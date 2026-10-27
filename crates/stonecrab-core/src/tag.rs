@@ -4,7 +4,7 @@ use std::num::NonZeroU32;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::{ErrorKind, PlcError, PlcValueType, Result};
+use crate::{ByteOrder, ErrorKind, PlcError, PlcValueType, Result, WordOrder};
 
 /// Driver-owned validated protocol address, independent of caller identity.
 ///
@@ -26,6 +26,8 @@ pub trait ProtocolAddress: Any + fmt::Debug + Send + Sync {
 /// Immutable caller identity, validated address and positive element count.
 ///
 /// Clones share an address through [`Arc`]; no parser, socket or device is invoked.
+/// Byte and word order are optional per-tag settings that stay absent unless the
+/// caller sets them; see [`ByteOrder`] for the precedence a driver applies.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Tag {
@@ -33,6 +35,8 @@ pub struct Tag {
     address: Arc<dyn ProtocolAddress>,
     value_type: Option<PlcValueType>,
     count: NonZeroU32,
+    byte_order: Option<ByteOrder>,
+    word_order: Option<WordOrder>,
 }
 
 impl Tag {
@@ -57,6 +61,8 @@ impl Tag {
             address,
             value_type,
             count: NonZeroU32::MIN,
+            byte_order: None,
+            word_order: None,
         }
     }
 
@@ -89,6 +95,61 @@ impl Tag {
         self
     }
 
+    /// Set the byte order within each protocol word for this tag.
+    ///
+    /// Infallible and returning `Self`, unlike [`Tag::with_type`], because core has no
+    /// address-specific rule to contradict; a driver that reads an explicit order from
+    /// its address syntax applies the precedence documented on [`ByteOrder`] (this
+    /// field first) and validates conflicts itself. The order is never inferred.
+    ///
+    /// The example below is compile-checked; the executed assertions live in
+    /// `tests/tag_order.rs`, because core has no in-crate address fixture.
+    ///
+    /// # Examples
+    /// ```
+    /// use std::sync::Arc;
+    /// use stonecrab_core::{ByteOrder, ProtocolAddress, Tag, TagId};
+    /// fn little(address: Arc<dyn ProtocolAddress>) -> stonecrab_core::Result<Tag> {
+    ///     let tag = Tag::new(TagId::new("counter")?, address)
+    ///         .with_byte_order(ByteOrder::LittleEndian);
+    ///     assert_eq!(tag.byte_order(), Some(ByteOrder::LittleEndian));
+    ///     Ok(tag)
+    /// }
+    /// ```
+    ///
+    /// # Compatibility: docs/parity/modbus.md#MB-BYTEORDER-PRECEDENCE
+    /// The tag field is the highest-precedence source of the upstream byte order.
+    #[must_use]
+    pub const fn with_byte_order(mut self, byte_order: ByteOrder) -> Self {
+        self.byte_order = Some(byte_order);
+        self
+    }
+
+    /// Set the order of 16-bit words within a multi-word value for this tag.
+    ///
+    /// Infallible and returning `Self` for the same reason as [`Tag::with_byte_order`].
+    /// The order is never inferred.
+    ///
+    /// # Examples
+    /// ```
+    /// use std::sync::Arc;
+    /// use stonecrab_core::{ProtocolAddress, Tag, TagId, WordOrder};
+    /// fn low_first(address: Arc<dyn ProtocolAddress>) -> stonecrab_core::Result<Tag> {
+    ///     let tag = Tag::new(TagId::new("counter")?, address)
+    ///         .with_word_order(WordOrder::LowWordFirst);
+    ///     assert_eq!(tag.word_order(), Some(WordOrder::LowWordFirst));
+    ///     Ok(tag)
+    /// }
+    /// ```
+    ///
+    /// # Compatibility: docs/parity/modbus.md#MB-BYTEORDER-PRECEDENCE
+    /// The tag field is the highest-precedence source of the upstream byte order.
+    #[must_use]
+    pub const fn with_word_order(mut self, word_order: WordOrder) -> Self {
+        self.word_order = Some(word_order);
+        self
+    }
+
     /// Caller-supplied stable correlation identity.
     #[must_use]
     pub const fn id(&self) -> &TagId {
@@ -111,6 +172,43 @@ impl Tag {
     #[must_use]
     pub const fn count(&self) -> NonZeroU32 {
         self.count
+    }
+
+    /// Explicit byte order set on this tag, `None` when the caller set none.
+    ///
+    /// `None` means "defer to the address block, then the driver default"; it is not
+    /// a big-endian default.
+    ///
+    /// # Examples
+    /// ```
+    /// use std::sync::Arc;
+    /// use stonecrab_core::{ProtocolAddress, Tag, TagId};
+    /// fn unset(address: Arc<dyn ProtocolAddress>) -> stonecrab_core::Result<()> {
+    ///     let tag = Tag::new(TagId::new("counter")?, address);
+    ///     assert_eq!(tag.byte_order(), None);
+    ///     Ok(())
+    /// }
+    /// ```
+    #[must_use]
+    pub const fn byte_order(&self) -> Option<ByteOrder> {
+        self.byte_order
+    }
+
+    /// Explicit word order set on this tag, `None` when the caller set none.
+    ///
+    /// # Examples
+    /// ```
+    /// use std::sync::Arc;
+    /// use stonecrab_core::{ProtocolAddress, Tag, TagId};
+    /// fn unset(address: Arc<dyn ProtocolAddress>) -> stonecrab_core::Result<()> {
+    ///     let tag = Tag::new(TagId::new("counter")?, address);
+    ///     assert_eq!(tag.word_order(), None);
+    ///     Ok(())
+    /// }
+    /// ```
+    #[must_use]
+    pub const fn word_order(&self) -> Option<WordOrder> {
+        self.word_order
     }
 }
 

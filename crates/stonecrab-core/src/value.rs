@@ -4,7 +4,7 @@ use std::time::Duration;
 ///
 /// Calendar, byte-buffer and recursive collection representations are deferred;
 /// they will not be silently substituted with strings or floating-point numbers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum PlcValueType {
     /// Explicitly absent value, not a failed acquisition.
@@ -199,6 +199,45 @@ impl PlcValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // covers: ALPHA_PLAN D13 / additive Ord on PlcValueType
+    #[test]
+    fn value_types_sort_in_declaration_order_stay_copy_and_round_trip_through_a_set() {
+        let declared = [
+            PlcValueType::Null,
+            PlcValueType::Bool,
+            PlcValueType::I8,
+            PlcValueType::I16,
+            PlcValueType::I32,
+            PlcValueType::I64,
+            PlcValueType::U8,
+            PlcValueType::U16,
+            PlcValueType::U32,
+            PlcValueType::U64,
+            PlcValueType::F32,
+            PlcValueType::F64,
+            PlcValueType::Char,
+            PlcValueType::String,
+            PlcValueType::Duration,
+        ];
+        let mut reversed = declared;
+        reversed.reverse();
+        let mut sorted = reversed.to_vec();
+        sorted.sort();
+        assert_eq!(sorted, declared, "sort restores declaration order");
+        for (left, right) in declared.iter().zip(declared.iter().skip(1)) {
+            assert!(left < right, "strictly increasing");
+            assert_eq!(left.partial_cmp(right), Some(std::cmp::Ordering::Less));
+        }
+        let copied = declared;
+        assert_eq!(copied, declared, "Copy leaves the source usable");
+        let set: std::collections::BTreeSet<_> = reversed.into_iter().collect();
+        assert_eq!(
+            set.into_iter().collect::<Vec<_>>(),
+            declared,
+            "set iterates sorted"
+        );
+    }
 
     #[test]
     fn each_value_reports_its_original_representation() {

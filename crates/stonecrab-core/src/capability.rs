@@ -1,7 +1,7 @@
 use std::num::NonZeroUsize;
 
 /// A protocol operation, independent of any transport or executor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum Operation {
     /// Establish a connection.
@@ -104,6 +104,35 @@ impl Capabilities {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // covers: ALPHA_PLAN D13 / additive Ord on Operation
+    #[test]
+    fn operations_sort_in_declaration_order_and_round_trip_through_a_set() {
+        let declared = [
+            Operation::Connect,
+            Operation::Read,
+            Operation::Write,
+            Operation::Subscribe,
+            Operation::Browse,
+            Operation::Discover,
+            Operation::Close,
+        ];
+        let mut reversed = declared;
+        reversed.reverse();
+        let mut sorted = reversed.to_vec();
+        sorted.sort();
+        assert_eq!(sorted, declared, "sort restores declaration order");
+        for (left, right) in declared.iter().zip(declared.iter().skip(1)) {
+            assert!(left < right, "strictly increasing");
+            assert_eq!(left.partial_cmp(right), Some(std::cmp::Ordering::Less));
+        }
+        let set: std::collections::BTreeSet<_> = reversed.into_iter().collect();
+        assert_eq!(
+            set.into_iter().collect::<Vec<_>>(),
+            declared,
+            "set iterates sorted"
+        );
+    }
 
     #[test]
     fn capabilities_report_each_operation_without_enabling_others() {

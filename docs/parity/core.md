@@ -32,10 +32,28 @@ Calendar and structured values require a further design decision.
 - `WriteOutcome`: confirmed, rejected and unknown-after-transmit data; no write
   operation or retry behavior is implemented.
 
+- `ByteOrder`, `WordOrder`, `Tag::with_byte_order`, `Tag::with_word_order`: explicit,
+  never-inferred byte and word order as optional tag fields; additive `Ord` on
+  `ErrorKind`, `Operation` and `PlcValueType`. See ADR-0006 and "Byte and word order".
+
 Unit tests live beside each implementation; `crates/stonecrab/tests/public_contract.rs`
 checks the consumer boundary. README examples are executable doctests.
 `crates/stonecrab-core/tests/read_contract.rs` uses the unpublished shared testkit
 to exercise addresses and batch contracts without ad hoc mocks or network access.
+
+## Byte and word order
+Status: implemented as data only (ADR-0006, slice S05). The types carry the setting; no
+decoder consumes it yet. The Modbus mapping and its row ids are the `MB-BYTEORDER-*`
+rows in `docs/parity/modbus.md` (`MB-BYTEORDER-BE`, `MB-BYTEORDER-LE`,
+`MB-BYTEORDER-BE-SWAP`, `MB-BYTEORDER-LE-SWAP`, `MB-BYTEORDER-PRECEDENCE`), which stay
+`planned` there until the upstream little-endian vectors pass (S23).
+
+| Row id | Upstream behavior | Stonecrab behavior | Status | Test ids |
+| --- | --- | --- | --- | --- |
+| CORE-BYTEORDER-MODEL | One setting `ModbusByteOrder` with four modes; no separate word order (`docs/parity/modbus.md` "Byte order"). | `ByteOrder` x `WordOrder`, both `Copy` and `Ord`, never inferred; `Tag::with_byte_order`/`with_word_order` set optional fields that default to `None`; precedence tag field, address block, driver default. | implemented | `byte_order_is_total_and_follows_declaration_order`, `word_order_is_total_and_follows_declaration_order`, `orders_are_copy_hash_and_clone_equal`, `debug_text_names_the_variant`, `orders_default_to_absent_and_are_never_inferred`, `each_builder_sets_exactly_one_field`, `both_orders_combine_independently_of_call_order_and_last_write_wins`, `orders_do_not_disturb_other_fields_and_survive_clone_and_debug`, `facade_reexports_ordering_types_and_additive_ord` |
+| CORE-VALUE-ORD | Not applicable (Java enums are comparable by ordinal). | Additive `PartialOrd, Ord` on `ErrorKind`, `Operation`, `PlcValueType` in declaration order; supports `BTreeSet<ErrorKind>`. | implemented | `error_kinds_sort_in_declaration_order_and_round_trip_through_a_set`, `operations_sort_in_declaration_order_and_round_trip_through_a_set`, `value_types_sort_in_declaration_order_stay_copy_and_round_trip_through_a_set` |
+
+`RawValue` and calendar, bytes and list values are deferred (ADR-0006).
 
 ## Connection string grammar
 Status: planned. No `ConnectionUri` exists yet; the slice that implements it is S08 in

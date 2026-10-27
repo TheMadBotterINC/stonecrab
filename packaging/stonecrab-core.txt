@@ -10,6 +10,7 @@ src/deadline.rs
 src/error.rs
 src/lib.rs
 src/limits.rs
+src/order.rs
 src/read_response.rs
 src/request.rs
 src/response.rs

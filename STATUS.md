@@ -74,6 +74,9 @@ ADR-0004 explicitly overrides the original `main` branch policy with `master`.
   `Any + Debug + Send + Sync`. No real protocol address parser exists yet.
 - `Tag`: shared immutable address, caller identity, positive count and type-hint
   consistency. Stable trait upcasting supports concrete-address downcasting.
+- `ByteOrder` / `WordOrder`: explicit, never-inferred byte and word order carried as
+  optional `Tag` fields (`with_byte_order`, `with_word_order`); additive `Ord` on
+  `ErrorKind`, `Operation` and `PlcValueType` (ADR-0006). Data only; no decoder yet.
 - `Capabilities`, `Operation`, `SubscriptionMode`: explicit capability metadata,
   including the distinction between native and polling subscriptions.
 - `PlcError`, `ErrorKind`, `Diagnostics`, `ConnectionState`, `FailureCategory`:
@@ -112,6 +115,7 @@ gates named were run locally before that commit.
 | Slice | Date | Landed | Gates |
 | --- | --- | --- | --- |
 | S02 | 2026-10-27 | Repository hygiene and community files; docs.rs metadata; facade archive without tests; GitHub community-profile check deferred until the next push | check, coverage, dependencies, package |
+| S05 | 2026-10-27 | Core `ByteOrder`/`WordOrder`, optional per-tag order fields, additive `Ord` on `ErrorKind`/`Operation`/`PlcValueType`, ADR-0006 (RawValue and calendar values deferred); facade re-exports; parity rows `CORE-BYTEORDER-MODEL`, `CORE-VALUE-ORD` | check, coverage, lint-attrs, features, machete, dependencies, package |
 | S03 | 2026-10-27 | CI gates and ADR-0005: nextest, per-crate coverage tiers via `scripts/coverage-gate.sh`, `scripts/lint-attrs.sh` with self-test fixtures, `scripts/dco-check.sh`, jobs dco/features/machete/lint-attrs/beta/geiger/semver/scheduled, pinned actions, single-maintainer waiver; hosted CI unexercised until pushed | check, coverage, lint-attrs, dco, features, machete, dependencies, package |
 | S01 | 2026-10-27 | Modbus TCP parity record with stable row ids (77 alpha rows `planned`, 26 deferred, 21 divergence rows, UNVERIFIED list), `CORE-URI-GRAMMAR` row, manifest `[inventory.modbus_tcp]` and `[policy]`; docs only | check |
 
@@ -141,7 +145,7 @@ Most recent local results for the implementation baseline:
 - Formatting, strict Clippy, nextest, `cargo test` with doctests, documentation with
   warnings denied, no-default-features, lint-attrs, feature powerset and unused-
   dependency checks passed.
-- Per-crate line coverage (ADR-0005): `stonecrab-core` 969/969 lines (100%, gate
+- Per-crate line coverage (ADR-0005): `stonecrab-core` 1139/1139 lines (100%, gate
   100%), `stonecrab-testkit` 23/23 lines (gate 90%), `stonecrab` n/a (no executable
   lines). Error paths are not excluded. Region coverage was approximately 99.92%;
   do not describe this as branch coverage, which is reported and not gated.
@@ -231,7 +235,8 @@ not native subscriptions. No Rust Modbus implementation or parity claim exists y
 - Typed connection configuration, access-policy enforcement and actual read/write I/O.
 - Runtime-independent cancellation, state watching and clock/sleep abstractions.
 - Simulator driver, scripted acquisition failures, fake time and common driver suite.
-- Byte/raw/recursive/calendar `PlcValue` variants and byte/word ordering types.
+- Byte/raw/recursive/calendar `PlcValue` variants (deferred by ADR-0006); the byte and
+  word order types exist as data only, with no decoder consuming them.
 - Complete write request/response batches, browse, discovery and subscriptions.
 - Transport/codec crates, Modbus TCP/RTU, sensor profiles and board adapters.
 - OPC UA, EtherNet/IP/Logix, S7 and remaining upstream protocols.

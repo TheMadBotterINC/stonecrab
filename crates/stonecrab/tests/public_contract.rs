@@ -6,16 +6,17 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use stonecrab::{
-        Capabilities, ConnectionState, Deadline, Diagnostics, ErrorKind, FailureCategory,
-        ItemError, Operation, PlcError, PlcValue, PlcValueType, ProtocolAddress, ProtocolStatus,
-        ReadItem, ReadRequest, ReadRequestBuilder, ReadResponse, ReadResponseBuilder,
-        ResourceLimits, ResourceLimitsBuilder, Secret, SubscriptionMode, Tag, TagId, UnknownReason,
-        WriteOutcome,
+        ByteOrder, Capabilities, ConnectionState, Deadline, Diagnostics, ErrorKind,
+        FailureCategory, ItemError, Operation, PlcError, PlcValue, PlcValueType, ProtocolAddress,
+        ProtocolStatus, ReadItem, ReadRequest, ReadRequestBuilder, ReadResponse,
+        ReadResponseBuilder, ResourceLimits, ResourceLimitsBuilder, Secret, SubscriptionMode, Tag,
+        TagId, UnknownReason, WordOrder, WriteOutcome,
     };
 
     #[test]
     fn public_foundation_types_are_send_sync_and_static() {
         fn assert_send_sync<T: Send + Sync + 'static>() {}
+        assert_send_sync::<ByteOrder>();
         assert_send_sync::<Capabilities>();
         assert_send_sync::<ConnectionState>();
         assert_send_sync::<Deadline>();
@@ -41,6 +42,7 @@ mod tests {
         assert_send_sync::<ReadResponse>();
         assert_send_sync::<ReadResponseBuilder>();
         assert_send_sync::<UnknownReason>();
+        assert_send_sync::<WordOrder>();
         assert_send_sync::<WriteOutcome>();
     }
 
@@ -72,5 +74,25 @@ mod tests {
             Some(Duration::from_secs(1)),
             "explicit clock reading"
         );
+    }
+
+    #[test]
+    fn facade_reexports_ordering_types_and_additive_ord() {
+        use std::collections::BTreeSet;
+
+        assert!(
+            ByteOrder::BigEndian < ByteOrder::LittleEndian,
+            "byte order is Ord"
+        );
+        assert!(
+            WordOrder::HighWordFirst < WordOrder::LowWordFirst,
+            "word order is Ord"
+        );
+        let retry: BTreeSet<ErrorKind> = [ErrorKind::Timeout, ErrorKind::Disconnected]
+            .into_iter()
+            .collect();
+        assert!(retry.contains(&ErrorKind::Timeout), "kinds fit a BTreeSet");
+        assert!(Operation::Read < Operation::Write, "operations are Ord");
+        assert!(PlcValueType::I16 < PlcValueType::U16, "value types are Ord");
     }
 }

@@ -7,7 +7,7 @@ use crate::Operation;
 pub type Result<T> = std::result::Result<T, PlcError>;
 
 /// Stable failure classification; messages are not intended for programmatic matching.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum ErrorKind {
     /// Invalid configuration or a value incompatible with the requested type.
@@ -179,6 +179,62 @@ impl PlcError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // covers: ALPHA_PLAN D13 / additive Ord on ErrorKind (BTreeSet<ErrorKind>)
+    #[test]
+    fn error_kinds_sort_in_declaration_order_and_round_trip_through_a_set() {
+        let declared = [
+            ErrorKind::InvalidConfig,
+            ErrorKind::InvalidAddress,
+            ErrorKind::Unsupported(Operation::Connect),
+            ErrorKind::Unsupported(Operation::Close),
+            ErrorKind::Timeout,
+            ErrorKind::Cancelled,
+            ErrorKind::Disconnected,
+            ErrorKind::Authentication,
+            ErrorKind::Trust,
+            ErrorKind::MalformedData,
+            ErrorKind::DeviceException,
+            ErrorKind::ResourceLimit,
+            ErrorKind::Backpressure,
+            ErrorKind::Internal,
+        ];
+        let mut reversed = declared;
+        reversed.reverse();
+        let mut sorted = reversed.to_vec();
+        sorted.sort();
+        assert_eq!(
+            sorted, declared,
+            "variants by declaration, payload by Operation order"
+        );
+        for (left, right) in declared.iter().zip(declared.iter().skip(1)) {
+            assert!(left < right, "strictly increasing");
+            assert_eq!(left.partial_cmp(right), Some(std::cmp::Ordering::Less));
+        }
+        let set: std::collections::BTreeSet<_> = reversed.into_iter().collect();
+        assert_eq!(set.len(), declared.len(), "no duplicates or losses");
+        assert_eq!(
+            set.into_iter().collect::<Vec<_>>(),
+            declared,
+            "set iterates sorted"
+        );
+        let retry: std::collections::BTreeSet<_> = [
+            ErrorKind::Backpressure,
+            ErrorKind::Timeout,
+            ErrorKind::Disconnected,
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            retry.into_iter().collect::<Vec<_>>(),
+            [
+                ErrorKind::Timeout,
+                ErrorKind::Disconnected,
+                ErrorKind::Backpressure
+            ],
+            "the default retry set is stable"
+        );
+    }
 
     #[test]
     fn error_preserves_message_context_and_original_source() {
