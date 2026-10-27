@@ -208,6 +208,9 @@ not native subscriptions. No Rust Modbus implementation or parity claim exists y
 
 ## Recommended continuation
 
+The slice-by-slice plan to the first alpha release, with the decisions and
+maintainer prerequisites it needs, is in [`docs/ALPHA_PLAN.md`](docs/ALPHA_PLAN.md).
+
 1. Review the source documents, ADRs and actual exported types; rerun the local
    gates and check hosted CI before changing code.
 2. Complete M0 source inventory and test traceability. Do not equate protocol
