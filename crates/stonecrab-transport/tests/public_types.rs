@@ -3,8 +3,10 @@
 
 #[cfg(test)]
 mod tests {
+    use stonecrab_testkit::LengthPrefixedFramer;
     use stonecrab_transport::{
-        FrameError, Framer, Jitter, SystemClock, Transport, TransportFactory,
+        ConnectionGuard, FrameError, Framer, GuardConfig, GuardStats, Jitter, SystemClock,
+        Transport, TransportFactory,
     };
 
     #[test]
@@ -13,6 +15,14 @@ mod tests {
         assert_send_sync::<FrameError>();
         assert_send_sync::<Jitter>();
         assert_send_sync::<SystemClock>();
+        assert_send_sync::<GuardConfig>();
+        assert_send_sync::<GuardStats>();
+    }
+
+    #[test]
+    fn the_connection_guard_is_send_sync_and_static_for_a_sendable_frame_and_framer() {
+        fn assert_send_sync<T: Send + Sync + 'static>() {}
+        assert_send_sync::<ConnectionGuard<Vec<u8>, LengthPrefixedFramer>>();
     }
 
     #[test]

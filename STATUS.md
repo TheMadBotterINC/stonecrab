@@ -58,8 +58,8 @@ ADR-0004 explicitly overrides the original `main` branch policy with `master`.
 - `crates/stonecrab`: public facade, re-exporting core.
 - `crates/stonecrab-core`: no Tokio, executor or network dependency.
 - `crates/stonecrab-transport`: the only crate with Tokio (scoped features, no spawned
-  tasks); TCP transport, framing layer with resync, `SystemClock` and the reconnect
-  jitter source (ADR-0014).
+  tasks); TCP transport, framing layer with resync, the reconnecting `ConnectionGuard`,
+  `SystemClock` and the reconnect jitter source (ADR-0014).
 - `tools/stonecrab-testkit`: unpublished deterministic fixtures, development-only:
   `FixtureAddress`, `FakeClock`, `block_on`, `block_on_with`, `poll_once`, `CountingWaker`;
   behind its `net` feature `Script`, `ScriptedPeer`, `FakeTransport`,
@@ -171,6 +171,7 @@ gates named were run locally before that commit.
 | S04a (part) | 2026-10-27 | Testkit `fixtures` feature: golden-vector loader (`load_dir`, `load_hex`, `PROVENANCE.toml` schema enforced: every `.hex` listed, every listed vector present), `InteropMap` over the first-party `fixtures/modbus/interop/register-map.toml` authored from the `MB-INTEROP-*` rows; `serde_json` adopted (D23 clean). The upstream vector copies and the NOTICE update wait for prerequisite P4 | check, coverage, lint-attrs, machete, dependencies, package |
 | S11a + S11b-2 | 2026-10-27 | Core `Driver`, `Connection` and `DriverRegistry` traits with cancel slots on both request types (ADR-0011); simulator `SimDriver` and `SimConnection` (scheme `sim`, `sim://<device>?latency-ms=&seed=`, lifecycle through `StateCell`, single in-flight slot with `Backpressure`, latency raced against token and deadline, default-deadline rule, bounded read retry, writes never retried, diagnostics and tracing spans); ADR-0007 and ADR-0012 accepted; parity rows `CORE-DRIVER-TRAIT`, `CORE-CONNECTION-TRAIT`, `CORE-REGISTRY`, `SIM-DRIVER`, `SIM-CONNECTION`; one commit because every commit must pass the 100% core gate | check, coverage, lint-attrs, machete, dependencies, package |
 | S12 | 2026-10-27 | Simulator `FailureStep` and `FailureScript` on the shared device (delay, timeout after transmit, disconnect into `Failed`, device exception, malformed, partial failure, backpressure, unknown after transmit); one step per operation after every pre-I/O check; each retry attempt pops its own step and a read without an explicit deadline gets a fresh default deadline per attempt; parity row `SIM-FAILURE-SCRIPT` implemented | check, coverage, lint-attrs, machete, package |
+| S19 | 2026-10-27 | Transport `ConnectionGuard` over `FramedTransport`: lifecycle through core `ConnectionState` with private idle, in-flight and resyncing phases, request-driven reconnect with capped jittered backoff and `Failed` on exhaustion, one in-flight slot plus an admission queue bounded by `max_pending_requests` (`Backpressure` beyond it), every wait raced against close, token and deadline, a timeout after flush resyncs before the next send, `GuardConfig`, `GuardStats`; parity rows `TRANSPORT-GUARD-LIFECYCLE`, `TRANSPORT-RECONNECT`, `TRANSPORT-QUEUE` implemented | check, coverage, lint-attrs, machete, package |
 
 ## Verified evidence and reproduction
 
@@ -298,11 +299,12 @@ operation row is implemented yet.
 
 ## Not implemented or not yet evidenced
 
-- An operational connection lifecycle over a real transport (the simulator has one).
+- A protocol session over the connection guard (the guard itself runs the lifecycle,
+  reconnect and queue over any `Transport`).
 - Actual read/write I/O against a device (the simulator enforces the access policy and
   serves in-process reads and writes).
-- Enforcement of cancellation and default deadlines over a real transport (the
-  simulator connection enforces both).
+- A Modbus session using the guard's cancellation and deadline enforcement (the guard
+  and the simulator connection both enforce them).
 - The common driver contract suite (S13); the simulator driver and its failure script
   exist.
 - Byte/raw/recursive/calendar `PlcValue` variants (deferred by ADR-0006); the byte and

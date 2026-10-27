@@ -10,6 +10,7 @@ mod deadline;
 mod error;
 mod framed;
 mod framer;
+mod guard;
 mod jitter;
 #[cfg(feature = "tcp")]
 mod tcp;
@@ -19,6 +20,7 @@ pub use clock::SystemClock;
 pub use error::FrameError;
 pub use framed::FramedTransport;
 pub use framer::Framer;
+pub use guard::{ConnectionGuard, GuardConfig, GuardStats};
 pub use jitter::Jitter;
 #[cfg(feature = "tcp")]
 #[cfg_attr(docsrs, doc(cfg(feature = "tcp")))]

@@ -303,6 +303,97 @@ and is not behind `tcp`, so `--no-default-features` and the testkit's
   coalescing, peer close at each framing boundary`. Row ids: `TRANSPORT-FRAMING` and
   `TRANSPORT-RESYNC` in `docs/parity/transport.md`.
 
+## Addendum (S19): the connection guard
+Slice S19 adds `ConnectionGuard<F, R>`, `GuardConfig` and `GuardStats` to this crate (no
+ADR of its own: it is the owner that D15 and the S16 and S18 text promised, uses no new
+dependency, and is not behind `tcp`). It consumes the `sync` feature that decision 11
+declared; the "declared and unused until S19" consequence above is therefore resolved.
+
+- **Shape.** `ConnectionGuard<F, R: Framer<F>>` is built from a `GuardConfig { endpoint,
+  timeouts, reconnect, limits }` (public fields, `GuardConfig::new(endpoint, limits)` for
+  the defaults, `From<&ConnectionConfig>`; no `Credentials`), an `Arc<dyn
+  TransportFactory>`, a `Box<dyn Fn() -> R + Send + Sync>` (a fresh framer per opened
+  transport), an `Arc<dyn Clock>` and, unless `with_jitter_source` replaces it, a `Jitter`.
+  Its operations are `connect`, `request(frame, deadline, token)`,
+  `request_with_default_deadline(frame, token)`, `next_reply(deadline, token)`, `close`, `state`, `watch_state` and
+  `stats`. **Default deadline:** `request` keeps an explicit `Deadline` (the caller always
+  states the bound) and a sibling method applies the ADR-0007 rule
+  (`Deadline::after(clock.now(), timeouts.request)`), instead of making the deadline an
+  `Option`.
+- **Machine.** Core's `ConnectionState` is the published state; `Connected` has the
+  private sub-states `Idle`, `InFlight` and `Resyncing` (visible in `Debug` when the slot
+  is free). `Closed` and `Failed` are terminal. `Reconnecting.attempt` is one-based (core
+  documents it so) and the delay is `next_delay(attempt - 1, sample)`, so the schedule at
+  sample 0.5 is 250, 500, 1000 ms; `is_exhausted(n)` is asked with the number of retries
+  already scheduled, so `max_attempts = N` allows N retries after the first failure. An
+  open that fails with `Timeout` or `Disconnected` backs off; any other kind is
+  `Failed(kind)`. A peer close, a failed send or a failed resync drops the transport and
+  backs off the same way.
+- **Request-driven reconnect (D15).** Nothing runs between calls. The next `request` or
+  `connect` sleeps until `next_at` with `Clock::sleep_until`, raced against its token,
+  its deadline and the guard's own closing signal; it then opens within
+  `min(timeouts.connect, request deadline)`, makes one attempt, and fails with the open's
+  error if that attempt fails. An abandoned open (token, or the future dropped) puts the
+  state back to what it was; an abandoned sleep changes nothing.
+- **Queue.** Two `tokio::sync` primitives, no channel: a `Semaphore` with
+  `max_pending_requests` permits is the admission gate (`try_acquire`; none left is
+  `Backpressure` before any I/O), and a `tokio::sync::Mutex` over the connection state is
+  the single in-flight slot (its waiters are served in arrival order). Both are released
+  by drop on every path. The wait for the slot is raced against the token, the request
+  deadline and `close`.
+- **Deadline sources.** Queueing, backoff, open, send, resync and the reply wait all end
+  at the request's deadline; the open is also limited by `timeouts.connect`; `close`
+  (slot, shutdown and any resync it interrupts) is limited by
+  `Deadline::after(clock.now(), timeouts.request)`.
+- **Cancellation.** The token is honoured while queued, in the backoff, during the open,
+  in a resync and while waiting for the reply. The send is not interrupted by the token
+  (a half-written frame poisons the transport); a token that fired meanwhile is seen right
+  after the flush. `close` does interrupt a send, because the transport is being
+  discarded.
+- **What a late reply does.** After a timeout, a cancel after the flush or a framing
+  error, the guard stays `Connected` and marks the stream `Resyncing`. Before the next
+  request, if the receive buffer holds bytes, it runs `FramedTransport::resync` within
+  that request's deadline and discards the frame found there (the end of the abandoned
+  reply, or debris); no resync runs when nothing is buffered. A late reply that arrives
+  whole after that point cannot be told from the answer to the new request at framing
+  level, so it comes out as that request's reply, and the session discards it by
+  correlation (S24b `late_replies`). The guard has no correlation of its own, so it
+  offers `next_reply(deadline, token)`, which reads a further frame without sending,
+  under the same slot, deadline, token and close handling as `request`. The session
+  drops a mismatched frame and calls it again, which realigns the stream.
+- **Diagnostics.** Every error carries `Diagnostics` with the state at the moment of
+  failure (before the guard reacts), the latency on the guard's clock, the reconnect
+  attempt as `retries` and a category (`Validation` before any I/O, `Transport`
+  otherwise). `operation` is `Connect` for a failed open and `Close` for `close`; it is
+  unset for the frame exchange because the guard cannot tell a read from a write.
+- **Testing the state sequence.** `StateWatch` coalesces (ADR-0007), so the tests collect
+  every transition with a waker registered on `changed()` that reads the state on each
+  `StateCell::set` and re-arms itself; sequences are asserted by value with the `Instant`s
+  of `next_at`. No testkit change was needed; `FakeTransport::send` never waits, so a
+  cancel or a `close` that lands in the middle of a write cannot be staged yet.
+- **Named uncovered lines (ADR-0005).** Two lines of `guard.rs`, both in `transmit`.
+  The first is `Err(Fault::lose(error))`, a send failure that is not a framer refusal:
+  `FakeTransport::send` fails only after `recv` has observed the close, so the arm cannot
+  be staged with the doubles. The second is the `Err(cut)` arm, a `close` that lands while
+  a frame is being written: the double's `send` completes on its first poll and `close`
+  cancels the guard's signal in the same step that sets `Closing`, so a single-threaded
+  test cannot interleave them; the arm shares `stopped` with the covered reply wait. A
+  failed send therefore has no test of its own that it drops the transport and backs off;
+  the same drop-and-schedule path is covered for a failed receive. `scripts/coverage-gate.sh`
+  reports transport at 1216 of 1220 lines (99.67%), the other two being the arms already
+  named above.
+- **Retry budget.** Only a received reply resets the attempt count, not an open, so a peer
+  that accepts and then closes spends `max_attempts` and ends `Failed(Disconnected)`. An
+  open cut short by the caller's own earlier deadline is a `Timeout` for that request and
+  does not count as a failed attempt.
+- **Not done here.** The per-operation tracing spans of CODING_STANDARDS 14.2 (decision 13
+  above: the crate has no `tracing` dependency, and this slice adds none).
+- **Rows and tests.** `TRANSPORT-GUARD-LIFECYCLE`, `TRANSPORT-RECONNECT` and
+  `TRANSPORT-QUEUE` in `docs/parity/transport.md`; tests in
+  `crates/stonecrab-transport/tests/guard.rs` tagged F2 delayed replies after timeout, F4
+  cancellation (connecting, queued, transmitting, awaiting) and F5 reconnect (device
+  restart, outage and recovery, exhausted budget, shutdown during reconnect).
+
 ## Alternatives considered
 - **`async-std` or `smol`.** Rejected: CODING_STANDARDS 15.8 names Tokio as the sanctioned
   runtime, the later OPC UA and TLS crates in the ecosystem assume it, and a second

@@ -75,6 +75,14 @@
   and coalesced frames within `max_buffered_bytes`, `send_frame` encodes and sends one
   bounded frame, and `resync(Deadline)` discards bytes until the framer finds a frame
   boundary and fails with `Disconnected` at the deadline (ADR-0014 addendum).
+- Add `ConnectionGuard<F, R>`, `GuardConfig` and `GuardStats`: the connection lifecycle
+  machine over a `TransportFactory` and a `Framer` (`connect`, `request`,
+  `request_with_default_deadline`, `next_reply`, `close`, `state`, `watch_state`, `stats`), one request
+  in flight with a bounded FIFO queue (`Backpressure` beyond `max_pending_requests`),
+  request-driven reconnect with jittered backoff and `Failed(Disconnected)` when the retry
+  budget is spent, resync before the next request after a timeout, `Diagnostics` on every
+  error, and a `close` bounded by `Timeouts.request`. No background task (ADR-0014
+  addendum).
 ### stonecrab-modbus 0.1.0
 - Add the crate scaffold: the native Modbus TCP driver crate, depending only on
   `stonecrab-core`, with default features empty. Nothing but address types and their

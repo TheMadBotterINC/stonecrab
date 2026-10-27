@@ -2,7 +2,8 @@
 Deadline-bounded byte transports for the Stonecrab protocol drivers. A `Transport` sends
 and receives bytes to one peer and does nothing else: it does not frame, parse, retry or
 reconnect. The crate also holds the `TransportFactory` that opens transports, the
-Tokio-backed `SystemClock`, and a small jitter source for reconnect backoff. It depends on
+`ConnectionGuard` that owns a connection's lifecycle, the Tokio-backed `SystemClock`, and
+a small jitter source for reconnect backoff. It depends on
 `stonecrab-core` (plus `bytes` and a scoped set of Tokio features) and not on the codec
 crate; framing errors are reported with the crate's own `FrameError`.
 
@@ -15,6 +16,7 @@ types are Stonecrab's own contract. The behavior that is specified is recorded i
 | `Transport` and `TransportFactory` traits, `FrameError` | build-tested |
 | `TcpTransport` and `TcpFactory` (feature `tcp`) | build-tested |
 | `Framer` trait and `FramedTransport` (`next_frame`, `send_frame`, `resync`) | build-tested |
+| `ConnectionGuard` (lifecycle machine, one in-flight request, bounded queue, request-driven reconnect), `GuardConfig`, `GuardStats` | build-tested |
 | `SystemClock` (Tokio timer) | build-tested |
 | `Jitter` (xorshift64* sample source for `ReconnectPolicy::next_delay`) | build-tested |
 | Serial, UDP and TLS transports | planned |
@@ -30,6 +32,11 @@ The framing layer has tests over the in-memory transport double and a fake clock
 fragmentation, coalescing, peer close at each framing boundary, the buffer bound, resync
 and deadline expiry. No protocol framer ships in this crate yet, so the support level
 stays build-tested.
+
+The connection guard has tests over the same doubles and a fake clock only: backoff
+schedules, the retry budget, cancellation while connecting, queued and awaiting, device
+restart, outage and recovery, shutdown during a reconnect and delayed replies after a
+timeout. It has never run against a socket or a device, so it is build-tested too.
 
 ## Features
 - `tcp` (default): `TcpTransport` and `TcpFactory`, and Tokio's `net` feature. Without it
@@ -64,6 +71,37 @@ receive buffer, bounded by `max_buffered_bytes`:
   receiving. It fails with `Disconnected` when the deadline passes without a frame
   boundary. Its deadline is the remaining deadline of the request whose timeout triggered
   it, or `Deadline::after(clock.now(), timeouts.request)` from close or recovery.
+
+## The connection guard
+`ConnectionGuard<F, R>` owns one connection: the lifecycle (`Disconnected`, `Connecting`,
+`Connected`, `Reconnecting { attempt, next_at }`, `Closing`, `Closed`, `Failed`), a
+`FramedTransport` made by a `TransportFactory`, and one operation on it,
+`request(frame, deadline, token)`: one frame out, one frame back. A protocol session wraps
+it and does the correlation. Observe it with `state()` and `watch_state()`, count with
+`stats()`, and end it with `close()`.
+
+- **Reconnect is request-driven (D15).** There is no background task. After a transport
+  failure the state is `Reconnecting` with `next_at = now + next_delay(attempt - 1,
+  sample)`; the next request sleeps until `next_at` on the clock (cancellably, within its
+  own deadline), reopens within `timeouts.connect` and carries on. When
+  `ReconnectPolicy::is_exhausted` says so the state becomes `Failed(Disconnected)` and
+  every later request fails with `Disconnected` before any I/O.
+- **One in flight, a bounded line behind it.** At most `max_pending_requests` requests
+  are owned at once, the running one included; one more is `Backpressure` before any
+  I/O. The rest wait in arrival order on `tokio::sync` primitives and leave the line when
+  cancelled, timed out or overtaken by `close`.
+- **Deadlines.** `request` takes the deadline from the caller;
+  `request_with_default_deadline` uses `timeouts.request`. `close` is bounded by
+  `timeouts.request` too and always ends `Closed`.
+- **Late replies.** A request that times out or is cancelled after its frame went out
+  leaves the guard `Connected`. If bytes of its reply are buffered, the next request first
+  runs `resync` within its own deadline and drops the frame found; if none is found in
+  time that request fails with `Disconnected` and the guard reconnects. A reply that
+  arrives whole later is the next request's reply, and the session discards it by
+  correlation, so a session must loop on `next_reply(deadline, token)` (which reads a
+  further frame without sending) until the correlated frame arrives.
+- **Reconnect budget.** Only a received reply resets the attempt count; an open alone
+  does not, so a peer that accepts and then closes ends in `Failed(Disconnected)`.
 
 ## Limits
 `recv` appends only up to `ResourceLimits::max_buffered_bytes` and fails with
