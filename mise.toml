@@ -1,21 +1,63 @@
+# Local task runner. CI (.github/workflows/ci.yml) runs the same commands; the mapping is:
+#
+#   mise run check         = CI "quality" fmt, clippy and doc steps + CI "test" steps on
+#                            the pinned 1.99.1 (nextest, then cargo test for doctests,
+#                            then the --no-default-features check)
+#   mise run coverage      = CI "quality" coverage step (scripts/coverage-gate.sh)
+#   mise run lint-attrs    = CI "lint-attrs" job
+#   mise run features      = CI "features" job
+#   mise run machete       = CI "machete" job
+#   mise run dependencies  = CI "dependencies" job
+#   mise run package       = CI "package" job
+#   mise run dco -- RANGE  = CI "dco" job (RANGE defaults to origin/master..HEAD)
+#
+# CI selects the nextest `ci` profile, which only adds a JUnit file; `mise run check` uses
+# the default profile. These CI jobs have no task: the 1.97.1 and OS cells of "test",
+# "cross" (needs the foreign targets), "beta", "semver", "geiger" and "scheduled".
+# ADR-0005 records the coverage and waiver decisions.
+
 [tools]
 rust = "1.99.1"
 cargo-deny = "0.20.2"
 "aqua:taiki-e/cargo-llvm-cov" = "0.9.1"
+"aqua:nextest-rs/nextest/cargo-nextest" = "0.9.148"
+"cargo:cargo-hack" = "0.6.45"
+"cargo:cargo-machete" = "0.9.2"
 
 [tasks.check]
 description = "Run local formatting, strict lint, tests and documentation gates"
 run = [
   "cargo fmt --all --check",
   "cargo clippy --locked --workspace --all-targets --all-features -- -D warnings",
+  "cargo nextest run --locked --workspace --all-features",
   "cargo test --locked --workspace --all-features",
   "RUSTDOCFLAGS='-D warnings' cargo doc --locked --workspace --all-features --no-deps",
   "cargo check --locked --workspace --no-default-features",
 ]
 
 [tasks.coverage]
-description = "Require every handwritten executable line to be covered"
-run = "cargo llvm-cov --locked --workspace --all-features --exclude-from-report stonecrab-testkit --fail-under-lines 100 --show-missing-lines"
+description = "Per-crate line coverage gate from one instrumented nextest run (ADR-0005)"
+run = "scripts/coverage-gate.sh"
+
+[tasks.lint-attrs]
+description = "Fail on crate-level lint attributes outside the section 5.1 promotions"
+run = "scripts/lint-attrs.sh"
+
+[tasks.features]
+description = "Check the feature powerset (depth 2) and each crate without default features"
+run = [
+  # --no-dev-deps rewrites Cargo.toml while it runs, which --locked refuses, so no --locked here.
+  "cargo hack check --workspace --feature-powerset --depth 2 --no-dev-deps",
+  "cargo hack check --locked --workspace --no-default-features",
+]
+
+[tasks.machete]
+description = "Find unused dependencies"
+run = "cargo machete"
+
+[tasks.dco]
+description = "Require Signed-off-by on every commit in a range (default origin/master..HEAD)"
+run = "scripts/dco-check.sh"
 
 [tasks.dependencies]
 description = "Check dependency advisories, licenses, bans and sources"

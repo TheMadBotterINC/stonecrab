@@ -1,7 +1,24 @@
 name: CI
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Weekly, Monday 04:17 UTC. Runs every job below plus the "scheduled" skeleton.
+    - cron: "17 4 * * 1"
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+# Notes on pinning. dtolnay/rust-toolchain is pinned to the commit behind its v1 tag
+# (that repository has no immutable version tags; its 1.x.y refs are branches). The pin
+# fixes the action code only: every use passes `toolchain:` explicitly, so the pin never
+# selects the compiler. Tool versions match mise.toml (cargo-nextest 0.9.148, cargo-hack 0.6.45,
+# cargo-machete 0.9.2, cargo-llvm-cov 0.9.1, cargo-deny 0.20.2). `mise run <task>` runs the
+# same commands locally; the mapping is at the top of mise.toml. Third-party actions
+# (actions/checkout, upload-artifact, taiki-e/install-action) float on a major tag and the
+# report-only semver job installs cargo-semver-checks unpinned (ADR-0005 decision 9).
 jobs:
   test:
     strategy:
@@ -11,16 +28,21 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
         with:
           toolchain: ${{ matrix.rust }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.148
+      - run: cargo +${{ matrix.rust }} nextest run --locked --workspace --all-features --profile ci
+      # nextest does not run doctests, so cargo test stays as the second step (ADR-0005).
       - run: cargo +${{ matrix.rust }} test --locked --workspace --all-features
       - run: cargo +${{ matrix.rust }} check --locked --workspace --no-default-features
   quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
         with:
           toolchain: "1.99.1"
           components: rustfmt, clippy, llvm-tools-preview
@@ -31,17 +53,23 @@ jobs:
           RUSTDOCFLAGS: "-D warnings"
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-llvm-cov@0.9.1
-      - run: cargo llvm-cov --locked --workspace --all-features --exclude-from-report stonecrab-testkit --fail-under-lines 100 --lcov --output-path target/coverage.lcov
+          tool: cargo-llvm-cov@0.9.1,cargo-nextest@0.9.148
+      # One instrumented nextest run, then a report pass per crate (ADR-0005).
+      - run: scripts/coverage-gate.sh
+        env:
+          NEXTEST_PROFILE: ci
       - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
         with:
           name: coverage
-          path: target/coverage.lcov
+          path: |
+            target/coverage.lcov
+            target/coverage-summary.txt
   cross:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
         with:
           toolchain: "1.99.1"
           targets: aarch64-unknown-linux-gnu, armv7-unknown-linux-gnueabihf
@@ -51,7 +79,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
         with:
           toolchain: "1.99.1"
       - uses: taiki-e/install-action@v2
@@ -62,7 +90,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
         with:
           toolchain: "1.99.1"
       - run: cargo package --locked --workspace --exclude stonecrab-testkit
@@ -73,3 +101,114 @@ jobs:
           diff -u packaging/stonecrab-core.txt target/core-package-files.txt
           cargo package --locked -p stonecrab --list > target/facade-package-files.txt
           diff -u packaging/stonecrab.txt target/facade-package-files.txt
+  dco:
+    # Not meaningful on schedule or manual runs, and a new branch push has an all-zero
+    # "before" and no base to compare with.
+    if: >-
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'push' &&
+      github.event.before != '0000000000000000000000000000000000000000')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Signed-off-by on every pull request commit
+        if: github.event_name == 'pull_request'
+        run: scripts/dco-check.sh "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+      - name: Signed-off-by on every pushed commit
+        if: github.event_name == 'push'
+        run: |
+          # After a force-push the old "before" commit is gone from the clone: skip then.
+          if ! git cat-file -e "${{ github.event.before }}^{commit}" 2>/dev/null; then
+            echo "::notice::before commit ${{ github.event.before }} is not in the clone; dco check skipped"
+            exit 0
+          fi
+          scripts/dco-check.sh "${{ github.event.before }}..${{ github.sha }}"
+  features:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
+        with:
+          toolchain: "1.99.1"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-hack@0.6.45
+      # --no-dev-deps edits Cargo.toml while it runs, so this pass cannot use --locked.
+      - run: cargo hack check --workspace --feature-powerset --depth 2 --no-dev-deps
+      # cargo hack runs one cargo check per package, i.e. --no-default-features per crate.
+      - run: cargo hack check --locked --workspace --no-default-features
+  machete:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
+        with:
+          toolchain: "1.99.1"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-machete@0.9.2
+      - run: cargo machete
+  lint-attrs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/lint-attrs.sh
+      - run: scripts/lint-attrs.sh --self-test
+  beta:
+    # Report only: a beta regression is information, not a merge blocker.
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
+        with:
+          toolchain: beta
+      - run: cargo +beta test --locked --workspace --all-features
+  geiger:
+    # cargo-geiger 0.14.0 builds on 1.99.1 but exits 1 whenever any dependency uses unsafe
+    # (bytes does) and rejects a virtual workspace manifest, so it cannot gate first-party
+    # code. The blocking gate is the grep; the geiger tree is an informational report.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No first-party unsafe outside forbid(unsafe_code)
+        run: |
+          if grep -rnw --include='*.rs' unsafe crates tools | grep -v 'forbid(unsafe_code)'; then
+            echo "first-party unsafe found; CODING_STANDARDS section 4 forbids it" >&2
+            exit 1
+          fi
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
+        with:
+          toolchain: "1.99.1"
+      - name: Dependency unsafe report (informational)
+        continue-on-error: true
+        run: |
+          cargo install cargo-geiger --version 0.14.0 --locked
+          cargo geiger --locked --all-features --manifest-path "$PWD/crates/stonecrab/Cargo.toml"
+  semver:
+    # Report only until the first tag gives cargo-semver-checks a published baseline.
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
+        with:
+          toolchain: "1.99.1"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-semver-checks
+      - run: cargo semver-checks --workspace --exclude stonecrab-testkit
+  scheduled:
+    # Skeleton: every step is a no-op that states what it will do. Real steps arrive with
+    # the fuzz workspace (S03b) and mutants.toml (S32); until then the weekly run is green.
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fuzz (no-op until fuzz targets exist)
+        run: echo "will run each fuzz target for 30 minutes (cargo fuzz run <target> -- -max_total_time=1800) once fuzz/ has targets"
+      - name: Mutation testing (no-op until mutants.toml exists)
+        run: echo "will run cargo mutants --config mutants.toml once S32 commits mutants.toml"
+      - name: Advisory dry run (no-op)
+        run: echo "will run cargo update --dry-run and report the advisory delta once the scheduled job is enabled"

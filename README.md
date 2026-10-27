@@ -17,7 +17,8 @@ not shipped functionality. See [current scope](docs/parity/core.md).
 ## Development
 Install [mise](https://mise.jdx.dev/), then run `mise install`.
 Use `mise run check` for formatting, strict Clippy, tests, doctests and docs;
-`mise run coverage` requires 100% handwritten executable line coverage.
+`mise run coverage` enforces the per-crate line-coverage thresholds of ADR-0005 (core
+100%, testkit 90%); `lint-attrs`, `features`, `machete` and `dco` run the other CI gates.
 The pinned development compiler is Rust 1.99.1, edition 2024; MSRV is 1.97.
 
 The facade is in `crates/stonecrab`, pure contracts in `crates/stonecrab-core`.

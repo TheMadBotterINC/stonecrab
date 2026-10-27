@@ -20,6 +20,9 @@ There are no connections, device reads, protocol drivers or hardware integration
 - Current development versions: facade **0.2.0**, core **0.1.0**, both unreleased.
 - The facade's minor bump records removal of the published `placeholder::status`
   API. Do not restore a compatibility shim without a real consumer requirement.
+- Review policy: ADR-0005 waives the two-approval rule of CODING_STANDARDS 18.6
+  while there is one maintainer. The waiver expires when a second maintainer with
+  merge rights exists; until then every PR carries an Appendix C self-review.
 
 Pushing is a manual maintainer action; `git status -sb` shows unpushed commits.
 No new release was published. There is no unfinished source edit at this handoff.
@@ -109,13 +112,15 @@ gates named were run locally before that commit.
 | Slice | Date | Landed | Gates |
 | --- | --- | --- | --- |
 | S02 | 2026-10-27 | Repository hygiene and community files; docs.rs metadata; facade archive without tests; GitHub community-profile check deferred until the next push | check, coverage, dependencies, package |
+| S03 | 2026-10-27 | CI gates and ADR-0005: nextest, per-crate coverage tiers via `scripts/coverage-gate.sh`, `scripts/lint-attrs.sh` with self-test fixtures, `scripts/dco-check.sh`, jobs dco/features/machete/lint-attrs/beta/geiger/semver/scheduled, pinned actions, single-maintainer waiver; hosted CI unexercised until pushed | check, coverage, lint-attrs, dco, features, machete, dependencies, package |
 | S01 | 2026-10-27 | Modbus TCP parity record with stable row ids (77 alpha rows `planned`, 26 deferred, 21 divergence rows, UNVERIFIED list), `CORE-URI-GRAMMAR` row, manifest `[inventory.modbus_tcp]` and `[policy]`; docs only | check |
 
 ## Verified evidence and reproduction
 
 Development toolchain: **Rust 1.99.1**.
 Declared MSRV: **1.97**; locally exercised with **1.97.1**.
-Pinned tools: `cargo-llvm-cov` **0.9.1**, `cargo-deny` **0.20.2**.
+Pinned tools: `cargo-llvm-cov` **0.9.1**, `cargo-deny` **0.20.2**, `cargo-nextest`
+**0.9.148**, `cargo-hack` **0.6.45**, `cargo-machete` **0.9.2**.
 
 From the repository root:
 
@@ -123,18 +128,23 @@ From the repository root:
 mise install
 mise run check
 mise run coverage
+mise run lint-attrs
+mise run features
+mise run machete
 mise run dependencies
 mise run package
+mise run dco -- origin/master..HEAD
 ```
 
 Most recent local results for the implementation baseline:
 
-- Formatting, strict Clippy, tests, doctests, documentation with warnings denied,
-  and no-default-features checks passed.
-- **100% measured executable line coverage** for released code, without excluding
-  error paths. Maintainer testkit code is excluded from the released-code report,
-  but its tests still run. Region coverage was approximately 99.92%; do not
-  describe this as 100% branch coverage.
+- Formatting, strict Clippy, nextest, `cargo test` with doctests, documentation with
+  warnings denied, no-default-features, lint-attrs, feature powerset and unused-
+  dependency checks passed.
+- Per-crate line coverage (ADR-0005): `stonecrab-core` 969/969 lines (100%, gate
+  100%), `stonecrab-testkit` 23/23 lines (gate 90%), `stonecrab` n/a (no executable
+  lines). Error paths are not excluded. Region coverage was approximately 99.92%;
+  do not describe this as branch coverage, which is reported and not gated.
 - Workspace tests and doctests passed on Rust 1.97.1.
 - Cross-compilation checks passed for `aarch64-unknown-linux-gnu` and
   `armv7-unknown-linux-gnueabihf`. These are compile checks, not device tests.
@@ -152,9 +162,12 @@ mise exec -- cargo check --locked --workspace --all-features --target armv7-unkn
 
 Hosted CI for `e7d887e` **completed successfully**:
 https://github.com/TheMadBotterINC/stonecrab/actions/runs/40442677439
-This covers the configured current test, quality, cross-target, dependency and
-package jobs. It does not establish the unimplemented fuzz, mutation, soak,
-interoperability or hardware gates from the source standards.
+That run covered the earlier test, quality, cross-target, dependency and package
+jobs. The S03 workflow (nextest, coverage gate, dco, features, machete, lint-attrs,
+beta, geiger, semver, scheduled) has not run on GitHub yet; the first push must
+confirm the pinned action commit, the install-action tool names and the dco job on
+both event types. Nothing establishes the fuzz, mutation, soak, interoperability or
+hardware gates yet.
 
 ## Important implementation and tooling details
 
@@ -224,7 +237,8 @@ not native subscriptions. No Rust Modbus implementation or parity claim exists y
 - OPC UA, EtherNet/IP/Logix, S7 and remaining upstream protocols.
 - Code generation or retained upstream fixture corpus.
 - Parser fuzzing, mutation testing, soak/load/benchmark evidence, branch-coverage
-  gates and the full proposed CI gate set in the source standards.
+  gates, and the `fuzz-smoke`, `interop`, `regen` and blocking `semver` jobs from the
+  source standards.
 - Hardware verification, source-release signatures and a reviewed full parity matrix.
 - Verified private vulnerability-reporting availability; this remains a release prerequisite.
 

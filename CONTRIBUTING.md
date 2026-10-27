@@ -5,6 +5,8 @@ not shipped functionality.
 
 Use `mise install`, then `mise run check` and `mise run coverage`.
 Use `mise run dependencies` to check advisories, licenses, bans and sources.
+`mise run lint-attrs`, `features`, `machete` and `dco -- <range>` run the CI jobs of the
+same names; `mise run coverage` applies the per-crate thresholds of ADR-0005.
 Unit tests and doctests must also pass with ordinary `cargo test --workspace`.
 Tests must not access devices or external networks. Use explicit fake time rather
 than sleeps, and bind loopback integration listeners to an ephemeral port.
@@ -30,6 +32,8 @@ normative and are not duplicated here. Per ADR-0004 the trunk is `master`.
   follows the commit format.
 - Review (18.6): one maintainer approval, two for CI, release tooling or hardware bench
   changes; authors do not approve their own PRs.
+  ADR-0005 waives the two-approval rule while there is one maintainer; each PR then
+  carries a self-review against the Appendix C checklist.
 - Merge (18.7): squash-merge with the PR title as the subject; no merge commits or
   force-pushes to the trunk.
 - New drivers (18.8): capability metadata, address documentation, fixtures with
