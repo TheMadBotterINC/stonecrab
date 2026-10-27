@@ -14,6 +14,9 @@ than sleeps, and bind loopback integration listeners to an ephemeral port.
 Keep changes reviewable. Add regression tests for fixes and boundary/failure tests
 for new behavior. Do not exclude error paths from coverage.
 Use Conventional Commits and DCO sign-off (`git commit -s`).
+The CI `geiger` job greps first-party Rust sources for the word `unsafe`; it may
+appear only in the `forbid(unsafe_code)` attribute, so keep it out of comments,
+strings and test names too.
 ADRs document new crates, public traits and dependency decisions.
 Never place credentials in source, fixtures, logs or commit messages.
 

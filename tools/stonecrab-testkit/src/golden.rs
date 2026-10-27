@@ -825,7 +825,7 @@ mod tests {
     #[test]
     fn invalid_provenance_is_an_error_naming_the_file() {
         // covers: CODING_STANDARDS 13.7, malformed provenance is rejected
-        let error = load_dir(&tree("bad_provenance")).expect_err("unsafe name");
+        let error = load_dir(&tree("bad_provenance")).expect_err("hostile name");
         assert!(
             matches!(&error, GoldenError::Provenance { path: Some(p), .. } if file_name(p) == "PROVENANCE.toml"),
             "unexpected {error}"
@@ -997,7 +997,7 @@ mod tests {
 
     #[test]
     fn provenance_validation_rejects_unsafe_duplicate_and_blank_entries() {
-        // covers: CODING_STANDARDS 13.7, unsafe provenance entries are rejected
+        // covers: CODING_STANDARDS 13.7, hostile provenance entries are rejected
         let vector = |name: &str, origin: &str, license: &str| {
             format!(
                 "[[vector]]\nname = \"{name}\"\nsource = \"captured\"\norigin = \"{origin}\"\nlicense = \"{license}\"\n"
