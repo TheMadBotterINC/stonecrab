@@ -9,6 +9,9 @@ for current scope. No upstream compatibility or hardware support is claimed.
 
 Build-tested functionality includes scalar values, identifiers, capabilities, errors,
 deadlines and redacted secrets.
+It also exposes immutable tags, bounded read requests, correlated read results,
+original protocol diagnostics and explicit unknown write outcomes. These are pure
+data contracts, not implemented device-read or device-write operations.
 
 ```rust
 use stonecrab::{PlcValue, TagId};

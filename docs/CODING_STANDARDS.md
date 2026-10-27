@@ -491,6 +491,10 @@ A library crate emits nothing above `warn` in steady-state operation. A log line
 
 ## 15. Dependencies and supply chain
 
+> Local tooling exception: [ADR-0003](adr/0003-request-response-contracts.md)
+> permits a path-only development dependency on the unpublished shared testkit.
+> Wildcard registry versions remain prohibited.
+
 15.1. **Justify every dependency** in the PR that adds it: what it does, why `std` is insufficient, its `unsafe` status (§4.4), its license, its maintenance signal (last release, open advisories), and the features enabled. A reviewer may ask for it to be replaced by 50 lines of first-party code; "it's popular" is not a justification.
 
 15.2. **`cargo deny`** runs on every PR with the policy in Appendix A: licenses allow-listed (Apache-2.0, MIT, BSD-2/3-Clause, ISC, Zlib, Unicode-3.0, MPL-2.0 for named crates only; GPL/LGPL/AGPL/SSPL/BUSL denied), advisories denied (no unpatched RUSTSEC entries, yanked crates denied), sources restricted to crates.io, wildcard versions denied, duplicate major versions warned. — **CI**

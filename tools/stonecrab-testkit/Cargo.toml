@@ -1,0 +1,20 @@
+[package]
+name = "stonecrab-testkit"
+version = "0.1.0"
+description = "Unpublished deterministic contract fixtures for Stonecrab"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+stonecrab-core.workspace = true

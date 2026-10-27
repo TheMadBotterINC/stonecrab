@@ -32,7 +32,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov@0.9.1
-      - run: cargo llvm-cov --locked --workspace --all-features --fail-under-lines 100 --lcov --output-path target/coverage.lcov
+      - run: cargo llvm-cov --locked --workspace --all-features --exclude-from-report stonecrab-testkit --fail-under-lines 100 --lcov --output-path target/coverage.lcov
       - uses: actions/upload-artifact@v4
         with:
           name: coverage
@@ -65,7 +65,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.99.1"
-      - run: cargo package --locked --workspace
+      - run: cargo package --locked --workspace --exclude stonecrab-testkit
+        env:
+          CARGO_HOME: ${{ runner.temp }}/stonecrab-package-home
       - run: |
           cargo package --locked -p stonecrab-core --list > target/core-package-files.txt
           diff -u packaging/stonecrab-core.txt target/core-package-files.txt

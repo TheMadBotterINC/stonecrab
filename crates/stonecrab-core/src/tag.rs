@@ -1,8 +1,118 @@
+use std::any::Any;
 use std::fmt;
+use std::num::NonZeroU32;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::{ErrorKind, PlcError, Result};
+use crate::{ErrorKind, PlcError, PlcValueType, Result};
+
+/// Driver-owned validated protocol address, independent of caller identity.
+///
+/// Implementors own parsing, canonical syntax and validation. The string methods
+/// and Debug implementation must not expose credentials. Trait upcasting to
+/// [`Any`] allows a driver to downcast only its own concrete address type.
+/// Methods must be pure and return stable metadata for the address's lifetime.
+pub trait ProtocolAddress: Any + fmt::Debug + Send + Sync {
+    /// Stable driver protocol identifier, not the connection endpoint.
+    fn protocol(&self) -> &'static str;
+
+    /// Canonical address text without credentials.
+    fn canonical(&self) -> String;
+
+    /// Scalar type fixed by the parsed address, or `None` when not specified.
+    fn value_type_hint(&self) -> Option<PlcValueType>;
+}
+
+/// Immutable caller identity, validated address and positive element count.
+///
+/// Clones share an address through [`Arc`]; no parser, socket or device is invoked.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct Tag {
+    id: TagId,
+    address: Arc<dyn ProtocolAddress>,
+    value_type: Option<PlcValueType>,
+    count: NonZeroU32,
+}
+
+impl Tag {
+    /// Retain a validated driver address, using its type hint and a count of one.
+    ///
+    /// Address implementations must satisfy [`ProtocolAddress`]'s validation
+    /// contract before reaching this constructor.
+    ///
+    /// # Examples
+    /// ```
+    /// use std::sync::Arc;
+    /// use stonecrab_core::{ProtocolAddress, Tag, TagId};
+    /// fn tag_address(address: Arc<dyn ProtocolAddress>) -> stonecrab_core::Result<Tag> {
+    ///     Ok(Tag::new(TagId::new("counter")?, address))
+    /// }
+    /// ```
+    #[must_use]
+    pub fn new(id: TagId, address: Arc<dyn ProtocolAddress>) -> Self {
+        let value_type = address.value_type_hint();
+        Self {
+            id,
+            address,
+            value_type,
+            count: NonZeroU32::MIN,
+        }
+    }
+
+    /// Select a requested type without contradicting an address's explicit type.
+    ///
+    /// # Errors
+    /// Returns [`ErrorKind::InvalidConfig`] when a driver-supplied type hint
+    /// conflicts with the requested type.
+    #[must_use = "requested type validation must be checked"]
+    pub fn with_type(mut self, value_type: PlcValueType) -> Result<Self> {
+        if self
+            .address
+            .value_type_hint()
+            .is_some_and(|hint| hint != value_type)
+        {
+            return Err(PlcError::new(
+                ErrorKind::InvalidConfig,
+                "requested value type conflicts with protocol address",
+            ));
+        }
+        self.value_type = Some(value_type);
+        Ok(self)
+    }
+
+    /// Set a positive number of elements; protocol-specific range limits are
+    /// validated by the driver before transmission.
+    #[must_use]
+    pub const fn with_count(mut self, count: NonZeroU32) -> Self {
+        self.count = count;
+        self
+    }
+
+    /// Caller-supplied stable correlation identity.
+    #[must_use]
+    pub const fn id(&self) -> &TagId {
+        &self.id
+    }
+
+    /// Borrow the original validated driver address.
+    #[must_use]
+    pub fn address(&self) -> &dyn ProtocolAddress {
+        self.address.as_ref()
+    }
+
+    /// Explicit requested type or the address hint, absent when neither exists.
+    #[must_use]
+    pub const fn value_type(&self) -> Option<PlcValueType> {
+        self.value_type
+    }
+
+    /// Positive number of requested elements.
+    #[must_use]
+    pub const fn count(&self) -> NonZeroU32 {
+        self.count
+    }
+}
 
 /// Stable caller-owned correlation identifier, distinct from a protocol address.
 ///

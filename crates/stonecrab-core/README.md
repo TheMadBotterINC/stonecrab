@@ -8,6 +8,15 @@ Build-tested contracts: exact-width scalar values, stable validated tag identifi
 capabilities, typed errors with diagnostic context, monotonic deadlines and redacted
 secret formatting. No simulator, interoperability or hardware verification is claimed.
 Resource budgets are finite, positive and immutable after builder validation.
+Immutable tags, bounded read requests and correlated read responses are implemented
+as data contracts only. They do not acquire device data. Protocol status retains
+bounded raw bytes without exposing them through Debug, and write outcomes retain
+post-transmit uncertainty without implementing a write or retry operation.
+
+Read builders require explicit `ResourceLimits`. Duplicate identifiers and over-budget
+requests fail before any transport exists. Response builders reject missing, duplicate
+or unexpected identities and invalid sampling intervals; per-item failures remain data.
+Cancellation tokens and relative-deadline clock ownership are not implemented yet.
 
 ```rust
 use stonecrab_core::{Deadline, PlcValue, TagId};

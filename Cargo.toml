@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
-members = ["crates/stonecrab", "crates/stonecrab-core"]
+members = ["crates/stonecrab", "crates/stonecrab-core", "tools/stonecrab-testkit"]
+default-members = ["crates/stonecrab", "crates/stonecrab-core"]
 
 [workspace.package]
 edition = "2024"
@@ -16,6 +17,7 @@ categories = ["network-programming", "embedded"]
 stonecrab-core = { path = "crates/stonecrab-core", version = "0.1", default-features = false }
 thiserror = { version = "2.0", default-features = false, features = ["std"] }
 bytes = { version = "1.10", default-features = false, features = ["std"] }
+stonecrab-testkit = { path = "tools/stonecrab-testkit" }
 
 [workspace.lints.rust]
 unsafe_code                   = "forbid"

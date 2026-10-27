@@ -38,7 +38,15 @@ name = "stonecrab-core"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "stonecrab-testkit",
  "thiserror",
+]
+
+[[package]]
+name = "stonecrab-testkit"
+version = "0.1.0"
+dependencies = [
+ "stonecrab-core",
 ]
 
 [[package]]

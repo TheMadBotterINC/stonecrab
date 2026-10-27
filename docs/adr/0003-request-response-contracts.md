@@ -15,8 +15,17 @@ no retry or I/O behavior belongs in these data types.
 - Extend `tag.rs` with `ProtocolAddress` and `Tag`; reuse existing `TagId`.
 - Add `request.rs` for a bounded read builder and explicit deadlines.
 - Add `response.rs` for protocol status, item errors, read results and write outcomes.
+- Keep batch correlation in `read_response.rs`, separate from individual outcomes.
 - Add `tools/stonecrab-testkit` with a fixture address used by consumer contract tests.
   It is unpublished and never a runtime dependency of a published crate.
+  Core integration tests using that path-only development dependency stay in the
+  workspace rather than the published archive. Packaged core unit tests and
+  documentation remain self-contained. Package verification uses a fresh Cargo
+  cache to avoid stale same-version unpublished sibling archives.
+  `cargo-deny` permits wildcard path dependencies for this unpublished development
+  testkit; wildcard registry versions remain denied. Published runtime dependencies
+  still require versioned paths, enforced by Cargo packaging. This is the narrow
+  local-tooling exception to the version policy in coding standards §15.
 - Use `bytes::Bytes` for retained protocol-status bytes, matching the specified
   shared-buffer representation rather than inventing a second byte container.
 - Remove no existing public API; this is additive development work.
