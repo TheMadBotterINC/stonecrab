@@ -4,8 +4,10 @@ Accepted by the sole maintainer on 2026-10-27, as slice S28a of docs/ALPHA_PLAN.
 It adds the new crate `stonecrab-sensors` (CODING_STANDARDS 12.6 requires an ADR for a
 new crate), adopts `serde` and `toml` (section 15.1), and implements decisions D10, D17
 and D23 for this crate. It builds on ADR-0005 (the sensors coverage row), ADR-0009 (the
-fuzz workspace) and ADR-0013 (how a dependency is adopted). Semantic validation of a
-profile is slice S28b and is not part of this decision.
+fuzz workspace) and ADR-0013 (how a dependency is adopted). Semantic validation, the tag
+builder and measurement pipeline, and the synthetic profiles with the facade `sensors`
+feature are not part of this original decision; they are the addenda below (S28b, S29,
+S30), and the whole record is accepted.
 
 ## Context
 SPEC.md "Sensor profile contract" says profiles are versioned data, initially TOML, that

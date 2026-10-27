@@ -158,6 +158,9 @@ impl fmt::Debug for StateCell {
 /// Clones are independent observers: a clone starts with the same "last seen" version as
 /// its source and then tracks its own. All handles are `Send + Sync`.
 ///
+/// # Compatibility: docs/parity/core.md#CORE-STATE-WATCH
+/// Upstream has no state-watch API; the latest-value watch is a Stonecrab addition.
+///
 /// # Examples
 /// ```
 /// use std::task::{Context, Poll, Waker};

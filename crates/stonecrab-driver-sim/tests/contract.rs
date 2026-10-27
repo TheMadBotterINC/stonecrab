@@ -1,4 +1,5 @@
-//! The common driver contract suite (slice S13) run against the simulator.
+//! The common driver contract suite (slice S13, row `SIM-CONTRACT-SUITE` of
+//! `docs/parity/sim.md`) run against the simulator.
 //!
 //! The suite lives in the testkit; the simulator supplies the device, the fault hooks
 //! (each one queues a `FailureStep` on the device) and the counters. Everything runs on

@@ -254,7 +254,8 @@ mod tests {
     }
 
     // covers: SPEC mandatory-failure-cases / F5 Modbus level; MB-TCP-CONNECT,
-    // MB-TCP-READ-HR, MB-INTEROP-HR-01 to MB-INTEROP-HR-07
+    // MB-TCP-READ-HR, MB-INTEROP-HR-01, MB-INTEROP-HR-02, MB-INTEROP-HR-03,
+    // MB-INTEROP-HR-04, MB-INTEROP-HR-05, MB-INTEROP-HR-06, MB-INTEROP-HR-07
     #[tokio::test(flavor = "current_thread")]
     #[ignore = "interop: set STONECRAB_INTEROP_MODBUS"]
     async fn interop_reads_all_fifteen_holding_register_types() {

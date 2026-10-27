@@ -1,6 +1,50 @@
 # Changelog
+All notable changes to this project are documented here, in the style of Keep a
+Changelog. There is one section per crate. Nothing in the alpha sections below is
+published: the only published version is `stonecrab` 0.1.0, and publication of the alpha
+needs a separate maintainer approval.
+
 ## Unreleased
-### stonecrab 0.2.0
+No changes since the alpha sections below.
+
+## Alpha (unreleased)
+The first pre-release: `stonecrab` 0.2.0 and the 0.1.0 releases of `stonecrab-core`,
+`stonecrab-codec`, `stonecrab-transport`, `stonecrab-driver-sim`, `stonecrab-modbus` and
+`stonecrab-sensors`. Each crate section below carries the four release-note items that
+`docs/SPEC.md` ('Open-source project requirements') requires: the upstream baseline, the
+supported operations, the actual hardware evidence and the breaking changes. The support
+levels are those of the 'Hardware evidence' policy of `docs/SPEC.md`; the full matrix is
+`docs/COMPATIBILITY.md`.
+
+Gates not run for the alpha, so that nobody reads their absence as a pass: branch coverage
+(line coverage is gated per crate, region coverage is reported), a mutation-testing
+threshold, the 8-hour release fuzz run (CI fuzzes each target for 60 seconds), the 24-hour
+soak, benchmarks, differential tests against PLC4J, hardware verification, and `cargo
+semver-checks` against the specification-stage 0.1.0 package (its API was replaced). The
+measured substitutes are recorded by the release-evidence slice S32.
+
+### stonecrab 0.2.0 (unreleased)
+- **Upstream baseline:** Apache PLC4X v1.0.0 (commit
+  `ea229918f5d07700e04d7d69ab1645da679cb700`, pinned in `upstream/manifest.toml`; the
+  inventory covers the Modbus TCP subset only and the source-release signature is not
+  verified). The facade makes no upstream claim of its own; claims are per parity row in
+  `docs/parity/`.
+- **Supported operations:** the facade has no driver. `stonecrab::sim` (feature `sim`)
+  re-exports the simulator: connect, read, write, close, scripted failures,
+  `simulator-tested`. `stonecrab::modbus` (feature `modbus`) re-exports the Modbus TCP
+  driver: connect, close and reads of coils, discrete inputs, holding registers and input
+  registers (function codes 01 to 04) as 15 types, `interoperability-tested` against
+  pymodbus 3.8.6; writes, subscriptions, browse and discovery are not supported.
+  `stonecrab::sensors` (feature `sensors`) re-exports the synthetic-profile pipeline. The
+  matrix is `docs/COMPATIBILITY.md`.
+- **Hardware evidence:** none. No physical device has been tried and no hardware record
+  exists; nothing is `hardware-verified`.
+- **Breaking changes:** versus the published 0.1.0 specification-stage package, the
+  `placeholder::status` API is removed with no replacement (migration: delete the call;
+  consult `docs/COMPATIBILITY.md` for what is supported). Everything else is new: the
+  0.1.0 package exposed nothing else.
+
+Changes:
 - Move the facade into a resolver-3 workspace with a runtime-independent core crate.
 - Remove the specification-only `placeholder::status` API. There is no replacement
   status API; consult the capability and parity documentation.
@@ -30,7 +74,19 @@
   loads a synthetic profile from `profiles/`, reads it from `sim://bench` or a Modbus TCP
   server and reports name, value, unit, quality, origin and raw value through `tracing`;
   `--expect-good` makes it fail on any measurement that is not of quality `Good`.
-### stonecrab-codec 0.1.0
+
+### stonecrab-codec 0.1.0 (unreleased)
+- **Upstream baseline:** none; these are Stonecrab's own helpers and the crate makes no
+  upstream parity claim. The Modbus layouts that use them are tracked in
+  `docs/parity/modbus.md` against Apache PLC4X v1.0.0.
+- **Supported operations:** none; the crate offers bounds-checked byte primitives and no
+  protocol operation. `build-tested`; the Modbus PDU codec built on them runs against
+  pymodbus 3.8.6.
+- **Hardware evidence:** none. No physical device has been tried and no hardware record
+  exists; nothing is `hardware-verified`.
+- **Breaking changes:** none; this is the first release of the crate.
+
+Changes:
 - Add the crate: `BoundedReader` and `BoundedWriter` with bounds-checked integer, float,
   byte-run and least-significant-bit-first coil reads and writes in an explicit
   `ByteOrder`, and `ParseError` (`Truncated`, `OversizedLength`, `InvalidDiscriminator`,
@@ -38,7 +94,18 @@
 - Add `coil_byte_count`, `pack_bits_lsb_first` and `unpack_bits_lsb_first`.
 - Lengths are checked against the caller's maximum and the remaining input before any
   allocation or copy; no function panics on any input (ADR-0013).
-### stonecrab-driver-sim 0.1.0
+
+### stonecrab-driver-sim 0.1.0 (unreleased)
+- **Upstream baseline:** none claimed. Apache PLC4X ships a simulated driver whose source
+  is not inventoried, so the simulator is Stonecrab-owned (`docs/parity/sim.md`).
+- **Supported operations:** connect, close, read (`STATE` and `RANDOM`), write (`STATE`
+  and `SINK`), scripted failures and bounded read retry, `simulator-tested` by the common
+  driver contract suite. Subscribe, browse and discover are not supported.
+- **Hardware evidence:** none. No physical device has been tried and no hardware record
+  exists; nothing is `hardware-verified`. The simulator models no wire protocol.
+- **Breaking changes:** none; this is the first release of the crate.
+
+Changes:
 - Add the crate: the in-process simulator driver, depending on `stonecrab-core` and
   `tracing` only, Tokio-free, default features empty (ADR-0012, accepted).
 - Add `RealtimeClock`, a `std`-only `Clock` whose `now()` is `Instant::now()` and whose
@@ -67,7 +134,20 @@
   `pending_failures` and `clear_failures`. A connect, read or write takes at most one step;
   a scripted disconnect leaves the connection `Failed(Disconnected)`; a read without a
   deadline now gets `timeouts.request` afresh for each retry attempt.
-### stonecrab-transport 0.1.0
+
+### stonecrab-transport 0.1.0 (unreleased)
+- **Upstream baseline:** none claimed; Apache PLC4X builds its transports on Netty and the
+  types here are Stonecrab's own contract (`docs/parity/transport.md`).
+- **Supported operations:** deadline-bounded TCP transport, framing with
+  resynchronization, and the connection guard (lifecycle, one request in flight, bounded
+  queue, request-driven reconnect). TCP, framing and the guard's connect and request path
+  are `interoperability-tested` through the Modbus driver; resync, reconnect and the queue
+  are `simulator-tested`. Serial, UDP and TLS are not supported.
+- **Hardware evidence:** none. No physical device has been tried and no hardware record
+  exists; nothing is `hardware-verified`.
+- **Breaking changes:** none; this is the first release of the crate.
+
+Changes:
 - Add the crate: the object-safe `Transport` trait (`send`, `recv`, `shutdown`, `peer`,
   `limits`; every call takes a `Deadline`) and `TransportFactory` (both return
   `OpFuture`), and `FrameError` (`Truncated`, `Oversized`, `Malformed`) with
@@ -97,10 +177,31 @@
   budget is spent, resync before the next request after a timeout, `Diagnostics` on every
   error, and a `close` bounded by `Timeouts.request`. No background task (ADR-0014
   addendum).
-### stonecrab-modbus 0.1.0
-- Add the crate scaffold: the native Modbus TCP driver crate, depending only on
-  `stonecrab-core`, with default features empty. Nothing but address types and their
-  text grammar is implemented; there is no codec, framing, session, connection or driver yet.
+
+### stonecrab-modbus 0.1.0 (unreleased)
+- **Upstream baseline:** Apache PLC4X v1.0.0 (commit
+  `ea229918f5d07700e04d7d69ab1645da679cb700`, pinned in `upstream/manifest.toml`; the
+  inventory covers the Modbus TCP subset only and the source-release signature is not
+  verified). Divergences are rows in `docs/parity/modbus.md` and are listed in
+  `docs/COMPATIBILITY.md`.
+- **Supported operations:** Modbus TCP connect, close and reads of coils, discrete inputs,
+  holding registers and input registers (function codes 01 to 04) as the 15 numeric and
+  bit types, with batching and `split_into` disclosure, request-driven reconnect, retry,
+  cancellation and timeouts. Reads are `interoperability-tested` against pymodbus 3.8.6;
+  the fault handling is `simulator-tested`. Writes (the driver reports `write: false`),
+  subscriptions, browse, discovery, ping, extended registers, strings, calendar types,
+  RTU, ASCII, UDP and TLS are not supported.
+- **Hardware evidence:** none. No physical device has been tried and no hardware record
+  exists; nothing is `hardware-verified`.
+- **Breaking changes:** none; this is the first release of the crate. Behavior that
+  differs from upstream by design: bare `40001` addresses need an explicit convention,
+  unknown connection parameters are errors, replies are validated on transaction id, unit
+  id and function code.
+
+Changes:
+- Add the native Modbus TCP driver crate, depending only on `stonecrab-core`, with default
+  features empty. It starts with the address types and their text grammar; the codec,
+  framing, session, connection and driver follow in the entries below.
 - Add `UnitId` (one MBAP byte; default 1; 0 and 255 are carried, not rejected),
   `ModbusArea` (`Coil`, `DiscreteInput`, `HoldingRegister`, `InputRegister`),
   `ModbusDataType` (the 15 numeric and bit types, with `from_upstream_name` recognising
@@ -201,7 +302,19 @@
   tests in `tests/interop_pymodbus.rs` and the `modbus_tcp_read` example, with the image id,
   `pip freeze`, server log and contract report uploaded as `interop-evidence`; ADR-0015 is
   accepted (decision 16).
-### stonecrab-sensors 0.1.0
+
+### stonecrab-sensors 0.1.0 (unreleased)
+- **Upstream baseline:** none; Apache PLC4X has no sensor profile concept, so the format
+  is Stonecrab's own (`docs/parity/sensors.md`).
+- **Supported operations:** loading and validating version-1 TOML profiles, building tags
+  through a driver and turning a read response into scaled, graded measurements. The
+  synthetic profiles are `simulator-tested` against the simulator and
+  `interoperability-tested` against pymodbus 3.8.6; no named device profile exists.
+- **Hardware evidence:** none. No physical device has been tried and no hardware record
+  exists; nothing is `hardware-verified`.
+- **Breaking changes:** none; this is the first release of the crate.
+
+Changes:
 - Add the crate: declarative sensor profiles for Stonecrab, depending on `stonecrab-core`,
   `serde` and, behind the default `toml` feature, `toml` (ADR-0016). No driver reads a
   profile yet; that arrives in a later slice.
@@ -239,7 +352,21 @@
   from the pymodbus register map and a `sim` twin, all labeled `validation = "synthetic"`.
   They are repository data and are not packaged with the crate. The crate's code is
   unchanged; a new test loads and validates every file.
-### stonecrab-core 0.1.0
+
+### stonecrab-core 0.1.0 (unreleased)
+- **Upstream baseline:** none for most contracts, which are Stonecrab-owned; the
+  connection-string grammar follows Apache PLC4X v1.0.0 (`CORE-URI-GRAMMAR` in
+  `docs/parity/core.md`).
+- **Supported operations:** defines the driver boundary (`DriverRegistry`, `Driver`,
+  `Connection`: connect, read, write, close, state watching) and the data contracts, and
+  implements no driver. `simulator-tested` through the common driver contract suite and,
+  for reads on a wire, `interoperability-tested` through `stonecrab-modbus`. Subscribe,
+  browse and discover are not defined.
+- **Hardware evidence:** none. No physical device has been tried and no hardware record
+  exists; nothing is `hardware-verified`.
+- **Breaking changes:** none; this is the first release of the crate.
+
+Changes:
 - Add docs.rs metadata (`all-features`, `--cfg docsrs`) for feature-gated item docs.
 - Establish shared metadata, safety lints and foundation contracts.
 - Add exact-width scalar values, validated tag identifiers, monotonic deadlines,

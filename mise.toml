@@ -5,6 +5,7 @@
 #                            then the --no-default-features check)
 #   mise run coverage      = CI "quality" coverage step (scripts/coverage-gate.sh)
 #   mise run lint-attrs    = CI "lint-attrs" job
+#   mise run parity        = CI "parity" job (scripts/parity-check.sh and its --self-test)
 #   mise run features      = CI "features" job
 #   mise run examples      = CI "examples" job
 #   mise run interop       = CI "interop" job (needs Docker; interop/pymodbus/interop.sh,
@@ -47,6 +48,13 @@ run = "scripts/coverage-gate.sh"
 [tasks.lint-attrs]
 description = "Fail on crate-level lint attributes outside the section 5.1 promotions"
 run = "scripts/lint-attrs.sh"
+
+[tasks.parity]
+description = "Check that every # Compatibility id resolves in docs/parity and every implemented row is referenced (ADR-0005 addendum)"
+run = [
+  "scripts/parity-check.sh",
+  "scripts/parity-check.sh --self-test",
+]
 
 [tasks.features]
 description = "Check the feature powerset (depth 2) and each crate without default features"

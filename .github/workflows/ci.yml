@@ -236,6 +236,14 @@ jobs:
       - uses: actions/checkout@v4
       - run: scripts/lint-attrs.sh
       - run: scripts/lint-attrs.sh --self-test
+  parity:
+    # ADR-0005 addendum (S31): every # Compatibility id in crates/*/src resolves to a row of
+    # docs/parity, and every implemented or automated-verified row is referenced.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/parity-check.sh
+      - run: scripts/parity-check.sh --self-test
   beta:
     # Report only: a beta regression is information, not a merge blocker.
     continue-on-error: true

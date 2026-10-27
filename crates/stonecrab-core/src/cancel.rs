@@ -46,6 +46,10 @@ impl Inner {
 /// Every method is cancel-safe. Dropping a [`cancelled`](Self::cancelled) future removes
 /// its parked waker and leaves the token untouched.
 ///
+/// # Compatibility: docs/parity/core.md#CORE-CANCEL-TOKEN
+/// Upstream cancels through `CompletableFuture.cancel`, with no hierarchy; the token with
+/// child tokens is a Stonecrab addition.
+///
 /// # Examples
 /// ```
 /// use std::task::{Context, Poll, Waker};

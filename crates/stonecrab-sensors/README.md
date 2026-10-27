@@ -31,11 +31,21 @@ register map and its own fixtures.
 | Schema types and `SensorProfile::from_toml` (schema version 1) | build-tested; fuzzed |
 | Semantic validation (`SensorProfile::validate`) and the fixed unit table | build-tested |
 | Scaling and quality evaluation (`SensorProfile::measurements`) | build-tested; property-tested |
-| Driver integration (`SensorProfile::tags` through `Driver::parse_address`) | build-tested; run against the simulator |
-| Synthetic reference profiles | planned |
-| Interoperability against an independent server | planned |
+| Driver integration (`SensorProfile::tags` through `Driver::parse_address`) | simulator-tested |
+| Synthetic reference profiles, `sim` variants | simulator-tested |
+| Synthetic reference profiles, `modbus-tcp` variants | interoperability-tested |
+| Interoperability against an independent server | interoperability-tested |
 | Named device profiles | planned |
 | Hardware verification | planned |
+
+The synthetic reference profiles (temperature, pressure/flow/level and discrete state)
+live in the repository under `profiles/synthetic/`, two files per device, one per scheme,
+and are labeled `synthetic`: they describe no real device and are not part of this crate.
+The facade's `profile_read` example reads each `sim` profile against the simulator in the
+`examples` CI job and each `modbus-tcp` profile against the pymodbus 3.8.6 server in the
+`interop` job, and every measurement comes back of quality `Good`. That is the evidence
+behind the two `tested` rows above: an independent Modbus server served the synthetic
+register map. No named device profile exists and no real device has been tried.
 
 ## Features
 - `toml` (default): the TOML loader, `SensorProfile::from_toml`, and the `toml` crate

@@ -14,29 +14,28 @@ types are Stonecrab's own contract. The behavior that is specified is recorded i
 | Capability | Support level |
 | --- | --- |
 | `Transport` and `TransportFactory` traits, `FrameError` | build-tested |
-| `TcpTransport` and `TcpFactory` (feature `tcp`) | build-tested |
-| `Framer` trait and `FramedTransport` (`next_frame`, `send_frame`, `resync`) | build-tested |
-| `ConnectionGuard` (lifecycle machine, one in-flight request, bounded queue, request-driven reconnect), `GuardConfig`, `GuardStats` | build-tested |
-| `SystemClock` (Tokio timer) | build-tested |
+| `TcpTransport` and `TcpFactory` (feature `tcp`) | interoperability-tested |
+| `Framer` trait and `FramedTransport` (`next_frame`, `send_frame`) | interoperability-tested |
+| `FramedTransport::resync` | simulator-tested |
+| `ConnectionGuard` connect, close, lifecycle and one in-flight request, `GuardConfig`, `GuardStats` | interoperability-tested |
+| `ConnectionGuard` request-driven reconnect, bounded queue, resync after a timeout | simulator-tested |
+| `SystemClock` (Tokio timer) | interoperability-tested |
 | `Jitter` (xorshift64* sample source for `ReconnectPolicy::next_delay`) | build-tested |
 | Serial, UDP and TLS transports | planned |
+| Hardware verification | planned |
 
-The TCP transport has byte-level tests over real loopback sockets (connect refusal,
-fragmented and coalesced delivery, peer close, buffer and frame bounds, shutdown). Those
-tests move bytes only; they exercise no protocol, no simulator and no device, so the
-support level stays build-tested. Deadline expiry is tested on paused Tokio time against a
-future that never completes, not on a socket. Simulator, interoperability and hardware
-verification are not claimed.
-
-The framing layer has tests over the in-memory transport double and a fake clock only:
-fragmentation, coalescing, peer close at each framing boundary, the buffer bound, resync
-and deadline expiry. No protocol framer ships in this crate yet, so the support level
-stays build-tested.
-
-The connection guard has tests over the same doubles and a fake clock only: backoff
-schedules, the retry budget, cancellation while connecting, queued and awaiting, device
-restart, outage and recovery, shutdown during a reconnect and delayed replies after a
-timeout. It has never run against a socket or a device, so it is build-tested too.
+How the levels were reached. The TCP transport has byte-level tests over real loopback
+sockets (connect refusal, fragmented and coalesced delivery, peer close, buffer and frame
+bounds, shutdown) and, through `stonecrab-modbus`, carries every read of its `interop`
+job against pymodbus 3.8.6 (the Modbus MBAP framer runs over `FramedTransport` and the
+guard there). `interoperability-tested` therefore means those paths ran against an
+independent server; it is a statement about the crate used by that driver, not a claim
+about any other protocol. Deadline expiry, resync, reconnect, the queue and late replies
+are tested on the in-memory `FakeTransport` and a fake clock (decision D21: Tokio paused
+time does not control socket readiness), and pymodbus has no way to drop a link or delay a
+reply on demand, so those rows are `simulator-tested` and no further. The framing layer
+ships no protocol framer of its own; the only one is the Modbus one. No physical device has
+been tried.
 
 ## Features
 - `tcp` (default): `TcpTransport` and `TcpFactory`, and Tokio's `net` feature. Without it

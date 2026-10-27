@@ -1,6 +1,7 @@
 # Stonecrab Testkit
 Maintainer-only deterministic fixtures. Never published or used as a runtime
-dependency of a published crate.
+dependency of a published crate. It has no support level of its own; it is the
+tooling behind the evidence claimed by the other crates (coverage tier 90%, ADR-0005).
 
 `FixtureAddress` supplies a protocol-address double for core integration tests.
 It retains supplied text and an optional type hint; it does not parse or validate
@@ -75,6 +76,15 @@ through `ConnectionConfig::builder`, so the fixture needs no knob for them. The
 queued-cancellation case is not part of the suite (it needs a wait queue; see
 `ConnectionGuard`). The full run against the simulator is
 `crates/stonecrab-driver-sim/tests/contract.rs`; ADR-0009's S13 addendum has the details.
+
+At the alpha the suite runs against four fixtures, and every skip is named in the
+report rather than hidden: the simulator (`tests/contract.rs` of the sim crate: 22 passed,
+1 named skip, the unsupported-write case), the Modbus driver over a fake transport with a
+first-party MBAP responder (21 passed, 2 skipped: the two write cases), the Modbus driver
+over loopback sockets to a `ScriptedPeer` (18 passed, 5 skipped: three timing cases and
+two write cases) and the Modbus driver against pymodbus 3.8.6 in the `interop` job (14
+passed, 9 skipped: timing, on-demand disconnect and device exception, and the write
+cases). The results are in the parity rows `SIM-CONTRACT-SUITE` and `MB-CONTRACT-SUITE`.
 
 ```rust,no_run
 use stonecrab_core::Driver;

@@ -1,7 +1,8 @@
 # Simulator record
-Status: implemented through slice S13 (ADR-0012, accepted; the contract suite is in the
-testkit, ADR-0009 addendum).
-Stonecrab-owned; no upstream parity claim.
+Status at the alpha (slice S31): implemented and simulator-tested through slices S11b-1,
+S11b-2, S12 and S13 (ADR-0012, accepted; the contract suite is in the testkit, ADR-0009
+addendum). Stonecrab-owned; no upstream parity claim. Every row below has real test ids
+and is named by a `# Compatibility` section or a test (`scripts/parity-check.sh`).
 
 Apache PLC4X ships a simulated driver (`SimulatedDriver`), and its Javadoc describes the
 address shape `AREA/name:TYPE` with the areas `STATE`, `RANDOM` and `STDOUT`. No part of

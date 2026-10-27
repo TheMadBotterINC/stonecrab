@@ -29,6 +29,9 @@
 /// | `BIG_ENDIAN_BYTE_SWAP` | `[2,1,4,3]` | `LittleEndian` | `HighWordFirst` |
 /// | `LITTLE_ENDIAN_BYTE_SWAP` | `[3,4,1,2]` | `BigEndian` | `LowWordFirst` |
 ///
+/// The core-side model (two independent axes, optional per-tag fields, never inferred)
+/// is recorded in `docs/parity/core.md#CORE-BYTEORDER-MODEL`.
+///
 /// # Examples
 /// ```
 /// use stonecrab_core::ByteOrder;

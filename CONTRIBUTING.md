@@ -5,8 +5,13 @@ not shipped functionality.
 
 Use `mise install`, then `mise run check` and `mise run coverage`.
 Use `mise run dependencies` to check advisories, licenses, bans and sources.
-`mise run lint-attrs`, `features`, `machete` and `dco -- <range>` run the CI jobs of the
-same names; `mise run coverage` applies the per-crate thresholds of ADR-0005.
+`mise run lint-attrs`, `features`, `machete`, `parity` and `dco -- <range>` run the CI jobs
+of the same names; `mise run coverage` applies the per-crate thresholds of ADR-0005.
+`mise run parity` (`scripts/parity-check.sh`) fails when a `# Compatibility:
+docs/parity/<file>.md#<ROW-ID>` section in `crates/*/src` names a row that does not exist,
+or when a row marked `implemented` or `automated-verified` in `docs/parity/*.md` has no
+test id or is named by no `# Compatibility` section or test; a change to a parity row and
+to the code it describes goes in the same PR.
 Unit tests and doctests must also pass with ordinary `cargo test --workspace`.
 Tests must not access devices or external networks. Use explicit fake time rather
 than sleeps, and bind loopback integration listeners to an ephemeral port.
@@ -45,9 +50,9 @@ normative and are not duplicated here. Per ADR-0004 the trunk is `master`.
 - Bug fixes (18.9): carry a regression test named after the issue, or a documented
   reason it can only be shown on hardware, with the hardware record linked.
 
-`mise run fuzz` runs the fuzz smoke check (see `fuzz/README.md`); it passes with zero
-targets until the first one lands. The `interop` task arrives in a later slice of
-`docs/ALPHA_PLAN.md`; until then its PR template item is marked n/a. Commit any
+`mise run fuzz` runs the fuzz smoke check (see `fuzz/README.md`), 60 seconds per target.
+`mise run interop` runs the pymodbus interoperability job and needs Docker; its PR template
+item may be marked n/a when the change cannot affect a driver. Commit any
 `proptest-regressions/` directories that property tests create.
 
 ## Changing the upstream baseline
@@ -57,7 +62,7 @@ its own PR and contains:
 
 1. The `upstream/manifest.toml` change, alone, with no logic changes.
 2. A parity diff over `docs/parity` showing every capability whose status changes.
-3. A full regression run, including interop and fuzz-smoke once those exist.
+3. A full regression run, including interop and fuzz-smoke.
 4. A migration note in `CHANGELOG.md` under `Unreleased`.
 
 ## Fuzz findings

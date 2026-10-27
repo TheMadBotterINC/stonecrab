@@ -38,11 +38,14 @@ assert_eq!(response.items()[0].outcome().as_ref().ok(), Some(&PlcValue::F32(71.5
 ```
 
 The crate depends on `stonecrab-core` and `tracing` only, has no Tokio dependency, and its
-default feature set is empty. Tests that need time to pass inject the unpublished testkit's
+default feature set is empty. Through the facade it is `stonecrab::sim` behind the `sim`
+feature; the `sim_read` example and the `sim` variants of the synthetic sensor profiles
+(`profile_read`) run against it with no network, which is what the alpha's `examples` CI
+job does. Tests that need time to pass inject the unpublished testkit's
 `FakeClock` with `SimDriver::with_clock`.
 
 Upstream behavior is the simulated driver of Apache PLC4X, and the simulator claims no
-parity with it. Stonecrab-owned rows, divergences and planned items are recorded in the
+parity with it. Stonecrab-owned rows and divergences are recorded in the
 [simulator record](https://github.com/TheMadBotterINC/stonecrab/blob/master/docs/parity/sim.md).
 
 ## Features

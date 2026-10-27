@@ -17,9 +17,13 @@ that consume them are tracked in the
 | `ParseError` and its conversion to `PlcError` | build-tested |
 | Coil bit packing helpers (least significant bit first) | build-tested |
 | Checksums (`InvalidChecksum`) and nesting limits (`RecursionLimit`) | planned |
+| Hardware verification | planned |
 
-Simulator, interoperability and hardware verification are not claimed. Byte order is
-always passed explicitly as a `ByteOrder`; nothing is inferred from the data.
+The primitives are unit-tested, property-tested and fuzzed, and the Modbus PDU codec built
+on them runs against pymodbus 3.8.6 in the repository's `interop` job; that is evidence
+for the Modbus read path, and the primitives carry no support level above `build-tested`
+of their own. Checksums arrive with Modbus RTU (milestone M2). Byte order is always passed
+explicitly as a `ByteOrder`; nothing is inferred from the data.
 
 API:
 

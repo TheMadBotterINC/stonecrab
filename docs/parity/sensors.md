@@ -1,7 +1,12 @@
 # Sensors record
-Status: schema and loader implemented in slice S28a, validation and the unit table in
-slice S28b, tags and the measurement pipeline in slice S29, the synthetic profiles in
-slice S30 (ADR-0016). Stonecrab-owned: no upstream behavioral parity claim.
+Status at the alpha (slice S31): schema and loader implemented in slice S28a, validation
+and the unit table in slice S28b, tags and the measurement pipeline in slice S29, the
+synthetic profiles in slice S30 (ADR-0016). Stonecrab-owned: no upstream behavioral
+parity claim. The synthetic profiles are `simulator-tested` (the `examples` job) and
+`interoperability-tested` for the `modbus-tcp` variants (the `profiles` step of the
+`interop` job, green on the hosted runner for S30, run 40548582722); no named device profile and
+no hardware evidence exist. Every row below has real test ids and is named by a
+`# Compatibility` section or a test (`scripts/parity-check.sh`).
 
 Apache PLC4X has no sensor profile concept. It describes devices through driver address
 strings and MSpec-generated data types, and it has no declarative file that maps addresses

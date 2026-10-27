@@ -1,8 +1,10 @@
 # Stonecrab Modbus
-Native Modbus TCP driver for Stonecrab. The alpha scope is read-only: function codes 01
-(read coils), 02 (read discrete inputs), 03 (read holding registers) and 04 (read input
-registers) over TCP with MBAP framing. RTU, ASCII, TLS, UDP, writes, extended registers
-and string types are out of scope for the alpha.
+Native Modbus TCP driver for Stonecrab (alpha). The alpha scope is read-only: function
+codes 01 (read coils), 02 (read discrete inputs), 03 (read holding registers) and 04
+(read input registers) over TCP with MBAP framing. RTU, ASCII, TLS, UDP, writes, extended
+registers, string types, subscriptions, browse, discovery and ping are out of scope for
+the alpha and are listed under "Not in the alpha" below. The driver has been checked
+against an independent server, pymodbus 3.8.6, and no physical device.
 
 This crate offers `ModbusTcpDriver`, the `Driver` of the `modbus-tcp` scheme, with
 `ModbusOptions`, the parsed connection parameters; `ModbusConnection` with
@@ -136,7 +138,8 @@ read `interoperability-tested`. No physical device has been tried.
 | Write | not supported |
 | Subscribe, browse and discover | not supported |
 | Connection string and parameters (`parse_config`) | simulator-tested |
-| Connect, close, request-driven reconnect and connection state | interoperability-tested |
+| Connect, close and connection state | interoperability-tested |
+| Request-driven reconnect, read retry, cancellation, timeout and late-reply discard | simulator-tested |
 | Batched reads with split disclosure | interoperability-tested |
 | Interoperability against an independent server | interoperability-tested |
 | Hardware verification | planned |
@@ -154,6 +157,29 @@ The layers underneath, with their evidence:
 | Typed register decoding and byte order (`TypedDecoder`) | unit-tested; vector-tested; property-tested; the little-endian modes are derived from the documented layouts, not yet confirmed by upstream vectors |
 | Read batching (`Batcher`) | unit-tested; property-tested |
 | Connection and driver (`ModbusConnection`, `ModbusTcpDriver`) | unit-tested on the in-memory transport; contract-suite-tested on the in-memory transport and over loopback sockets; one read run over loopback; ten reads and the contract suite against pymodbus 3.8.6 |
+
+## Not in the alpha
+Each item is a deferred row of the
+[Modbus parity record](https://github.com/TheMadBotterINC/stonecrab/blob/master/docs/parity/modbus.md)
+with its owner. Where the parser or driver can see the request it rejects it with a typed
+error rather than ignoring it; operations that have no API at all do not exist:
+
+- writes (`MB-TCP-WRITE`): `write` is `Unsupported(Operation::Write)`, sends nothing, and
+  `Capabilities.write` is false; write PDUs, the upstream FC06-versus-FC16 choice and
+  `WriteOutcome::Unknown` on the wire come after the alpha;
+- subscriptions, browse, discovery and ping (`MB-TCP-SUBSCRIBE`, `MB-TCP-BROWSE`,
+  `MB-TCP-DISCOVER`, `MB-TCP-PING`): these operations do not exist in the API; the
+  `ping-address` key is validated and unused;
+- extended registers (FC20 and FC21, `extended-register`, `6x`), `STRING`, `WSTRING`,
+  `CHAR`, `WCHAR`, the `TIME` and `DATE` family, array selections and the legacy array
+  form (`MB-ADDR-*`, `MB-TYPE-*`);
+- UDP, TLS and TLS-PSK transports (`MB-TCP-TRANSPORTS-*`); RTU and ASCII framing are
+  milestone M2 (no row yet);
+- the upstream gap-filling read optimizer: Stonecrab merges adjacent or overlapping tags
+  only (`MB-READ-GAP`), and a background reconnect task: reconnect is request-driven;
+- the upstream test vectors, which wait for maintainer approval to redistribute them
+  (prerequisite P4): the repository's vectors are first-party, and the byte-order rows
+  stay below `automated-verified` for that reason.
 
 ## Interoperability
 The `interop` job of the repository's CI builds `interop/pymodbus/` (a first-party Modbus

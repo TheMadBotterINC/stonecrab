@@ -23,6 +23,9 @@ use crate::OpFuture;
 /// A caller who injects a clock derives its [`Deadline`](crate::Deadline)s from that
 /// same clock; mixing readings from two clocks is a logic error.
 ///
+/// # Compatibility: docs/parity/core.md#CORE-CLOCK
+/// Upstream reads the system clock directly; the injectable trait is a Stonecrab addition.
+///
 /// # Examples
 /// A clock implementation returns a boxed future from `sleep_until`. This one never
 /// waits, which is enough to show the shape and that the trait is object safe.

@@ -1,6 +1,14 @@
 # Stonecrab Architecture
 
-**Status:** design document, derived from the [engineering specification](./SPEC.md). No code exists yet; every type below is a target, not a description of shipped behavior. Names are provisional until M0 pins the upstream baseline.
+**Status:** design document, derived from the [engineering specification](./SPEC.md) and
+reconciled with the code at the alpha (slice S31). The diagrams are the original targets.
+Every section that has shipped carries a **Shipped at alpha** note that is authoritative
+wherever it differs from the diagram above it, and anything a diagram shows that the alpha
+does not ship is marked **deferred** with the slice or milestone that owns it (milestones
+are those of SPEC.md 'Delivery milestones', slices those of
+[`ALPHA_PLAN.md`](./ALPHA_PLAN.md)). The upstream baseline is pinned in
+`upstream/manifest.toml`; M0 is not complete. Support levels per capability are in
+[`COMPATIBILITY.md`](./COMPATIBILITY.md).
 
 This document is the diagram set for the workspace. It is organized from the outside in: crate graph first, then the public contract in `stonecrab-core`, then the layers beneath it, then the dynamic behavior (state machines and sequences) that the static diagrams cannot show.
 
@@ -122,6 +130,38 @@ flowchart TB
 - `stonecrab-sensors` depends only on `stonecrab-core`; a profile is data about tags, not about wire bytes.
 - Board adapters depend on `stonecrab-sensors` so they share the measurement envelope and quality model, but they are not upstream-parity items.
 - A plain `cargo add stonecrab` with default features pulls in `stonecrab-core` and nothing else. Every protocol is opt-in.
+**Shipped at alpha (D22).** The alpha ships seven crates plus one unpublished tool crate.
+The graph above holds for them, with the exceptions listed after the table.
+
+| Crate | Version | Normal dependencies | Notes |
+| --- | --- | --- | --- |
+| `stonecrab` (facade) | 0.2.0 | `stonecrab-core`; optional `stonecrab-driver-sim`, `stonecrab-modbus`, `stonecrab-sensors` | no logic of its own; features `sim`, `modbus`, `sensors`, `full`, all off (section 10) |
+| `stonecrab-core` | 0.1.0 | `thiserror`, `bytes` | no executor, no network, no Tokio |
+| `stonecrab-codec` | 0.1.0 | `stonecrab-core` | bounded readers and writers |
+| `stonecrab-transport` | 0.1.0 | `stonecrab-core`, `bytes`, `tokio` (`rt`, `time`, `sync`, `io-util`; `net` behind `tcp`) | the only crate with Tokio; no spawned task |
+| `stonecrab-driver-sim` | 0.1.0 | `stonecrab-core`, `tracing` | Tokio-free; depends on neither transport nor codec (D9) |
+| `stonecrab-modbus` | 0.1.0 | `stonecrab-core`, `stonecrab-codec`, `stonecrab-transport` (`tcp`), `bytes`, `tracing` | Modbus TCP reads only |
+| `stonecrab-sensors` | 0.1.0 | `stonecrab-core`, `serde`, `toml` (default feature) | depends on no driver |
+| `tools/stonecrab-testkit` | unpublished | `stonecrab-core`; `net` adds transport, Tokio, `bytes`; `fixtures` adds `serde`, `serde_json`, `toml` | dev-dependency only |
+
+Where the alpha differs from the graph and the original brief:
+
+- **Transport error type (D22).** `stonecrab-transport` does not depend on the codec. Its
+  framing errors are the transport-local `FrameError` (`Truncated`, `Oversized`,
+  `Malformed`) with `From<FrameError> for PlcError`, and `MbapFramer` in the Modbus crate
+  converts the codec's `ParseError` into it. The edges `TRANSPORT --> CORE` and
+  `CODEC --> CORE` therefore stand, there is no `TRANSPORT --> CODEC` edge, and the
+  `ParseError` that sections 4.1 and 4.2 show on `Framer` is `FrameError` as shipped.
+  The two sections were inconsistent on this point; this is the recorded choice.
+- **Deferred crates.** `stonecrab-opcua` (milestone M3), `stonecrab-eip` and
+  `stonecrab-s7` (M4), the remaining baseline drivers (M5), both board adapters (M2S),
+  `stonecrab-codegen` (M5) and the differential runner (M5) do not exist. `xtask` does
+  not exist either: its jobs are shell scripts under `scripts/` and mise tasks
+  (ADR-0005). Serial and UDP transports and Modbus RTU are M2 and M3.
+- **Drivers and shared crates.** The simulator depends on core alone, so the rule that
+  driver crates depend on transport and codec applies to `stonecrab-modbus` only.
+- **Opt-in.** A plain `cargo add stonecrab` pulls `stonecrab-core` and nothing else,
+  as the last rule says, and every shipped driver is behind a feature.
 
 ---
 
@@ -174,7 +214,7 @@ classDiagram
         +scheme() str
         +capabilities() Capabilities
         +parse_config(uri: str) Result~ConnectionConfig~
-        +parse_address(address: str) Result~Box~dyn ProtocolAddress~~
+        +parse_address(text: str, options: AddressOptions) Result~Arc~dyn ProtocolAddress~~
         +connect(cfg: ConnectionConfig) OpFuture~Box~dyn Connection~~
     }
 
@@ -183,6 +223,7 @@ classDiagram
         +state() ConnectionState
         +watch_state() StateWatch
         +capabilities() Capabilities
+        +limits() ResourceLimits
         +read(req: ReadRequest) OpFuture~ReadResponse~
         +write(req: WriteRequest) OpFuture~WriteResponse~
         +subscribe(req: SubscribeRequest) OpFuture~Subscription~
@@ -312,20 +353,79 @@ classDiagram
     note for RetryPolicy "Applies to reads only. Some registers have read\nside effects, so the budget is per-connection configurable."
 ```
 
-**Implementation note (ADR-0011).** `Driver` and `Connection` are defined in
-`stonecrab-core` as drawn, with these differences. `Connection` is the narrow set `state`,
-`watch_state`, `capabilities`, `limits`, `read`, `write` and `close`; `subscribe`, `browse`
-and `discover` are added later as provided methods returning `Unsupported` (D2, D4), and
-`limits()` exists because the request builders need the item budget. `Driver::parse_address`
-takes a second argument, `&AddressOptions`, and returns `Arc<dyn ProtocolAddress>` (D16).
-`DriverRegistry::parse` returns the driver together with the `ConnectionConfig`;
-`register(&mut self, ..)` is setup-time only and the registry map has no lock. `Endpoint`
-has only `Tcp` and `Custom` variants until the UDP and serial transports exist, and
-`ConnectionConfig` has private fields with accessors and carries the shared
-`address-convention` key as `AddressOptions` instead of an options map. The item budget is
-mandatory: `ResourceLimits.max_items_per_request` is a `NonZeroUsize`, not an `Option`.
-`Capabilities` and `ResourceLimits` are `Copy` and returned by value. `Timeouts.idle` is
-recorded and not enforced at alpha. The diagram is not redrawn.
+**Shipped at alpha (ADR-0011, ADR-0008).** This note is authoritative where it differs
+from the diagram, which is the original target and is not redrawn.
+
+`Driver` is object safe and `Send + Sync`, a stateless factory:
+
+| Method | Shipped signature |
+| --- | --- |
+| `scheme` | `fn scheme(&self) -> &'static str` |
+| `capabilities` | `fn capabilities(&self) -> Capabilities` (by value; `Capabilities` is `Copy`) |
+| `parse_config` | `fn parse_config(&self, uri: &str) -> Result<ConnectionConfig>` |
+| `parse_address` | `fn parse_address(&self, text: &str, options: &AddressOptions) -> Result<Arc<dyn ProtocolAddress>>` |
+| `connect` | `fn connect(&self, config: ConnectionConfig) -> OpFuture<'_, Box<dyn Connection>>` |
+
+`parse_address` takes the caller's `AddressOptions` (D16): a `Clone`, `#[non_exhaustive]`
+carrier of the optional `address-convention` name, so the convention is chosen explicitly
+and never held as driver state. `ConnectionConfig::address_options()` returns it, and a
+caller takes it before `connect` consumes the configuration (the configuration holds
+credentials in a `Secret`, which is not `Clone`, so it is passed by value and is itself not
+`Clone`). `connect` is bounded by `Timeouts.connect`; there is no connect without a
+deadline.
+
+`Connection` is the narrow set of D2, object safe and `Send + Sync`:
+
+| Method | Shipped signature |
+| --- | --- |
+| `state` | `fn state(&self) -> ConnectionState` |
+| `watch_state` | `fn watch_state(&self) -> StateWatch` |
+| `capabilities` | `fn capabilities(&self) -> Capabilities` |
+| `limits` | `fn limits(&self) -> ResourceLimits` (the request builders need the item budget) |
+| `read` | `fn read(&self, request: ReadRequest) -> OpFuture<'_, ReadResponse>` |
+| `write` | `fn write(&self, request: WriteRequest) -> OpFuture<'_, WriteResponse>` |
+| `close` | `fn close(&self) -> OpFuture<'_, ()>` (bounded by `Timeouts.request`) |
+
+**Deferred:** `subscribe` (M2, D4), `browse` and `discover` (M3), drawn in the diagram
+above but not shipped. They will be added as
+provided methods returning `Unsupported`, which is additive for implementors; their
+request, response and event types (`SubscribeRequest`, `Subscription`, `QueuePolicy`,
+`LossCounters`, `BrowseRequest`, `DiscoverRequest` and the rest) do not exist at alpha
+(ADR-0001: no empty scaffolds).
+
+`DriverRegistry` is populated at setup time: `register(&mut self, Arc<dyn Driver>)
+-> Result<()>` (a duplicate scheme is `InvalidConfig`), `driver(&str)`, `schemes()` (sorted),
+`parse(&str) -> Result<(Arc<dyn Driver>, ConnectionConfig)>` and `connect(&str)`. It takes
+the scheme from `ConnectionUri::parse` and hands the original text to
+`Driver::parse_config`; an unknown scheme is `Unsupported(Operation::Connect)`. There is no
+lock and no global registry.
+
+`ConnectionConfig` has private fields with accessors, is built by
+`ConnectionConfig::builder(scheme, endpoint)` and validated at `build`. It differs from the
+diagram in three ways:
+
+- `Endpoint` has `Tcp { host, port }` and `Custom(String)`; `Udp` and `Serial` arrive with
+  their transports (M3 and M2).
+- The `options: BTreeMap` is gone. The shared `address-convention` key is carried as
+  `AddressOptions`, and options only one driver understands travel in the **`DriverOptions`
+  slot**: `DriverOptions` is a method-free `Any + Debug + Send + Sync` trait, stored as
+  `Arc<dyn DriverOptions>` by `ConnectionConfigBuilder::driver_options` and read back by
+  `ConnectionConfig::driver_options_as::<T>()`. A TCP endpoint cannot carry query text, so
+  `ModbusTcpDriver::parse_config` puts its parsed `ModbusOptions` there and `connect`
+  reads them; a configuration built by hand carries none and the driver falls back to its
+  defaults. The simulator keeps its options in the text of `Endpoint::Custom`.
+- `ReconnectPolicy::next_delay(attempt, sample: f64)` is pure (no random source in core),
+  `RetryPolicy.retry_on` is a `BTreeSet<ErrorKind>` (default `{Timeout, Disconnected,
+  Backpressure}`, equal to `PlcError::is_retryable`), `AccessPolicy` defaults to
+  `ReadOnly`, and `Timeouts.idle` is recorded and **not enforced** at alpha because no
+  background task exists (M2).
+
+`ResourceLimits.max_items_per_request` is a mandatory `NonZeroUsize`, not an `Option`;
+`Capabilities` and `ResourceLimits` are `Copy` and returned by value. `Capabilities` is
+`#[non_exhaustive]` with public fields and `supports(Operation)`. `ConnectionState`,
+`StateWatch` and `StateCell` are as in the diagram (`StateCell` is the writer side; section
+3.4). Every `OpFuture` method states its deadline source and documents `# Cancel safety`
+and `# Wire effects`.
 
 ### 3.2 Tags, addresses, and values
 
@@ -456,10 +556,26 @@ classDiagram
     note for RawValue "Escape hatch for diagnosis: the bytes as received,\nwith the ordering the driver used to interpret them."
 ```
 
-**Implementation note (ADR-0011).** `Tag` holds `Arc<dyn ProtocolAddress>`, not a `Box`,
-because `Tag::new` shares the address that `Driver::parse_address` returned and a profile
-reuses one address for several tags. `Tag` also has optional byte and word order fields
-(ADR-0006). The diagram is not redrawn.
+**Shipped at alpha (ADR-0006, ADR-0011).** `Tag` holds `Arc<dyn ProtocolAddress>`, not a
+`Box`, because `Tag::new(id, address)` shares the address that `Driver::parse_address`
+returned and a profile reuses one address for several tags. Its fields are private with
+accessors (`id`, `address`, `value_type`, `count`, `byte_order`, `word_order`) and
+builders `with_type` (checked against the address's hint), `with_count`, `with_byte_order`
+and `with_word_order`; the last two are optional and never inferred. `count` is set after
+parsing, invisible to `parse_address`, and the Modbus connection rejects a count other
+than 1 before any I/O (array selections are M2).
+
+`ProtocolAddress` is `Any + Debug + Send + Sync` with `protocol()`, `canonical()` and
+`value_type_hint()`; a driver downcasts its own addresses through trait upcasting.
+
+`PlcValue` ships `Null`, `Bool`, `I8` to `I64`, `U8` to `U64`, `F32`, `F64`, `Char`,
+`String` and `Duration`, with `value_type()`, `as_bool`, `as_i64`, `as_u64` and `as_f64`
+(integer access never silently widens a counter to floating point). **Deferred:**
+`Bytes`, `Date`, `Time`, `DateTime`, `List`, `Struct` and `Raw` (and `RawValue` with them):
+ADR-0006 keeps the unscaled typed value in `Measurement.raw` and the received register
+bytes on a decode failure's `ProtocolStatus` instead, and the calendar and structured
+values wait for an ADR before their first consumer (section 11). `ByteOrder` and
+`WordOrder` are exhaustive two-variant enums. The diagram is not redrawn.
 
 ### 3.3 Requests, responses, and errors
 
@@ -682,14 +798,36 @@ classDiagram
     note for PlcError "One error type crate-wide. Connection-level failures and\nper-tag device exceptions are never conflated."
 ```
 
-**Implementation note (ADR-0011).** Request builders are limits-bound:
-`ReadRequest::builder(limits)` and `WriteRequest::builder(limits)` take the connection's
-`ResourceLimits`, whose item budget is mandatory, and `cancel(token)` fills the cancel
-slot (S11a). `Diagnostics` fields are optional (`operation`, `connection_state`,
-`latency` and `category` are `Option`, `retries` is a count) and a core validation error
-does not invent them; a connection populates every one at the failure site. The
-`Subscribe*`, `Browse*` and `Discover*` types, `QueuePolicy` and `LossCounters` do not
-exist at alpha. The diagram is not redrawn.
+**Shipped at alpha (ADR-0003, ADR-0010, ADR-0011).**
+
+- Request builders are limits-bound: `ReadRequest::builder(limits)` and
+  `WriteRequest::builder(limits)` take the connection's `ResourceLimits`, accept
+  `tag`/`item`, an absolute `deadline(Deadline)` and `cancel(CancellationToken)`, and
+  `build()` fails (sticky errors, before any collection grows) on an empty batch, a
+  duplicate `TagId` or an item over the budget.
+- `ReadResponse::builder(&request, started, finished)` restores request order and
+  rejects missing, duplicate and unexpected identities and a reversed interval.
+  `split_into()` is a `NonZeroU32` that discloses how many wire requests served the batch;
+  `sampled_at` is per item. `ReadItem` carries `outcome()`, an optional `ProtocolStatus`,
+  `sampled_at` and `source_time()`, which is `None` unless the device supplied one and is
+  never filled from another clock.
+- `ItemError` wraps a `PlcError` and an optional `ProtocolStatus`. `ProtocolStatus` holds
+  the protocol name, the original code and name, and bounded raw bytes
+  (`with_raw(bytes, max)`, never printed by `Debug`).
+- `PlcError` has private fields and accessors (`kind`, `diagnostics`, `is_retryable`; the
+  message is its `Display`) with `with_source` and `with_diagnostics`; `Diagnostics` fields are
+  optional (`operation`, `connection_state`, `latency`, `category`) plus a `retries`
+  count, and a core validation error does not invent them. `ErrorKind` is as drawn and is
+  totally ordered (additive `Ord`).
+- Write batches (`WriteItem`, `WriteRequest`, `WriteResult`, `WriteResponse`) and
+  `WriteOutcome::{Confirmed, Rejected, Unknown(UnknownReason)}` exist as correlated data
+  and the simulator implements `write` (including `Unknown` after transmit). The Modbus
+  driver reports `write: false` and rejects writes before any I/O; Modbus write PDUs and
+  `WriteOutcome::Unknown` on the wire are deferred (first post-alpha slices, D3).
+- **Deferred:** `SubscribeRequest`, `Subscription`, `SubscriptionEvent`, `QueuePolicy`,
+  `LossCounters` (M2, D4) and `BrowseRequest`, `BrowseResponse`, `BrowseNode` (M3).
+
+The diagram is not redrawn.
 
 ### 3.4 Time and cancellation primitives
 
@@ -740,13 +878,33 @@ classDiagram
     note for StaleTracker "A missed acquisition marks the retained value Stale.\nIt never republishes the previous value as a new Good reading."
 ```
 
-**Implementation note (ADR-0011).** `Deadline::after(now, duration)` takes the clock
-reading explicitly, with no hidden clock: a connection computes the default deadline from
-its own `Clock`, `Deadline::after(clock.now(), timeouts.request)` (ADR-0007). `SystemClock`
-is not in `stonecrab-core`: core has no timer, so it lives in `stonecrab-transport`, and the
-Tokio-free implementations are `FakeClock` in the testkit and `RealtimeClock` in
-`stonecrab-driver-sim`. `StaleTracker` does not exist at alpha. The diagram is not
-redrawn.
+**Shipped at alpha (ADR-0007, ADR-0011).**
+
+- `Clock` is `Send + Sync` with `now()`, `wall_now()` and `sleep_until(Instant) ->
+  OpFuture<'_, ()>`. Core ships no implementation (it has no timer). `SystemClock` lives
+  in `stonecrab-transport`, not in core: a unit struct whose `now()` is Tokio's instant,
+  so paused-time tests agree with `Deadline`. The Tokio-free implementations are
+  `FakeClock` in the testkit (advanced by hand) and `RealtimeClock` in the simulator
+  (`std` only, `sleep_until` resolves at once).
+- `Deadline::after(now, duration) -> Result<Deadline>` takes the clock reading
+  explicitly, with no hidden clock; `remaining(now)` and `is_elapsed(now)` are as drawn.
+  A connection derives its default deadline from its own clock,
+  `Deadline::after(clock.now(), timeouts.request)`, so a caller who injects a clock
+  derives deadlines from the same one.
+- `OpFuture<'a, T>` is `Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>`; there is
+  no `async-trait`.
+- `CancellationToken` is cloneable with `new`, `child`, `cancel`, `is_cancelled` and
+  `cancelled() -> OpFuture<'_, ()>`: `cancel` is idempotent, wakes each waiter once and
+  reaches children (held weakly) but never the parent. A request carries an optional token
+  in its cancel slot and the connection enforces it.
+- `StateCell::new(initial) -> (StateCell, StateWatch)`, `set`, `current`, `watch`; a
+  `StateWatch` has `current()` and `changed() -> OpFuture<'_, ConnectionState>` with
+  latest-value semantics (intermediate states coalesce; the machine records every
+  transition in tracing events).
+- **Deferred:** `StaleTracker` and the `Quality::Stale` it would produce (M2, with the
+  polling loop). The diagram's `SystemClock ..|> Clock` edge holds, in the transport crate.
+
+The diagram is not redrawn.
 
 ---
 
@@ -848,6 +1006,42 @@ classDiagram
     note for FramedTransport~F~ "Owns the receive buffer so TCP fragmentation and\ncoalescing are invisible to the driver."
 ```
 
+**Shipped at alpha (ADR-0014).** The diagram is the original target; this note is
+authoritative where they differ.
+
+| Item | Shipped shape |
+| --- | --- |
+| `Transport` (`Send`, object safe) | `send(&mut self, Bytes, Deadline) -> OpFuture<'_, ()>`; `recv(&mut self, &mut BytesMut, Deadline) -> OpFuture<'_, usize>` (`0` means the peer closed); **`shutdown(&mut self, Deadline) -> OpFuture<'_, ()>`**; `peer() -> &Endpoint`; `limits() -> &ResourceLimits` |
+| `TransportFactory` (`Send + Sync`) | `open(&self, &Endpoint, ResourceLimits, Deadline) -> OpFuture<'_, Box<dyn Transport>>` |
+| `TcpTransport`, `TcpFactory { nodelay }` | feature `tcp` (default on): name resolution and connect inside one connect deadline; refused or reset peers are `Disconnected`; `recv` bounded by `max_buffered_bytes`, `send` by `max_frame_bytes`; a `send` cut short poisons the transport. No keepalive field. |
+| `Framer<F>` (`Send`) | `decode(&mut self, &mut BytesMut) -> Result<Option<F>, FrameError>`; `encode(&mut self, &F, &mut BytesMut) -> Result<(), FrameError>`; `max_frame_bytes() -> usize` |
+| `FramedTransport<F, R>` | `new(Box<dyn Transport>, R)`; `next_frame(Deadline)`; `send_frame(&F, Deadline)`; **`resync(Deadline)`**; owns the receive buffer, bounded by `max_buffered_bytes` |
+| `ConnectionGuard<F, R>` | `connect`, `request(frame, deadline, token)`, `request_with_default_deadline`, `next_reply(deadline, token)`, `close`, `state`, `watch_state`, `stats`; `GuardConfig`, `GuardStats` |
+| `FrameError` | `Truncated`, `Oversized(usize)`, `Malformed`, with `From<FrameError> for PlcError` (D22) |
+| `SystemClock`, `Jitter` | the Tokio-backed `Clock` and the xorshift64* sample source for `ReconnectPolicy::next_delay` |
+
+Every call that waits takes the `Deadline` it must finish by, and that argument is the
+only deadline source. `shutdown(Deadline)` is idempotent and closes from its first poll.
+`resync(Deadline)` realigns the receive stream after a framing error or an abandoned
+request: it asks the framer to decode the front of the buffer, keeps receiving while the
+front is a plausible header, and discards one byte at a time while the framer rejects it;
+without a frame boundary before the deadline the result is `Disconnected` and the owner
+reopens the connection. Its deadline is the remaining deadline of the request whose
+timeout triggered it, or `Deadline::after(clock.now(), timeouts.request)` from close or
+recovery. `FramedTransport::next_frame` handles fragmentation and coalescing, so the
+driver never sees them.
+
+`ConnectionGuard` owns one connection and is the state machine of section 8. It is not a
+struct of public fields as drawn: the pending slot, reconnect policy and token are
+private. It offers one in-flight request on a single slot with an admission queue bounded
+by `ResourceLimits.max_pending_requests` (`Backpressure` beyond it), request-driven
+reconnect, a resync before the next send after a timeout, and a `close` bounded by
+`Timeouts.request`. Nothing is spawned and nothing runs between calls (D15).
+
+**Deferred:** `UdpTransport` (M3), `SerialTransport`, `SerialSettings` and
+`BlockingWorker` (M2, with Modbus RTU), TLS transports (M3), and the TCP `keepalive`
+option.
+
 ### 4.2 Codec primitives and generated-message support
 
 ```mermaid
@@ -933,6 +1127,20 @@ classDiagram
     note for BoundedReader "Length fields are validated against a caller-supplied\nmaximum before any allocation. Panics are a bug."
     note for GenerationManifest "Emitted alongside every generated module and checked\nin CI: regenerate, then require a clean diff."
 ```
+
+**Shipped at alpha (ADR-0013).** `BoundedReader` and `BoundedWriter` ship with explicit
+`ByteOrder` readers and writers for 8-, 16-, 32- and 64-bit integers and floats, bounded
+byte runs, least-significant-bit-first coil bits (`read_bits_lsb_first`,
+`write_bits_lsb_first`, `coil_byte_count`, `pack_bits_lsb_first`, `unpack_bits_lsb_first`),
+`expect_eof` and `as_slice`/`into_bytes`; the writer is capacity-bounded rather than
+limit-and-`finish`. `ParseError` has `Truncated`, `OversizedLength`, `InvalidDiscriminator`,
+`TrailingBytes` and `Overflow`, with `From<ParseError> for PlcError`. Every length is
+checked against the caller's maximum and the bytes present before allocation, and no
+function panics on any input.
+
+**Deferred:** `InvalidChecksum` and `RecursionLimit`, the `Checksum` trait and `Crc16Modbus`
+(M2, with Modbus RTU); `MessageCodec`, `GenerationManifest` and `MspecFeatureMatrix`
+(M5: nothing is generated, the Modbus PDUs are hand-written from `modbus.mspec`, D6).
 
 ---
 
@@ -1118,6 +1326,110 @@ classDiagram
     note for TypedDecoder "Never infers word order from plausible-looking values."
 ```
 
+**Shipped at alpha (ADR-0015).** `stonecrab-modbus` 0.1.0 ships the Modbus TCP **read**
+path. The diagram above is the original target for TCP and RTU; this note is
+authoritative. Nothing is generated: the PDUs are hand-written from `modbus.mspec` (D6).
+
+**What ships, layer by layer**
+
+| Layer | Shipped | Notes |
+| --- | --- | --- |
+| Address | `UnitId`, `ModbusArea`, `ModbusDataType`, `AddressConvention`, `ModbusAddress`, `ModbusAddressBuilder` | `ModbusAddress::parse(text, &AddressOptions)`; wire offset is the logical number minus one |
+| PDU | `FunctionCode`, `ExceptionCode`, `ModbusPdu`, `encode_request`, `decode_request`, `decode_response`, `encode_response` | FC01 to FC04 requests, the bit and register responses and the exception response only |
+| Framing | `MbapHeader`, `TransactionId`, `ModbusAdu`, `MbapFramer` | `MbapFramer` implements the transport `Framer`; ADU at most 260 bytes |
+| Decode | `TypedDecoder::{decode_registers, decode_bits, encode_registers}` | the 15 types under the four byte-order modes |
+| Batching | `Batcher::plan(&[Tag], &BatchLimits) -> Result<Vec<Chunk>>`, `Member` | groups by unit id and area, merges adjacent or overlapping spans only, at most 125 registers or 2000 bits per chunk |
+| Session | `ModbusSession`, `SessionStats`, `exception_item_error` | wraps `ConnectionGuard<ModbusAdu, MbapFramer>` and the transaction counter |
+| Connection | `ModbusConnection::open(config, factory, clock, ConnectionDefaults)` | implements `Connection`; `write` is `Unsupported(Operation::Write)` with no I/O |
+| Driver | `ModbusTcpDriver`, `ModbusOptions` | scheme `modbus-tcp`; `new`, `with_clock`, `with_transport_factory`, `with_defaults` |
+
+**Address grammar.** `AREA:N[:TYPE]` with `AREA` one of `coil`, `discrete-input`,
+`holding-register`, `input-register` (`N` is one-based, 1 to 9 digits) is always
+accepted; the prefixed short forms `0x`, `1x`, `3x`, `4x` plus 4 or 5 digits (`4x00016:INT`)
+are always accepted; the bare short forms (`40001`, `10001`, ...) are accepted only when
+the caller selected `address-convention=plc4x` (D16, divergence `MB-ADDR-BARE-40001`), and
+otherwise fail with `InvalidAddress` naming the ambiguity and the two spellings that always
+parse. An optional `{unit-id: N, byte-order: 'NAME'}` block follows the type. `TYPE` is one
+of `BOOL`, `BYTE`, `WORD`, `DWORD`, `LWORD`, `SINT`, `USINT`, `INT`, `UINT`, `DINT`,
+`UDINT`, `LINT`, `ULINT`, `REAL`, `LREAL`, one element per tag; bit areas accept `BOOL`
+only. `AddressConvention` has the single value `Plc4xCompatible` (`#[non_exhaustive]`);
+`ZeroBased` and `OneBased40001` are deferred (M2). Unlike the diagram, the address has no
+element `count`: the count lives on `Tag` and must be 1.
+
+**Session.** `ModbusSession::request(&pdu, unit_id, deadline, token)` encodes one read,
+sends it with the next transaction id (1 to 0xFFFE, wrapping, continuing across a
+reconnect) and returns the PDU that answers it. A reply is accepted only when its
+transaction id, unit id and function code (exception bit cleared) match; any other reply is
+discarded, counted in `SessionStats` as late or mismatched and logged at `warn`, and the
+session reads on within the same deadline (divergence `MB-READ-MATCH`: upstream matches the
+transaction id only). A device exception is `Ok(ModbusPdu::Exception)` and the connection
+stays `Connected`; `exception_item_error` maps code 1 to `Unsupported(Operation::Read)`,
+code 2 to `InvalidAddress` and every other code to `DeviceException`, always keeping the raw
+code and name (D18). One exchange runs at a time; a second concurrent request is
+`Backpressure` before any I/O.
+
+**Connection.** `read` checks, before any I/O: the connection is open, the token is not
+cancelled, every address is a `ModbusAddress`, no tag has a count above 1 and the batch
+fits `max_items_per_request`. Then it holds one in-flight slot (a concurrent read is
+`Backpressure`) and runs the chunks of `Batcher::plan` one after another, each under the
+deadline `min(request deadline, now + timeouts.request)`. A device exception fails only its
+chunk's members; a failed exchange is retried per the configuration's `RetryPolicy`
+(retryable kinds only, never past the request deadline) and otherwise fails the read. The
+response has one item per tag in request order, `split_into` is the chunk count,
+`sampled_at` is the instant each chunk was answered and `source_time` is `None`. Reconnect
+is the guard's, request-driven: a lost peer shows as `Reconnecting`, the next read waits
+out the backoff and reopens, and the read in flight when the peer closed fails with
+`Disconnected` and is never replayed.
+
+**Configuration keys** (read by `ModbusTcpDriver::parse_config` from
+`modbus-tcp[:tcp]://host[:port]?key=value&...`, port 502 by default; any other key is
+`InvalidConfig`, where upstream warns):
+
+| Key | Default | Accepted | Parity row |
+| --- | --- | --- | --- |
+| `request-timeout-ms` | 5000 | whole milliseconds above 0; also `Timeouts.request` | `MB-CFG-REQUEST-TIMEOUT` |
+| `default-unit-identifier` | 1 | 0 to 255 | `MB-CFG-UNIT-ID` |
+| `ping-address` | `4x00001:BOOL` | an address of the grammar; recorded, unused (no ping) | `MB-CFG-PING-ADDRESS` |
+| `default-payload-byte-order` | `BIG_ENDIAN` | the four upstream names | `MB-CFG-BYTE-ORDER` |
+| `max-coils-per-request` | 2000 | 1 to 2000 | `MB-CFG-MAX-COILS` |
+| `max-registers-per-request` | 125 | 1 to 125 | `MB-CFG-MAX-REGISTERS` |
+| `address-convention` | none | `plc4x` | `MB-ADDR-BARE-40001` |
+
+**Byte-order mapping (D14, ADR-0006).** Upstream's four-valued `ModbusByteOrder` is two
+core axes. The mapping is derived from the documented 4-byte layouts and is
+`implemented`, not `automated-verified`, until the upstream little-endian vectors pass
+(prerequisite P4). Precedence: the tag field, then the address block, then
+`default-payload-byte-order`; never inferred.
+
+| Upstream name | `ByteOrder` | `WordOrder` | `0x01020304` on the wire |
+| --- | --- | --- | --- |
+| `BIG_ENDIAN` | `BigEndian` | `HighWordFirst` | `[1,2,3,4]` |
+| `LITTLE_ENDIAN` | `LittleEndian` | `LowWordFirst` | `[4,3,2,1]` |
+| `BIG_ENDIAN_BYTE_SWAP` | `LittleEndian` | `HighWordFirst` | `[2,1,4,3]` |
+| `LITTLE_ENDIAN_BYTE_SWAP` | `BigEndian` | `LowWordFirst` | `[3,4,1,2]` |
+
+**Deferred, with their owners:**
+
+- writes: `WriteSingleCoil`, `WriteSingleRegister`, `WriteMultipleCoils`,
+  `WriteMultipleRegisters` and their responses, the upstream FC06-versus-FC16 selection
+  and `WriteOutcome::Unknown` on the wire (first post-alpha slices, M1 completion, D3);
+- subscriptions (polling emulation, M2), browse, discovery and ping (M3 or the parity
+  backlog);
+- extended registers (FC20 and FC21), `STRING`, `WSTRING`, `CHAR`, `WCHAR`, the `TIME` and
+  `DATE` family and array selections: the parser rejects each with a typed error (M2; the
+  calendar types wait for an ADR);
+- `ModbusRtuDriver`, `RtuFramer`, `Crc16Modbus`, the `Framing` enum and the serial
+  transport (M2); UDP, TLS and TLS-PSK transports (M3 or the parity backlog);
+- the upstream gap-filling read optimizer (the batcher never reads a gap, divergence
+  `MB-READ-GAP`) and a background reconnect task (D15; eager reconnect is the first M2
+  slice);
+- the upstream test vectors (prerequisite P4): the repository's vectors are first-party.
+
+The diagram's `Framing`, `RtuFramer`, `ModbusRtuDriver`, write PDU variants and the
+`count` on `ModbusAddress` are therefore deferred or changed as stated; the rest of the
+diagram (driver, connection, session, batcher, typed decoder, exception codes) describes
+shipped behavior at the names listed in the table above.
+
 ### 5.1 Simulator driver
 
 ```mermaid
@@ -1175,6 +1487,19 @@ classDiagram
 
     note for SimDriver "Runs the same contract suite as every real driver.\nIt is the reference implementation of the API, not a toy."
 ```
+
+**Shipped at alpha (ADR-0012).** `stonecrab-driver-sim` 0.1.0 ships `SimDriver` (scheme
+`sim`; `sim://<device>?latency-ms=<n>&seed=<u64>`; `new()`, `with_clock(Arc<dyn Clock>)`,
+`with_device`, `device`), `SimConnection`, `SimDevice`, `SimTag`, `SimAddress`
+(`STATE|RANDOM|SINK/<name>:<type>`), `FailureScript`, `FailureStep` and `RealtimeClock`.
+The script lives on the shared `SimDevice` rather than on each connection, so every
+connection to a device consumes the same queue, one step per operation. The step set is
+`Delay`, `Timeout`, `Disconnect`, `DeviceException`, `Malformed`, `PartialFailure`,
+`Backpressure` and `UnknownAfterTransmit`. The simulator implements `read` and `write`
+(`write` is rejected under `AccessPolicy::ReadOnly`), has one in-flight slot with no wait
+queue (a second operation is `Backpressure`), applies bounded read retry and never retries
+a write. It is Tokio-free and uses `RealtimeClock` unless a test injects a `FakeClock`. It
+runs the same contract suite as `stonecrab-modbus`, as the note beside the diagram says.
 
 ---
 
@@ -1351,7 +1676,42 @@ classDiagram
     note for SampleBlock "Raw waveform data is a block with interval, layout and\nloss accounting — never a stream of unrelated scalars."
 ```
 
+**Shipped at alpha (ADR-0016).** `stonecrab-sensors` 0.1.0 ships the schema (version 1), the
+loader, validation, the tag builder and the measurement pipeline; board adapters and the
+acquisition loop are deferred.
+
+- `SensorProfile::from_toml(&str) -> Result<SensorProfile, ProfileError>` (feature `toml`,
+  default on; 64 KiB bound checked before parsing, unknown keys denied), `validate(&self)
+  -> Result<(), Vec<ProfileError>>` (every error, never just the first),
+  `tags(&self, &dyn Driver) -> Result<Vec<Tag>, ProfileError>` and `measurements(&self,
+  &ReadResponse, wall_now: SystemTime) -> Vec<Measurement>`. `tags` refuses a driver whose
+  scheme differs from the profile's `connection.scheme`, passes the profile's declared
+  `address_convention` as `AddressOptions` to every `Driver::parse_address` call, and adds
+  one `<measurement>.<status name>` tag per status field.
+- `address_convention` is mandatory when the scheme is `modbus-tcp` and optional for
+  `sim`; a profile belongs to one scheme and a device reachable through two schemes has two
+  files (D17). Profiles are repository data under `profiles/synthetic/` (temperature,
+  pressure/flow/level and discrete state, each a `modbus-tcp` file and a `sim` twin),
+  labeled `synthetic`; no named device profile exists.
+- `Measurement` has `value`, `raw` (the unscaled typed value when `keep_raw`, not wire
+  bytes), `unit`, `quality`, `origin`, `received_at`, `received_mono`, `source_time` (never
+  substituted) and `protocol_status`. `Quality` is `Good`, `Uncertain`, `Bad`, `Stale`,
+  `Unknown` with precedence `Bad`, `Stale`, `Uncertain`, `Unknown`, `Good`; `Stale` is
+  produced only by the M2 tracker. Scaling is checked and ordered (`multiply`, `divide`,
+  `offset`, `clamp`, `bit_field`); integers stay integers while every step is integral.
+- **Deferred:** `Acquisition`, queues and the polling loop (M2), `StaleTracker` (M2),
+  `Lookup` scale steps and named device profiles (M2), `stonecrab-adapter-max31855` and
+  `stonecrab-adapter-adxl345` (M2S). Section 6.1 is entirely deferred to M2S.
+
+Section 9.7 shows the target pipeline with `Acquisition`; at the alpha an application calls
+`tags`, reads through a `Connection`, then calls `measurements` itself, as the
+`profile_read` example does.
+
 ### 6.1 Direct bench adapters
+
+**Deferred (M2S).** Nothing in this section ships at the alpha: no board adapter, no
+`adapters-linux` feature and no hardware runner exist, and no hardware record exists
+(`docs/hardware/TEMPLATE.md` is the only artifact).
 
 ```mermaid
 classDiagram
@@ -1555,54 +1915,104 @@ classDiagram
     note for GoldenVector "Round trip alone can hide a matching encode/decode bug.\nexpected is independently authored, not derived."
 ```
 
+**Shipped at alpha (ADR-0009).** The testkit is `tools/stonecrab-testkit`, unpublished and
+a dev-dependency only. It ships `FakeClock`, `block_on`, `block_on_with`, `poll_once`,
+`CountingWaker` and `FixtureAddress`; behind the `net` feature `Script`, `Step` (including
+`Respond` and `React`), `Reaction`, `ScriptedPeer`, `ScriptedPeerFactory`, `FakeTransport`,
+`FakeTransportFactory`, `CountingFactory` and `LengthPrefixedFramer`; behind the `fixtures`
+feature the golden-vector loader (`load_dir`, `GoldenVector`, `VectorSource`) and
+`InteropMap`; and `ContractSuite` (23 cases, `ContractFixture`, `ContractReport`) which
+every driver runs. **Deferred:** `DifferentialRunner` and `UpstreamHarness` (M5), the
+hardware runner and `HardwareRecord` (M2S). The golden upstream vectors wait for
+prerequisite P4; the vectors in the repository are first-party.
+
 ---
 
 ## 8. Connection lifecycle
 
-One owner per connection. The driver wraps `ConnectionGuard`, which holds exactly this state machine.
+One owner per connection. The driver wraps `ConnectionGuard`, which holds exactly the
+state machine drawn here. The diagram is the shipped one and replaces the original target
+diagram; the transitions the original showed that the alpha does not implement are listed
+under "Deferred" below, not dropped silently.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Disconnected
 
     Disconnected --> Connecting : connect()
-    Connecting --> Connected : transport open + protocol handshake ok
-    Connecting --> Reconnecting : I/O error, timeout (attempts remain)
-    Connecting --> Failed : Authentication / Trust / InvalidConfig\nor retry budget exhausted
-    Connecting --> Closed : cancel() or close()
+    Connecting --> Connected : transport open
+    Connecting --> Reconnecting : open fails with Timeout or Disconnected\n(attempts remain)
+    Connecting --> Failed : any other open error (InvalidConfig, ...)\nor retry budget exhausted
+    Connecting --> Closing : close()
 
     state Connected {
         [*] --> Idle
-        Idle --> InFlight : request transmitted
-        InFlight --> Idle : response correlated
-        InFlight --> Resyncing : deadline elapsed
-        Resyncing --> Idle : TCP: discard mismatched txn id\nRTU: drain until t3.5 silence
-        Resyncing --> [*] : framing unrecoverable → force disconnect
+        Idle --> InFlight : frame sent
+        InFlight --> Idle : reply correlated
+        InFlight --> Resyncing : timeout, cancel after flush or framing error
+        Resyncing --> Idle : next request resyncs within its deadline\nand drops the stray frame
     }
 
-    Connected --> Reconnecting : peer close, I/O error, idle timeout
+    Connected --> Reconnecting : peer closed, I/O error, send or resync failed
     Connected --> Closing : close()
 
-    Reconnecting --> Connecting : backoff elapsed\n(exponential, capped, jittered)
-    Reconnecting --> Failed : max_attempts reached
-    Reconnecting --> Closing : close() during backoff
+    Reconnecting --> Connecting : next request or connect() after the backoff\n(capped exponential, jittered)
+    Reconnecting --> Failed : max_attempts exceeded
+    Reconnecting --> Closing : close()
 
-    Closing --> Closed : pending requests failed with Disconnected\nsubscriptions receive Ended
+    Closing --> Closed : close complete
 
     Failed --> [*]
     Closed --> [*]
 
     note right of Reconnecting
-        Pending reads fail with ErrorKind::Disconnected.
-        Pending writes resolve to WriteOutcome::Unknown
-        if they may have been transmitted.
+        Request-driven: nothing runs between calls.
+        The request in flight when the peer closed fails
+        with ErrorKind::Disconnected and is never replayed.
     end note
 
     note right of Closed
-        Terminal. A new connect() creates a new
-        Connection; state is never reused.
+        Terminal, like Failed. A new connect()
+        needs a new connection; state is never reused.
     end note
 ```
+
+**Shipped at alpha (ADR-0007, ADR-0011, ADR-0014).**
+
+- The machine lives in `ConnectionGuard` (`stonecrab-transport`) and is observable through
+  core's `ConnectionState`, held in a `StateCell` that every `watch_state()` reads. The
+  private sub-states `Idle`, `InFlight` and `Resyncing` are not part of the public state.
+  `ModbusConnection` and `ModbusSession` report the guard's state unchanged; the simulator
+  runs its own, smaller lifecycle (`Disconnected`, `Connecting`, `Connected`, `Closing`,
+  `Closed`, plus `Failed(Disconnected)` after a scripted disconnect) through the same
+  `StateCell`.
+- **Reconnect is request-driven (D15).** There is no background task. After a failure the
+  state is `Reconnecting { attempt, next_at }` with `next_at = now + next_delay(attempt - 1,
+  sample)`; the next request (or `connect`) sleeps until `next_at` on the clock,
+  cancellably and within its own deadline, reopens within `Timeouts.connect` and carries on.
+  One request makes one open attempt. When `ReconnectPolicy::is_exhausted` says so the state
+  is `Failed(Disconnected)` and every later request fails with `Disconnected` before any
+  I/O. Only a received reply resets the attempt count: a peer that accepts and then closes
+  keeps spending the budget. A `close` during the backoff ends `Closed`.
+- **Timeout, cancel and late replies.** A request that times out, is cancelled after its
+  frame went out or hits a framing error leaves the guard `Connected` with the stream marked
+  as possibly owing bytes. Before the next send, if bytes the guard cannot account for are
+  buffered, it runs `FramedTransport::resync` within that request's deadline; if no frame
+  boundary is found in time the request fails with `Disconnected` and the guard reconnects.
+  A reply that arrives whole afterwards is discarded by the session, by correlation (the
+  transaction id, unit id and function code), not by the guard.
+- **One in flight, a bounded line behind it.** At most `max_pending_requests` requests are
+  owned at once; one more is `Backpressure` before any I/O. The Modbus connection and the
+  simulator allow one read in flight and answer a second with `Backpressure`.
+- **`close`** is bounded by `Timeouts.request`, always ends `Closed` and wakes every wait
+  the guard owns.
+
+**Deferred:** the RTU variant of `Resyncing` ("drain until t3.5 silence", M2); the
+`idle timeout` transition into `Reconnecting` (`Timeouts.idle` is recorded and unenforced,
+M2); "subscriptions receive `Ended`" on close (no subscriptions, M2); pending writes
+resolving to `WriteOutcome::Unknown` on reconnect (the Modbus driver sends no write; the
+simulator models it with `UnknownAfterTransmit`); and an eager background reconnect task
+(first M2 slice).
 
 ### 8.1 Request lifecycle
 
@@ -1630,9 +2040,30 @@ stateDiagram-v2
     Rejected --> [*] : no I/O performed
 ```
 
+**Shipped at alpha.** The machine is shipped for reads (the Modbus connection and the
+simulator) and for simulator writes. Local validation failures never reach the wire: the
+Modbus `read` rejects, before any I/O, a closed or failed connection (`Disconnected`), a
+cancelled token (`Cancelled`), a non-Modbus address (`InvalidAddress`), a tag count above one
+(`InvalidConfig`) and a batch over the item budget (`ResourceLimit`), and an expired
+request deadline is `Timeout` before the wire. `Queued` is the guard's admission queue; the
+connections themselves answer a concurrent request with `Backpressure` rather than queueing
+it. The write rows of the diagram apply to the simulator only (Modbus writes are
+deferred, D3), and browse and subscribe requests do not exist (M3 and M2). A read that
+times out is retried per `RetryPolicy` (default one attempt), a write never.
+
 ---
 
 ## 9. Sequences
+
+| Sequence | Status at the alpha | Differences from the diagram |
+| --- | --- | --- |
+| 9.1 Connect through the registry | shipped | the connection-string parameter is `default-unit-identifier` (corrected in the diagram); the driver is built with its transport factory and clock, `ModbusConnection::open` creates the `ConnectionGuard` |
+| 9.2 Batched read with split and partial failure | shipped | the exception is mapped per D18 (`0x02` is `InvalidAddress`, not `DeviceException`); the Modbus connection runs the chunks one after another |
+| 9.3 Timeout, late reply, resynchronization | shipped for TCP | the guard resyncs before the next send; the RTU variant and write `Unknown` outcomes on the wire are deferred (M2 and the write slice) |
+| 9.4 Reconnect with backoff | shipped, request-driven | no background sleep: the next request waits out the backoff; no `Subscription` participates (M2) |
+| 9.5 Polling subscription | **deferred, M2** | `SubscribeRequest`, `Subscription`, `QueuePolicy`, `LossCounters`, `StaleTracker` and the poll task do not exist |
+| 9.6 Write with an ambiguous outcome | **deferred**; simulator only | the Modbus driver rejects writes with `Unsupported` before any I/O; the simulator's `UnknownAfterTransmit` step exercises `Unknown` |
+| 9.7 Sensor profile to measurement | partly shipped | `tags` and `measurements` exist; `Acquisition`, address convention `ZeroBased` and the polling loop are deferred (M2); the convention is `plc4x` |
 
 ### 9.1 Connect through the registry
 
@@ -1646,7 +2077,7 @@ sequenceDiagram
     participant T as TcpTransport
     participant Dev as Device
 
-    App->>Reg: connect("modbus-tcp://10.0.0.5:502?unit-id=1")
+    App->>Reg: connect("modbus-tcp://10.0.0.5:502?default-unit-identifier=1")
     Reg->>Reg: scheme lookup
     alt scheme not registered
         Reg-->>App: Err(ErrorKind::Unsupported)
@@ -1869,22 +2300,35 @@ sequenceDiagram
 
 ---
 
-## 10. Cargo feature matrix (planned)
+## 10. Cargo feature matrix
+
+The shipped features. All are additive, and enabling one never opens a network endpoint
+or starts hardware discovery (parsing a connection string or an address opens no socket).
 
 | Crate | Feature | Pulls in | Default |
 | --- | --- | --- | --- |
-| `stonecrab` | `sim` | `stonecrab-driver-sim` | no |
-| `stonecrab` | `modbus` | `stonecrab-modbus` (TCP + RTU) | no |
-| `stonecrab` | `modbus-rtu` | `stonecrab-modbus/serial` → `stonecrab-transport/serial` | no |
-| `stonecrab` | `opcua` | `stonecrab-opcua` | no |
-| `stonecrab` | `eip`, `s7`, `ads`, `slmp`, … | respective driver crates | no |
-| `stonecrab` | `sensors` | `stonecrab-sensors` | no |
-| `stonecrab` | `adapters-linux` | both board adapters with Linux `spidev`/`i2c-dev` backends | no |
-| `stonecrab` | `full` | every published driver and sensor crate | no |
-| `stonecrab-transport` | `tcp`, `udp`, `serial` | Tokio net / `serialport` + blocking worker | `tcp` |
+| `stonecrab` | `sim` | `stonecrab-driver-sim` (and through it `tracing`) | no |
+| `stonecrab` | `modbus` | `stonecrab-modbus` (Modbus TCP, reads), and through it `stonecrab-transport` with `tcp`, `stonecrab-codec` and Tokio | no |
+| `stonecrab` | `sensors` | `stonecrab-sensors` with its `toml` feature (the loader; `serde` and `toml` come with it) | no |
+| `stonecrab` | `full` | `sim`, `modbus` and `sensors` | no |
+| `stonecrab-transport` | `tcp` | Tokio `net`: `TcpTransport` and `TcpFactory` | yes |
 | `stonecrab-sensors` | `toml` | profile loading from TOML | yes |
+| `stonecrab-testkit` (unpublished) | `net`, `fixtures` | transport doubles and Tokio; golden-vector loader, `serde`, `serde_json`, `toml` | no |
 
-Features are additive. No feature may remove an API or change a default behavior. Enabling a feature never opens a network endpoint or starts hardware discovery.
+The facade, `stonecrab-core`, `stonecrab-codec`, `stonecrab-driver-sim` and
+`stonecrab-modbus` have empty default features and no other feature. `cargo add stonecrab`
+pulls `stonecrab-core` only. The facade pins the three optional sibling crates it
+re-exports (`stonecrab-driver-sim`, `stonecrab-modbus`, `stonecrab-sensors`) with `=`
+ranges (CODING_STANDARDS 20.1; ADR-0014 addendum). The two intra-foundation defaults,
+`stonecrab-transport/tcp` and `stonecrab-sensors/toml`, are on because a transport crate
+with no transport and a profile crate with no loader are not usable defaults (D10,
+ADR-0014, ADR-0016); the `features` job proves both crates build and expose their traits
+and types without them.
+
+**Deferred (not declared):** the facade features `modbus-rtu`, `opcua`, `eip`, `s7`, `ads`,
+`slmp` and `adapters-linux`, and the transport features `udp` and `serial`. They arrive with
+their crates (RTU and serial in M2, OPC UA in M3, EtherNet/IP and S7 in M4, the board
+adapters in M2S).
 
 ---
 

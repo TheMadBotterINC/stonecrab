@@ -7,6 +7,11 @@ use crate::Operation;
 pub type Result<T> = std::result::Result<T, PlcError>;
 
 /// Stable failure classification; messages are not intended for programmatic matching.
+///
+/// # Compatibility: docs/parity/core.md#CORE-VALUE-ORD
+/// Upstream has no counterpart. The variants are totally ordered by declaration, which has
+/// no protocol meaning and lets a `BTreeSet<ErrorKind>` hold a retry set; the same
+/// additive `Ord` is on `Operation` and `PlcValueType`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum ErrorKind {

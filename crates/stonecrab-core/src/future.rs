@@ -27,6 +27,10 @@ use crate::Result;
 /// as long as the future lives. The price is one heap allocation per operation, which is
 /// small beside a network round trip and is accepted deliberately.
 ///
+/// # Compatibility: docs/parity/core.md#CORE-OPFUTURE
+/// Upstream driver operations return a `CompletableFuture`; this is the object-safe,
+/// runtime-independent counterpart.
+///
 /// # Examples
 /// ```
 /// use std::task::{Context, Poll, Waker};

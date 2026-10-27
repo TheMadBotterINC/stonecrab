@@ -1,15 +1,22 @@
 # Foundation scope
-Status: initial implementation; no upstream behavioral parity claim.
+Status at the alpha (slice S31): implemented, simulator-tested. Core makes no upstream
+behavioral parity claim except where a row cites an upstream behavior (the connection
+string grammar, `CORE-URI-GRAMMAR`, and the Modbus rows it points at); every other row
+is a Stonecrab-owned contract.
 
-The architecture maps values, tags, errors and capabilities to PLC4J concepts.
-This slice provides pure foundation types and validated request/result data.
-The `Driver`, `Connection` and `DriverRegistry` contracts exist (ADR-0011) and are
-exercised through the simulator driver; there is no subscription, protocol driver or
-sensor profile in core.
+The architecture maps values, tags, errors and capabilities to PLC4J concepts. Core holds
+the pure foundation types, the validated request and result data, the time, cancellation
+and state primitives, the connection configuration and the `Driver`, `Connection` and
+`DriverRegistry` contracts (ADR-0011). Core implements none of the traits; they are
+exercised through the simulator driver and, on a real transport, the Modbus driver, and
+both pass the common driver contract suite. There is no subscription, browse, protocol
+driver or sensor profile in core.
 
-Each implemented contract has unit and executable documentation tests. The complete
+Each implemented contract has unit and executable documentation tests, and every row
+below is checked by `scripts/parity-check.sh` (`mise run parity`): its id is named in a
+`# Compatibility` section or a test, and its test-id column names real tests. The complete
 upstream protocol/transport/operation inventory is still required before M0 can close.
-Calendar and structured values require a further design decision.
+Calendar and structured values require a further design decision (ADR-0006).
 
 ## Implemented foundation
 - `Capabilities`, `Operation`, `SubscriptionMode`: explicit operation reporting.
@@ -25,8 +32,8 @@ Calendar and structured values require a further design decision.
 - Public facade integration and compile-time Send/Sync assertions.
 - `ProtocolAddress` and immutable `Tag`: driver-owned addresses, stable caller
   identity, type-hint consistency, positive counts and shared immutable ownership.
-- `ReadRequest`: finite item budgets, duplicate rejection and explicit deadline
-  metadata; no transmission or cancellation implementation.
+- `ReadRequest`: finite item budgets, duplicate rejection, explicit deadline metadata and
+  an optional cancel slot; core transmits nothing, a connection enforces the token.
 - `ProtocolStatus`, `ItemError`, `ReadItem`: original device status and bounded raw
   diagnostics, redacted Debug, source chaining and actual source-time absence.
 - `ReadResponse`: exact correlation and request ordering across partial/all-item
@@ -57,11 +64,13 @@ checks the consumer boundary. README examples are executable doctests.
 to exercise addresses and batch contracts without ad hoc mocks or network access.
 
 ## Byte and word order
-Status: implemented as data only (ADR-0006, slice S05). The types carry the setting; no
-decoder consumes it yet. The Modbus mapping and its row ids are the `MB-BYTEORDER-*`
-rows in `docs/parity/modbus.md` (`MB-BYTEORDER-BE`, `MB-BYTEORDER-LE`,
-`MB-BYTEORDER-BE-SWAP`, `MB-BYTEORDER-LE-SWAP`, `MB-BYTEORDER-PRECEDENCE`), which stay
-`planned` there until the upstream little-endian vectors pass (S23).
+Status: implemented as data (ADR-0006, slice S05). The types carry the setting; core
+decodes nothing, and `TypedDecoder` in `stonecrab-modbus` consumes it. The Modbus mapping
+and its row ids are the `MB-BYTEORDER-*` rows in `docs/parity/modbus.md`
+(`MB-BYTEORDER-BE`, `MB-BYTEORDER-LE`, `MB-BYTEORDER-BE-SWAP`, `MB-BYTEORDER-LE-SWAP`,
+`MB-BYTEORDER-PRECEDENCE`), which are `implemented` there and stay below
+`automated-verified` until the upstream little-endian vectors pass (maintainer
+prerequisite P4).
 
 | Row id | Upstream behavior | Stonecrab behavior | Status | Test ids |
 | --- | --- | --- | --- | --- |
@@ -73,7 +82,9 @@ rows in `docs/parity/modbus.md` (`MB-BYTEORDER-BE`, `MB-BYTEORDER-LE`,
 ## Time, cancellation and state observation
 Status: implemented as primitives (ADR-0007, slice S06). Request types have a cancel slot
 (S11a) and the simulator connection enforces the token and applies the default-deadline
-rule (S11b-2; see `CORE-CONNECTION-TRAIT`); enforcement on a real wire lands with S19.
+rule (S11b-2; see `CORE-CONNECTION-TRAIT`); enforcement on a real wire is the connection
+guard's (S19, `TRANSPORT-GUARD-LIFECYCLE` in `docs/parity/transport.md`) and the Modbus
+connection's (S25, `MB-READ-TIMEOUT`).
 Upstream PLC4J cancels through `CompletableFuture` cancellation and has no
 state-watch API, so there is no upstream source file to cite; the design source is
 `docs/ARCHITECTURE.md` section 3.4, with the `SystemClock` placement changed by ADR-0007.
@@ -85,15 +96,18 @@ state-watch API, so there is no upstream source file to cite; the design source 
 | CORE-CANCEL-TOKEN | `CompletableFuture.cancel`; no hierarchy. | `CancellationToken`: idempotent `cancel`, each waiter woken once, `child` follows parent and never the reverse, `Weak` children, waker re-registration with `will_wake` deduplication. Consumed by `SimConnection` through the request cancel slot (S11b-2). | implemented (primitive) | `cancel_wakes_each_waiter_exactly_once_and_a_second_cancel_wakes_nothing`, `cancelled_on_an_already_cancelled_token_is_ready_on_the_first_poll`, `child_follows_parent_but_parent_does_not_follow_child`, `parent_cancel_wakes_child_waiters_once_and_skips_independently_cancelled_children`, `dropped_child_is_not_retained_by_its_parent`, `polling_again_replaces_the_waker_and_the_same_waker_registers_one_entry`, `dropping_a_pending_future_removes_its_waker_without_cancelling`, `a_waker_woken_by_cancel_may_call_back_into_the_token_without_deadlock`, `deep_child_chains_cancel_without_recursion`, `a_panicking_waker_cannot_strand_descendants_or_other_waiters`, `cancelling_on_another_thread_never_loses_a_wake_up`, `clones_share_state_and_default_is_a_live_token`, `a_poisoned_lock_is_recovered`, `debug_shows_the_flag_and_child_count_but_no_wakers`, `facade_token_and_watch_can_be_polled_without_a_runtime` |
 | CORE-STATE-WATCH | None (no state-watch API upstream). | `StateCell::set` and `StateWatch::changed`: version counter, latest-value semantics, intermediate states coalesced, a same-state `set` still bumps the version, all watchers woken. | implemented (primitive) | `current_reflects_set_on_the_cell_and_every_watch`, `changed_is_pending_until_set_then_ready_once_per_version`, `two_sets_before_a_poll_coalesce_into_one_change_with_the_latest_value`, `setting_the_same_state_still_bumps_the_version`, `every_watcher_wakes_and_each_sees_the_change_independently`, `a_clone_starts_from_the_source_seen_version_and_then_tracks_its_own`, `repolling_replaces_the_waker_and_the_same_waker_registers_one_entry`, `a_dropped_future_loses_no_change_and_releases_its_waker`, `a_panicking_waker_does_not_stop_later_watchers_waking`, `setting_on_another_thread_never_loses_a_wake_up`, `changed_stays_pending_after_the_cell_is_dropped`, `a_poisoned_lock_is_recovered`, `debug_shows_state_and_versions_but_no_wakers` |
 
-Cancelling an operation on a real wire and unknown-after-transmit handling are not covered
-by these rows; they land with S19. The default-deadline rule and cancellation of a
-simulated operation are rows of `CORE-CONNECTION-TRAIT`.
+Cancelling an operation on a real wire is not covered by these rows; see
+`TRANSPORT-GUARD-LIFECYCLE` and `MB-READ-TIMEOUT`. Unknown-after-transmit handling has no
+wire path at the alpha because Modbus writes are deferred (`MB-TCP-WRITE`). The
+default-deadline rule and cancellation of a simulated operation are rows of
+`CORE-CONNECTION-TRAIT`.
 
 ## Connection configuration
 Status: implemented as data and pure arithmetic (ADR-0008, slice S07). The simulator
 connection (S11b-2) enforces the timeouts, the read retry policy and the access policy;
-the transport (S16) and the reconnect loops (S19, S25) consume the rest later. Upstream has no
-driver-independent configuration type, so rows cite the Modbus `MB-CFG-*` rows in
+the transport (S16), the connection guard (S19) and the Modbus connection (S25) enforce
+the connect and request timeouts, the reconnect policy and the read retry set. Upstream
+has no driver-independent configuration type, so rows cite the Modbus `MB-CFG-*` rows in
 `docs/parity/modbus.md` rather than upstream files; the design source is
 `docs/ARCHITECTURE.md` section 3 as amended by decision D12.
 
@@ -105,8 +119,10 @@ driver-independent configuration type, so rows cite the Modbus `MB-CFG-*` rows i
 | CORE-ADDRESS-OPTIONS | Bare-digit Modbus forms such as `40001` are accepted unconditionally; there is no convention option (`docs/parity/modbus.md#MB-CFG-UNKNOWN` covers the option-handling difference). | `AddressOptions` (`#[non_exhaustive]`, `Clone`, `Default`) carries the optional `address-convention` name; the builder bounds it to 64 bytes and rejects empty names, whitespace and control characters; `ConnectionConfig::address_options()` and `address_convention(&str)` feed it. The Modbus driver accepts only `plc4x` at alpha (D16, ADR-0015). | implemented (data only) | `default_and_empty_builder_carry_no_convention`, `convention_round_trips_clones_and_last_call_wins`, `invalid_conventions_are_rejected_without_echoing_them`, `address_options_round_trip_and_outlive_the_config`, doctests `AddressOptions`, `AddressOptionsBuilder::build` |
 | CORE-DRIVER-OPTIONS | The driver-specific configuration object that `DriverBase` builds beside the transport configuration (for Modbus the six `MB-CFG-*` parameters in `docs/parity/modbus.md`). | `DriverOptions: Any + Debug + Send + Sync` (a method-free trait the driver implements; its `Debug` must carry no secrets) stored as `Arc<dyn DriverOptions>` by `ConnectionConfigBuilder::driver_options` and read by `ConnectionConfig::driver_options()` and `driver_options_as::<T>()`; absent or foreign options read as `None` and the driver falls back to its defaults. `Debug` and `redacted_display` print the options. The simulator keeps its options in the text of `Endpoint::Custom`; a TCP driver has a structured endpoint, so it uses this slot (ADR-0008 amendment, S26). A Stonecrab extension. | implemented | `driver_options_are_absent_by_default`, `driver_options_round_trip_through_the_builder_and_downcast_to_their_own_type`, `driver_options_appear_in_debug_and_redacted_display_without_credentials`, `public_foundation_types_are_send_sync_and_static`, doctests `DriverOptions`, `driver_options`, `driver_options_as`, `ConnectionConfigBuilder::driver_options` |
 
-Idle timeout, reconnect, retry and the access policy are recorded and not enforced; the
-rows change to a stronger status when S11b-2, S19 and S25 enforce them.
+The connect and request timeouts, the reconnect policy, the read retry set and the access
+policy are enforced by the simulator connection (S11b-2), the guard (S19) and the Modbus
+connection (S25). `Timeouts.idle` is recorded and not enforced at the alpha: no
+background task exists to enforce it (eager reconnect and idle handling are M2).
 
 ## Write batches
 Status: implemented as data only (ADR-0010, slice S09). No write is transmitted: the
@@ -125,10 +141,11 @@ Status: implemented (ADR-0011, slice S11a, landed in one commit with the simulat
 of S11b-2 because ADR-0001 forbids a public driver trait that nothing exercises). The
 upstream types are `PlcDriver`, `PlcConnection` and `PlcDriverManager`; the Stonecrab
 boundary follows `docs/ARCHITECTURE.md` section 3.1 with the differences listed in its
-implementation note. No upstream API-shape finding is recorded in `docs/parity/modbus.md`
-yet, so the "Upstream behavior" column cites the architecture document and names only the
+"Shipped shape" note. No upstream API-shape finding is recorded in `docs/parity/modbus.md`,
+so the "Upstream behavior" column cites the architecture document and names only the
 upstream type. Core implements none of the traits (CODING_STANDARDS 13.5); the behavioral
-tests are the simulator's, through `DriverRegistry`.
+tests are the simulator's, through `DriverRegistry`, and the Modbus driver's over its
+contract-suite fixtures.
 
 | Row id | Upstream behavior | Stonecrab behavior | Status | Test ids |
 | --- | --- | --- | --- | --- |
@@ -142,7 +159,7 @@ splits and validates; drivers (S11b-1, S20) give the parts meaning. The grammar 
 strict subset of upstream's: every rejection beyond the regular expression is listed in
 the Stonecrab column below and in the `ConnectionUri` rustdoc.
 
-| Row id | Upstream behavior (file:line) | Stonecrab planned behavior | Status | Planned test ids |
+| Row id | Upstream behavior (file:line) | Stonecrab behavior | Status | Test ids |
 | --- | --- | --- | --- | --- |
 | CORE-URI-GRAMMAR | `DriverBase.URI_PATTERN` is `^(?<protocolCode>[a-z0-9\-]*)(:(?<transportCode>[a-z0-9\-]*))?://(?<transportConfig>[^?]*)(\?(?<paramString>.*))?` (`plc4j/spi/drivers/src/main/java/org/apache/plc4x/java/spi/drivers/DriverBase.java:76-77`), applied with `matches()` at `DriverBase.java:149-150`. Protocol code, optional transport code, `://`, transport configuration up to the first `?`, then the raw parameter string. | `ConnectionUri::parse(&str)` for `scheme(:transport)?://authority(?k=v(&k=v)*)?`. Scheme and transport are non-empty `[a-z0-9-]+` (the empty forms upstream admits are rejected). The authority is everything up to the first `?`, non-empty. Options are `k=v` pairs split on `&`, kept in written order in a `Vec` (order cannot matter to a lookup by key because duplicates are rejected; it keeps `Display` faithful), the key ends at the first `=`, an empty value (`k=`) is allowed because upstream's `.*` parameter string admits it. Deliberate differences, all rejections with `InvalidConfig` whose message never echoes the authority or query: percent-encoding (any `%`; upstream passes the text through undecoded); credentials in the authority (an `@` before its first `/`; upstream passes the authority through, use `Credentials`); an empty parameter string (`...?`), empty pairs (`&&`, a trailing `&`), a pair without `=`, an empty key, a repeated key (compared exactly, case-sensitive like upstream); control characters and whitespace anywhere; input over 4096 bytes (checked first). Parsing never panics. `Display` renders the canonical text and parses back to an equal value. Redacted display never contains credential text. | implemented | `prop_uri_round_trips_valid_parts`, `prop_uri_parse_is_total_and_stable`, `prop_redacted_display_never_contains_password`, `uri_empty_input_is_rejected`, `uri_forms_one_byte_short_are_rejected`, `uri_minimal_form_is_accepted`, `uri_trailing_separators_are_rejected`, `uri_over_4096_bytes_is_rejected`, `uri_invalid_scheme_and_transport_are_rejected`, `uri_percent_encoding_is_rejected`, `uri_credentials_in_authority_are_rejected`, `uri_duplicate_key_is_rejected`, `uri_empty_key_is_rejected`, `uri_pair_without_equals_is_rejected`, `uri_control_characters_and_whitespace_are_rejected`, `uri_options_keep_order_values_and_empty_values`, `uri_authority_stops_at_the_first_question_mark_only`, `uri_display_parses_back_to_an_equal_value`, doctests `ConnectionUri`, `parse`, `option`, `fuzz_core_connection_string`
 

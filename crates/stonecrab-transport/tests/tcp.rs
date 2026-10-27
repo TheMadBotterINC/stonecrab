@@ -133,7 +133,8 @@ mod tests {
         );
     }
 
-    // covers: SPEC mandatory-failure-cases / F2 transport (fragmented delivery)
+    // covers: SPEC mandatory-failure-cases / F2 transport (fragmented delivery);
+    // TRANSPORT-STREAM-DELIVERY
     #[tokio::test]
     async fn a_frame_written_in_fragments_accumulates_across_recv_calls() {
         // The peer waits for a "next" byte before each fragment, so every fragment is

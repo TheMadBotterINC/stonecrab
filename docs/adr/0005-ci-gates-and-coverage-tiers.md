@@ -152,3 +152,35 @@ therefore write one final or-pattern arm that names the unsupported known varian
 with `| _` and returns a typed error (`Null | Char | String | Duration | _ => Err(..)`), and
 a test per named variant executes that arm, so the 100% line gate holds with no
 `#[expect]`. Details and the probe results are in ADR-0012, decision 7.
+
+Addendum (S31, 2026-10-27): the parity gate. `scripts/parity-check.sh` (`mise run parity`,
+the CI job `parity`, and `--self-test` over the fixture trees in
+`scripts/testdata/parity-check/`, in the style of `lint-attrs.sh`) joins `lint-attrs`,
+`dco` and `features` as a blocking job. It replaces the parity half of the `xtask
+release-check` that CODING_STANDARDS 20.3 names ("parity records have no `implemented`
+status without a test id"), for the same reason as Decision 7. A row id is the first cell
+of a table row in `docs/parity/*.md`, an upper-case id of two or more hyphen-joined groups
+(`MB-TCP-CONNECT`); the files use no other form, so headings are not ids. The script fails,
+printing file, line and id for every finding, when:
+
+- (a) a `docs/parity/<file>.md#<ROW-ID>` reference in `crates/*/src/**/*.rs`, which
+  covers every `# Compatibility:` rustdoc section and any prose cross-reference of the
+  same shape, names a file that does not exist or an id that no row of that file carries;
+- (b) a row whose status starts with `implemented` or `automated-verified` is named
+  nowhere, as a bare id, in `crates/*/src/**/*.rs`, `crates/*/tests/**/*.rs` or
+  `tools/stonecrab-testkit/src/**/*.rs`;
+- (c) such a row's test-id column holds no backticked test id (the S31 exit criterion "no
+  `implemented` row without a test id"), or a table row has a different number of cells
+  than its header.
+
+Divergence tables carry no status column and are not subject to (b) and (c); their ids
+repeat the ids of the behavior rows they qualify, so (a) resolves them. Rows that are
+`deferred` or `not reproduced` are exempt from (b). The first run found 11 `implemented`
+rows that nothing named (`CORE-BYTEORDER-MODEL`, `CORE-VALUE-ORD`, `CORE-OPFUTURE`,
+`CORE-CLOCK`, `CORE-CANCEL-TOKEN`, `CORE-STATE-WATCH`, `MB-INTEROP-HR-02`, `-03`, `-06`,
+`SIM-CONTRACT-SUITE`, `TRANSPORT-STREAM-DELIVERY`); each was fixed by naming the row in the
+rustdoc or the test it describes (comment-only edits), and the check was not changed. What
+the gate does not do: it does not prove that a named test exists or passes (the `test`
+jobs run the tests, and S31 checked once, by a throw-away script, that every backticked
+snake_case test id in the records exists as a `fn`); and a name in a comment satisfies
+(b), so review still judges whether the cited test verifies the row.

@@ -1,6 +1,11 @@
 # Transport record
-Status: implemented in slices S16, S18 and S19 (ADR-0014). No upstream behavioral
-parity claim.
+Status at the alpha (slice S31): implemented in slices S16, S18 and S19 (ADR-0014). No
+upstream behavioral parity claim. The rows are checked on loopback sockets, the in-memory
+`FakeTransport` and the fake clock; the Modbus driver exercises the TCP transport, the
+framing layer and the guard against pymodbus 3.8.6 in the `interop` job, which is
+evidence for `MB-TCP-CONNECT` and the read rows in `docs/parity/modbus.md`. Every row
+below has real test ids and is named by a `# Compatibility` section or a test
+(`scripts/parity-check.sh`).
 
 Apache PLC4X (PLC4J) builds its transports on Netty channels, pipelines and handlers;
 there is no upstream transport behavior inventoried in `upstream/manifest.toml` to compare
