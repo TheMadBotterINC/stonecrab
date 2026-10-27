@@ -21,3 +21,4 @@ default = []
 
 [dependencies]
 thiserror.workspace = true
+bytes.workspace = true
