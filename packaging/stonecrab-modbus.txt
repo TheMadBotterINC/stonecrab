@@ -9,6 +9,7 @@ src/address.rs
 src/batch.rs
 src/connection.rs
 src/decode.rs
+src/driver.rs
 src/framing/mbap.rs
 src/framing.rs
 src/lib.rs

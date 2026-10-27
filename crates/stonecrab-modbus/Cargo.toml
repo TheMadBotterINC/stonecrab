@@ -27,7 +27,7 @@ default = []
 bytes.workspace = true
 stonecrab-codec.workspace = true
 stonecrab-core.workspace = true
-stonecrab-transport.workspace = true
+stonecrab-transport = { workspace = true, features = ["tcp"] }
 tracing.workspace = true
 
 [dev-dependencies]

@@ -156,6 +156,17 @@
   One read is in flight at a time (`Backpressure` before any I/O). `write` is
   `Unsupported(Operation::Write)` with no I/O. `ConnectionDefaults` carries the default unit
   and the byte and word order that a tag or address without its own falls back to.
+- Add `ModbusTcpDriver` (ADR-0015, decision 14): the `Driver` of the `modbus-tcp` scheme,
+  with `new()` (real TCP transport and `SystemClock`), `with_clock`,
+  `with_transport_factory` (the way to run the testkit `FakeTransportFactory`) and
+  `with_defaults`. `parse_config` reads `modbus-tcp[:tcp]://host[:port]` (port 502 by
+  default, IPv6 in brackets) and accepts no parameter yet; the six upstream parameters and
+  `address-convention` follow with the configuration slice. `parse_address` delegates to
+  `ModbusAddress::parse` with the convention of the options, and `capabilities` is the
+  value every `ModbusConnection` reports. The crate now enables the `tcp` feature of
+  `stonecrab-transport`. The common driver contract suite runs green against the driver over
+  the fake transport (`tests/contract.rs`, with a first-party MBAP responder over the
+  interop register map).
 ### stonecrab-sensors 0.1.0
 - Add the crate: declarative sensor profiles for Stonecrab, depending on `stonecrab-core`,
   `serde` and, behind the default `toml` feature, `toml` (ADR-0016). No driver reads a

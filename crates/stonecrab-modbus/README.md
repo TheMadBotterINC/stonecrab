@@ -5,22 +5,40 @@ registers) over TCP with MBAP framing. RTU, ASCII, TLS, UDP, writes, extended re
 and string types are out of scope for the alpha.
 
 Nothing is implemented beyond the address types, their text grammar, read batching, the
-PDU codec, MBAP framing, the typed decoder, the session and the connection. This crate
-currently offers `UnitId`, `ModbusArea`, `ModbusDataType`, `AddressConvention`,
-`ModbusAddress` (built with its builder or parsed from text with `ModbusAddress::parse`)
-and `ProtocolAddress` for it, plus `Batcher`, `BatchLimits`, `Chunk` and `Member`, the PDU
-types `FunctionCode`, `ExceptionCode` and `ModbusPdu` with `encode_request`,
-`decode_request`, `decode_response` and `encode_response`, the framing types `MbapHeader`,
-`TransactionId`, `ModbusAdu` and `MbapFramer`, `TypedDecoder`, which turns registers or
-coil bits into `PlcValue`s, and `ModbusSession` with `SessionStats` and
-`exception_item_error`, which send one read request over a connection and return the reply
-that answers it, and `ModbusConnection` with `ConnectionDefaults`, the `Connection` that
-reads tags in batches over a session. There is no driver yet. The session and the
-connection do I/O only through a transport factory the caller passes in, so the crate's
-tests run on the in-memory transport of the repository's unpublished testkit. The crate
-depends on `stonecrab-core`, `stonecrab-codec`, `stonecrab-transport` (without its `tcp`
-feature, for the `Framer` trait, `ConnectionGuard` and `TransportFactory`), `bytes` and
-`tracing`; default features are empty.
+PDU codec, MBAP framing, the typed decoder, the session, the connection and the first
+version of the driver. This crate currently offers `UnitId`, `ModbusArea`,
+`ModbusDataType`, `AddressConvention`, `ModbusAddress` (built with its builder or parsed
+from text with `ModbusAddress::parse`) and `ProtocolAddress` for it, plus `Batcher`,
+`BatchLimits`, `Chunk` and `Member`, the PDU types `FunctionCode`, `ExceptionCode` and
+`ModbusPdu` with `encode_request`, `decode_request`, `decode_response` and
+`encode_response`, the framing types `MbapHeader`, `TransactionId`, `ModbusAdu` and
+`MbapFramer`, `TypedDecoder`, which turns registers or coil bits into `PlcValue`s, and
+`ModbusSession` with `SessionStats` and `exception_item_error`, which send one read
+request over a connection and return the reply that answers it, `ModbusConnection` with
+`ConnectionDefaults`, the `Connection` that reads tags in batches over a session, and
+`ModbusTcpDriver`, the `Driver` of the `modbus-tcp` scheme.
+
+## Driver
+
+`ModbusTcpDriver::new()` uses the real TCP transport and the Tokio-backed clock;
+`with_clock` and `with_transport_factory` replace them, which is how the repository's
+tests run the driver over an in-memory transport. This first version of the driver is
+completed by the configuration slice (S26):
+
+- `parse_config` reads `modbus-tcp://host[:port]` or `modbus-tcp:tcp://host[:port]` (port
+  502 by default, IPv6 addresses in brackets). It accepts no `?key=value` parameter yet;
+  the six upstream parameters and the `address-convention` key arrive with S26.
+- `parse_address` is `ModbusAddress::parse` with the address convention of the options.
+- `capabilities` is the value every connection reports: read only, no subscriptions,
+  browse or discovery, one operation at a time, PDUs up to 253 bytes.
+
+The session and the connection do I/O only through a transport factory the caller
+passes in, so the crate's tests run on the in-memory transport of the repository's
+unpublished testkit. The common driver contract suite passes against the driver over that
+transport, with two write cases and two disconnect cases skipped by name. The crate
+depends on `stonecrab-core`, `stonecrab-codec`, `stonecrab-transport` (with its `tcp`
+feature, for `TcpFactory`, and the `Framer` trait, `ConnectionGuard` and
+`TransportFactory`), `bytes` and `tracing`; default features are empty.
 
 Upstream behavior is the Apache PLC4X Modbus TCP driver at the commit pinned in
 `upstream/manifest.toml`. Every claim about it, and every divergence, is recorded with a
@@ -37,7 +55,7 @@ stable row id in the
 | Typed register decoding and byte order (`TypedDecoder`) | unit-tested; vector-tested; property-tested; the little-endian modes are derived from the documented layouts, not yet confirmed by upstream vectors |
 | Read batching (`Batcher`) | unit-tested; property-tested |
 | Connection: batched reads, retry, reconnect, one read in flight (`ModbusConnection`) | unit-tested on the in-memory transport; not yet run against a socket |
-| `modbus-tcp` driver | planned |
+| `modbus-tcp` driver: scheme, `parse_config` without parameters, `parse_address`, capabilities, `connect` (`ModbusTcpDriver`) | unit-tested; contract-suite-tested on the in-memory transport; not yet run against a socket; configuration parameters planned |
 | Interoperability against an independent server | planned |
 | Hardware verification | planned |
 

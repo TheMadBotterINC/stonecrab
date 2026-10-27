@@ -236,10 +236,10 @@ parses it with `Short.parseShort` and the inventoried files show no range check
    `decode_member` through every arm. No line is excluded.
 10. **Transport injection point (S26).** `ModbusTcpDriver::new()` uses the real TCP
     factory. `ModbusTcpDriver::with_transport_factory(Arc<dyn TransportFactory>)` is the
-    sanctioned way to run the testkit `FakeTransportFactory` under the driver. S25b lands
-    it as a crate-private constructor for the contract suite and S26 makes it public and
-    adds the driver to `tests/public_types.rs`. A global registry of test transports or a
-    Cargo feature for fakes is not used.
+    sanctioned way to run the testkit `FakeTransportFactory` under the driver. It is public
+    from S25b on (the contract suite is an integration test outside the crate, so a
+    crate-private constructor cannot serve it; decision 14). A global registry of test
+    transports or a Cargo feature for fakes is not used.
 11. **MBAP framing and the transport edge (S22).** `src/framing.rs` with the single child
     `src/framing/mbap.rs` holds `MbapHeader`, `TransactionId`, `ModbusAdu` and `MbapFramer`
     (`mod.rs` is denied, as for `pdu/`). `stonecrab-modbus` gains a dependency on
@@ -520,6 +520,68 @@ parses it with `Short.parseShort` and the inventoried files show no range check
       (one read in flight, cancellation, deadlines, the terminal states, `open` validation,
       tracing) run on `FakeTransportFactory`, `FakeTransport` and `FakeClock`; two unit
       tests in `connection.rs` reach the arms no wire exchange can.
+14. **Driver skeleton and the contract run (S25b, amendment 2026-10-27).**
+    `src/driver.rs` holds `ModbusTcpDriver`, and `tests/contract.rs` runs the S13 contract
+    suite through `&dyn Driver` against it. The only change to an earlier decision is the
+    visibility note in decision 10. The crate now enables the `tcp` feature of
+    `stonecrab-transport` (an existing dependency; the feature pulls Tokio's `net`, which
+    the workspace already builds), because `new()` needs `TcpFactory`.
+    - **Shape.** `ModbusTcpDriver` holds an `Arc<dyn Clock>`, an `Arc<dyn TransportFactory>`
+      and a `ConnectionDefaults`. `new()` uses `TcpFactory::default()` and `SystemClock`;
+      `with_clock`, `with_transport_factory` and `with_defaults` replace one part each.
+      `with_defaults` is beyond the S26 list; S26 decides whether it stays once
+      `parse_config` fills the defaults.
+      The constructors are public from this slice: decision 10 planned a crate-private
+      `with_transport_factory` for S25b, but an integration test is outside the crate. The
+      driver is stateless: `connect` is `ModbusConnection::open(config, factory, clock,
+      defaults)` boxed as `dyn Connection`, so its cancel safety, wire effects and deadline
+      source (`timeouts.connect`) are those of `open`.
+    - **Capabilities.** One function builds the `MB-TCP-CAPABILITIES` value and both
+      `ModbusConnection::capabilities()` and `Driver::capabilities()` return it, so the
+      two cannot drift; a unit test asserts the equality through a real connect.
+    - **`parse_config`.** The text goes through `ConnectionUri::parse`; the scheme must be
+      `modbus-tcp` and a transport code, when present, `tcp`. The authority is
+      `host[:port]` (default 502): a host is ASCII letters, digits, `-`, `_` and `.`; an
+      IPv6 address is accepted in brackets only, with an optional port after the bracket
+      (`Endpoint::Tcp` holds it without the brackets); a port is decimal digits, 1 to
+      65535. Everything else, including a path, is `InvalidConfig` with a message that does
+      not repeat the authority. This slice accepts no query parameter: any key is
+      `InvalidConfig` and the message says that parameters arrive with the configuration
+      slice, so the configuration is `ConnectionConfig::builder("modbus-tcp", endpoint)`
+      with core defaults. S26 completes it: the six upstream parameters
+      (`MB-CFG-REQUEST-TIMEOUT`, `MB-CFG-UNIT-ID`, `MB-CFG-PING-ADDRESS`,
+      `MB-CFG-BYTE-ORDER`, `MB-CFG-MAX-COILS`, `MB-CFG-MAX-REGISTERS`), `address-convention`
+      mapped into the configuration, the rejection of unknown keys (`MB-CFG-UNKNOWN`), the
+      `ConnectionDefaults` filled from the parsed parameters, the facade feature and the
+      loopback and pymodbus runs.
+    - **The responder is a test harness.** `tests/support/responder.rs` is a Modbus
+      device built from this crate's own codec (`decode_request`, `encode_response`,
+      `MbapHeader`) over the interop register map; it plugs into the testkit's
+      `Step::Respond`. It is the peer's side of the protocol, not a second implementation
+      of a Stonecrab trait, so CODING_STANDARDS 13.5 (no mocks of our own
+      traits outside the testkit) does not apply to it. Its blocks are indexed by logical
+      address (wire address plus one) as the interop server's are, and a span that leaves
+      the block is exception 02. It serves any unit and echoes the unit and transaction
+      ids.
+    - **How the fixture steers it.** `FakeTransportFactory` serves a fresh script for
+      every connect, so the run queues 256 scripts, each a single `Step::Respond` over one
+      shared device. `inject_timeout` queues a fault that makes the device swallow the
+      next request, so the fake clock drives the deadline; `inject_device_exception`
+      queues exception 04 (SERVER DEVICE FAILURE); `device_reads` counts every request
+      that reached the device, swallowed ones included, which the retry case needs;
+      `io_probe` is the frames sent plus the opens across every transport the factory
+      created, so the "no I/O" cases are real. A `Step::Respond` closure can answer or stay
+      silent but cannot end the script, so the device cannot close the peer on demand:
+      `inject_disconnect` is left unset and the two disconnect cases are skipped by name.
+      The lost link is covered through the same driver by a test whose script closes the
+      peer after one request. Closing on demand needs a testkit change (a responder that
+      can end the script); no slice in the alpha plan owns that testkit change yet, so the
+      two skips stay until one does.
+    - **Result.** 19 cases pass and 4 are skipped by name: the read-only policy and the
+      unknown-write-outcome cases (`driver reports write unsupported`, decision D3) and the
+      two disconnect cases (`fixture cannot inject disconnect`). `an unsupported write
+      performs no I/O` runs and passes because the fixture names a writable address. The
+      suite runs on `FakeClock`; nothing sleeps.
 
 ## Consequences
 - The rest of the crate builds on a small, fully tested vocabulary. The parser has

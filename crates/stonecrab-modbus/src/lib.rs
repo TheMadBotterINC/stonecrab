@@ -10,6 +10,7 @@ mod address;
 mod batch;
 mod connection;
 mod decode;
+mod driver;
 mod framing;
 mod pdu;
 mod session;
@@ -20,6 +21,7 @@ pub use address::{
 pub use batch::{BatchLimits, Batcher, Chunk, Member};
 pub use connection::{ConnectionDefaults, ModbusConnection};
 pub use decode::TypedDecoder;
+pub use driver::ModbusTcpDriver;
 pub use framing::{MbapFramer, MbapHeader, ModbusAdu, TransactionId};
 pub use pdu::{
     ExceptionCode, FunctionCode, MAX_PDU_BYTES, MAX_READ_BITS, MAX_READ_REGISTERS, ModbusPdu,

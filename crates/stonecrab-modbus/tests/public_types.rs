@@ -7,7 +7,7 @@ mod tests {
         AddressConvention, BatchLimits, Batcher, Chunk, ConnectionDefaults, ExceptionCode,
         FunctionCode, MbapFramer, MbapHeader, Member, ModbusAddress, ModbusAddressBuilder,
         ModbusAdu, ModbusArea, ModbusConnection, ModbusDataType, ModbusPdu, ModbusSession,
-        SessionStats, TransactionId, TypedDecoder, UnitId,
+        ModbusTcpDriver, SessionStats, TransactionId, TypedDecoder, UnitId,
     };
 
     #[test]
@@ -35,5 +35,6 @@ mod tests {
         assert_send_sync::<SessionStats>();
         assert_send_sync::<ConnectionDefaults>();
         assert_send_sync::<ModbusConnection>();
+        assert_send_sync::<ModbusTcpDriver>();
     }
 }

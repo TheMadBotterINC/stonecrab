@@ -30,6 +30,22 @@ const RAW_BUDGET: NonZeroUsize = match NonZeroUsize::new(MAX_PDU_BYTES) {
     None => NonZeroUsize::MIN,
 };
 
+/// The capabilities of the alpha driver and of every connection it opens: read only, no
+/// subscriptions, browse or discovery, one operation at a time, PDUs up to 253 bytes
+/// (`MB-TCP-CAPABILITIES`). The driver reports the same value before any connection exists.
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "unreachable_pub forbids plain pub in a private module"
+)]
+pub(crate) fn alpha_capabilities() -> Capabilities {
+    let mut capabilities = Capabilities::default();
+    capabilities.read = true;
+    capabilities.subscribe = SubscriptionMode::Unsupported;
+    capabilities.max_pdu_bytes = NonZeroUsize::new(MAX_PDU_BYTES);
+    capabilities.concurrency = NonZeroUsize::MIN;
+    capabilities
+}
+
 /// The connection-wide defaults a tag or an address may override: which unit answers when an
 /// address names none, and how multi-byte values are laid out when neither the tag nor its
 /// address says.
@@ -318,11 +334,6 @@ impl ModbusConnection {
         // default stands in for the impossible refusal.
         let batch =
             BatchLimits::new(registers, coils, limits.max_items_per_request()).unwrap_or(wire);
-        let mut capabilities = Capabilities::default();
-        capabilities.read = true;
-        capabilities.subscribe = SubscriptionMode::Unsupported;
-        capabilities.max_pdu_bytes = NonZeroUsize::new(MAX_PDU_BYTES);
-        capabilities.concurrency = NonZeroUsize::MIN;
         let session = ModbusSession::new(GuardConfig::from(config), factory, Arc::clone(&clock));
         Ok(Self {
             session,
@@ -333,7 +344,7 @@ impl ModbusConnection {
             limits,
             batch,
             defaults,
-            capabilities,
+            capabilities: alpha_capabilities(),
             in_flight: AtomicBool::new(false),
         })
     }
