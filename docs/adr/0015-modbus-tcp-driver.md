@@ -220,7 +220,10 @@ parses it with `Short.parseShort` and the inventoried files show no range check
    and connection carry OS-dependent error arms; the row becomes 95 in the slice that
    adds them (S24b or S25), with `address`, `pdu`, `framing`, `batch` and `decode`
    still held to 100 by review of `target/coverage.lcov`, and every uncovered line named
-   in that PR.
+   in that PR. S24b amendment: the session module has no OS-dependent
+   arm (every I/O path runs on the in-memory transport), the crate measures 100% and the
+   row stays 100; the 95 tier is reconsidered only if a later slice adds a line that a
+   deterministic test cannot reach, with that line named.
 10. **Transport injection point (S26).** `ModbusTcpDriver::new()` uses the real TCP
     factory. `ModbusTcpDriver::with_transport_factory(Arc<dyn TransportFactory>)` is the
     sanctioned way to run the testkit `FakeTransportFactory` under the driver. S25b lands
@@ -324,6 +327,90 @@ parses it with `Short.parseShort` and the inventoried files show no range check
       `automated-verified`, and the S23 exit criterion "little-endian upstream vectors
       pass" is not met. It is met by adding `ADT` and `ADTLE` as `upstream_fixture`
       vectors once P4 is granted.
+
+12. **Session (S24b, amendment 2026-10-27).** `src/session.rs` holds `ModbusSession`,
+    `SessionStats` and `exception_item_error`. The crate gains `tracing` (a workspace
+    entry; no feature change, and the D23 `once_cell` path is unchanged because `tracing`
+    was already in the graph) and nothing else; the testkit `net` dev-dependency was added
+    in S22. Nothing here changes decisions 1 to 11 except the coverage note appended to
+    decision 9 above.
+    - **Shape.** `ModbusSession::new(GuardConfig, Arc<dyn TransportFactory>, Arc<dyn
+      Clock>)` owns a `ConnectionGuard<ModbusAdu, MbapFramer>` and a `TransactionId`
+      counter. `connect`, `close`, `state`, `watch_state` and `stats` pass through to the
+      guard; `stats` adds the session counters to the guard's `GuardStats`. `request(&pdu,
+      UnitId, Deadline, Option<&CancellationToken>)` returns `OpFuture<'_, ModbusPdu>`. The
+      counter belongs to the session, which outlives any one connection, so ids continue
+      across a reconnect (`MB-READ-TXN`); `starting_at(TransactionId)` sets the first id so
+      a test reaches the 0xFFFE wrap in three requests.
+    - **Acceptance rule (divergence `MB-READ-MATCH`).** The request PDU is encoded with
+      `encode_request` into a `BoundedWriter` of `MAX_PDU_BYTES`, wrapped in a `ModbusAdu`
+      with the next id and sent with `guard.request`. A reply is accepted only when its
+      transaction id equals the request's, its unit id equals the request's and its first
+      PDU byte, with the exception bit cleared, is the request's function code. Anything
+      else is discarded, counted, logged at `warn` (`expected_txn`, `received_txn`,
+      `received_unit`, `late`) and followed by `guard.next_reply` within the same
+      deadline. The accepted PDU goes through `decode_response(reader, request.function())`
+      and `check_reply_to(&request)`; a failure of either is `MalformedData` with the
+      `Protocol` category and the `ParseError` as its source. Upstream compares the
+      transaction id only (`Conn:145-157`); V1.1b section 7 has the function echo and the
+      Modbus Messaging on TCP/IP Implementation Guide the unit identifier echo.
+    - **The late-reply rule.** The session remembers the transaction ids of requests it
+      gave up on: a request that ends in any error, or whose future is dropped, after its
+      frame reached the transport (the guard's `requests` counter rose during the call)
+      records its id, in a queue of 32 with the oldest forgotten first; a request refused
+      before any I/O records nothing. A discarded reply whose id is in the queue counts in `late_replies`, any
+      other discarded reply in `mismatched_replies`. The ids are only a label for the
+      counters and the log: acceptance never depends on them. Issuing an id removes it
+      from the queue, so a wrapped counter never mistakes its own reply for a stale one.
+      A whole late reply is not seen by the guard: it comes out of the next `next_frame`
+      as that request's first reply (guard rustdoc, "Late replies"), which is why the
+      session checks every reply.
+    - **Resynchronization.** The guard offers no resync entry point: it sets a private
+      `Resyncing` phase after a timeout, a cancellation or a reply that violates the
+      framer, and runs `FramedTransport::resync` within the next request's deadline before
+      it sends, reconnecting when that fails (`Disconnected`). The plan paragraph's
+      "`resync(Deadline)` with the request's remaining deadline, then forced disconnect"
+      is therefore the guard's behavior and the session uses it as it is, with no change
+      to the transport crate. A reply whose PDU does not decode or fit the request is
+      not a stream failure: the framer cut exactly one ADU by its length field, so the
+      stream is aligned and nothing is owed. The byte-count test in `tests/session.rs`
+      proves that the next request needs no resync.
+    - **One exchange at a time.** The session guards its whole exchange, discards
+      included, with an atomic flag; a second `request` meanwhile fails with
+      `Backpressure` before any I/O and a dropped request frees the flag. The guard's
+      admission queue is not used by the session: a request queued behind a discard would
+      take the reply the first one still waits for, because `next_reply` re-enters the
+      guard's queue behind it. The bounded wait queue of D15 stays the guard's and the
+      owner of the session (S25) serializes its chunks. Queueing inside the session would
+      need either `tokio::sync` (a new direct dependency of this crate) or a hand-written
+      waker queue; neither earns its cost before the connection exists.
+    - **Exceptions (D18).** An exception reply is `Ok(ModbusPdu::Exception { function,
+      code })`: the exchange succeeded and the connection stays `Connected`.
+      `exception_item_error(function, code) -> ItemError` maps code 1 to
+      `Unsupported(Operation::Read)`, code 2 to `InvalidAddress` and every other code to
+      `DeviceException`, with `ProtocolStatus::new("modbus", code).with_name(code.name())`
+      so the raw number and the V1.1b name are always kept; `Diagnostics` carry
+      `operation = Read` and the `Protocol` category. `decode_response` refuses a code
+      outside the ten defined ones (decision 6), so on the wire that is `MalformedData`;
+      the function still maps a constructed `ExceptionCode::Unknown(n)` to
+      `DeviceException` with the number kept and the name `UNKNOWN`.
+    - **Errors and tracing.** Every error leaving `request` has its `Diagnostics` filled
+      in: `operation = Read` always, and where the failure site left them out the
+      connection state, the latency on the session's clock and a category (`Validation`
+      before the wire, `Transport` for the guard's errors, `Protocol` for a reply that
+      does not fit); the guard's own state, latency and reconnect attempt (`retries`) are
+      kept. `request` opens a `debug` span `request` with `scheme = "modbus-tcp"`,
+      `endpoint` (the `Endpoint` display: host and port, no credentials), `op = "read"`
+      and `txn` (recorded once the id is issued). The future records `txn` through a
+      clone of the span it is instrumented with, because `Span::current()` is only as
+      good as the installed subscriber.
+    - **Deadlines.** The caller's `Deadline` is the only source; the session adds no
+      default (the connection applies `timeouts.request` and the chunk `min`, S25).
+    - **Tests.** `tests/session.rs` runs byte-level scripts on `FakeTransportFactory`,
+      `FakeTransport` and `FakeClock` under `block_on_with` and installs one global
+      `tracing` subscriber in the test binary that records spans and events by thread,
+      because a scoped subscriber races the callsite interest cache across parallel
+      tests.
 
 ## Consequences
 - The rest of the crate builds on a small, fully tested vocabulary. The parser has
@@ -455,7 +542,7 @@ parses it with `Short.parseShort` and the inventoried files show no range check
   adds no dependency: `stonecrab-codec`, `stonecrab-core` and the existing
   dev-dependencies are all it uses, so the D23 check is unchanged.
 - Later slices extend this section: S21 (vectors per variant, no `generated/`), S24a
-  (batcher property), S24b (exception mapping tests for codes 1 to 8 and 10 to 11), S26
+  (batcher property), S26
   (`with_transport_factory` in `tests/public_types.rs`) and S27 (the interop job and its
   evidence artifact, which moves this ADR to accepted).
 - The `deny` job stays blocking. This slice adds no dependency, so the D23 check is
@@ -485,3 +572,25 @@ parses it with `Short.parseShort` and the inventoried files show no range check
   `log`, `time` and `chrono` absent and `once_cell` only through `tracing-core` and
   `stonecrab-driver-sim`; the only new crate edge is `stonecrab-modbus` to
   `stonecrab-transport`, and the transport crate builds with its default features off.
+- S24b: `crates/stonecrab-modbus/tests/session.rs` holds the byte-level session tests: a
+  holding-register round trip with the request bytes asserted exactly, a reply with a
+  wrong transaction id, unit id and function code (the last with a normal and an
+  exception reply for function 04), a late reply after a timeout then the correct
+  correlation (`late_reply_after_timeout_is_discarded_and_the_next_correlation_succeeds`),
+  the 32-id bound of the late rule, a request refused before the wire not being
+  remembered, an exception for each of the ten defined codes (`exception_01_...` to
+  `exception_0b_...`) with the mapping, the raw code and the name asserted, codes 1, 2 and
+  5 in a row on one connection that stays `Connected`, a byte count that does not fit,
+  a PDU that does not decode, an unencodable request, a request before `connect`, a
+  truncated reply then close and the recovery after the reconnect, close mid-reply,
+  cancel before and after the flush (the latter with a partial reply buffered, so the
+  guard's resync is the thing that makes the next request succeed), one request in flight
+  at a time, the id sequence 1, 2, 3 and 0xFFFE, 1, 2, and the `warn` event and `request`
+  span fields. Tests carry `// covers: SPEC mandatory-failure-cases / F2 incorrect
+  transaction and unit ids, delayed replies after timeout`, `F4 transmitting and
+  awaiting` and `F3 device exception`. The `# Compatibility` sections cite
+  `MB-READ-MATCH`, `MB-READ-TXN`, `MB-EXC-01` and the transport rows for the guard
+  pass-throughs. The D23 check (`cargo tree -e normal,dev -i <name>`, one name at a time)
+  finds `lazy_static`, `log`, `time` and `chrono` absent and `once_cell` only through
+  `tracing-core` and `stonecrab-driver-sim`: the only new edge is `stonecrab-modbus` to
+  `tracing`, which was already in the graph. The coverage row stays 100 (decision 9).

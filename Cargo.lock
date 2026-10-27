@@ -315,6 +315,7 @@ dependencies = [
  "stonecrab-core",
  "stonecrab-testkit",
  "stonecrab-transport",
+ "tracing",
 ]
 
 [[package]]

@@ -130,6 +130,18 @@
   keeps the received bytes within the caller's budget. The little-endian modes are derived
   from the documented layouts; they are not `automated-verified` until the upstream
   little-endian vectors are added. Vectors are under `fixtures/modbus/tcp/typed_*`.
+- Add `ModbusSession` (ADR-0015): one read request in flight over the transport crate's
+  `ConnectionGuard`, a transaction counter that continues across reconnects, and
+  `request(pdu, unit_id, deadline, token)` returning the reply PDU. A reply is accepted
+  only when its transaction id, unit id and function code all match (upstream compares the
+  transaction id only; divergence `MB-READ-MATCH`, V1.1b section 7); anything else is
+  discarded, counted in `SessionStats` as `late_replies` (the id of a request the session
+  gave up on) or `mismatched_replies`, and logged at `warn` with the expected and received
+  transaction ids. A device exception is `Ok(ModbusPdu::Exception)` with the connection
+  still `Connected`; `exception_item_error` maps it per decision D18 and keeps the raw code
+  and name. A reply PDU that does not decode or fit the request is `MalformedData`. Each
+  request has a `debug` span with `scheme`, `endpoint`, `op` and `txn`. The crate now
+  depends on `tracing`.
 ### stonecrab-sensors 0.1.0
 - Add the crate: declarative sensor profiles for Stonecrab, depending on `stonecrab-core`,
   `serde` and, behind the default `toml` feature, `toml` (ADR-0016). No driver reads a

@@ -5,16 +5,21 @@ registers) over TCP with MBAP framing. RTU, ASCII, TLS, UDP, writes, extended re
 and string types are out of scope for the alpha.
 
 Nothing is implemented beyond the address types, their text grammar, read batching, the
-PDU codec, MBAP framing and the typed decoder. This crate currently offers `UnitId`, `ModbusArea`,
-`ModbusDataType`, `AddressConvention`, `ModbusAddress` (built with its builder or parsed
-from text with `ModbusAddress::parse`) and `ProtocolAddress` for it, plus `Batcher`,
-`BatchLimits`, `Chunk` and `Member`, the PDU types `FunctionCode`, `ExceptionCode` and
-`ModbusPdu` with `encode_request`, `decode_request`, `decode_response` and
-`encode_response`, the framing types `MbapHeader`, `TransactionId`, `ModbusAdu` and
-`MbapFramer`, and `TypedDecoder`, which turns registers or coil bits into `PlcValue`s.
-There is no session, connection or driver yet, and no I/O of any kind. The crate
-depends on `stonecrab-core`, `stonecrab-codec`, `stonecrab-transport` (without its
-`tcp` feature, for the `Framer` trait only) and `bytes`; default features are empty.
+PDU codec, MBAP framing, the typed decoder and the session. This crate currently offers
+`UnitId`, `ModbusArea`, `ModbusDataType`, `AddressConvention`, `ModbusAddress` (built with
+its builder or parsed from text with `ModbusAddress::parse`) and `ProtocolAddress` for it,
+plus `Batcher`, `BatchLimits`, `Chunk` and `Member`, the PDU types `FunctionCode`,
+`ExceptionCode` and `ModbusPdu` with `encode_request`, `decode_request`, `decode_response`
+and `encode_response`, the framing types `MbapHeader`, `TransactionId`, `ModbusAdu` and
+`MbapFramer`, `TypedDecoder`, which turns registers or coil bits into `PlcValue`s, and
+`ModbusSession` with `SessionStats` and `exception_item_error`, which send one read
+request over a connection and return the reply that answers it. There is no connection
+or driver yet. The session does I/O only through a transport factory the caller passes
+in, so the crate's tests run on the in-memory transport of the repository's
+unpublished testkit. The crate depends on `stonecrab-core`, `stonecrab-codec`,
+`stonecrab-transport` (without its `tcp` feature, for the `Framer` trait,
+`ConnectionGuard` and `TransportFactory`), `bytes` and `tracing`; default features are
+empty.
 
 Upstream behavior is the Apache PLC4X Modbus TCP driver at the commit pinned in
 `upstream/manifest.toml`. Every claim about it, and every divergence, is recorded with a
@@ -27,10 +32,10 @@ stable row id in the
 | Address text grammar and parser (`ModbusAddress::parse`) | unit-tested; fuzzed |
 | PDU codec for function codes 01 to 04 and the exception PDU | unit-tested; vector-tested; property-tested; fuzzed |
 | MBAP framing (`MbapFramer`, `MbapHeader`, `ModbusAdu`, `TransactionId`) | unit-tested; vector-tested; fuzzed |
-| Transaction correlation | planned |
+| Session: transaction ids, reply correlation by transaction id, unit id and function code, exception mapping (`ModbusSession`, `exception_item_error`) | unit-tested on the in-memory transport; not yet run against a socket |
 | Typed register decoding and byte order (`TypedDecoder`) | unit-tested; vector-tested; property-tested; the little-endian modes are derived from the documented layouts, not yet confirmed by upstream vectors |
 | Read batching (`Batcher`) | unit-tested; property-tested |
-| Session, connection and `modbus-tcp` driver | planned |
+| Connection and `modbus-tcp` driver | planned |
 | Interoperability against an independent server | planned |
 | Hardware verification | planned |
 
@@ -217,6 +222,71 @@ The golden ADU vectors in `fixtures/modbus/tcp/adu_*` wrap the V1.1b example PDU
 header layout of the Modbus Messaging on TCP/IP Implementation Guide V1.0b, and add
 the adversarial cases (lengths 255, 1 and 0, protocol id 1, a truncated header, a body that
 has not arrived, a 261 byte ADU and a 1 KiB stream of seven coalesced ADUs).
+## Session
+`ModbusSession::new(config, factory, clock)` owns a
+`ConnectionGuard<ModbusAdu, MbapFramer>` (the lifecycle, request-driven reconnect and
+the single in-flight slot of the transport crate) and the transaction counter.
+`connect`, `close`, `state`, `watch_state` and `stats` pass through to the guard. `request(&pdu, unit_id, deadline, token)` encodes a read
+request, sends it with the next transaction id (1 to 0xFFFE, continuing across a
+reconnect) and returns the PDU that answers it:
+
+- a reply is accepted only when its transaction id, its unit id and its function code (the
+  reply's function with the exception bit cleared) all match the request; upstream
+  compares the transaction id alone (`MB-READ-MATCH`, a divergence);
+- any other reply is discarded, counted in `SessionStats` and logged at `warn` level with
+  `expected_txn` and `received_txn`; the session then reads on within the same deadline.
+  `late_replies` counts a reply whose transaction id belongs to a request the session gave
+  up on (a timeout, a cancellation or a dropped request after the frame went out, a lost
+  connection; the last 32 ids are remembered); `mismatched_replies` counts every other
+  discarded reply;
+- the accepted PDU is decoded with `decode_response` and proved against the request with
+  `ModbusPdu::check_reply_to`; one that does not decode or whose byte count does not fit
+  the quantity is `ErrorKind::MalformedData` with the `Protocol` category, and the stream
+  stays aligned because the framer cut exactly one ADU;
+- a device exception is not an error of the exchange: it is `Ok(ModbusPdu::Exception)`,
+  the connection stays `Connected`, and `exception_item_error(function, code)` gives the
+  per-member `ItemError` (code 1 `Unsupported(Operation::Read)`, code 2 `InvalidAddress`,
+  every other code `DeviceException`; the raw code and the V1.1b name are always in the
+  `ProtocolStatus`);
+- every error carries `Diagnostics` with `operation = Read`, the connection state, the
+  latency and the reconnect attempt, and the request has a `debug` span with the fields
+  `scheme = "modbus-tcp"`, `endpoint` (host and port), `op = "read"` and `txn`.
+
+A session runs one request at a time; a second one made meanwhile fails with
+`ErrorKind::Backpressure` before any I/O. Resynchronization after a timeout, a
+cancellation or a framing error is the guard's: it discards the unaccounted bytes within
+the next request's deadline and reconnects if that fails.
+
+```rust
+use std::sync::Arc;
+use std::time::Duration;
+use stonecrab_core::{Clock, Deadline, Endpoint, ResourceLimits};
+use stonecrab_modbus::{ModbusPdu, ModbusSession, UnitId};
+use stonecrab_testkit::{FakeClock, FakeTransportFactory, Script, Step, block_on_with};
+use stonecrab_transport::GuardConfig;
+
+// The V1.1b section 6.3 exchange, against the repository's in-memory test transport.
+let clock = FakeClock::default();
+let factory = FakeTransportFactory::new(clock.clone());
+factory.push_script(Script::strict(vec![
+    Step::Expect(vec![0, 1, 0, 0, 0, 6, 0x11, 3, 0x00, 0x6B, 0x00, 0x03]),
+    // A reply for the wrong unit comes first and is discarded.
+    Step::Reply(vec![0, 1, 0, 0, 0, 9, 0x12, 3, 6, 0, 1, 0, 2, 0, 3]),
+    Step::Reply(vec![0, 1, 0, 0, 0, 9, 0x11, 3, 6, 0x02, 0x2B, 0x00, 0x00, 0x00, 0x64]),
+]));
+let limits = ResourceLimits::builder().build()?;
+let config = GuardConfig::new(Endpoint::Custom("fake://plc".to_owned()), limits);
+let session = ModbusSession::new(config, Arc::new(factory), Arc::new(clock.clone()));
+block_on_with(&clock, session.connect())?;
+
+let request = ModbusPdu::ReadHoldingRegisters { start: 107, quantity: 3 };
+let deadline = Deadline::after(clock.now(), Duration::from_secs(1))?;
+let reply = block_on_with(&clock, session.request(&request, UnitId::from(17), deadline, None))?;
+assert!(matches!(reply, ModbusPdu::ReadRegistersResponse { .. }));
+assert_eq!(session.stats().mismatched_replies, 1);
+# Ok::<(), stonecrab_core::PlcError>(())
+```
+
 ## Decoding values
 `TypedDecoder` turns the registers of a holding or input register read into a typed
 `PlcValue`, and one bit of a coil or discrete-input read into a `Bool`. The layout is two

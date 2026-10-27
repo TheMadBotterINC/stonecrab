@@ -28,6 +28,7 @@ bytes.workspace = true
 stonecrab-codec.workspace = true
 stonecrab-core.workspace = true
 stonecrab-transport.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
