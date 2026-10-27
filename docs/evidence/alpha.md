@@ -75,14 +75,14 @@ numbers above are the S27 and S30 records.
 
 ## Hosted CI matrix
 
-From `STATUS.md` ("Hosted CI and the per-OS matrix"); no new run id is invented here. The
-run for the S32 commit is not yet recorded.
+From `STATUS.md` ("Hosted CI and the per-OS matrix"); no new run id is invented here.
 
 | Run | Commit | Result |
 | --- | --- | --- |
-| https://github.com/TheMadBotterINC/stonecrab/actions/runs/40548582722 | `f19be4c` (S30) | completed successfully; every job green except the report-only `semver` |
+| https://github.com/TheMadBotterINC/stonecrab/actions/runs/40584025718 | `2d38e48` (S32) | completed successfully; every job green except the report-only `semver` |
+| https://github.com/TheMadBotterINC/stonecrab/actions/runs/40557968227 | `8f5c3d0` (S31) | completed successfully; first run of the `parity` job |
+| https://github.com/TheMadBotterINC/stonecrab/actions/runs/40548582722 | `f19be4c` (S30) | completed successfully; the definition of done on the hosted runner |
 | https://github.com/TheMadBotterINC/stonecrab/actions/runs/40543567845 | `0429da3` (S27) | earlier run, recorded in `STATUS.md` |
-| (S31 and S32 commits) | `8f5c3d0`, S32 | not yet recorded; the S31 commit adds the `parity` job |
 
 Jobs of the S30 run: `test` on ubuntu, macOS and Windows each with Rust 1.97.1 and 1.99.1
 (six cells), `quality`, `cross`, `dependencies`, `package`, `dco`, `features`, `machete`,
@@ -299,10 +299,10 @@ here; `[ ]` says what blocks it.
    refuses the uncommitted tree and `mise run interop` needs Docker (last green in S30);
    both are re-run on the clean commit. The MSRV cell is green in hosted run
    40548582722.
-3. `[ ]` Hosted CI green on `master` for the candidate commit, including `interop`,
-   `fuzz-smoke` via `workflow_dispatch`, `features`, `examples`, `dco`, `lint-attrs`, run
-   URL recorded in `STATUS.md`. **Blocked:** the S31 and S32 commits are not pushed; the
-   last recorded green run is for S30 (`f19be4c`).
+3. `[x]` Hosted CI green on `master` for the S32 commit `2d38e48` (run 40584025718:
+   every job green except the report-only `semver`, `interop`, `features`, `examples`,
+   `dco`, `lint-attrs` and `parity` included); `fuzz-smoke` ran on push, not by
+   `workflow_dispatch`. Re-confirm on the release candidate commit when it exists.
 4. `[x]` Both example runs pass: `profile_read` against pymodbus and against `sim` returned
    success in the S30 `interop` and `examples` jobs (run 40548582722). Re-confirm on the
    candidate commit with item 3.

@@ -372,9 +372,9 @@ https://github.com/TheMadBotterINC/stonecrab/actions/runs/40543567845
 | `interop` (pymodbus 3.8.6 on the amd64 runner: ten interop tests, the `modbus_tcp_read` example, the `profiles` step, the `interop-evidence` artifact) | green |
 | `semver` (report only) | fails until the sibling crates exist on crates.io (no baseline); does not fail the run |
 
-Not yet recorded: the hosted run for the S32 commit (release evidence; it adds the
-`release-evidence` workflow, which runs on dispatch only). Check it after the push and
-record its URL here.
+The run for the S32 commit `2d38e48` (release evidence) also completed successfully:
+https://github.com/TheMadBotterINC/stonecrab/actions/runs/40584025718
+The `release-evidence` workflow runs on dispatch only and has not been dispatched yet.
 
 Platform fixes that hosted runs needed, for the next maintainer: the prebuilt cargo-fuzz
 binary defaults to a musl target, so the smoke script passes the host triple; the
@@ -514,7 +514,6 @@ Deferred features, each a deferred row in `docs/parity/modbus.md` or an item of 
 - **Not verified by the interop run**: timing over a real clock, dropped links and device
   exceptions on demand (a stock pymodbus has no fault hooks), unit-id correlation, and any
   server other than pymodbus 3.8.6.
-- **Hosted CI** for the S32 commit is not yet recorded (see "Hosted CI").
 - A queued-cancellation case is exercised on `ConnectionGuard` only, not on the simulator
   (which has no wait queue); the real-socket connect-timeout arm of the transport is
   uncovered and named in ADR-0014.
@@ -539,9 +538,8 @@ The alpha plan is executed (S01 to S32; S04a and S04b wait for P4). What remains
 maintainer's: nothing below is done by an automated run, and nothing is published,
 tagged or posted without separate approval.
 
-1. Record the hosted run of the S32 commit in "Hosted CI" above and run the
-   `release-evidence` workflow once (`workflow_dispatch`); attach its artifact to the
-   draft pre-release when one exists.
+1. Run the `release-evidence` workflow once (`workflow_dispatch`) and attach its
+   artifact to the draft pre-release when one exists.
 2. Close the maintainer prerequisites P1 to P3 (repository settings) and decide P4 (the
    upstream vector redistribution), which unblocks S04a and S04b and the
    `automated-verified` status of the byte-order rows.
