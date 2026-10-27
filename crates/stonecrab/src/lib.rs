@@ -3,6 +3,6 @@
 #![deny(missing_docs)]
 
 pub use stonecrab_core::{
-    Capabilities, ConnectionState, Diagnostics, ErrorKind, FailureCategory, Operation, PlcError,
-    Result, SubscriptionMode,
+    Capabilities, ConnectionState, Deadline, Diagnostics, ErrorKind, FailureCategory, Operation,
+    PlcError, Result, Secret, SubscriptionMode, TagId,
 };
