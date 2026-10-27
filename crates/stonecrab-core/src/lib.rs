@@ -6,6 +6,7 @@
 mod capability;
 mod deadline;
 mod error;
+mod limits;
 mod secret;
 mod tag;
 mod value;
@@ -13,6 +14,7 @@ mod value;
 pub use capability::{Capabilities, Operation, SubscriptionMode};
 pub use deadline::Deadline;
 pub use error::{ConnectionState, Diagnostics, ErrorKind, FailureCategory, PlcError, Result};
+pub use limits::{ResourceLimits, ResourceLimitsBuilder};
 pub use secret::Secret;
 pub use tag::TagId;
 pub use value::{PlcValue, PlcValueType};

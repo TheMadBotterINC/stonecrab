@@ -4,5 +4,6 @@
 
 pub use stonecrab_core::{
     Capabilities, ConnectionState, Deadline, Diagnostics, ErrorKind, FailureCategory, Operation,
-    PlcError, PlcValue, PlcValueType, Result, Secret, SubscriptionMode, TagId,
+    PlcError, PlcValue, PlcValueType, ResourceLimits, ResourceLimitsBuilder, Result, Secret,
+    SubscriptionMode, TagId,
 };

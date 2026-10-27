@@ -7,7 +7,8 @@ mod tests {
 
     use stonecrab::{
         Capabilities, ConnectionState, Deadline, Diagnostics, ErrorKind, FailureCategory,
-        Operation, PlcError, PlcValue, PlcValueType, Secret, SubscriptionMode, TagId,
+        Operation, PlcError, PlcValue, PlcValueType, ResourceLimits, ResourceLimitsBuilder, Secret,
+        SubscriptionMode, TagId,
     };
 
     #[test]
@@ -23,6 +24,8 @@ mod tests {
         assert_send_sync::<PlcError>();
         assert_send_sync::<PlcValue>();
         assert_send_sync::<PlcValueType>();
+        assert_send_sync::<ResourceLimits>();
+        assert_send_sync::<ResourceLimitsBuilder>();
         assert_send_sync::<Secret<String>>();
         assert_send_sync::<SubscriptionMode>();
         assert_send_sync::<TagId>();

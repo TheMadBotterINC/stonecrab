@@ -7,6 +7,7 @@ See the [foundation parity record](https://github.com/themadbotter/stonecrab/blo
 Build-tested contracts: exact-width scalar values, stable validated tag identifiers,
 capabilities, typed errors with diagnostic context, monotonic deadlines and redacted
 secret formatting. No simulator, interoperability or hardware verification is claimed.
+Resource budgets are finite, positive and immutable after builder validation.
 
 ```rust
 use stonecrab_core::{Deadline, PlcValue, TagId};

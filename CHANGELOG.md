@@ -6,5 +6,8 @@
   status API; consult the capability and parity documentation.
 ### stonecrab-core 0.1.0
 - Establish shared metadata, safety lints and foundation contracts.
+- Add exact-width scalar values, validated tag identifiers, monotonic deadlines,
+  immutable finite resource budgets, explicit capabilities, typed diagnostic
+  failures and redacted secret formatting.
 ## stonecrab 0.1.0
 - Publish the specification-stage package. No industrial protocol support.

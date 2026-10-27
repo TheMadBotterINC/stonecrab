@@ -15,6 +15,8 @@ Calendar and structured values require a further design decision.
   boxed failures with concrete source retention and optional, never invented context.
 - `TagId`: bounded, validated caller identifiers; not protocol address parsing.
 - `Deadline`: deterministic explicit-time construction and evaluation.
+- `ResourceLimits`: immutable finite budgets, positive values and buffer/frame
+  consistency checked by a builder before allocation.
 - `Secret<T>`: redacted Debug/Display; no memory-zeroization claim.
 - `PlcValue`, `PlcValueType`: exact scalar widths, lossless checked integer widening
   and explicit float-only access. Byte/raw/calendar/collection values remain deferred.
