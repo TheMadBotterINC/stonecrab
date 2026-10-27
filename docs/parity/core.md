@@ -40,6 +40,11 @@ Calendar and structured values require a further design decision.
   and state-observation primitives; see "Time, cancellation and state observation" and
   ADR-0007. Nothing enforces them yet.
 
+- `ConnectionConfig` and its builder, `Endpoint`, `Timeouts`, `ReconnectPolicy`,
+  `RetryPolicy`, `AccessPolicy`, `Credentials`, `AddressOptions` and its builder:
+  validated connection configuration as data; see "Connection configuration" and
+  ADR-0008. Nothing enforces it yet.
+
 Unit tests live beside each implementation; `crates/stonecrab/tests/public_contract.rs`
 checks the consumer boundary. README examples are executable doctests.
 `crates/stonecrab-core/tests/read_contract.rs` uses the unpublished shared testkit
@@ -75,6 +80,24 @@ state-watch API, so there is no upstream source file to cite; the design source 
 
 Cancelling an operation on the wire, unknown-after-transmit handling and the
 default-deadline rule are not covered by these rows; they land with S11a, S11b-2 and S19.
+
+## Connection configuration
+Status: implemented as data and pure arithmetic (ADR-0008, slice S07). Nothing enforces
+the configuration yet: the connection layer (S11a), the transport (S16) and the
+reconnect and retry loops (S19, S25) consume it later. Upstream has no
+driver-independent configuration type, so rows cite the Modbus `MB-CFG-*` rows in
+`docs/parity/modbus.md` rather than upstream files; the design source is
+`docs/ARCHITECTURE.md` section 3 as amended by decision D12.
+
+| Row id | Upstream behavior | Stonecrab behavior | Status | Test ids |
+| --- | --- | --- | --- | --- |
+| CORE-CONFIG-SHAPE | `DriverBase` parses the connection string into a driver-specific configuration with per-option defaults; for Modbus `request-timeout-ms` is 5000 and the other defaults are the `MB-CFG-*` rows in `docs/parity/modbus.md` (`MB-CFG-REQUEST-TIMEOUT`, `MB-CFG-UNIT-ID`, `MB-CFG-PING-ADDRESS`, `MB-CFG-BYTE-ORDER`, `MB-CFG-MAX-COILS`, `MB-CFG-MAX-REGISTERS`, `MB-CFG-UNKNOWN`). There is no connect timeout, idle timeout, access policy or credentials object in the inventoried Modbus files. | `ConnectionConfig` (private fields, accessors, by value, not `Clone`) with `Endpoint::{Tcp, Custom}`, `Timeouts` (5 s, 5 s, idle recorded and unenforced), `AccessPolicy` (default `ReadOnly`), `Credentials` in a `Secret`, `ResourceLimits`; a validating builder rejects an empty scheme, a zero connect or request timeout and bad reconnect values with `InvalidConfig`; `redacted_display` never contains credential text. Unknown options are rejected, not warned about (`MB-CFG-UNKNOWN`, divergence). | implemented | `defaults_match_the_documented_values`, `every_setter_is_retained_by_its_accessor`, `build_rejects_each_invalid_field_with_invalid_config`, `boundary_values_are_accepted`, `endpoint_display_brackets_ipv6_and_keeps_custom_text`, `access_policy_displays_stable_names`, `credentials_debug_never_prints_the_password`, `config_debug_hides_the_whole_credentials_value`, `redacted_display_never_contains_credential_text`, `redacted_display_has_a_fixed_shape_without_credentials`, `public_foundation_types_are_send_sync_and_static`, `facade_builds_a_configuration_and_extracts_address_options` |
+| CORE-RECONNECT-POLICY | None: no reconnect or backoff in the inventoried files (`docs/parity/modbus.md#MB-READ-RECONNECT`). | `ReconnectPolicy` (250 ms, 30 s cap, multiplier 2.0, jitter 0.2, unlimited) with pure `next_delay(attempt, sample)` (capped exponential, symmetric jitter factor `1 + jitter * (2 * sample - 1)`, total for every attempt and sample, never above `max * (1 + jitter)`) and `is_exhausted`. A Stonecrab extension; no random source in core. | implemented (data only) | `backoff_doubles_from_the_initial_delay_and_caps_at_max`, `jitter_samples_reach_both_bounds_and_the_cap_bounds_the_upper_one`, `next_delay_is_total_and_bounded_for_every_attempt_and_sample`, `next_delay_survives_policies_the_builder_would_reject`, `reconnect_attempts_are_exhausted_only_at_the_limit`, doctests `ReconnectPolicy`, `next_delay`, `is_exhausted` |
+| CORE-RETRY-POLICY | INFERENCE, not run: no read retry in the inventoried read path (`docs/parity/modbus.md#MB-READ-RETRY`). | `RetryPolicy` (default one attempt, `retry_on` = `{Timeout, Disconnected, Backpressure}`, equal to `PlcError::is_retryable`) with `should_retry(kind, attempt)`; reads only, writes are never retried. | implemented (data only) | `default_retry_set_equals_the_error_retryable_predicate`, `retry_stops_at_max_attempts_and_only_for_listed_kinds`, doctests `RetryPolicy`, `should_retry` |
+| CORE-ADDRESS-OPTIONS | Bare-digit Modbus forms such as `40001` are accepted unconditionally; there is no convention option (`docs/parity/modbus.md#MB-CFG-UNKNOWN` covers the option-handling difference). | `AddressOptions` (`#[non_exhaustive]`, `Clone`, `Default`) carries the optional `address-convention` name; the builder bounds it to 64 bytes and rejects empty names, whitespace and control characters; `ConnectionConfig::address_options()` and `address_convention(&str)` feed it. The Modbus driver accepts only `plc4x` at alpha (D16, ADR-0015). | implemented (data only) | `default_and_empty_builder_carry_no_convention`, `convention_round_trips_clones_and_last_call_wins`, `invalid_conventions_are_rejected_without_echoing_them`, `address_options_round_trip_and_outlive_the_config`, doctests `AddressOptions`, `AddressOptionsBuilder::build` |
+
+Idle timeout, reconnect, retry and the access policy are recorded and not enforced; the
+rows change to a stronger status when S11b-2, S19 and S25 enforce them.
 
 ## Connection string grammar
 Status: planned. No `ConnectionUri` exists yet; the slice that implements it is S08 in

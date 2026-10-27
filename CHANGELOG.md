@@ -9,6 +9,9 @@
 - Re-export `ByteOrder` and `WordOrder` from `stonecrab-core`.
 - Re-export `OpFuture`, `Clock`, `CancellationToken`, `StateCell` and `StateWatch` from
   `stonecrab-core`.
+- Re-export `ConnectionConfig`, `ConnectionConfigBuilder`, `Endpoint`, `Timeouts`,
+  `ReconnectPolicy`, `RetryPolicy`, `AccessPolicy`, `Credentials`, `AddressOptions` and
+  `AddressOptionsBuilder` from `stonecrab-core`.
 ### stonecrab-codec 0.1.0
 - Add the crate: `BoundedReader` and `BoundedWriter` with bounds-checked integer, float,
   byte-run and least-significant-bit-first coil reads and writes in an explicit
@@ -31,6 +34,10 @@
 - Add `OpFuture`, the `Clock` trait (no implementation in core), `CancellationToken` with
   child tokens and `StateCell`/`StateWatch` latest-value connection-state observation,
   all on `std` only (ADR-0007, proposed).
+- Add `ConnectionConfig` (not `Clone`) with its validating builder, `Endpoint`, `Timeouts`,
+  `ReconnectPolicy` with pure `next_delay`, `RetryPolicy`, `AccessPolicy` (default
+  `ReadOnly`), `Credentials`, and the `AddressOptions` carrier with its builder
+  (ADR-0008). Data only; nothing enforces the policies yet.
 - Add an unpublished deterministic address fixture testkit for contract tests.
 ## stonecrab 0.1.0
 - Publish the specification-stage package. No industrial protocol support.

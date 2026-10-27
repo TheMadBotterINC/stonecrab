@@ -4,9 +4,11 @@
 #![deny(missing_docs)]
 #![deny(clippy::as_conversions)]
 
+mod address_options;
 mod cancel;
 mod capability;
 mod clock;
+mod config;
 mod deadline;
 mod error;
 mod future;
@@ -20,9 +22,14 @@ mod state;
 mod tag;
 mod value;
 
+pub use address_options::{AddressOptions, AddressOptionsBuilder};
 pub use cancel::CancellationToken;
 pub use capability::{Capabilities, Operation, SubscriptionMode};
 pub use clock::Clock;
+pub use config::{
+    AccessPolicy, ConnectionConfig, ConnectionConfigBuilder, Credentials, Endpoint,
+    ReconnectPolicy, RetryPolicy, Timeouts,
+};
 pub use deadline::Deadline;
 pub use error::{ConnectionState, Diagnostics, ErrorKind, FailureCategory, PlcError, Result};
 pub use future::OpFuture;

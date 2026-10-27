@@ -93,6 +93,10 @@ ADR-0004 explicitly overrides the original `main` branch policy with `master`.
   cancellation token with child tokens, and latest-value connection-state observation
   (ADR-0007, proposed). Primitives only: no request carries a cancel slot and no
   connection enforces a default deadline yet.
+- `ConnectionConfig` and builder, `Endpoint`, `Timeouts`, `ReconnectPolicy`,
+  `RetryPolicy`, `AccessPolicy`, `Credentials`, `AddressOptions`: validated connection
+  configuration as data (ADR-0008); the reconnect backoff is a pure function of attempt
+  and a caller-supplied sample. No connection consumes it yet.
 - `ResourceLimits`: finite positive budgets; immutable after builder validation.
 - `Secret<T>`: redacted Debug/Display, explicit access; no zeroization claim.
 - `ProtocolStatus`: original code/name and explicitly bounded retained raw bytes;
@@ -131,6 +135,7 @@ gates named were run locally before that commit.
 | S03b | 2026-10-27 | Test tooling policy ADR-0009; `fuzz/` as its own Cargo workspace (nightly-2026-10-01, cargo-fuzz 0.13.2, libfuzzer-sys 0.4.13 with the NCSA allowance, arbitrary 1.5.0, no targets yet); `scripts/fuzz-smoke.sh`, `fuzz-smoke` CI job, weekly fuzz step, `PROPTEST_CASES=256` in CI | check, coverage, lint-attrs, features, machete, dependencies, fuzz, package |
 | S15 | 2026-10-27 | New crate `stonecrab-codec` 0.1.0: `BoundedReader`, `BoundedWriter`, `ParseError` with `From<ParseError> for PlcError`, coil bit helpers; proptest 1.12 adopted (D23 check clean); first fuzz target `fuzz_codec_bounded_reader` (60 s clean); ADR-0013. Same commit series makes `ByteOrder`/`WordOrder` exhaustive (ADR-0006 amendment 7) | check, coverage, lint-attrs, features, machete, dependencies, fuzz, package |
 | S06 | 2026-10-27 | Core `OpFuture`, `Clock` trait (no implementation in core; `SystemClock` moves to transport), `CancellationToken` with child tokens and waker dedup, `StateCell`/`StateWatch` latest-value observation; ADR-0007 proposed (accepted when S11b-2 enforces it); parity rows `CORE-OPFUTURE`, `CORE-CLOCK`, `CORE-CANCEL-TOKEN`, `CORE-STATE-WATCH`; no cancel slot on requests yet | check, coverage, lint-attrs, machete, dependencies, package |
+| S07 | 2026-10-27 | Core `ConnectionConfig` and builder, `Endpoint`, `Timeouts`, `ReconnectPolicy` with pure `next_delay`, `RetryPolicy` over `BTreeSet<ErrorKind>`, `AccessPolicy` (default `ReadOnly`), `Credentials`, `AddressOptions` carrier; ADR-0008; parity rows `CORE-CONFIG-SHAPE`, `CORE-RECONNECT-POLICY`, `CORE-RETRY-POLICY`, `CORE-ADDRESS-OPTIONS`; data only, unenforced | check, coverage, lint-attrs, machete, package |
 
 ## Verified evidence and reproduction
 
@@ -160,7 +165,7 @@ Most recent local results for the implementation baseline:
 - Formatting, strict Clippy, nextest, `cargo test` with doctests, documentation with
   warnings denied, no-default-features, lint-attrs, feature powerset and unused-
   dependency checks passed.
-- Per-crate line coverage (ADR-0005): `stonecrab-core` 1965/1965 lines (gate 100%),
+- Per-crate line coverage (ADR-0005): `stonecrab-core` 2704/2704 lines (gate 100%),
   `stonecrab-codec` 181/181 lines (gate 100%), `stonecrab-testkit` 23/23 lines (gate
   90%), `stonecrab` n/a (no executable lines). Error paths are not excluded. Region
   coverage is reported in `target/coverage-summary.txt` and not gated; do not describe
@@ -248,7 +253,8 @@ not native subscriptions. No Rust Modbus implementation or parity claim exists y
 ## Not implemented or not yet evidenced
 
 - Driver registry, driver/connection traits and operational connection lifecycle.
-- Typed connection configuration, access-policy enforcement and actual read/write I/O.
+- Access-policy enforcement and actual read/write I/O (typed configuration exists as
+  data only).
 - Enforcement of cancellation and default deadlines by a connection; a `Clock`
   implementation (the trait exists; `SystemClock`, `FakeClock`, `RealtimeClock` are
   later slices).

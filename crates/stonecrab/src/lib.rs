@@ -4,9 +4,11 @@
 #![deny(missing_docs)]
 
 pub use stonecrab_core::{
-    ByteOrder, CancellationToken, Capabilities, Clock, ConnectionState, Deadline, Diagnostics,
-    ErrorKind, FailureCategory, ItemError, OpFuture, Operation, PlcError, PlcValue, PlcValueType,
-    ProtocolAddress, ProtocolStatus, ReadItem, ReadRequest, ReadRequestBuilder, ReadResponse,
-    ReadResponseBuilder, ResourceLimits, ResourceLimitsBuilder, Result, Secret, StateCell,
-    StateWatch, SubscriptionMode, Tag, TagId, UnknownReason, WordOrder, WriteOutcome,
+    AccessPolicy, AddressOptions, AddressOptionsBuilder, ByteOrder, CancellationToken,
+    Capabilities, Clock, ConnectionConfig, ConnectionConfigBuilder, ConnectionState, Credentials,
+    Deadline, Diagnostics, Endpoint, ErrorKind, FailureCategory, ItemError, OpFuture, Operation,
+    PlcError, PlcValue, PlcValueType, ProtocolAddress, ProtocolStatus, ReadItem, ReadRequest,
+    ReadRequestBuilder, ReadResponse, ReadResponseBuilder, ReconnectPolicy, ResourceLimits,
+    ResourceLimitsBuilder, Result, RetryPolicy, Secret, StateCell, StateWatch, SubscriptionMode,
+    Tag, TagId, Timeouts, UnknownReason, WordOrder, WriteOutcome,
 };

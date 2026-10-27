@@ -7,20 +7,28 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use stonecrab::{
-        ByteOrder, CancellationToken, Capabilities, Clock, ConnectionState, Deadline, Diagnostics,
-        ErrorKind, FailureCategory, ItemError, OpFuture, Operation, PlcError, PlcValue,
-        PlcValueType, ProtocolAddress, ProtocolStatus, ReadItem, ReadRequest, ReadRequestBuilder,
-        ReadResponse, ReadResponseBuilder, ResourceLimits, ResourceLimitsBuilder, Secret,
-        StateCell, StateWatch, SubscriptionMode, Tag, TagId, UnknownReason, WordOrder,
-        WriteOutcome,
+        AccessPolicy, AddressOptions, AddressOptionsBuilder, ByteOrder, CancellationToken,
+        Capabilities, Clock, ConnectionConfig, ConnectionConfigBuilder, ConnectionState,
+        Credentials, Deadline, Diagnostics, Endpoint, ErrorKind, FailureCategory, ItemError,
+        OpFuture, Operation, PlcError, PlcValue, PlcValueType, ProtocolAddress, ProtocolStatus,
+        ReadItem, ReadRequest, ReadRequestBuilder, ReadResponse, ReadResponseBuilder,
+        ReconnectPolicy, ResourceLimits, ResourceLimitsBuilder, RetryPolicy, Secret, StateCell,
+        StateWatch, SubscriptionMode, Tag, TagId, Timeouts, UnknownReason, WordOrder, WriteOutcome,
     };
 
     #[test]
     fn public_foundation_types_are_send_sync_and_static() {
         fn assert_send_sync<T: Send + Sync + 'static>() {}
+        assert_send_sync::<AccessPolicy>();
+        assert_send_sync::<AddressOptions>();
+        assert_send_sync::<AddressOptionsBuilder>();
         assert_send_sync::<ByteOrder>();
         assert_send_sync::<CancellationToken>();
         assert_send_sync::<Capabilities>();
+        assert_send_sync::<ConnectionConfig>();
+        assert_send_sync::<ConnectionConfigBuilder>();
+        assert_send_sync::<Credentials>();
+        assert_send_sync::<Endpoint>();
         assert_send_sync::<ConnectionState>();
         assert_send_sync::<Deadline>();
         assert_send_sync::<Diagnostics>();
@@ -30,13 +38,16 @@ mod tests {
         assert_send_sync::<PlcError>();
         assert_send_sync::<PlcValue>();
         assert_send_sync::<PlcValueType>();
+        assert_send_sync::<ReconnectPolicy>();
         assert_send_sync::<ResourceLimits>();
         assert_send_sync::<ResourceLimitsBuilder>();
+        assert_send_sync::<RetryPolicy>();
         assert_send_sync::<Secret<String>>();
         assert_send_sync::<StateCell>();
         assert_send_sync::<StateWatch>();
         assert_send_sync::<SubscriptionMode>();
         assert_send_sync::<TagId>();
+        assert_send_sync::<Timeouts>();
         assert_send_sync::<Tag>();
         assert_send_sync::<Box<dyn ProtocolAddress>>();
         assert_send_sync::<ProtocolStatus>();
@@ -138,5 +149,32 @@ mod tests {
         assert!(retry.contains(&ErrorKind::Timeout), "kinds fit a BTreeSet");
         assert!(Operation::Read < Operation::Write, "operations are Ord");
         assert!(PlcValueType::I16 < PlcValueType::U16, "value types are Ord");
+    }
+
+    #[test]
+    fn facade_builds_a_configuration_and_extracts_address_options() {
+        let config = ConnectionConfig::builder(
+            "modbus-tcp",
+            Endpoint::Tcp {
+                host: "192.0.2.10".to_owned(),
+                port: 502,
+            },
+        )
+        .credentials(Credentials::new("operator", "example-only"))
+        .address_convention("plc4x")
+        .build()
+        .expect("valid configuration");
+        let options = config.address_options();
+        assert_eq!(options.convention(), Some("plc4x"), "carrier extracted");
+        assert_eq!(config.access(), AccessPolicy::ReadOnly, "read-only default");
+        assert!(
+            !config.redacted_display().contains("example-only"),
+            "display is redacted"
+        );
+        assert_eq!(
+            config.reconnect().next_delay(1, 0.5),
+            Duration::from_millis(500),
+            "pure backoff is reachable through the facade"
+        );
     }
 }
