@@ -926,7 +926,12 @@ mod tests {
         let measurement = measure(&profile(NEG), vec![item]).remove(0);
         let shown = format!("{measurement:?}");
         assert!(shown.contains("raw_bytes: Some(4)"), "{shown}");
-        assert!(!shown.contains("222"), "no byte of the status: {shown}");
+        // Only the status is inspected for its bytes: the clocks in the measurement are
+        // real values whose digits may contain any byte's decimal rendering by chance.
+        let status = format!("{:?}", measurement.protocol_status);
+        for byte in ["222", "173", "190", "239", "DE", "AD", "BE", "EF"] {
+            assert!(!status.contains(byte), "no byte of the status: {status}");
+        }
     }
 
     // ---- the simulator end to end -------------------------------------------------------
