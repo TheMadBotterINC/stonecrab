@@ -23,6 +23,21 @@
 - Add `coil_byte_count`, `pack_bits_lsb_first` and `unpack_bits_lsb_first`.
 - Lengths are checked against the caller's maximum and the remaining input before any
   allocation or copy; no function panics on any input (ADR-0013).
+### stonecrab-transport 0.1.0
+- Add the crate: the object-safe `Transport` trait (`send`, `recv`, `shutdown`, `peer`,
+  `limits`; every call takes a `Deadline`) and `TransportFactory` (both return
+  `OpFuture`), and `FrameError` (`Truncated`, `Oversized`, `Malformed`) with
+  `From<FrameError> for PlcError` (ADR-0014).
+- Add `TcpTransport` and `TcpFactory { nodelay }` behind the default `tcp` feature: name
+  resolution and connection inside one connect deadline, refused and reset connections as
+  `Disconnected`, `recv` bounded by `max_buffered_bytes`, `send` bounded by
+  `max_frame_bytes`, and a transport that poisons itself when a `send` is cut short.
+- Add `SystemClock`, the Tokio-backed `Clock` (`now()` is Tokio's instant so paused-time
+  tests agree with `Deadline`), and `Jitter`, a seeded xorshift64* source for
+  `ReconnectPolicy::next_delay`.
+- Adopt `tokio` with scoped features (`rt`, `time`, `sync`, `io-util`, and `net` through
+  `tcp`); `deny.toml` bans its `full` feature. No task is spawned and nothing runs between
+  calls.
 ### stonecrab-modbus 0.1.0
 - Add the crate scaffold: the native Modbus TCP driver crate, depending only on
   `stonecrab-core`, with default features empty. Nothing but address types and their

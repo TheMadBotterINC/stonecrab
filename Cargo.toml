@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
-members = ["crates/stonecrab", "crates/stonecrab-codec", "crates/stonecrab-core", "crates/stonecrab-modbus", "tools/stonecrab-testkit"]
-default-members = ["crates/stonecrab", "crates/stonecrab-codec", "crates/stonecrab-core", "crates/stonecrab-modbus"]
+members = ["crates/stonecrab", "crates/stonecrab-codec", "crates/stonecrab-core", "crates/stonecrab-modbus", "crates/stonecrab-transport", "tools/stonecrab-testkit"]
+default-members = ["crates/stonecrab", "crates/stonecrab-codec", "crates/stonecrab-core", "crates/stonecrab-modbus", "crates/stonecrab-transport"]
 exclude = ["fuzz"]
 
 [workspace.package]
@@ -19,6 +19,7 @@ stonecrab-core = { path = "crates/stonecrab-core", version = "0.1", default-feat
 thiserror = { version = "2.0", default-features = false, features = ["std"] }
 bytes = { version = "1.10", default-features = false, features = ["std"] }
 proptest = { version = "1.12", default-features = false, features = ["std"] }
+tokio = { version = "1.54", default-features = false }
 stonecrab-testkit = { path = "tools/stonecrab-testkit" }
 
 [workspace.lints.rust]

@@ -83,5 +83,42 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
 - Alternatives: `quickcheck` (smaller, weaker shrinking and no regression files),
   hand-written exhaustive loops (kept in addition for boundaries), and `cargo fuzz` (used
   for the parser, but it does not shrink or run in `cargo test`).
+- Maintenance: 1.54.1 is the current 1.x release as resolved on the review date, and
+  `cargo-deny` reports no open RUSTSEC advisory against it or its transitive crates.
+- Review date: 2026-10-27. `cargo-deny` passes advisory, license, ban and source checks;
+  this records the trust boundary, not a memory-safety certification.
+
+## tokio 1.54.1 (stonecrab-transport)
+- Purpose: the async runtime pieces the transport needs: `TcpStream` and `lookup_host`
+  (`net`), `timeout_at` and `sleep_until` (`time`), `read_buf` and `write_all`
+  (`io-util`), and the runtime driver (`rt`). `std` has no async sockets or timers, and
+  blocking sockets on a thread cannot honour a deadline (CODING_STANDARDS 8.4, ADR-0014).
+- License: MIT.
+- Features: `default-features = false` in `[workspace.dependencies]`
+  (`tokio = "1.54"`). `stonecrab-transport` enables `rt`, `time`, `sync` and `io-util`,
+  and `net` through its default `tcp` feature; dev-dependencies add `macros`, `test-util`
+  and `rt-multi-thread`. `sync` has no consumer in this slice (it adds no crate; the
+  connection guard of S19 uses it). `full` is banned by `[[bans.features]]` in
+  `deny.toml` and the ban was verified to fire (ADR-0014).
+- Unsafe: tokio is not `forbid(unsafe_code)` and uses `unsafe` heavily in the task
+  harness, the I/O driver and the timer wheel (about 1,100 occurrences of the keyword in
+  its sources on 2026-10-27); `mio` (about 175), `socket2` (about 240) and `pin-project-lite`
+  (13) add more, as expected for readiness polling, raw sockets and pin projection.
+  First-party code stays `forbid(unsafe_code)`. No native code is compiled: the only
+  build script in the tree is `libc`'s, which probes the target and links nothing.
+- Transitive crates in this configuration (normal graph, `tcp` on): `bytes` 1.12.1
+  (already audited above), `libc` 0.2.191 (MIT OR Apache-2.0), `mio` 1.2.4 (MIT),
+  `socket2` 0.6.5 (MIT OR Apache-2.0), `pin-project-lite` 0.2.17 (Apache-2.0 OR MIT);
+  `windows-sys` 0.61.2 and `windows-link` 0.2.1 (MIT OR Apache-2.0) on Windows targets and
+  `wasi` 0.11.1 (Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT) on WASI. Dev builds
+  add `tokio-macros` 2.7.2 (MIT; `proc-macro2`, `quote` and `syn` are already present
+  through `thiserror`). With `--no-default-features` only `bytes` and `pin-project-lite`
+  remain.
+- Banned crates: the D23 check (`cargo tree -e normal,dev -i once_cell -i lazy_static -i
+  log -i time -i chrono`, and each name alone) matches no package, so no `deny.toml`
+  wrapper is needed (ADR-0014).
+- Alternatives: `async-std` and `smol` (smaller ecosystems and not the runtime named in
+  section 15.8), `mio` alone (would re-implement the timer and the resolver pool) and
+  blocking `std::net` on a worker thread (cannot be cancelled by a deadline).
 - Review date: 2026-10-27. `cargo-deny` passes advisory, license, ban and source checks;
   this records the trust boundary, not a memory-safety certification.

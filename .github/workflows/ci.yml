@@ -111,6 +111,8 @@ jobs:
           diff -u packaging/stonecrab-codec.txt target/codec-package-files.txt
           cargo package --locked -p stonecrab-modbus --list > target/modbus-package-files.txt
           diff -u packaging/stonecrab-modbus.txt target/modbus-package-files.txt
+          cargo package --locked -p stonecrab-transport --list > target/transport-package-files.txt
+          diff -u packaging/stonecrab-transport.txt target/transport-package-files.txt
           cargo package --locked -p stonecrab --list > target/facade-package-files.txt
           diff -u packaging/stonecrab.txt target/facade-package-files.txt
   dco:

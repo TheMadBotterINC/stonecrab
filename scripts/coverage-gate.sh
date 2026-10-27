@@ -28,14 +28,20 @@ EXCLUDE='(^|/)(examples|benches|fuzz|generated)/'
 # --fail-under-lines` exits 1 on an empty file set, so n/a crates are never passed to
 # it, and the gate fails loudly the day a listed n/a crate gains an executable line.
 # A crate directory with no row also fails. Later slices add rows here (driver-sim,
-# sensors 100; transport 95); codec landed in S15 and modbus in S20a. The modbus row is 100
+# sensors 100); codec landed in S15, transport in S16 and modbus in S20a. The modbus row is 100
 # while the crate is pure (address types only); ADR-0005 sets the whole-crate tier at 95
 # with the pure modules at 100, so the row becomes 95 in the slice that adds the session
 # and connection modules (S24b/S25), which carry the OS-dependent error arms.
+#
+# The transport row is 95 (ADR-0005, ADR-0014): the real-socket connect-timeout arm (the
+# deadline passing while a connect is pending) cannot be induced on loopback, because a
+# listening socket completes the handshake in the kernel backlog and non-loopback
+# addresses are forbidden in tests; it is the first named OS-dependent uncovered arm.
 THRESHOLDS="
 crates/stonecrab-core|100
 crates/stonecrab-codec|100
 crates/stonecrab-modbus|100
+crates/stonecrab-transport|95
 crates/stonecrab|na
 tools/stonecrab-testkit|90
 "

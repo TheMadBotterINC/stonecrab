@@ -19,7 +19,7 @@ connections, device reads, protocol drivers or hardware integrations.
 - License: **Apache-2.0**.
 - Published on crates.io: **`stonecrab` 0.1.0**, a specification-stage placeholder.
 - Current development versions: facade **0.2.0**, core **0.1.0**, codec **0.1.0**,
-  modbus **0.1.0**, all unreleased.
+  modbus **0.1.0**, transport **0.1.0**, all unreleased.
 - The facade's minor bump records removal of the published `placeholder::status`
   API. Do not restore a compatibility shim without a real consumer requirement.
 - Review policy: ADR-0005 waives the two-approval rule of CODING_STANDARDS 18.6
@@ -54,6 +54,8 @@ ADR-0004 explicitly overrides the original `main` branch policy with `master`.
 - Resolver-3 Cargo workspace, Rust 2024, shared metadata and strict safety lints.
 - `crates/stonecrab`: public facade, re-exporting core.
 - `crates/stonecrab-core`: no Tokio, executor or network dependency.
+- `crates/stonecrab-transport`: the only crate with Tokio (scoped features, no spawned
+  tasks); TCP transport, `SystemClock` and the reconnect jitter source (ADR-0014).
 - `tools/stonecrab-testkit`: unpublished deterministic fixtures, development-only:
   `FixtureAddress`, `FakeClock`, `block_on`, `block_on_with`, `poll_once`, `CountingWaker`.
 - Empty default feature sets in the publishable crates; no protocol feature flags yet.
@@ -148,6 +150,7 @@ gates named were run locally before that commit.
 | S09 | 2026-10-27 | Core `WriteItem`, `WriteRequest` and builder, `WriteResult`, `WriteResponse` and builder (exact correlation, request order, unknown outcomes never collapsed); ADR-0010; parity rows `CORE-WRITE-REQUEST`, `CORE-WRITE-RESPONSE`; data only | check, coverage, lint-attrs, machete, package |
 | S08 | 2026-10-27 | Core `ConnectionUri::parse` for the upstream connection-string grammar (strict subset: 4096-byte bound, no percent-encoding, no credentials in the authority, unique keys); second fuzz target `fuzz_core_connection_string` (60 s clean); proptest adopted by core; parity row `CORE-URI-GRAMMAR` implemented | check, coverage, lint-attrs, machete, dependencies, fuzz, package |
 | S20b | 2026-10-27 | `ModbusAddress::parse` for the verified PLC4X grammar (long, prefixed short and convention-gated bare forms, config block, typed rejections for selections, strings, calendar types, extended registers, legacy arrays); third fuzz target `fuzz_modbus_address` (60 s clean); grammar and limit parity rows implemented with test ids | check, coverage, lint-attrs, machete, dependencies, fuzz, package |
+| S16 | 2026-10-27 | New crate `stonecrab-transport` 0.1.0: `Transport` and `TransportFactory` traits with a `Deadline` on every I/O call, `FrameError`, `TcpTransport` and `TcpFactory` over Tokio with bounded send/receive and self-poisoning after a failed write, `SystemClock`, dependency-free `Jitter`; tokio 1.54 adopted with rt/net/time/sync/io-util only and `full` banned; ADR-0014; parity rows in `docs/parity/transport.md`; loopback byte-level tests; coverage gate 95% (measured 99.6%) with the real-socket deadline-expiry arms named | check, coverage, lint-attrs, features, machete, dependencies, package |
 
 ## Verified evidence and reproduction
 
@@ -178,8 +181,10 @@ Most recent local results for the implementation baseline:
   warnings denied, no-default-features, lint-attrs, feature powerset and unused-
   dependency checks passed.
 - Per-crate line coverage (ADR-0005): `stonecrab-core` 2704/2704 lines (gate 100%),
-  `stonecrab-codec` 181/181 lines (gate 100%), `stonecrab-modbus` 229/229 lines (gate
-  100%), `stonecrab-testkit` 549/551 lines (gate 90%), `stonecrab` n/a (no executable lines). Error paths are not excluded. Region
+  `stonecrab-codec` 181/181 lines (gate 100%), `stonecrab-modbus` 585/585 lines (gate
+  100%), `stonecrab-transport` 457/459 lines (gate 95%; the uncovered lines are the
+  real-socket deadline-expiry and resolver-failure arms named in ADR-0014),
+  `stonecrab-testkit` 549/551 lines (gate 90%), `stonecrab` n/a (no executable lines). Error paths are not excluded. Region
   coverage is reported in `target/coverage-summary.txt` and not gated; do not describe
   it as branch coverage.
 - Workspace tests and doctests passed on Rust 1.97.1.
@@ -231,7 +236,8 @@ hardware gates yet.
 - Update `packaging/stonecrab-core.txt` or `packaging/stonecrab.txt` when shipped
   files change, and review the resulting archive contents.
 - New dependencies require a rationale and the applicable audit/ADR entry.
-  Current runtime dependencies are `thiserror` and `bytes`, not a protocol client.
+  Runtime dependencies are `thiserror`, `bytes` and, in the transport crate only,
+  `tokio` with scoped features; dev-only `proptest`.
 
 ## Baseline and incomplete M0 work
 
@@ -268,16 +274,16 @@ operation row is implemented yet.
 - Driver registry, driver/connection traits and operational connection lifecycle.
 - Access-policy enforcement and actual read/write I/O (typed configuration exists as
   data only).
-- Enforcement of cancellation and default deadlines by a connection; a `Clock`
-  implementation (the trait exists; `SystemClock`, `FakeClock`, `RealtimeClock` are
-  later slices).
+- Enforcement of cancellation and default deadlines by a connection (`SystemClock` and
+  `FakeClock` exist; `RealtimeClock` lands with the simulator).
 - Simulator driver, scripted acquisition failures and the common driver suite (fake
   time exists in the testkit).
 - Byte/raw/recursive/calendar `PlcValue` variants (deferred by ADR-0006); the byte and
   word order types exist as data only, with no decoder consuming them.
 - Browse, discovery and subscriptions (write batches exist as data).
-- Transport crate, Modbus PDU codec and I/O, sensor profiles and board adapters (the
-  codec crate and the Modbus address parser exist; nothing reads a device yet).
+- Modbus PDU codec, framing and connection, sensor profiles and board adapters (the
+  TCP transport, the codec crate and the Modbus address parser exist; nothing reads a
+  device yet).
 - OPC UA, EtherNet/IP/Logix, S7 and remaining upstream protocols.
 - Code generation or retained upstream fixture corpus.
 - Parser fuzzing (the `fuzz-smoke` job exists but has no targets), mutation testing,

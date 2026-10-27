@@ -31,6 +31,12 @@ deny = [
   { crate = "log", reason = "use tracing when diagnostics need output" },
 ]
 
+# tokio's umbrella feature is banned in published crates (CODING_STANDARDS 8.1, ADR-0014);
+# each crate lists the scoped features it uses.
+[[bans.features]]
+crate = "tokio"
+deny = ["full"]
+
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
