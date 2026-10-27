@@ -50,13 +50,23 @@ STONECRAB_INTEROP_MODBUS=modbus-tcp://127.0.0.1:5020 \
   -E 'test(/^tests::interop_/)'
 STONECRAB_URL=modbus-tcp://127.0.0.1:5020 \
   cargo run -p stonecrab --example modbus_tcp_read --features modbus
+STONECRAB_URL='modbus-tcp://127.0.0.1:5020?address-convention=plc4x' \
+  STONECRAB_PROFILE=profiles/synthetic/modbus-tcp/temperature_transmitter.toml \
+  cargo run -p stonecrab --example profile_read --features full -- --expect-good
 docker rm -f stonecrab-interop
 ```
 
+The last command is one of the `profiles` step: the synthetic profiles of
+`profiles/synthetic/modbus-tcp/` are authored from the same register map, and
+`profile_read --expect-good` reads each against the server and exits 1 unless every
+measurement is of quality `Good` (see `profiles/README.md`).
+
 `mise run interop` does all of it, including the readiness probe, and writes the evidence
 to `target/interop-evidence/`: `image-digest.txt`, `pip-freeze.txt`, `server.log`,
-`contract-report.txt`, `nextest.txt` and `example.txt`. It needs the `docker` binary and a
-running daemon and fails with a message naming the missing piece otherwise.
+`contract-report.txt`, `nextest.txt`, `example.txt` and `profiles.txt` (the
+`profile_read` output for each Modbus profile, written by `interop.sh profiles`). It
+needs the `docker` binary and a running daemon and fails with a message naming the
+missing piece otherwise.
 
 `interop.sh` takes `INTEROP_PORT` (default 5020) and `INTEROP_EVIDENCE_DIR`. The
 Dockerfile pins the base image by digest; to move it, pull the new tag, record the index

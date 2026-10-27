@@ -90,14 +90,17 @@ run = [
 ]
 
 [tasks.examples]
-description = "Build every example with all features, then run the sim example (ADR-0011)"
+description = "Build every example with all features, run the sim example, then profile_read against each sim profile (ADR-0011)"
 run = [
   "cargo build --locked --examples --all-features",
   "cargo run --locked -p stonecrab --example sim_read --features sim",
+  "STONECRAB_PROFILE=profiles/synthetic/sim/temperature_transmitter.toml cargo run --locked -p stonecrab --example profile_read --features full -- --expect-good",
+  "STONECRAB_PROFILE=profiles/synthetic/sim/pressure_flow_level.toml cargo run --locked -p stonecrab --example profile_read --features full -- --expect-good",
+  "STONECRAB_PROFILE=profiles/synthetic/sim/discrete_state.toml cargo run --locked -p stonecrab --example profile_read --features full -- --expect-good",
 ]
 
 [tasks.interop]
-description = "Build and run the pymodbus server in Docker, run the interop tests and the modbus_tcp_read example against it, keep the evidence (ADR-0015 decision 16)"
+description = "Build and run the pymodbus server in Docker, run the interop tests, the modbus_tcp_read example and profile_read for each modbus-tcp profile against it, keep the evidence (ADR-0015 decision 16)"
 run = "interop/pymodbus/interop.sh run"
 
 [tasks.fuzz]

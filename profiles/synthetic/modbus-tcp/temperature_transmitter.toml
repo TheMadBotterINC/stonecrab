@@ -1,0 +1,55 @@
+# Synthetic temperature transmitter for the Modbus TCP interop peer. It describes no real
+# device: it maps the pymodbus register map of fixtures/modbus/interop/register-map.toml
+# to engineering values. Twin of sim/temperature_transmitter.toml.
+id = "synthetic_temperature_transmitter"
+schema_version = 1
+validation = "synthetic"
+
+[device]
+manufacturer = "Synthetic Manufacturer"
+model = "Synthetic Temperature Transmitter"
+
+[connection]
+scheme = "modbus-tcp"
+# Declared, never inferred: the addresses below are logical PLC4X addresses.
+address_convention = "plc4x"
+
+[connection.options]
+default-unit-identifier = "1"
+
+[provenance]
+source = "Synthetic: fixtures/modbus/interop/register-map.toml; docs/parity/modbus.md rows MB-INTEROP-HR-07, MB-INTEROP-LE and MB-INTEROP-COIL"
+fixtures = ["fixtures/modbus/interop/register-map.toml"]
+
+# REAL 3.141593 at holding registers 26-27 (MB-INTEROP-HR-07), big endian, high word first.
+# The clamp keeps a runaway reading inside the transmitter's span; the range check marks a
+# reading outside the span uncertain. The unscaled REAL is kept to show the pipeline.
+[[measurements]]
+name = "process_temperature"
+address = "holding-register:26:REAL"
+data_type = "REAL"
+byte_order = "big_endian"
+word_order = "high_word_first"
+unit = "Cel"
+scaling = [{ clamp = { min = -50.0, max = 150.0 } }]
+range = { min = -50.0, max = 150.0 }
+min_interval_ms = 1000
+stale_after_ms = 5000
+keep_raw = true
+# Coil 2 is false in the coil run (MB-INTEROP-COIL): no open circuit, so the reading is good.
+status_fields = [{ name = "open_circuit", address = "coil:2", bit = 0 }]
+quality_map = { bad_when = ["open_circuit"] }
+
+# The same REAL 3.141593 at holding registers 300-301 (MB-INTEROP-LE), stored little endian:
+# the bytes DC 0F 49 40 under LITTLE_ENDIAN, which is (little endian, low word first).
+[[measurements]]
+name = "process_temperature_le"
+address = "holding-register:300:REAL"
+data_type = "REAL"
+byte_order = "little_endian"
+word_order = "low_word_first"
+unit = "Cel"
+range = { min = -50.0, max = 150.0 }
+keep_raw = true
+status_fields = [{ name = "open_circuit", address = "coil:2", bit = 0 }]
+quality_map = { bad_when = ["open_circuit"] }

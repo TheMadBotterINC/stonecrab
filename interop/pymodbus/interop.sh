@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: interop/pymodbus/interop.sh build|start|wait|tests|example|evidence|stop|run
+# Usage: interop/pymodbus/interop.sh build|start|wait|tests|example|profiles|evidence|stop|run
 #
 # Drives the pymodbus interoperability run (slice S27, ADR-0015 decision 16). The CI job
 # "interop" calls the steps one by one and `mise run interop` calls `run`, so the two do
@@ -10,9 +10,11 @@
 #   wait      probe until 60 s have elapsed (about 1 s apart) with a real Modbus FC03 read (python3)
 #   tests     cargo nextest run the ten interop_ tests against the server
 #   example   cargo run the modbus_tcp_read example against the server (must exit 0)
+#   profiles  cargo run the profile_read example with --expect-good against the server for
+#             each profiles/synthetic/modbus-tcp/*.toml (must exit 0; output in profiles.txt)
 #   evidence  write the image digest, pip freeze and the server log to the evidence dir
 #   stop      remove the container (no error when it is not there)
-#   run       build, start, wait, tests, example, evidence, stop; the exit status is the
+#   run       build, start, wait, tests, example, profiles, evidence, stop; the exit status is the
 #             first failure (the container is always stopped; the evidence is written whenever it started)
 #
 # Environment (all optional):
@@ -32,6 +34,7 @@ URL="modbus-tcp://127.0.0.1:${PORT}"
 # nextest names a test by its module path, so the integration test's tests are tests::interop_*.
 FILTER='test(/^tests::interop_/)'
 EXPECTED_TESTS=10
+EXPECTED_PROFILES=3
 
 die() {
   echo "interop: $*" >&2
@@ -123,6 +126,28 @@ run_example() {
     --features modbus 2>&1 | tee "$EVIDENCE/example.txt"
 }
 
+run_profiles() {
+  mkdir -p "$EVIDENCE"
+  cd "$ROOT"
+  # A missing or short profile directory must not pass, so count the files first.
+  local profiles=(profiles/synthetic/modbus-tcp/*.toml)
+  [ -e "${profiles[0]}" ] || die "no profile under profiles/synthetic/modbus-tcp/"
+  [ "${#profiles[@]}" -eq "$EXPECTED_PROFILES" ] ||
+    die "expected $EXPECTED_PROFILES modbus-tcp profiles, found ${#profiles[@]}"
+  : >"$EVIDENCE/profiles.txt"
+  local profile status=0
+  for profile in "${profiles[@]}"; do
+    echo "== $profile" | tee -a "$EVIDENCE/profiles.txt"
+    # The URL names the same address convention the profile declares (profile_read refuses
+    # a disagreement). pipefail makes a failing run fail the pipeline despite tee, and the
+    # loop keeps going so that every profile is reported before the step fails.
+    STONECRAB_URL="${URL}?address-convention=plc4x" STONECRAB_PROFILE="$profile" \
+      cargo run --locked -q -p stonecrab --example profile_read --features full -- --expect-good 2>&1 |
+      tee -a "$EVIDENCE/profiles.txt" || status=1
+  done
+  return "$status"
+}
+
 evidence() {
   need_docker
   mkdir -p "$EVIDENCE"
@@ -144,7 +169,7 @@ run_all() {
   need_docker
   mkdir -p "$EVIDENCE"
   # Remove only the files this script writes, never the directory itself.
-  (cd "$EVIDENCE" && rm -f contract-report.txt example.txt image-digest.txt nextest.txt pip-freeze.txt server.log)
+  (cd "$EVIDENCE" && rm -f contract-report.txt example.txt image-digest.txt nextest.txt pip-freeze.txt profiles.txt server.log)
   trap stop EXIT
   local status=0
   # Subshells, because die exits: a failed step must still reach the evidence step.
@@ -154,6 +179,7 @@ run_all() {
   if [ "$status" -eq 0 ]; then
     (run_tests) || status=$?
     (run_example) || { [ "$status" -ne 0 ] || status=$?; }
+    (run_profiles) || { [ "$status" -ne 0 ] || status=$?; }
   fi
   (evidence) || { [ "$status" -ne 0 ] || status=$?; }
   return "$status"
@@ -165,8 +191,9 @@ case "${1:-}" in
   wait) wait_ready ;;
   tests) run_tests ;;
   example) run_example ;;
+  profiles) run_profiles ;;
   evidence) evidence ;;
   stop) stop ;;
   run) run_all ;;
-  *) die "usage: interop.sh build|start|wait|tests|example|evidence|stop|run" ;;
+  *) die "usage: interop.sh build|start|wait|tests|example|profiles|evidence|stop|run" ;;
 esac

@@ -24,6 +24,12 @@
   `SystemClock`, and the `modbus_tcp_read` example reads one tag from a Modbus TCP server
   through the driver registry. Each example now declares `required-features`.
 - Re-export `DriverOptions` from `stonecrab-core`.
+- Add the `sensors` feature (off by default): `stonecrab::sensors` re-exports the public
+  items of `stonecrab-sensors`, pinned `=0.1.0`, with its TOML loader enabled, and the
+  `full` feature (`sim`, `modbus`, `sensors`). The `profile_read` example (requires `full`)
+  loads a synthetic profile from `profiles/`, reads it from `sim://bench` or a Modbus TCP
+  server and reports name, value, unit, quality, origin and raw value through `tracing`;
+  `--expect-good` makes it fail on any measurement that is not of quality `Good`.
 ### stonecrab-codec 0.1.0
 - Add the crate: `BoundedReader` and `BoundedWriter` with bounds-checked integer, float,
   byte-run and least-significant-bit-first coil reads and writes in an explicit
@@ -228,6 +234,11 @@
   `AddressRejected`, `StatusAddressRejected`, `DuplicateStatusFieldName`). The simulator
   and the testkit are dev-dependencies for the tests; the unpublished testkit gains the
   `ConventionDriver` test double of `Driver`.
+- Add the synthetic reference profiles under `profiles/synthetic/` at the repository root:
+  temperature, pressure/flow/level and discrete state, each as a `modbus-tcp` file authored
+  from the pymodbus register map and a `sim` twin, all labeled `validation = "synthetic"`.
+  They are repository data and are not packaged with the crate. The crate's code is
+  unchanged; a new test loads and validates every file.
 ### stonecrab-core 0.1.0
 - Add docs.rs metadata (`all-features`, `--cfg docsrs`) for feature-gated item docs.
 - Establish shared metadata, safety lints and foundation contracts.

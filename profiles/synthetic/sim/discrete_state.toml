@@ -1,0 +1,82 @@
+# Synthetic discrete state block for the in-process simulator. It describes no real device.
+# The simulator device built by the profile_read example holds the same values as the Modbus
+# interop map, so this profile and modbus-tcp/discrete_state.toml yield the same measurements.
+# The addresses are STATE/<name>:bool; the simulator has no address convention.
+id = "synthetic_discrete_state_sim"
+schema_version = 1
+validation = "synthetic"
+
+[device]
+manufacturer = "Synthetic Manufacturer"
+model = "Synthetic Discrete State Block"
+
+[connection]
+scheme = "sim"
+
+[provenance]
+source = "Synthetic: the simulator twin of modbus-tcp/discrete_state.toml, values from fixtures/modbus/interop/register-map.toml (MB-INTEROP-COIL, MB-INTEROP-DI)"
+fixtures = ["fixtures/modbus/interop/register-map.toml"]
+
+[[measurements]]
+name = "channel_1"
+address = "STATE/coil_1:bool"
+data_type = "bool"
+unit = "1"
+status_fields = [{ name = "channel_fault", address = "STATE/discrete_input_1:bool", bit = 0 }]
+quality_map = { bad_when = ["channel_fault"] }
+
+[[measurements]]
+name = "channel_2"
+address = "STATE/coil_2:bool"
+data_type = "bool"
+unit = "1"
+status_fields = [{ name = "channel_fault", address = "STATE/discrete_input_2:bool", bit = 0, invert = true }]
+quality_map = { bad_when = ["channel_fault"] }
+
+[[measurements]]
+name = "channel_3"
+address = "STATE/coil_3:bool"
+data_type = "bool"
+unit = "1"
+status_fields = [{ name = "channel_fault", address = "STATE/discrete_input_3:bool", bit = 0 }]
+quality_map = { bad_when = ["channel_fault"] }
+
+[[measurements]]
+name = "channel_4"
+address = "STATE/coil_4:bool"
+data_type = "bool"
+unit = "1"
+status_fields = [{ name = "channel_fault", address = "STATE/discrete_input_4:bool", bit = 0, invert = true }]
+quality_map = { bad_when = ["channel_fault"] }
+
+[[measurements]]
+name = "channel_5"
+address = "STATE/coil_5:bool"
+data_type = "bool"
+unit = "1"
+status_fields = [{ name = "channel_fault", address = "STATE/discrete_input_5:bool", bit = 0, invert = true }]
+quality_map = { bad_when = ["channel_fault"] }
+
+[[measurements]]
+name = "channel_6"
+address = "STATE/coil_6:bool"
+data_type = "bool"
+unit = "1"
+status_fields = [{ name = "channel_fault", address = "STATE/discrete_input_6:bool", bit = 0 }]
+quality_map = { bad_when = ["channel_fault"] }
+
+[[measurements]]
+name = "channel_7"
+address = "STATE/coil_7:bool"
+data_type = "bool"
+unit = "1"
+status_fields = [{ name = "channel_fault", address = "STATE/discrete_input_7:bool", bit = 0, invert = true }]
+quality_map = { bad_when = ["channel_fault"] }
+
+[[measurements]]
+name = "channel_8"
+address = "STATE/coil_8:bool"
+data_type = "bool"
+unit = "1"
+status_fields = [{ name = "channel_fault", address = "STATE/discrete_input_8:bool", bit = 0, invert = true }]
+quality_map = { bad_when = ["channel_fault"] }

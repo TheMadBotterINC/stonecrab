@@ -26,6 +26,13 @@ default = []
 sim = ["dep:stonecrab-driver-sim"]
 # The native Modbus TCP driver, re-exported as `stonecrab::modbus` (ARCHITECTURE.md section 10).
 modbus = ["dep:stonecrab-modbus"]
+# The declarative sensor profile crate, re-exported as `stonecrab::sensors`. The profile loader
+# (`SensorProfile::from_toml`, behind `stonecrab-sensors/toml`) is enabled because the
+# `profile_read` example and the facade test load profiles; serde and toml are already in the
+# graph through the sensors crate (ARCHITECTURE.md section 10, decision D10).
+sensors = ["dep:stonecrab-sensors", "stonecrab-sensors/toml"]
+# Everything the facade can re-export; the `profile_read` example needs all three.
+full = ["sim", "modbus", "sensors"]
 
 # Each example needs the driver it exercises, so a build without that feature skips it
 # instead of failing; CI builds them all with --all-features.
@@ -37,10 +44,15 @@ required-features = ["sim"]
 name = "modbus_tcp_read"
 required-features = ["modbus"]
 
+[[example]]
+name = "profile_read"
+required-features = ["full"]
+
 [dependencies]
 stonecrab-core.workspace = true
 stonecrab-driver-sim = { workspace = true, optional = true }
 stonecrab-modbus = { workspace = true, optional = true }
+stonecrab-sensors = { workspace = true, optional = true }
 
 # Example and test tooling only (ADR-0014 addendum); never part of the packaged runtime graph.
 [dev-dependencies]

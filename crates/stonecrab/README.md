@@ -3,7 +3,7 @@ Public facade for the independent native Rust industrial protocol library.
 This development version currently exposes only the runtime-independent foundation.
 No hardware access is implemented. The only drivers are the in-process simulator behind the
 optional `sim` feature and the read-only Modbus TCP driver behind the optional `modbus`
-feature.
+feature. The optional `sensors` feature adds declarative sensor profiles.
 
 Default features are empty. Importing this crate performs no I/O.
 See the [foundation parity record](https://github.com/TheMadBotterINC/stonecrab/blob/master/docs/parity/core.md)
@@ -20,6 +20,15 @@ for current scope. No upstream compatibility or hardware support is claimed.
   `stonecrab-transport` with its Tokio-based TCP transport, so connections must run inside a
   Tokio runtime with the time driver enabled. Parsing a connection string or an address opens
   no socket. See the `stonecrab-modbus` README for the connection-string grammar.
+- `sensors` (off by default): re-exports the declarative sensor profile crate as
+  `stonecrab::sensors` (`SensorProfile`, `Measurement`, `Quality`, `Unit` and the schema
+  types). It also turns on `stonecrab-sensors/toml`, the TOML loader, because
+  `SensorProfile::from_toml` is how an application reads a profile file and the
+  `profile_read` example needs it; `serde` and `toml` come in through that crate and
+  nothing else is added. The profiles in the repository's `profiles/` directory are
+  synthetic, describe no real device and are not part of this crate.
+- `full` (off by default): `sim`, `modbus` and `sensors` together. The `profile_read`
+  example requires it.
 
 ## Quick start with a Modbus TCP server
 The `modbus_tcp_read` example registers `ModbusTcpDriver`, parses the connection string
@@ -59,6 +68,32 @@ cargo run -p stonecrab --example sim_read --features sim
 `sampled_at` is microseconds since the example started. The example exits with status 0
 on success and 1, after logging an error event, on any failure.
 The `sampled_at` values vary from run to run.
+
+## Quick start with a sensor profile
+The `profile_read` example loads a synthetic profile from the repository's `profiles/`
+directory, validates it, builds its tags through the driver the connection string names,
+reads them within 2 seconds, turns the response into measurements and logs name, value,
+unit, quality, origin and (when the profile keeps it) the raw value through `tracing`.
+`STONECRAB_URL` (default `sim://bench`) and `STONECRAB_PROFILE` (default
+`profiles/synthetic/sim/temperature_transmitter.toml`, read from the current directory, so
+run it from a checkout of the repository) select the connection and the profile. It needs
+the `full` feature and, with `--expect-good`, exits with status 1 unless every measurement
+is of quality `Good`:
+
+```sh
+cargo run -p stonecrab --example profile_read --features full -- --expect-good
+```
+
+```text
+ INFO profile_read: name=process_temperature value=F64(3.1415929794311523) unit=Cel quality=good origin=Synthetic sampled_at=4 raw=F32(3.141593)
+ INFO profile_read: name=process_temperature_le value=F32(3.141593) unit=Cel quality=good origin=Synthetic sampled_at=6 raw=F32(3.141593)
+ INFO profile_read: read complete profile=synthetic_temperature_transmitter_sim measurements=2 split_into=1
+```
+
+The simulated device `bench` holds the values of the Modbus interoperability register map,
+so a profile under `profiles/synthetic/modbus-tcp/` read from a pymodbus server (see
+`interop/pymodbus/README.md`) yields the same measurements. The `sampled_at` values vary
+from run to run, and the connect and close span events are omitted above.
 
 Build-tested functionality includes scalar values, identifiers, capabilities, errors,
 deadlines and redacted secrets.

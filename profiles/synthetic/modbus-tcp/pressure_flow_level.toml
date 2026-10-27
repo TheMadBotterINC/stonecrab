@@ -1,0 +1,67 @@
+# Synthetic pressure, flow and level transmitter for the Modbus TCP interop peer. It
+# describes no real device: it maps the pymodbus register map of
+# fixtures/modbus/interop/register-map.toml to engineering values. The map's integers are
+# test values (an INT of -2424, a UDINT of 4242442424), so the engineering numbers are
+# arbitrary but stay inside the declared ranges. Twin of sim/pressure_flow_level.toml.
+id = "synthetic_pressure_flow_level"
+schema_version = 1
+validation = "synthetic"
+
+[device]
+manufacturer = "Synthetic Manufacturer"
+model = "Synthetic Pressure, Flow and Level Transmitter"
+
+[connection]
+scheme = "modbus-tcp"
+address_convention = "plc4x"
+
+[connection.options]
+default-unit-identifier = "1"
+
+[provenance]
+source = "Synthetic: fixtures/modbus/interop/register-map.toml; docs/parity/modbus.md rows MB-INTEROP-HR-02, MB-INTEROP-HR-04, MB-INTEROP-HR-05 and MB-INTEROP-COIL"
+fixtures = ["fixtures/modbus/interop/register-map.toml"]
+
+# INT -2424 at holding register 12 (MB-INTEROP-HR-04) times 0.1 is -242.4 kPa. A fractional
+# constant computes in f64, so the scaled value is an F64 and the raw INT is kept.
+[[measurements]]
+name = "line_pressure"
+address = "holding-register:12:INT"
+data_type = "INT"
+unit = "kPa"
+scaling = [{ multiply = 0.1 }]
+range = { min = -500.0, max = 1000.0 }
+keep_raw = true
+# Coil 5 is false in the coil run (MB-INTEROP-COIL).
+status_fields = [{ name = "sensor_fault", address = "coil:5", bit = 0 }]
+quality_map = { bad_when = ["sensor_fault"] }
+
+# UDINT 4242442424 at holding registers 16-17 (MB-INTEROP-HR-05), big endian, high word
+# first, read as litres per minute. The two status fields read different places:
+# bit 0 of the WORD at holding register 3 (0xA5B8, MB-INTEROP-HR-02) is clear, and coil 7
+# is false.
+[[measurements]]
+name = "flow_rate"
+address = "holding-register:16:UDINT"
+data_type = "UDINT"
+byte_order = "big_endian"
+word_order = "high_word_first"
+unit = "L/min"
+range = { min = 0.0, max = 5000000000.0 }
+status_fields = [
+    { name = "cell_fault", address = "holding-register:3:WORD", bit = 0 },
+    { name = "low_flow", address = "coil:7", bit = 0 },
+]
+quality_map = { bad_when = ["cell_fault"], uncertain_when = ["low_flow"] }
+
+# UINT 42424 at holding register 13 (MB-INTEROP-HR-04) is a level in millimetres. Coil 1 is
+# true in the coil run and means "probe present", so the field inverts it: probe_lost is
+# set only when the coil is false.
+[[measurements]]
+name = "tank_level"
+address = "holding-register:13:UINT"
+data_type = "UINT"
+unit = "mm"
+range = { min = 0.0, max = 50000.0 }
+status_fields = [{ name = "probe_lost", address = "coil:1", bit = 0, invert = true }]
+quality_map = { bad_when = ["probe_lost"] }

@@ -291,6 +291,7 @@ dependencies = [
  "stonecrab-core",
  "stonecrab-driver-sim",
  "stonecrab-modbus",
+ "stonecrab-sensors",
  "tokio",
  "tracing",
  "tracing-subscriber",

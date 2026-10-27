@@ -1,0 +1,90 @@
+# Synthetic discrete state block for the Modbus TCP interop peer. It describes no real
+# device: it maps coils 1 to 8 and discrete inputs 1 to 8 of
+# fixtures/modbus/interop/register-map.toml to eight boolean channels. Each channel has a
+# fault flag on the matching discrete input. The discrete inputs are F,T,F,T,T,F,T,T
+# (MB-INTEROP-DI), so channels 1, 3 and 6 wire the input as an active-high fault flag
+# (no inversion: a clear input is no fault) and channels 2, 4, 5, 7 and 8 wire it as an
+# active-high "healthy" flag (invert: a set input is no fault). Twin of
+# sim/discrete_state.toml.
+id = "synthetic_discrete_state"
+schema_version = 1
+validation = "synthetic"
+
+[device]
+manufacturer = "Synthetic Manufacturer"
+model = "Synthetic Discrete State Block"
+
+[connection]
+scheme = "modbus-tcp"
+address_convention = "plc4x"
+
+[connection.options]
+default-unit-identifier = "1"
+
+[provenance]
+source = "Synthetic: fixtures/modbus/interop/register-map.toml; docs/parity/modbus.md rows MB-INTEROP-COIL and MB-INTEROP-DI"
+fixtures = ["fixtures/modbus/interop/register-map.toml"]
+
+[[measurements]]
+name = "channel_1"
+address = "coil:1"
+data_type = "BOOL"
+unit = "1"
+status_fields = [{ name = "channel_fault", address = "discrete-input:1", bit = 0 }]
+quality_map = { bad_when = ["channel_fault"] }
+
+[[measurements]]
+name = "channel_2"
+address = "coil:2"
+data_type = "BOOL"
+unit = "1"
+status_fields = [{ name = "channel_fault", address = "discrete-input:2", bit = 0, invert = true }]
+quality_map = { bad_when = ["channel_fault"] }
+
+[[measurements]]
+name = "channel_3"
+address = "coil:3"
+data_type = "BOOL"
+unit = "1"
+status_fields = [{ name = "channel_fault", address = "discrete-input:3", bit = 0 }]
+quality_map = { bad_when = ["channel_fault"] }
+
+[[measurements]]
+name = "channel_4"
+address = "coil:4"
+data_type = "BOOL"
+unit = "1"
+status_fields = [{ name = "channel_fault", address = "discrete-input:4", bit = 0, invert = true }]
+quality_map = { bad_when = ["channel_fault"] }
+
+[[measurements]]
+name = "channel_5"
+address = "coil:5"
+data_type = "BOOL"
+unit = "1"
+status_fields = [{ name = "channel_fault", address = "discrete-input:5", bit = 0, invert = true }]
+quality_map = { bad_when = ["channel_fault"] }
+
+[[measurements]]
+name = "channel_6"
+address = "coil:6"
+data_type = "BOOL"
+unit = "1"
+status_fields = [{ name = "channel_fault", address = "discrete-input:6", bit = 0 }]
+quality_map = { bad_when = ["channel_fault"] }
+
+[[measurements]]
+name = "channel_7"
+address = "coil:7"
+data_type = "BOOL"
+unit = "1"
+status_fields = [{ name = "channel_fault", address = "discrete-input:7", bit = 0, invert = true }]
+quality_map = { bad_when = ["channel_fault"] }
+
+[[measurements]]
+name = "channel_8"
+address = "coil:8"
+data_type = "BOOL"
+unit = "1"
+status_fields = [{ name = "channel_fault", address = "discrete-input:8", bit = 0, invert = true }]
+quality_map = { bad_when = ["channel_fault"] }

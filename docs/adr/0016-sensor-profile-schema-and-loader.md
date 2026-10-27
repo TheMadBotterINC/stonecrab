@@ -363,3 +363,95 @@ by path, `stonecrab-testkit` through the workspace), which adds no external crat
    shift-and-mask definition). Unit tests in `src/measurement/scale.rs` pin every branch
    of the engine and the conversions, and `src/tags.rs` pins `address_options`.
    `docs/parity/sensors.md` gains `SENSORS-TAGS` and extends `SENSORS-MEASUREMENTS`.
+
+## Addendum: synthetic profiles, the facade `sensors` feature and the profile example (slice S30, 2026-10-27)
+This addendum records the S30 decisions. It changes no type above; the crate gains only a
+test file, and the first profiles, the facade feature and the example are built on the
+contracts of S28a to S29.
+
+1. **Profiles are repository data.** The six synthetic profiles live in `profiles/synthetic/`
+   at the workspace root, three devices (`temperature_transmitter`, `pressure_flow_level`,
+   `discrete_state`) in two variants (decision D17): `modbus-tcp/` with
+   `address_convention = "plc4x"` and `sim/` with `STATE/<name>:<type>` addresses and no
+   convention. No crate archive contains them: the `include` lists of the sensors and facade
+   crates are unchanged and `packaging/*.txt` still pins them. Shipping profiles with a crate
+   is a milestone M2 decision (named device profiles will need it). `profiles/README.md`
+   documents each file; `crates/stonecrab-sensors/tests/profiles.rs` reads the directory
+   relative to `CARGO_MANIFEST_DIR`, so the test needs a checkout and is not part of any
+   archive either.
+2. **The `synthetic` validation level.** Every file says `validation = "synthetic"`, the
+   lowest label of SPEC.md "Hardware evidence". It means the profile was authored from a
+   documented register map and describes no device: the map is
+   `fixtures/modbus/interop/register-map.toml` (rows `MB-INTEROP-*` of
+   `docs/parity/modbus.md`), written for the pymodbus peer, and no manufacturer document,
+   capture or hardware record stands behind it. The `[provenance]` of each file names the map
+   and the rows; `fixtures` names the map file. The map's values are test values (an `INT`
+   of -2424 scaled by 0.1 is -242.4 kPa, a `UDINT` of 4242442424 is a flow in L/min), so the
+   ranges are chosen to contain them and make no physical claim. Every `Measurement` the
+   profiles yield carries `origin = Synthetic`. No named device profile exists and none is
+   implied (SPEC.md "Sensor profile contract").
+3. **Twins.** A Modbus file and its sim twin have the same file name, the same measurement
+   names and units, and ids that differ by the suffix `_sim` (the sim id is the Modbus id
+   plus `_sim`); the test asserts all three. The sim twin has no byte or word order because
+   the simulator stores native values, and its `data_type` is the simulator's own spelling
+   (`f32`, `i16`, `u32`, `u16`, `bool`), which the validator passes through. Status fields
+   cover the pipeline: a coil read as a status bit, a bit of a `WORD` register, an inverted
+   coil (`probe_lost`), eight inverted and non-inverted discrete-input flags, `bad_when` and
+   `uncertain_when`, `keep_raw` on the unscaled `REAL` and `INT`, and the little-endian
+   region (`MB-INTEROP-LE`) read as `little_endian` with `low_word_first`.
+4. **The facade feature.** `sensors = ["dep:stonecrab-sensors", "stonecrab-sensors/toml"]`
+   and `full = ["sim", "modbus", "sensors"]`, both off by default (D10); `stonecrab::sensors`
+   re-exports the crate with `pub use stonecrab_sensors::*;`, cfg-gated and `doc(cfg)` like
+   the other modules. The workspace entry is `stonecrab-sensors = { path, version =
+   "=0.1.0", default-features = false }`, so the facade pins the sibling exactly
+   (CODING_STANDARDS section 20.1) and the loader is switched on by the facade feature
+   rather than by the sibling's default: `SensorProfile::from_toml` exists only behind
+   `toml`, and the `profile_read` example and the facade test need it. `cargo add stonecrab`
+   still pulls core only.
+5. **The example.** `crates/stonecrab/examples/profile_read.rs` (`required-features =
+   ["full"]`) reads `STONECRAB_URL` (default `sim://bench`) and `STONECRAB_PROFILE` (default
+   `profiles/synthetic/sim/temperature_transmitter.toml`, read relative to the current
+   directory, so it resolves when the example is run from the repository root). It registers a
+   `SimDriver` holding the device `bench` and a `ModbusTcpDriver`; the bench `STATE` tags hold
+   the register map's values (`temperature` 3.141593, `pressure` -2424, `flow` 4242442424,
+   `flow_status` 0xA5B8, `level` 42424, `coil_1` to `coil_10`, `discrete_input_1` to
+   `discrete_input_10`), so a sim file and its Modbus twin yield the same measurements. It
+   loads and validates the profile, parses the connection string through the registry,
+   takes `ConnectionConfig::address_options()` before `connect` consumes the configuration
+   and refuses a connection string whose named convention differs from the profile's, builds
+   the tags with `profile.tags(driver)` (which hands the profile's convention to every
+   `parse_address` call), reads them within 2 s counted from `Instant::now()` (the
+   simulator's `RealtimeClock` and the Modbus `SystemClock` agree with it outside paused
+   test time), computes `profile.measurements(&response, SystemTime::now())` and emits one
+   `tracing::info!` per measurement with `name`, `value`, `unit`, `quality`, `origin`,
+   `sampled_at` and, when the profile keeps it, `raw`, then one event with `split_into`.
+   It installs the `fmt` layer itself (ADR-0011), prints nothing else and returns
+   `ExitCode`. With `--expect-good` it reports every measurement first and then returns
+   `FAILURE` if any quality is not `Good` or the response covers fewer measurements than
+   the profile defines. No library item exists only for the example: it calls
+   `SensorProfile::{from_toml, validate, address_options, tags, measurements}` and the
+   registry, driver and connection contracts that their own tests exercise.
+6. **CI.** The `examples` job and `mise run examples` run `profile_read --expect-good`
+   against `sim://bench` once per sim profile. `interop/pymodbus/interop.sh` gains the
+   `profiles` step, after `example` and part of `run`, which runs it against the container
+   once per `profiles/synthetic/modbus-tcp/*.toml` (the step fails unless exactly three
+   exist), writes `profiles.txt` into the evidence directory and keeps going after a failure
+   so that every profile is reported; the CI `interop` job calls it as a step. The `features`
+   job's `cargo hack check --feature-powerset --depth 2` covers `sensors` alone,
+   `sensors` with `modbus` or `sim`, and `full` without a change.
+7. **D23 result.** `cargo tree --locked -e normal,dev -i once_cell`, `-i lazy_static` and
+   `-i thread_local` show the paths already recorded in ADR-0012 and ADR-0014 and no new
+   one: `once_cell` through `tracing-core` (from `tracing` in `stonecrab-driver-sim` and
+   `stonecrab-modbus`, and from `tracing-subscriber`), `lazy_static` through `sharded-slab`
+   and `tracing-subscriber`, `thread_local` through `tracing-subscriber`. `-i log`, `-i time`
+   and `-i chrono` match no package. `serde` and `toml` were already in the graph through
+   `stonecrab-sensors`; the facade feature adds the edge `stonecrab -> stonecrab-sensors`
+   and nothing else. `cargo tree -p stonecrab -e normal` with default features is
+   `stonecrab-core` and its two dependencies only; with `--features full` it adds the
+   simulator (`tracing`), the Modbus crate (codec, transport, `tokio`) and the sensors crate
+   (`serde`, `toml`).
+8. **Tests and rows.** `tests/profiles.rs` (five tests, tagged `// covers:
+   SENSORS-SYNTHETIC-PROFILES`) and the facade test `tests/sensors_feature.rs`. The row
+   `SENSORS-SYNTHETIC-PROFILES` in `docs/parity/sensors.md` moves from `planned` to
+   `implemented`; the sensors README support table still lists the profiles as planned and
+   is brought to final support levels by S31.

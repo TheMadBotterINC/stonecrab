@@ -1,0 +1,44 @@
+# Synthetic temperature transmitter for the in-process simulator. It describes no real
+# device. The simulator device built by the profile_read example holds the same values as
+# the Modbus interop map, so this profile and modbus-tcp/temperature_transmitter.toml yield
+# the same measurements. The addresses are STATE/<name>:<type>; the simulator has no address
+# convention and no byte or word order, so none is declared.
+id = "synthetic_temperature_transmitter_sim"
+schema_version = 1
+validation = "synthetic"
+
+[device]
+manufacturer = "Synthetic Manufacturer"
+model = "Synthetic Temperature Transmitter"
+
+[connection]
+scheme = "sim"
+
+[provenance]
+source = "Synthetic: the simulator twin of modbus-tcp/temperature_transmitter.toml, values from fixtures/modbus/interop/register-map.toml (MB-INTEROP-HR-07, MB-INTEROP-LE, MB-INTEROP-COIL)"
+fixtures = ["fixtures/modbus/interop/register-map.toml"]
+
+[[measurements]]
+name = "process_temperature"
+address = "STATE/temperature:f32"
+data_type = "f32"
+unit = "Cel"
+scaling = [{ clamp = { min = -50.0, max = 150.0 } }]
+range = { min = -50.0, max = 150.0 }
+min_interval_ms = 1000
+stale_after_ms = 5000
+keep_raw = true
+status_fields = [{ name = "open_circuit", address = "STATE/coil_2:bool", bit = 0 }]
+quality_map = { bad_when = ["open_circuit"] }
+
+# The simulator stores values natively, so this is the same tag the Modbus twin reads in
+# little-endian form.
+[[measurements]]
+name = "process_temperature_le"
+address = "STATE/temperature:f32"
+data_type = "f32"
+unit = "Cel"
+range = { min = -50.0, max = 150.0 }
+keep_raw = true
+status_fields = [{ name = "open_circuit", address = "STATE/coil_2:bool", bit = 0 }]
+quality_map = { bad_when = ["open_circuit"] }

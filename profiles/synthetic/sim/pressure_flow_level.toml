@@ -1,0 +1,51 @@
+# Synthetic pressure, flow and level transmitter for the in-process simulator. It describes
+# no real device. The simulator device built by the profile_read example holds the same
+# values as the Modbus interop map, so this profile and
+# modbus-tcp/pressure_flow_level.toml yield the same measurements. The addresses are
+# STATE/<name>:<type>; the simulator has no address convention and no byte or word order.
+id = "synthetic_pressure_flow_level_sim"
+schema_version = 1
+validation = "synthetic"
+
+[device]
+manufacturer = "Synthetic Manufacturer"
+model = "Synthetic Pressure, Flow and Level Transmitter"
+
+[connection]
+scheme = "sim"
+
+[provenance]
+source = "Synthetic: the simulator twin of modbus-tcp/pressure_flow_level.toml, values from fixtures/modbus/interop/register-map.toml (MB-INTEROP-HR-02, MB-INTEROP-HR-04, MB-INTEROP-HR-05, MB-INTEROP-COIL)"
+fixtures = ["fixtures/modbus/interop/register-map.toml"]
+
+[[measurements]]
+name = "line_pressure"
+address = "STATE/pressure:i16"
+data_type = "i16"
+unit = "kPa"
+scaling = [{ multiply = 0.1 }]
+range = { min = -500.0, max = 1000.0 }
+keep_raw = true
+status_fields = [{ name = "sensor_fault", address = "STATE/coil_5:bool", bit = 0 }]
+quality_map = { bad_when = ["sensor_fault"] }
+
+[[measurements]]
+name = "flow_rate"
+address = "STATE/flow:u32"
+data_type = "u32"
+unit = "L/min"
+range = { min = 0.0, max = 5000000000.0 }
+status_fields = [
+    { name = "cell_fault", address = "STATE/flow_status:u16", bit = 0 },
+    { name = "low_flow", address = "STATE/coil_7:bool", bit = 0 },
+]
+quality_map = { bad_when = ["cell_fault"], uncertain_when = ["low_flow"] }
+
+[[measurements]]
+name = "tank_level"
+address = "STATE/level:u16"
+data_type = "u16"
+unit = "mm"
+range = { min = 0.0, max = 50000.0 }
+status_fields = [{ name = "probe_lost", address = "STATE/coil_1:bool", bit = 0, invert = true }]
+quality_map = { bad_when = ["probe_lost"] }

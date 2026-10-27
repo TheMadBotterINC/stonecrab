@@ -81,3 +81,43 @@ pub mod sim {
 pub mod modbus {
     pub use stonecrab_modbus::*;
 }
+
+/// Declarative sensor profiles, behind the `sensors` feature.
+///
+/// This module re-exports every public item of the `stonecrab-sensors` crate
+/// (`pub use stonecrab_sensors::*;`), so `stonecrab::sensors::SensorProfile` is the type
+/// `stonecrab_sensors::SensorProfile`. The facade version pins the sibling crate exactly, so
+/// the glob cannot drift from the version the facade was published with. The feature also
+/// enables the crate's `toml` loader, because
+/// [`SensorProfile::from_toml`](sensors::SensorProfile::from_toml) is how an application
+/// reads a profile file; the `profile_read` example and the facade test do exactly that.
+///
+/// A profile maps protocol addresses to named, scaled, qualified measurements. It belongs to
+/// one driver scheme, declares its address convention and carries no executable code. The
+/// profiles that ship in the repository under `profiles/` are labeled `synthetic`: they are
+/// authored from a documented register map and describe no real device.
+///
+/// # Examples
+/// ```
+/// use stonecrab::sensors::{SensorProfile, ValidationStatus};
+///
+/// let profile = SensorProfile::from_toml(r#"
+///     id = "synthetic_example"
+///     schema_version = 1
+///     validation = "synthetic"
+///
+///     [connection]
+///     scheme = "sim"
+///
+///     [provenance]
+///     source = "Synthetic reference profile; no real device"
+/// "#)?;
+/// assert_eq!(profile.validation, ValidationStatus::Synthetic);
+/// assert!(profile.validate().is_ok());
+/// # Ok::<(), stonecrab::sensors::ProfileError>(())
+/// ```
+#[cfg(feature = "sensors")]
+#[cfg_attr(docsrs, doc(cfg(feature = "sensors")))]
+pub mod sensors {
+    pub use stonecrab_sensors::*;
+}

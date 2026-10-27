@@ -153,7 +153,8 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-hack@0.6.45
-      # The powerset covers the facade's `sim` feature on its own (ADR-0014 addendum, S14).
+      # The powerset covers the facade's `sim` feature on its own (ADR-0014 addendum, S14), and
+      # at depth 2 `sensors` alone, `sensors` with `modbus` or `sim`, and `full` (S30).
       # --no-dev-deps edits Cargo.toml while it runs, so this pass cannot use --locked.
       - run: cargo hack check --workspace --feature-powerset --depth 2 --no-dev-deps
       # cargo hack runs one cargo check per package, i.e. --no-default-features per crate.
@@ -167,6 +168,17 @@ jobs:
           toolchain: "1.99.1"
       - run: cargo build --locked --examples --all-features
       - run: cargo run --locked -p stonecrab --example sim_read --features sim
+      # profile_read against the in-process simulator, one step per synthetic sim profile; no
+      # network. --expect-good fails the step on any measurement that is not of quality Good.
+      - run: cargo run --locked -p stonecrab --example profile_read --features full -- --expect-good
+        env:
+          STONECRAB_PROFILE: profiles/synthetic/sim/temperature_transmitter.toml
+      - run: cargo run --locked -p stonecrab --example profile_read --features full -- --expect-good
+        env:
+          STONECRAB_PROFILE: profiles/synthetic/sim/pressure_flow_level.toml
+      - run: cargo run --locked -p stonecrab --example profile_read --features full -- --expect-good
+        env:
+          STONECRAB_PROFILE: profiles/synthetic/sim/discrete_state.toml
   interop:
     # The driver against a real server: pymodbus 3.8.6 in Docker, built from
     # interop/pymodbus/ (ADR-0015 decision 16). Every push and pull request on
@@ -194,6 +206,9 @@ jobs:
       - run: interop/pymodbus/interop.sh tests
       # cargo run --locked -p stonecrab --example modbus_tcp_read --features modbus
       - run: interop/pymodbus/interop.sh example
+      # cargo run --locked -p stonecrab --example profile_read --features full -- --expect-good
+      # once per profiles/synthetic/modbus-tcp/*.toml (three, counted), output in profiles.txt.
+      - run: interop/pymodbus/interop.sh profiles
       # Image id, pip freeze and server log next to the contract report the test wrote.
       - run: interop/pymodbus/interop.sh evidence
         if: ${{ always() }}

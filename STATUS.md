@@ -55,9 +55,12 @@ ADR-0004 explicitly overrides the original `main` branch policy with `master`.
 ### Workspace and development infrastructure
 
 - Resolver-3 Cargo workspace, Rust 2024, shared metadata and strict safety lints.
-- `crates/stonecrab`: public facade, re-exporting core and, behind the `sim` and `modbus`
-  features, the simulator driver as `stonecrab::sim` and the Modbus TCP driver as
-  `stonecrab::modbus`; `examples/sim_read.rs` and `examples/modbus_tcp_read.rs`.
+- `crates/stonecrab`: public facade, re-exporting core and, behind the `sim`, `modbus` and
+  `sensors` features (`full` enables all three), the simulator driver as `stonecrab::sim`,
+  the Modbus TCP driver as `stonecrab::modbus` and the profiles as `stonecrab::sensors`;
+  `examples/sim_read.rs`, `examples/modbus_tcp_read.rs` and `examples/profile_read.rs`.
+- `profiles/synthetic/`: six synthetic sensor profiles (three for the pymodbus map, three
+  simulator twins) with `profiles/README.md`; repository data, not shipped.
 - `crates/stonecrab-core`: no Tokio, executor or network dependency.
 - `crates/stonecrab-transport`: the only crate with Tokio (scoped features, no spawned
   tasks); TCP transport, framing layer with resync, the reconnecting `ConnectionGuard`,
@@ -189,7 +192,8 @@ gates named were run locally before that commit.
 | S25b | 2026-10-27 | Modbus `ModbusTcpDriver` skeleton (public from this slice, not crate-private as the plan said, because the contract test is an integration test): `new()` over `TcpFactory` and `SystemClock`, `with_clock`, `with_transport_factory` (the sanctioned injection point for the testkit fake), `with_defaults`; scheme `modbus-tcp`; `parse_config` accepts `modbus-tcp[:tcp]://host[:port]` with default port 502, bracketed IPv6 and strict port rules and rejects every query parameter until S26 adds the six upstream parameters; `parse_address` delegates to the S20b parser; `connect` opens `ModbusConnection`; the transport dependency gains its `tcp` feature. The S13 contract suite runs through `dyn Driver` over `FakeTransportFactory` with a first-party MBAP responder on the interop register map (tests/support): 19 passed, 0 failed, 4 named skips (two write cases per D3, and two disconnect cases because a `Step::Respond` closure could not close the fake transport on demand; S25c added the hook and the two cases pass since); modbus coverage 100% (2412/2412); ADR-0015 decision 14; parity row `MB-CONTRACT-SUITE` | check, coverage, lint-attrs, features, machete, dependencies, package |
 | S25c | 2026-10-27 | Testkit `Reaction` (`Reply`, `Silence`, `Close`, `ReplyThenClose`), `Reactor` and `Step::React`/`Step::react`: a scripted responder decides per request whether to answer, stay silent, close the peer or answer then close; `Step::respond` is unchanged and shares the code path; both `FakeTransport` and `ScriptedPeer` honour a reaction close exactly like `CloseAt` (end of stream then `Disconnected`; half-close on loopback). The modbus contract test wires `inject_disconnect` to it: 21 passed, 0 failed, 2 named skips (the write cases, D3); ADR-0009 addendum; ADR-0015 decision 14 and `MB-CONTRACT-SUITE` updated | check, coverage, lint-attrs, features, machete, dependencies, package |
 | S26 | 2026-10-27 | Modbus TCP driver completed: core gains the driver-owned options slot (`DriverOptions` trait, `ConnectionConfigBuilder::driver_options`, `ConnectionConfig::driver_options_as::<T>()`; ADR-0008 amendment; `CORE-DRIVER-OPTIONS`) because a TCP endpoint cannot carry query text; `ModbusOptions` parsed from the six upstream parameters with upstream defaults and bounds (`request-timeout-ms` also sets `Timeouts.request`; `default-unit-identifier` 0..=255; `ping-address` validated under plc4x and unused; the four byte-order names through one shared table; `max-coils-per-request` 1..=2000 and `max-registers-per-request` 1..=125 fed into the batch plan; `address-convention=plc4x`; unknown keys rejected, divergence `MB-CFG-UNKNOWN`; driver defaults seed the parse and the string overrides them); seventh fuzz target `fuzz_modbus_connection_string` with a seed corpus; facade `modbus` feature (`stonecrab::modbus`, sibling pinned `=0.1.0`, `[[example]] required-features`) and `examples/modbus_tcp_read.rs` (`STONECRAB_URL`, `STONECRAB_ADDRESS`, ADR-0011 output rule; built in CI, run only by the S27 interop job); loopback evidence over `ScriptedPeer`: a strict-script holding-register read through `registry.connect("modbus-tcp://127.0.0.1:<port>")` and the S13 suite over the new testkit `ScriptedPeerFactory` (one peer per open): 18 passed, 0 failed, 5 named skips (three timing cases, which need the fake clock, and the two write cases); README completed (grammar, explicit-convention rule, parameter table, byte-order mapping, support levels) with the README-vs-`Capabilities` test; `MB-CFG-*`, `MB-QUIRK-A`, `MB-QUIRK-F` and `MB-TCP-CONNECT` (loopback) rows implemented; ADR-0015 decision 15, ADR-0009 addendum. `MB-TCP-CONNECT` and the four reads reach automated-verified only with S27 | check, coverage, lint-attrs, features, machete, dependencies, fuzz, examples, package |
-| S27 | 2026-10-27 | Interoperability against pymodbus 3.8.6: `interop/pymodbus/` holds a first-party server (`server.py`, read with `tomllib` from the interop register map, `pymodbus` 3.8.6 pinned, `python:3.12-slim` pinned by index digest, non-root) and `interop.sh` (build, start, a readiness probe that performs a real FC03 read, nextest over the ten `interop_` tests with a count guard, the `modbus_tcp_read` example, evidence, stop); `crates/stonecrab-modbus/tests/interop_pymodbus.rs` (ten tests, ignored unless `STONECRAB_INTEROP_MODBUS` is set; a mutated server made four of them fail, so they are not vacuous); testkit `CountingFactory` (opens, frames and bytes through any transport factory) gives the contract suite an exact `io_probe` over a real socket; the suite against pymodbus: 14 passed, 0 failed, 9 named skips (timing, on-demand disconnect and device exception, writes); CI job `interop` (ubuntu, every push and PR, `interop-evidence` artifact with image id, `pip freeze`, server log, contract report, nextest and example output) and `mise run interop`; finding: pymodbus 3.8.6 does not validate FC01/FC02 spans, so the server's bit blocks cover the whole address space; `MB-TCP-CONNECT` and the four read rows automated-verified; `MB-INTEROP-*` rows implemented; ADR-0015 accepted (decision 16); the modbus README support table moves read and interoperability to interoperability-tested. Verified locally through Docker; the hosted job's first run is this commit's | check, coverage, lint-attrs, features, machete, dependencies, interop, package |
+| S27 | 2026-10-27 | Interoperability against pymodbus 3.8.6: `interop/pymodbus/` holds a first-party server (`server.py`, read with `tomllib` from the interop register map, `pymodbus` 3.8.6 pinned, `python:3.12-slim` pinned by index digest, non-root) and `interop.sh` (build, start, a readiness probe that performs a real FC03 read, nextest over the ten `interop_` tests with a count guard, the `modbus_tcp_read` example, evidence, stop); `crates/stonecrab-modbus/tests/interop_pymodbus.rs` (ten tests, ignored unless `STONECRAB_INTEROP_MODBUS` is set; a mutated server made four of them fail, so they are not vacuous); testkit `CountingFactory` (opens, frames and bytes through any transport factory) gives the contract suite an exact `io_probe` over a real socket; the suite against pymodbus: 14 passed, 0 failed, 9 named skips (timing, on-demand disconnect and device exception, writes); CI job `interop` (ubuntu, every push and PR, `interop-evidence` artifact with image id, `pip freeze`, server log, contract report, nextest and example output) and `mise run interop`; finding: pymodbus 3.8.6 does not validate FC01/FC02 spans, so the server's bit blocks cover the whole address space; `MB-TCP-CONNECT` and the four read rows automated-verified; `MB-INTEROP-*` rows implemented; ADR-0015 accepted (decision 16); the modbus README support table moves read and interoperability to interoperability-tested. Verified locally through Docker and green on the hosted runner (run 40543567845) | check, coverage, lint-attrs, features, machete, dependencies, interop, package |
+| S30 | 2026-10-27 | Synthetic profiles and the definition-of-done example: `profiles/synthetic/modbus-tcp/{temperature_transmitter,pressure_flow_level,discrete_state}.toml` addressed to the pymodbus map under `address_convention = "plc4x"` (REAL temperature at holding register 26 with a coil status field plus a little-endian twin at 300, INT scaled by 0.1 to kPa, UDINT L/min, UINT mm with an inverted status, eight coils with inversion and discrete-input status fields), `profiles/synthetic/sim/` twins on `STATE/` addresses with the same names, units, ranges and quality maps (a test compares them), `profiles/README.md` (schema, the synthetic level, one section per file, no named device profile, repository data not shipped); facade features `sensors` (with the loader) and `full`, `stonecrab::sensors`, sibling pinned `=0.1.0`; `examples/profile_read.rs` (`STONECRAB_URL`, `STONECRAB_PROFILE`, `--expect-good` fails on any non-Good quality; ADR-0011 output rule) runs green with every measurement Good against `sim://bench` (examples job and `mise run examples`) and against pymodbus (interop job `profiles` step, `profiles.txt` evidence); `SENSORS-SYNTHETIC-PROFILES` implemented; ADR-0016 addendum. The sensors crate README's support rows are updated in S31 | check, coverage, lint-attrs, features, machete, dependencies, examples, interop, package |
 
 ## Verified evidence and reproduction
 
@@ -224,7 +228,7 @@ Most recent local results for the implementation baseline:
   `stonecrab-driver-sim` 2051/2051 (gate 100%), `stonecrab-sensors` 1398/1398 (gate
   100%), `stonecrab-transport` 1216/1220 (gate 95%; the uncovered lines are the
   real-socket deadline-expiry and resolver-failure arms named in ADR-0014),
-  `stonecrab-testkit` 4605/4679 (gate 90%), `stonecrab` n/a (no executable lines).
+  `stonecrab-testkit` 4606/4679 (gate 90%), `stonecrab` n/a (no executable lines).
   Error paths are not excluded. Region coverage is reported in
   `target/coverage-summary.txt` and not gated; do not describe it as branch coverage.
 - Workspace tests and doctests passed on Rust 1.97.1.
@@ -242,12 +246,13 @@ mise exec -- cargo check --locked --workspace --all-features --target aarch64-un
 mise exec -- cargo check --locked --workspace --all-features --target armv7-unknown-linux-gnueabihf
 ```
 
-Hosted CI for `cf93424` **completed successfully** with the full workflow:
-https://github.com/TheMadBotterINC/stonecrab/actions/runs/40541724308
+Hosted CI for `0429da3` (S27) **completed successfully** with the full workflow:
+https://github.com/TheMadBotterINC/stonecrab/actions/runs/40543567845
 Green jobs: the six test cells (ubuntu, macOS, Windows on 1.97.1 and 1.99.1), quality
 with the per-crate coverage gate, cross, dependencies, package, dco, features, machete,
-lint-attrs, beta, geiger, fuzz-smoke (seven targets) and examples (the `sim_read` example
-runs on the hosted runner). The report-only `semver` job fails until the sibling crates
+lint-attrs, beta, geiger, fuzz-smoke (seven targets), examples (the `sim_read` example
+runs on the hosted runner) and interop (the pymodbus 3.8.6 container on the amd64 runner:
+ten interop tests, the `modbus_tcp_read` example, the `interop-evidence` artifact). The report-only `semver` job fails until the sibling crates
 exist on crates.io (no baseline) and does not fail the run. Three platform fixes were
 needed on hosted runs: the prebuilt cargo-fuzz binary defaults to a musl target, so the
 smoke script passes the host triple; the drop-mid-write transport test is ignored on
@@ -258,9 +263,8 @@ fourth fix followed the first hosted smoke of `fuzz_modbus_connection_string`: t
 harness's echo invariant was unsound (a fixed message can equal the input, and an
 unknown key is named in the message), so it now checks only non-ASCII authority and
 value text that no key contains; the three inputs are corpus seeds with named
-regression tests (CONTRIBUTING, fuzz findings). The `interop` job (S27) is verified
-locally through Docker; its first hosted run is the S27 commit's. Nothing establishes
-the mutation, soak or hardware gates yet.
+regression tests (CONTRIBUTING, fuzz findings). The `interop` job (S27) passed on its
+first hosted run. Nothing establishes the mutation, soak or hardware gates yet.
 
 ## Important implementation and tooling details
 
