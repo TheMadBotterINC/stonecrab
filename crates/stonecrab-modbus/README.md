@@ -126,18 +126,19 @@ stable row id in the
 The labels are those of the project's hardware-evidence policy: `build-tested`,
 `simulator-tested`, `interoperability-tested` and `hardware-verified`, plus `planned` and
 `not supported`. `simulator-tested` covers the in-memory transport and the loopback
-scripted peer; the interoperability job against an independent server (pymodbus) is
-planned (slice S27), and no physical device has been tried.
+scripted peer. The `interop` CI job (slice S27) runs the driver against an independent
+server, pymodbus 3.8.6, on every push (see "Interoperability" below); the rows it exercises
+read `interoperability-tested`. No physical device has been tried.
 
 | Capability | Support level |
 | --- | --- |
-| Read: coils, discrete inputs, holding registers and input registers (function codes 01 to 04) as the 15 numeric and bit types | simulator-tested |
+| Read: coils, discrete inputs, holding registers and input registers (function codes 01 to 04) as the 15 numeric and bit types | interoperability-tested |
 | Write | not supported |
 | Subscribe, browse and discover | not supported |
 | Connection string and parameters (`parse_config`) | simulator-tested |
-| Connect, close, request-driven reconnect and connection state | simulator-tested |
-| Batched reads with split disclosure | simulator-tested |
-| Interoperability against an independent server | planned |
+| Connect, close, request-driven reconnect and connection state | interoperability-tested |
+| Batched reads with split disclosure | interoperability-tested |
+| Interoperability against an independent server | interoperability-tested |
 | Hardware verification | planned |
 
 The layers underneath, with their evidence:
@@ -152,7 +153,47 @@ The layers underneath, with their evidence:
 | Session: transaction ids, reply correlation by transaction id, unit id and function code, exception mapping (`ModbusSession`, `exception_item_error`) | unit-tested on the in-memory transport |
 | Typed register decoding and byte order (`TypedDecoder`) | unit-tested; vector-tested; property-tested; the little-endian modes are derived from the documented layouts, not yet confirmed by upstream vectors |
 | Read batching (`Batcher`) | unit-tested; property-tested |
-| Connection and driver (`ModbusConnection`, `ModbusTcpDriver`) | unit-tested on the in-memory transport; contract-suite-tested on the in-memory transport and over loopback sockets; one read run over loopback |
+| Connection and driver (`ModbusConnection`, `ModbusTcpDriver`) | unit-tested on the in-memory transport; contract-suite-tested on the in-memory transport and over loopback sockets; one read run over loopback; ten reads and the contract suite against pymodbus 3.8.6 |
+
+## Interoperability
+The `interop` job of the repository's CI builds `interop/pymodbus/` (a first-party Modbus
+TCP server on pymodbus 3.8.6, `python:3.12-slim` pinned by digest, serving the register
+map of `fixtures/modbus/interop/register-map.toml`), starts it on `127.0.0.1:5020` and
+runs ten tests of `tests/interop_pymodbus.rs` plus the `modbus_tcp_read` example against
+it. The tests are `#[ignore]`d and run only when `STONECRAB_INTEROP_MODBUS` names the
+server, so `cargo test` needs no container and no network.
+
+To run it locally you need Docker; from the repository root:
+
+```sh
+mise run interop
+```
+
+It builds the image, starts the container, waits for the port, runs the tests and the
+example, writes the evidence to `target/interop-evidence/` (image id, `pip freeze`, server
+log, the contract report, the test and example output) and removes the container. Without
+`docker` on the path it stops with a message saying so. `interop/pymodbus/README.md` has
+the manual commands.
+
+What the run verifies against the independent server:
+
+- All 15 holding-register types decode to the documented values (registers 1 to 31), plus
+  coils 1 to 10, discrete inputs 1 to 10 and input registers 1 to 7, with the wire
+  address one below the logical address.
+- The little-endian REAL at registers 300 and 301, by address block and by connection
+  parameter.
+- A read past the map yields a device exception (input register 22: exception 02, status
+  code 2 on the item), and a good tag in another chunk still succeeds.
+- Batches split at 125 registers and 2000 coils and say so in `split_into`; 125 registers
+  and 2000 coils are one request each.
+- The bare `40001` spelling is refused without `address-convention=plc4x` and reads with it.
+- The common driver contract suite passes through `ModbusTcpDriver::new()`: 14 cases pass
+  and 9 are skipped by name (the timing, disconnect and device-exception cases that need
+  a fault hook a stock pymodbus does not have, and the two write cases).
+
+Not verified there: timing over a real clock, dropped links and device exceptions on
+demand, and unit-id correlation (pymodbus answers every unit id). The decisions behind
+the run are in ADR-0015, decision 16.
 
 ## Address grammar
 `ModbusAddress::parse(text, &AddressOptions)` reads the grammar of the upstream PLC4X Modbus

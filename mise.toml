@@ -7,6 +7,8 @@
 #   mise run lint-attrs    = CI "lint-attrs" job
 #   mise run features      = CI "features" job
 #   mise run examples      = CI "examples" job
+#   mise run interop       = CI "interop" job (needs Docker; interop/pymodbus/interop.sh,
+#                            evidence under target/interop-evidence/)
 #   mise run fuzz          = CI "fuzz-smoke" job (scripts/fuzz-smoke.sh; optional seconds argument)
 #   mise run machete       = CI "machete" job
 #   mise run dependencies  = CI "dependencies" job
@@ -93,6 +95,10 @@ run = [
   "cargo build --locked --examples --all-features",
   "cargo run --locked -p stonecrab --example sim_read --features sim",
 ]
+
+[tasks.interop]
+description = "Build and run the pymodbus server in Docker, run the interop tests and the modbus_tcp_read example against it, keep the evidence (ADR-0015 decision 16)"
+run = "interop/pymodbus/interop.sh run"
 
 [tasks.fuzz]
 description = "cargo deny on the fuzz workspace, then every fuzz target for 60 s (ADR-0009)"

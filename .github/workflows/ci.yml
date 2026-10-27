@@ -167,6 +167,43 @@ jobs:
           toolchain: "1.99.1"
       - run: cargo build --locked --examples --all-features
       - run: cargo run --locked -p stonecrab --example sim_read --features sim
+  interop:
+    # The driver against a real server: pymodbus 3.8.6 in Docker, built from
+    # interop/pymodbus/ (ADR-0015 decision 16). Every push and pull request on
+    # ubuntu-latest only, so the job can become a required check. The steps are the
+    # subcommands of interop/pymodbus/interop.sh, which `mise run interop` also runs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
+        with:
+          toolchain: "1.99.1"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.148
+      # docker build -f interop/pymodbus/Dockerfile -t stonecrab-interop:local .
+      - run: interop/pymodbus/interop.sh build
+      # docker run -d on 127.0.0.1:5020
+      - run: interop/pymodbus/interop.sh start
+      # Probe until 60 s have elapsed (a real Modbus read, see interop.sh).
+      - run: interop/pymodbus/interop.sh wait
+      # cargo nextest run --locked -p stonecrab-modbus --all-features
+      #   --run-ignored ignored-only -E 'test(/^tests::interop_/)'
+      # (nextest names a test by its module path, hence the tests:: prefix.) The step
+      # fails when the filter does not select exactly the ten interop tests.
+      - run: interop/pymodbus/interop.sh tests
+      # cargo run --locked -p stonecrab --example modbus_tcp_read --features modbus
+      - run: interop/pymodbus/interop.sh example
+      # Image id, pip freeze and server log next to the contract report the test wrote.
+      - run: interop/pymodbus/interop.sh evidence
+        if: ${{ always() }}
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: interop-evidence
+          path: target/interop-evidence/
+      - run: interop/pymodbus/interop.sh stop
+        if: ${{ always() }}
   machete:
     runs-on: ubuntu-latest
     steps:

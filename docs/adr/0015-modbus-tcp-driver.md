@@ -1,12 +1,12 @@
 # 0015: Modbus TCP driver crate
 ## Status
-Proposed, drafted in slice S20a on 2026-10-27; accepted when S27's interoperability job is
-green. It adds the new crate `stonecrab-modbus` (CODING_STANDARDS 12.6 requires an ADR for a
-new crate) and records decisions D3 (the Modbus part), D5, D6, D8, D16, D18 and D19 of
-docs/ALPHA_PLAN.md. It builds on ADR-0005 (coverage tiers), ADR-0006 (`ByteOrder` and
-`WordOrder`) and ADR-0013 (codec primitives). Only the address types and their text
-grammar exist when this draft is written (S20a, S20b); every later slice named below adds
-to this ADR's Compliance section rather than replacing it.
+Accepted on 2026-10-27 by slice S27: the driver answered reads from an independent peer,
+pymodbus 3.8.6, and the S13 contract suite ran against it (decision 16). It was drafted
+in slice S20a on 2026-10-27 and adds the new crate `stonecrab-modbus` (CODING_STANDARDS
+12.6 requires an ADR for a new crate); it records decisions D3 (the Modbus part), D5, D6,
+D8, D16, D18 and D19 of docs/ALPHA_PLAN.md. It builds on ADR-0005 (coverage tiers),
+ADR-0006 (`ByteOrder` and `WordOrder`) and ADR-0013 (codec primitives). Every slice named
+below added to this ADR's Compliance section rather than replacing it.
 
 ## Context
 The alpha ships one real protocol: a native Modbus TCP driver that reads coils, discrete
@@ -85,7 +85,7 @@ parses it with `Short.parseShort` and the inventoried files show no range check
    the verified upstream fixture values plus one documented little-endian region (holding
    registers 300-301 = `0xDC0F 0x4940`, REAL 3.141593 under LITTLE_ENDIAN). It listens on
    TCP 5020 only. Nothing from upstream's `modbus_server.py` is copied. The job is S27 and
-   is what turns this ADR from proposed to accepted.
+   is what turned this ADR from proposed to accepted (decision 16).
 4. **Vector redistribution.** Four upstream test suites (`ParserSerializerTestsuite.xml`,
    `DriverTestsuite.xml`, `Modbus-all-datatypes.xml` and
    `Modbus-all-datatypes-little-endian.xml`) are kept verbatim with their ASF headers
@@ -640,8 +640,8 @@ parses it with `Short.parseShort` and the inventoried files show no range check
       configuration, reads one tag with a 2 s deadline, logs name, value, outcome and
       `sampled_at` through `tracing::info!` on a fmt layer it installs, closes and returns
       an `ExitCode`. The CI `examples` job already builds every example with
-      `--all-features`; the example is not run in CI until the interoperability job (S27)
-      provides a server. The D23 check (`cargo tree -e normal,dev -i once_cell`, then
+      `--all-features`; the example is run in CI by the `interop` job (S27, decision 16),
+      which provides a server. The D23 check (`cargo tree -e normal,dev -i once_cell`, then
       `-i lazy_static`, `-i log`, `-i time`, `-i chrono`, one name at a time) adds no
       path: `once_cell` only through `tracing-core`, `lazy_static` only through
       `sharded-slab` under the facade's `tracing-subscriber` dev-dependency, the other
@@ -666,11 +666,110 @@ parses it with `Short.parseShort` and the inventoried files show no range check
       deadline uses the connection timeout`, `a timeout carries diagnostics naming
       operation, state and category` and `read retry stops after the configured maximum
       attempts`. With the two write skips the report is 18 passed, 5 skipped, 0 failed.
-      Timing stays on the fake clock (D21). The ADR remains proposed: loopback evidence is
-      not an independent peer.
+      Timing stays on the fake clock (D21). Loopback evidence is not an independent peer,
+      so the ADR stayed proposed until S27 (decision 16).
     - **Fuzz.** `fuzz_modbus_connection_string` feeds arbitrary bytes (the longest valid
       UTF-8 prefix of input that is not UTF-8) to `parse_config` and asserts the bounds of
       every success and the shape of every rejection; twelve seed files.
+
+16. **The interoperability job and its evidence (S27, amendment 2026-10-27).** Slice S27
+    runs the driver against a real peer and accepts this ADR.
+    - **The server.** `interop/pymodbus/server.py` is first-party (header comment names the
+      register map and the parity section as its only sources; `interop/pymodbus/
+      PROVENANCE.toml` marks it, the Dockerfile and the other files first-party in the
+      schema of `fixtures/modbus/PROVENANCE.toml`, in a file of its own because the loader
+      refuses `..` in a `[[file]]` path). It reads `fixtures/modbus/interop/register-map.toml`
+      with `tomllib` at start and exits with status 2 and a message when the map cannot be
+      read or is invalid. It builds four `ModbusSequentialDataBlock`s starting at address 0
+      and serves them with `StartAsyncTcpServer` on `0.0.0.0:5020`; one context answers
+      every unit id. A `trace_pdu` hook logs each request and reply at INFO on stdout.
+    - **Address convention.** The map lists logical addresses T and the wire address is
+      T - 1. pymodbus 3.8.6 has no `zero_mode`: its slave context adds one to the wire
+      address before it indexes a block, so a block that starts at 0 holds logical T at
+      list index T and slot 0 is unreachable. The interop tests prove it: logical 13 reads
+      42424 (not its neighbours), and a server whose words for register 13 were changed
+      made four tests fail.
+    - **Block sizes.** A register block for a map size N has N + 1 slots, so logical 1 to N
+      is served (a block of N slots, as the upstream server allocates, would serve 1 to
+      N - 1; the holding block is also enlarged to hold the little-endian REAL at 300 and
+      301). pymodbus validates FC03 and FC04 against the block: logical N + 1 (input
+      register 22, holding register 60000) is answered with exception 02, which the driver
+      reports as an `InvalidAddress` item with status code 2. **pymodbus does not
+      validate FC01 and FC02 reads.** A first run with coil blocks of 2001 slots answered
+      the 2001st coil of a 2001-coil read with byte count 0, which the driver correctly
+      rejected as `MalformedData` ("invalid byte count discriminator 0"). The coil and
+      discrete-input blocks therefore cover the whole 16-bit address space, so no bit read
+      is refused and none is short; the map's bit sizes (2000) document the upstream server
+      and are not a limit. This resolves the UNVERIFIED note of the parity record on what
+      pymodbus returns past a block: exception 02 for registers, a short answer for bits.
+    - **The image.** `interop/pymodbus/Dockerfile` is `FROM python:3.12-slim` pinned by the
+      multi-architecture index digest
+      `sha256:12316debbfb86890f6b2d825820612741ba527ad5a44e3902759141d572bfe8f`
+      (pulled 2026-10-27), installs `pymodbus==3.8.6` from `requirements.txt` (the package
+      has no mandatory dependency, so `pip freeze` lists one line) and runs the server as
+      uid 10001. The build context is the repository root, cut down to three files by
+      `Dockerfile.dockerignore`.
+    - **The tests.** `crates/stonecrab-modbus/tests/interop_pymodbus.rs` holds ten
+      `#[ignore = "interop: set STONECRAB_INTEROP_MODBUS"]` tests that read the URL from
+      that variable, use `ModbusTcpDriver::new()` over the real TCP transport and the Tokio
+      clock, give every read a 2 s deadline and sleep nowhere. The expected values are the
+      `value` text of each map entry parsed as its type, not the words the server holds and
+      not a decoder's output: `interop_reads_all_fifteen_holding_register_types` (one batch
+      and each type alone), `interop_reads_coils_1_to_10`,
+      `interop_reads_discrete_inputs_1_to_10`, `interop_reads_input_registers_1_to_7`,
+      `interop_little_endian_region_decodes_real` (by address block and by the
+      `default-payload-byte-order` parameter; the big-endian default must not give the
+      value), `interop_read_beyond_map_yields_device_exception` (input register 22 with a
+      good tag in another chunk), `interop_split_batch_discloses_chunks` (two areas; 126
+      registers as 125 + 1 with the register words checked across the boundary),
+      `interop_125_register_and_2000_coil_reads` (one chunk each; 126 and 2001 split in
+      two), `interop_bare_40001_reads_with_explicit_convention` (refused without
+      `address-convention=plc4x`, read with it) and
+      `interop_contract_suite_passes_against_pymodbus`. The reads of 2000 and 2001 coils
+      raise `max_items_per_request` on the configuration (the default is 1024).
+    - **The suite run.** The S13 suite runs through `ModbusTcpDriver::new()
+      .with_transport_factory(CountingFactory)` (ADR-0009, S27 addendum) over a real
+      `TcpFactory`. The fixture's `io_probe` is the opens plus the frames sent, so the "no
+      I/O" cases are exact over a real socket; `device_reads` is the frames sent. The
+      readable address is `holding-register:13:UINT`, the rejected one
+      `holding-register:60000:UINT` (exception 02), the foreign one the testkit
+      `FixtureAddress`. A stock pymodbus cannot drop a link, swallow a reply or refuse on
+      demand, so the fixture has no fault hooks and nine cases are skipped by name, each
+      with its reason, and the test asserts the exact list: `an absent deadline uses the
+      connection timeout`, `a timeout carries diagnostics naming operation, state and
+      category` and `read retry stops after the configured maximum attempts` (`fixture
+      cannot inject timeout`); `a disconnect during a read yields Disconnected` and `a
+      disconnect carries diagnostics naming operation, state and category` (`fixture cannot
+      inject disconnect`); `a device exception carries diagnostics naming operation, state
+      and category` and `read retry skips non-retryable kinds` (`fixture cannot inject
+      device exception`); and the two write cases (`driver reports write unsupported`,
+      D3). The result is 14 passed, 9 skipped, 0 failed, written as text to the evidence
+      directory. The disconnect and device-exception cases are covered by the S25b and S26
+      runs, which have the hooks.
+    - **The job.** CI job `interop` (ubuntu-latest, every push and pull request, so it can
+      become a required check) checks out, installs the pinned toolchain and
+      `cargo-nextest@0.9.148`, then runs the steps of `interop/pymodbus/interop.sh`:
+      `docker build`, a detached container on `127.0.0.1:5020`, a readiness probe (a real FC03
+      read via python3, 1 s steps, 60 s at most), `cargo nextest run --locked -p stonecrab-modbus
+      --all-features --run-ignored ignored-only` with the filter `test(/^tests::interop_/)`
+      (nextest names a test by its module path, so the filter the plan wrote,
+      `test(/^interop_/)`, selects nothing; the script also fails unless the filter selects
+      exactly ten tests), and `cargo run --locked -p stonecrab --example modbus_tcp_read
+      --features modbus` with `STONECRAB_URL` set, which must exit 0. Whatever happens, an
+      `always()` step writes the evidence, one uploads it as `interop-evidence`, and one
+      removes the container. The evidence directory holds `image-digest.txt` (image id and
+      the pinned `FROM` line), `pip-freeze.txt`, `server.log`, `contract-report.txt`,
+      `nextest.txt` and `example.txt`. `mise run interop` runs the same script locally
+      (evidence under `target/interop-evidence/`) and fails with a message naming the
+      problem when `docker` is missing or its daemon is down. The actions are pinned as
+      the other jobs pin them (ADR-0005 decision 9).
+    - **Still unverified.** Timing over a real clock (deadline expiry, retry budgets and
+      the late-reply path against a peer that is slow) stays on the fake clock (D21).
+      Dropped links and device exceptions on demand are not exercised against pymodbus.
+      pymodbus answers every unit id, so unit-id correlation is not proven against a peer
+      that distinguishes units. Writes are deferred (D3). The little-endian rule is checked
+      for one REAL; the other three byte orders rest on the vector suites. Only pymodbus
+      3.8.6 is exercised, on linux/amd64 in CI and linux/arm64 in the local run.
 
 ## Consequences
 - The rest of the crate builds on a small, fully tested vocabulary. The parser has
@@ -690,8 +789,10 @@ parses it with `Short.parseShort` and the inventoried files show no range check
 - The vector redistribution depends on a maintainer approval outside the code (P4). If it
   is withheld, S04a and every slice after it that consumes upstream vectors is blocked,
   not re-scoped.
-- The ADR stays proposed until a real peer has answered reads, which is the evidence a
-  protocol driver actually needs.
+- The ADR was proposed until a real peer had answered reads, which is the evidence a
+  protocol driver actually needs; S27 supplied it. The interop job is now part of every
+  push, so its container build and the pinned image are a standing maintenance cost:
+  moving the base image means pulling, recording the new digest and rerunning the job.
 
 ## Alternatives considered
 - **Include RTU in the alpha.** Rejected: it needs a serial transport, a CRC and a
@@ -880,3 +981,12 @@ parses it with `Short.parseShort` and the inventoried files show no range check
   socket. `scripts/fuzz-smoke.sh 10` ran every target including
   `fuzz_modbus_connection_string`. `# Compatibility` sections cite `MB-CFG-*`,
   `MB-QUIRK-A` and `MB-QUIRK-F`.
+- S27: `crates/stonecrab-modbus/tests/interop_pymodbus.rs` (ten ignored tests, decision 16)
+  carries `// covers: SPEC mandatory-failure-cases / F5 Modbus level` and the parity row
+  ids (`MB-TCP-CONNECT`, `MB-TCP-READ-COIL`, `MB-TCP-READ-DI`, `MB-TCP-READ-HR`,
+  `MB-TCP-READ-IR`, `MB-INTEROP-*`, `MB-ADDR-BARE-40001`, `MB-READ-MERGE`,
+  `MB-CONTRACT-SUITE`). Without `STONECRAB_INTEROP_MODBUS` every test is reported ignored
+  and nothing touches the network. The testkit gains `CountingFactory` with its unit tests
+  and doctests (ADR-0009, S27 addendum). The slice adds no Rust dependency, so the D23
+  check is unchanged; the Python side adds `pymodbus==3.8.6` inside the container only.
+  The coverage rows are unchanged (modbus 100, testkit at least 90).

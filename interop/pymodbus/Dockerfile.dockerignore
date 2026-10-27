@@ -1,0 +1,5 @@
+# Only what the Dockerfile copies reaches the build context.
+*
+!interop/pymodbus/requirements.txt
+!interop/pymodbus/server.py
+!fixtures/modbus/interop/register-map.toml

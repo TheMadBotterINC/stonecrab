@@ -192,8 +192,8 @@ fn check_row(row: &str) -> Result<(), String> {
 }
 
 /// Check `entries` and add their `(first, last)` spans to `spans`, which must stay free of
-/// overlap. Spans are logical addresses; a block of `size` registers holds addresses
-/// `0..size` (pymodbus stores logical address T at index T).
+/// overlap. Spans are logical addresses; `size` means logical addresses `1..=size` are
+/// served (the server keeps `size + 1` slots, ADR-0015 decision 16).
 fn check_registers(
     entries: &[RegisterEntry],
     size: usize,

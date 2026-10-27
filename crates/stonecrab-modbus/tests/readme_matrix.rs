@@ -65,8 +65,8 @@ mod tests {
             "read: the driver advertises it and the README says {read}"
         );
         assert_eq!(
-            read, "simulator-tested",
-            "read is claimed at the simulator level until the interoperability job lands"
+            read, "interoperability-tested",
+            "read is claimed at the level the pymodbus job (S27) reached"
         );
 
         let write = level_of("Write");
@@ -90,8 +90,8 @@ mod tests {
         assert!(!capabilities.browse, "browse");
         assert!(!capabilities.discover, "discover");
 
-        // No interoperability claim before the job exists, no hardware claim at all.
-        assert_eq!(level_of("Interoperability"), "planned");
+        // The interoperability job (S27) exists; no hardware claim at all.
+        assert_eq!(level_of("Interoperability"), "interoperability-tested");
         assert_eq!(level_of("Hardware verification"), "planned");
     }
 

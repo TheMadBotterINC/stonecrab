@@ -190,6 +190,11 @@
   (`tests/contract_scripted_peer.rs`: 18 passed, 5 skipped by name). The README documents the
   connection-string grammar, the parameter table, the byte-order names and the support levels,
   and a test keeps its table equal to `ModbusTcpDriver::capabilities()`.
+- Add the `interop` CI job and `mise run interop`: the driver reads the interop register map
+  from a first-party pymodbus 3.8.6 server in Docker (`interop/pymodbus/`), ten ignored
+  tests in `tests/interop_pymodbus.rs` and the `modbus_tcp_read` example, with the image id,
+  `pip freeze`, server log and contract report uploaded as `interop-evidence`; ADR-0015 is
+  accepted (decision 16).
 ### stonecrab-sensors 0.1.0
 - Add the crate: declarative sensor profiles for Stonecrab, depending on `stonecrab-core`,
   `serde` and, behind the default `toml` feature, `toml` (ADR-0016). No driver reads a

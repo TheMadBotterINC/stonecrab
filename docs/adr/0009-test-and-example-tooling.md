@@ -278,3 +278,29 @@ not change the testkit's default features, so core's dev-dependency stays Tokio-
 **Tests.** `peer_factory.rs` carries its own unit tests; its one unexercised line is the
 `Internal` error for a peer task that panicked, which a `ScriptedPeer` cannot be made to
 do. `crates/stonecrab-modbus/tests/contract_scripted_peer.rs` is the consumer.
+
+## Addendum (S27): `CountingFactory`
+Slice S27 runs the driver contract suite against a real server in a container, where the
+test owns neither the socket nor the device's request counter. The suite's `io_probe` must
+not move when it says "no I/O", so something on our side of the wire has to count. As a
+double of our `TransportFactory` trait it lives in the testkit (CODING_STANDARDS 13.5):
+`CountingFactory` (`src/counting_factory.rs`, feature `net`) wraps an
+`Arc<dyn TransportFactory>` and returns transports that wrap the ones the inner factory
+opened.
+
+It counts `open` calls, `send` calls (frames) and the bytes given to `send`, each when the
+call is made, whether or not it succeeds: a probe that does not move proves the driver
+never reached the transport. `recv` and `shutdown` are delegated and not counted, since
+they transmit no application bytes. `io()` is opens plus frames, the number a
+`ContractFixture` wants as its `io_probe`. Clones share the counters, so a test keeps a
+clone while the driver owns the `Arc`. The wrapper reports the inner transport's `peer` and
+`limits`, and it changes no error, deadline or byte.
+
+**Tests.** `counting_factory.rs` carries its unit tests over `FakeTransportFactory` (counts
+across two transports, delegation of `recv` and `shutdown`, `peer` and `limits`, a failed
+open and a refused oversized send still counted, shared counters and `Debug`) and a
+compiling doctest on the type and on every method. The consumer is
+`crates/stonecrab-modbus/tests/interop_pymodbus.rs`: its contract-suite test uses `io()` as
+the probe and the frame count as `device_reads`. S26's loopback run keeps its own probe
+(opens plus the requests the responder counted), which is exact there, and does not use
+this double.

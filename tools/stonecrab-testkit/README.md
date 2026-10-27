@@ -134,6 +134,10 @@ the first mismatch).
   (script built by a closure) for every `open` and connecting to it with the real
   `TcpFactory`, so a driver keeps real sockets across reconnects; `finish` collects the
   peers' reports.
+- `CountingFactory` wraps an `Arc<dyn TransportFactory>` and counts `open` calls, `send`
+  calls (frames) and the bytes sent through the transports it hands out; `io()` is opens
+  plus frames. It is the exact `io_probe` for a contract run over a real socket (the
+  pymodbus interop run), where the test cannot count requests on the device side.
 
 ```rust
 # #[cfg(feature = "net")]

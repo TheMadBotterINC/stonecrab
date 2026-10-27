@@ -1,0 +1,48 @@
+# Provenance of the first-party files under interop/pymodbus (CODING_STANDARDS 13.6).
+#
+# This is a separate file, not an entry of fixtures/modbus/PROVENANCE.toml, because the
+# loader (stonecrab_testkit::load_provenance) accepts only relative paths without ".."
+# and checks that each [[file]] exists below the directory of the provenance file it
+# reads. These files are outside fixtures/modbus, so they get their own file in the same
+# schema (see the header of fixtures/modbus/PROVENANCE.toml). It lists no [[vector]].
+#
+# Every file is first-party and Apache-2.0. Nothing is copied from Apache PLC4X: its
+# modbus_server.py, Dockerfile and test vectors are not in this repository (decision D8
+# of docs/ALPHA_PLAN.md; P4 is not granted). The server is authored from the register map
+# and the parity record only.
+
+[[file]]
+path = "server.py"
+origin = "fixtures/modbus/interop/register-map.toml and docs/parity/modbus.md, section \"Interop register map\" (rows MB-INTEROP-*); pymodbus 3.8.6 API documentation"
+license = "Apache-2.0"
+note = "First-party. Serves the register map over Modbus TCP on pymodbus 3.8.6. Not derived from upstream's modbus_server.py."
+
+[[file]]
+path = "Dockerfile"
+origin = "Authored for S27 from the pinned base image python:3.12-slim and docs/parity/modbus.md (upstream's image is python:3.12-slim with pymodbus 3.8.6, Dkr:20-24, a fact, not content)"
+license = "Apache-2.0"
+note = "First-party. The base image is pinned by digest; pymodbus is pinned in requirements.txt."
+
+[[file]]
+path = "Dockerfile.dockerignore"
+origin = "Authored for S27"
+license = "Apache-2.0"
+note = "First-party. Keeps the build context to the files the Dockerfile copies."
+
+[[file]]
+path = "requirements.txt"
+origin = "Authored for S27; the version is the one the parity record names (docs/parity/modbus.md, Interop register map)"
+license = "Apache-2.0"
+note = "First-party. One pinned requirement."
+
+[[file]]
+path = "interop.sh"
+origin = "Authored for S27"
+license = "Apache-2.0"
+note = "First-party. Build, run, probe, test and collect evidence; shared by the CI job and mise run interop."
+
+[[file]]
+path = "README.md"
+origin = "Authored for S27"
+license = "Apache-2.0"
+note = "First-party."

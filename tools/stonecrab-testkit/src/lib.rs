@@ -5,6 +5,8 @@ mod address;
 mod clock;
 mod contract;
 mod convention;
+#[cfg(feature = "net")]
+mod counting_factory;
 mod executor;
 #[cfg(feature = "net")]
 mod fake_factory;
@@ -29,6 +31,8 @@ pub use contract::{
     CaseOutcome, ContractCase, ContractFixture, ContractReport, ContractSuite, Fault, Requires,
 };
 pub use convention::ConventionDriver;
+#[cfg(feature = "net")]
+pub use counting_factory::CountingFactory;
 pub use executor::{CountingWaker, block_on, block_on_with, poll_once, poll_once_with};
 #[cfg(feature = "net")]
 pub use fake_factory::{FakeTransportFactory, OpenCall};
