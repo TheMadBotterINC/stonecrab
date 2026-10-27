@@ -23,6 +23,21 @@
 - Add `coil_byte_count`, `pack_bits_lsb_first` and `unpack_bits_lsb_first`.
 - Lengths are checked against the caller's maximum and the remaining input before any
   allocation or copy; no function panics on any input (ADR-0013).
+### stonecrab-driver-sim 0.1.0
+- Add the crate: the in-process simulator driver's building blocks, depending on
+  `stonecrab-core` and `tracing` only, Tokio-free, default features empty. There is no
+  `Driver` or `Connection` implementation yet (they arrive with S11a and S11b-2); ADR-0012
+  is proposed.
+- Add `RealtimeClock`, a `std`-only `Clock` whose `now()` is `Instant::now()` and whose
+  `sleep_until` resolves immediately without moving time.
+- Add `SimAddress` and `SimArea`: the grammar `STATE|RANDOM|SINK/<name>:<type>` with
+  lowercase scalar type names, `ProtocolAddress` with protocol `sim`, 256-byte bound,
+  `STDOUT` renamed `SINK`, the legacy array form rejected.
+- Add `SimDevice` and `SimTag`: named tags, `ramp` with checked arithmetic that holds at
+  the last value on overflow, a read counter, a poison-recovering shared device, stored
+  latency and item limit, and a seeded xorshift `RANDOM` source (`SimDevice::with_seed`).
+- Adopt `tracing` 0.1 (`std` only) workspace-wide; `deny.toml` lets only `tracing-core`
+  depend on the banned `once_cell`.
 ### stonecrab-transport 0.1.0
 - Add the crate: the object-safe `Transport` trait (`send`, `recv`, `shutdown`, `peer`,
   `limits`; every call takes a `Deadline`) and `TransportFactory` (both return

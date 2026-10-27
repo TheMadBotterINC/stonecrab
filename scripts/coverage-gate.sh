@@ -40,6 +40,7 @@ EXCLUDE='(^|/)(examples|benches|fuzz|generated)/'
 THRESHOLDS="
 crates/stonecrab-core|100
 crates/stonecrab-codec|100
+crates/stonecrab-driver-sim|100
 crates/stonecrab-modbus|100
 crates/stonecrab-transport|95
 crates/stonecrab|na

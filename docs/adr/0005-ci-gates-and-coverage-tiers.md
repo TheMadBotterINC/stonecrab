@@ -142,3 +142,13 @@ reviewers apply the changed-lines rule and the named-arm rule from the lcov arti
 This ADR overrides ADR-0001's blanket coverage clause for transport and modbus,
 CODING_STANDARDS 13.10's `tools/` exclusion and `xtask` names, 5.1's `xtask lint-attrs`
 and 18.6's two-approval rule while the waiver stands.
+
+Addendum (S11b-1, 2026-10-27): `clippy::wildcard_enum_match_arm` (warn, root `Cargo.toml`)
+does fire on a `_` arm over a foreign `#[non_exhaustive]` enum (`PlcValueType`, `PlcValue`
+from `stonecrab-core`) under the pinned 1.99.1 toolchain when the `_` stands for known
+variants. It does not fire when every known variant is named and `_` is only the catch-all
+for future variants, nor on a tuple scrutinee such as `match (value, step)`. Sibling crates
+therefore write one final or-pattern arm that names the unsupported known variants and ends
+with `| _` and returns a typed error (`Null | Char | String | Duration | _ => Err(..)`), and
+a test per named variant executes that arm, so the 100% line gate holds with no
+`#[expect]`. Details and the probe results are in ADR-0012, decision 7.

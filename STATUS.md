@@ -19,7 +19,7 @@ connections, device reads, protocol drivers or hardware integrations.
 - License: **Apache-2.0**.
 - Published on crates.io: **`stonecrab` 0.1.0**, a specification-stage placeholder.
 - Current development versions: facade **0.2.0**, core **0.1.0**, codec **0.1.0**,
-  modbus **0.1.0**, transport **0.1.0**, all unreleased.
+  modbus **0.1.0**, transport **0.1.0**, driver-sim **0.1.0**, all unreleased.
 - The facade's minor bump records removal of the published `placeholder::status`
   API. Do not restore a compatibility shim without a real consumer requirement.
 - Review policy: ADR-0005 waives the two-approval rule of CODING_STANDARDS 18.6
@@ -155,6 +155,7 @@ gates named were run locally before that commit.
 | S16 | 2026-10-27 | New crate `stonecrab-transport` 0.1.0: `Transport` and `TransportFactory` traits with a `Deadline` on every I/O call, `FrameError`, `TcpTransport` and `TcpFactory` over Tokio with bounded send/receive and self-poisoning after a failed write, `SystemClock`, dependency-free `Jitter`; tokio 1.54 adopted with rt/net/time/sync/io-util only and `full` banned; ADR-0014; parity rows in `docs/parity/transport.md`; loopback byte-level tests; coverage gate 95% (measured 99.6%) with the real-socket deadline-expiry arms named | check, coverage, lint-attrs, features, machete, dependencies, package |
 | S24a | 2026-10-27 | Modbus `Batcher::plan` with `BatchLimits`, `Chunk` and `Member`: groups by unit id and area, merges adjacent or overlapping spans only (no gap reads), splits at 125 registers or 2000 coils, keeps every `TagId` in exactly one member; property test; parity rows `MB-LIMIT-COILS`, `MB-LIMIT-REGISTERS` and the optimizer rows implemented | check, coverage, lint-attrs, machete, package |
 | S17 | 2026-10-27 | Testkit `net` feature: `Script` and `Step` (expect, reply, fragmented, coalesced, delay, close-at, truncate, corrupt, wrong transaction id, late reply, responder), `ScriptedPeer` (the one sanctioned `tokio::spawn`, joined on close and aborted on drop), `FakeTransport` and `FakeTransportFactory` on `FakeClock` with connect-timeout and refusal plans; S16 loopback tests moved onto the peer where a step expresses them | check, coverage, lint-attrs, machete, dependencies |
+| S11b-1 | 2026-10-27 | New crate `stonecrab-driver-sim` 0.1.0 with the simulator data model only: `RealtimeClock`, `SimAddress` grammar (`STATE|RANDOM|SINK/name:type`), `SimDevice` and `SimTag` with ramps, read counters and a seeded RANDOM source; `tracing` 0.1 adopted workspace-wide (std only; `attributes` deferred, see ADR-0012) with the `once_cell` wrapper via `tracing-core` in deny.toml; ADR-0012 proposed; ADR-0005 addendum on wildcard arms; `docs/parity/sim.md`; no `Driver` yet | check, coverage, lint-attrs, machete, dependencies |
 
 ## Verified evidence and reproduction
 
@@ -188,7 +189,8 @@ Most recent local results for the implementation baseline:
   `stonecrab-codec` 181/181 lines (gate 100%), `stonecrab-modbus` 585/585 lines (gate
   100%), `stonecrab-transport` 457/459 lines (gate 95%; the uncovered lines are the
   real-socket deadline-expiry and resolver-failure arms named in ADR-0014),
-  `stonecrab-testkit` 549/551 lines (gate 90%), `stonecrab` n/a (no executable lines). Error paths are not excluded. Region
+  `stonecrab-driver-sim` 1046/1046 lines (gate 100%), `stonecrab-testkit` 2137/2147
+  lines (gate 90%), `stonecrab` n/a (no executable lines). Error paths are not excluded. Region
   coverage is reported in `target/coverage-summary.txt` and not gated; do not describe
   it as branch coverage.
 - Workspace tests and doctests passed on Rust 1.97.1.
@@ -240,8 +242,9 @@ hardware gates yet.
 - Update `packaging/stonecrab-core.txt` or `packaging/stonecrab.txt` when shipped
   files change, and review the resulting archive contents.
 - New dependencies require a rationale and the applicable audit/ADR entry.
-  Runtime dependencies are `thiserror`, `bytes` and, in the transport crate only,
-  `tokio` with scoped features; dev-only `proptest`.
+  Runtime dependencies are `thiserror`, `bytes`, `tracing` (std only; `once_cell`
+  reaches the graph through `tracing-core` under a recorded deny.toml wrapper) and, in
+  the transport crate only, `tokio` with scoped features; dev-only `proptest`.
 
 ## Baseline and incomplete M0 work
 
@@ -280,8 +283,8 @@ operation row is implemented yet.
   data only).
 - Enforcement of cancellation and default deadlines by a connection (`SystemClock` and
   `FakeClock` exist; `RealtimeClock` lands with the simulator).
-- Simulator driver, scripted acquisition failures and the common driver suite (fake
-  time exists in the testkit).
+- The simulator `Driver`/`Connection` implementation, scripted acquisition failures and
+  the common driver suite (the simulator's data model and fake time exist).
 - Byte/raw/recursive/calendar `PlcValue` variants (deferred by ADR-0006); the byte and
   word order types exist as data only, with no decoder consuming them.
 - Browse, discovery and subscriptions (write batches exist as data).

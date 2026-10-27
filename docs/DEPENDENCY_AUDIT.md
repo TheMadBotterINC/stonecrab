@@ -122,3 +122,69 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
   blocking `std::net` on a worker thread (cannot be cancelled by a deadline).
 - Review date: 2026-10-27. `cargo-deny` passes advisory, license, ban and source checks;
   this records the trust boundary, not a memory-safety certification.
+
+## tracing 0.1.44 (stonecrab-driver-sim, workspace-wide adoption)
+- Purpose: structured, level-filtered diagnostics that cost nothing without a subscriber.
+  The coding standards (section 14) name `tracing` as the one diagnostics API; the print
+  macros are denied and `log` is banned. The simulator emits `debug` events when a tag is
+  set, removed or made a ramp; S11b-2 adds the per-operation spans (`scheme`, redacted
+  `endpoint`, `op`, `request_id`). Library crates never install a subscriber (ADR-0012).
+- License: MIT.
+- Features: `default-features = false`, `std` only, in `[workspace.dependencies]`
+  (`tracing = "0.1"`: the 0.1 series has no minor bumps, and 0.1.44 resolved on the review
+  date). The default `attributes` feature is deliberately off: it adds `tracing-attributes`
+  and a second `syn` major version (2.0.119) beside the `syn` 3.0.9 that `thiserror-impl`
+  uses, and `clippy::multiple_crate_versions` then fails the `-D warnings` Clippy gate
+  for the one crate that depends on both. Nothing in the simulator needs `#[instrument]`
+  (manual spans and `Instrument` are in `tracing` itself). Adopt `attributes` later with
+  an `allowed-duplicate-crates = ["syn"]` entry in `clippy.toml` and a note here.
+  The `log`, `valuable`, `async-await` and `release_max_level_*` features are off.
+- Unsafe: `tracing` is not `forbid(unsafe_code)`; about 7 occurrences of the keyword in its
+  sources on 2026-10-27 (callsite registration, `Sync` impls), and `tracing-core` about 33
+  (callsite registry, dispatcher and `Dispatch` weak pointers). First-party code stays
+  `forbid(unsafe_code)`. No native code and no build script.
+- Transitive crates in this configuration (normal graph): `tracing-core` 0.1.36 (MIT),
+  `pin-project-lite` 0.2.17 (Apache-2.0 OR MIT; already audited under tokio) and
+  `once_cell` 1.21.4 (below). `tracing-attributes`, `syn` 2, `quote` and `proc-macro2`
+  do not appear for `tracing` (they would with `attributes`).
+- Banned crates: the D23 check finds exactly one path, `once_cell` through `tracing-core`
+  (see the next two entries and ADR-0012); `lazy_static`, `log`, `time` and `chrono`
+  match no package.
+- Alternatives: `log` (banned; no spans, no structured fields), `slog` (own ecosystem,
+  heavier, not the API the standards name) and no diagnostics (the standards require
+  spans on every operation).
+- Review date: 2026-10-27. `cargo-deny` passes advisory, license, ban and source checks
+  with the `once_cell` wrapper; this records the trust boundary, not a memory-safety
+  certification.
+
+## tracing-core 0.1.36 (via tracing)
+- Purpose: the callsite registry, `Dispatch` and `Subscriber` interfaces that `tracing`
+  macros expand to. Pulled by `tracing` only.
+- License: MIT.
+- Features: `std` (enabled by `tracing/std`), which enables its optional `once_cell`
+  dependency and the thread-safe callsite registry; `valuable` is off.
+- Unsafe: not `forbid(unsafe_code)`; about 33 occurrences of the keyword in its sources.
+  Third-party code, outside the first-party prohibition.
+- Role in `deny.toml`: the only wrapper allowed to depend on `once_cell`
+  (`wrappers = ["tracing-core"]`).
+- Alternatives: none separate from `tracing`; see above.
+- Review date: 2026-10-27.
+
+## once_cell 1.21.4 (via tracing-core, banned for first-party use)
+- Purpose: lazy and one-time initialization inside `tracing-core`'s callsite registry.
+  Reached only through `tracing-core/std`; no first-party crate depends on it.
+- License: MIT OR Apache-2.0.
+- Features: the resolved set on 2026-10-27 is `alloc`, `default`, `race` and `std` (from
+  `cargo tree -f '{p} {f}'`); nothing in this workspace selects them.
+- Policy: `deny.toml` keeps the ban with `reason = "use std lazy initialization in
+  first-party code"` and `wrappers = ["tracing-core"]` (decision D23). Removing the
+  wrapper makes `cargo deny check` fail with `crate 'once_cell = 1.21.4' is explicitly
+  banned`; that was verified on 2026-10-27 and the wrapper restored. Any other crate that
+  starts depending on `once_cell` fails the same check and needs its own wrapper entry and
+  audit entry.
+- Unsafe: not `forbid(unsafe_code)`; about 51 occurrences of the keyword in its sources
+  (the `unsync`/`sync` cell internals). Third-party code.
+- Alternatives: `std::sync::OnceLock` and `LazyLock` replace it in first-party code (the
+  reason for the ban); `tracing-core` without `std` would avoid the dependency but loses
+  the thread-safe registry the simulator's shared device needs under a real subscriber.
+- Review date: 2026-10-27.
