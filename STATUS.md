@@ -54,7 +54,8 @@ ADR-0004 explicitly overrides the original `main` branch policy with `master`.
 - Resolver-3 Cargo workspace, Rust 2024, shared metadata and strict safety lints.
 - `crates/stonecrab`: public facade, re-exporting core.
 - `crates/stonecrab-core`: no Tokio, executor or network dependency.
-- `tools/stonecrab-testkit`: unpublished deterministic fixtures, development-only.
+- `tools/stonecrab-testkit`: unpublished deterministic fixtures, development-only:
+  `FixtureAddress`, `FakeClock`, `block_on`, `block_on_with`, `poll_once`, `CountingWaker`.
 - Empty default feature sets in the publishable crates; no protocol feature flags yet.
 - Apache license/notices, contribution/security policy, changelog and ADRs.
 - Local mise tasks, CI workflow, package allow-lists and VS Code test debugging.
@@ -136,6 +137,7 @@ gates named were run locally before that commit.
 | S15 | 2026-10-27 | New crate `stonecrab-codec` 0.1.0: `BoundedReader`, `BoundedWriter`, `ParseError` with `From<ParseError> for PlcError`, coil bit helpers; proptest 1.12 adopted (D23 check clean); first fuzz target `fuzz_codec_bounded_reader` (60 s clean); ADR-0013. Same commit series makes `ByteOrder`/`WordOrder` exhaustive (ADR-0006 amendment 7) | check, coverage, lint-attrs, features, machete, dependencies, fuzz, package |
 | S06 | 2026-10-27 | Core `OpFuture`, `Clock` trait (no implementation in core; `SystemClock` moves to transport), `CancellationToken` with child tokens and waker dedup, `StateCell`/`StateWatch` latest-value observation; ADR-0007 proposed (accepted when S11b-2 enforces it); parity rows `CORE-OPFUTURE`, `CORE-CLOCK`, `CORE-CANCEL-TOKEN`, `CORE-STATE-WATCH`; no cancel slot on requests yet | check, coverage, lint-attrs, machete, dependencies, package |
 | S07 | 2026-10-27 | Core `ConnectionConfig` and builder, `Endpoint`, `Timeouts`, `ReconnectPolicy` with pure `next_delay`, `RetryPolicy` over `BTreeSet<ErrorKind>`, `AccessPolicy` (default `ReadOnly`), `Credentials`, `AddressOptions` carrier; ADR-0008; parity rows `CORE-CONFIG-SHAPE`, `CORE-RECONNECT-POLICY`, `CORE-RETRY-POLICY`, `CORE-ADDRESS-OPTIONS`; data only, unenforced | check, coverage, lint-attrs, machete, package |
+| S10 | 2026-10-27 | Testkit `FakeClock` (a `Clock` implementation with hand-advanced time and ordered sleepers), `block_on`, `block_on_with` (advances to the next sleeper, fails fast when nothing waits on time), `poll_once`, `poll_once_with`, `CountingWaker`; no dependency | check, coverage, lint-attrs, machete |
 
 ## Verified evidence and reproduction
 
@@ -166,7 +168,7 @@ Most recent local results for the implementation baseline:
   warnings denied, no-default-features, lint-attrs, feature powerset and unused-
   dependency checks passed.
 - Per-crate line coverage (ADR-0005): `stonecrab-core` 2704/2704 lines (gate 100%),
-  `stonecrab-codec` 181/181 lines (gate 100%), `stonecrab-testkit` 23/23 lines (gate
+  `stonecrab-codec` 181/181 lines (gate 100%), `stonecrab-testkit` 549/551 lines (gate
   90%), `stonecrab` n/a (no executable lines). Error paths are not excluded. Region
   coverage is reported in `target/coverage-summary.txt` and not gated; do not describe
   it as branch coverage.
@@ -258,7 +260,8 @@ not native subscriptions. No Rust Modbus implementation or parity claim exists y
 - Enforcement of cancellation and default deadlines by a connection; a `Clock`
   implementation (the trait exists; `SystemClock`, `FakeClock`, `RealtimeClock` are
   later slices).
-- Simulator driver, scripted acquisition failures, fake time and common driver suite.
+- Simulator driver, scripted acquisition failures and the common driver suite (fake
+  time exists in the testkit).
 - Byte/raw/recursive/calendar `PlcValue` variants (deferred by ADR-0006); the byte and
   word order types exist as data only, with no decoder consuming them.
 - Complete write request/response batches, browse, discovery and subscriptions.

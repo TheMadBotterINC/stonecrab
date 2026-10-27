@@ -39,5 +39,7 @@
   `ReadOnly`), `Credentials`, and the `AddressOptions` carrier with its builder
   (ADR-0008). Data only; nothing enforces the policies yet.
 - Add an unpublished deterministic address fixture testkit for contract tests.
+- Add `FakeClock`, `block_on`, `block_on_with`, `poll_once` and a counting waker to the
+  unpublished testkit for deterministic, sleep-free async tests.
 ## stonecrab 0.1.0
 - Publish the specification-stage package. No industrial protocol support.
