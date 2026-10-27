@@ -11,7 +11,9 @@ Resource budgets are finite, positive and immutable after builder validation.
 Immutable tags, bounded read requests and correlated read responses are implemented
 as data contracts only. They do not acquire device data. Protocol status retains
 bounded raw bytes without exposing them through Debug, and write outcomes retain
-post-transmit uncertainty without implementing a write or retry operation.
+post-transmit uncertainty without implementing a write or retry operation. Bounded
+write requests and correlated write responses are data contracts too; an unknown write
+outcome is never collapsed into a rejection or replayed.
 
 Read builders require explicit `ResourceLimits`. Duplicate identifiers and over-budget
 requests fail before any transport exists. Response builders reject missing, duplicate

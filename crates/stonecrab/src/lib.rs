@@ -10,5 +10,6 @@ pub use stonecrab_core::{
     PlcError, PlcValue, PlcValueType, ProtocolAddress, ProtocolStatus, ReadItem, ReadRequest,
     ReadRequestBuilder, ReadResponse, ReadResponseBuilder, ReconnectPolicy, ResourceLimits,
     ResourceLimitsBuilder, Result, RetryPolicy, Secret, StateCell, StateWatch, SubscriptionMode,
-    Tag, TagId, Timeouts, UnknownReason, WordOrder, WriteOutcome,
+    Tag, TagId, Timeouts, UnknownReason, WordOrder, WriteItem, WriteOutcome, WriteRequest,
+    WriteRequestBuilder, WriteResponse, WriteResponseBuilder, WriteResult,
 };

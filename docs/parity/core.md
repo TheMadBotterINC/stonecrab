@@ -99,6 +99,18 @@ driver-independent configuration type, so rows cite the Modbus `MB-CFG-*` rows i
 Idle timeout, reconnect, retry and the access policy are recorded and not enforced; the
 rows change to a stronger status when S11b-2, S19 and S25 enforce them.
 
+## Write batches
+Status: implemented as data only (ADR-0010, slice S09). No write is transmitted: the
+simulator implements `write` in S11b-2 and `modbus-tcp` reports `write: false` at alpha
+(decision D3 in `docs/ALPHA_PLAN.md`; the upstream write mapping is `MB-TCP-WRITE` in
+`docs/parity/modbus.md`). Rows cite `docs/ARCHITECTURE.md` section 3.3 rather than
+upstream files; the upstream types are `PlcWriteRequest` and `PlcWriteResponse`.
+
+| Row id | Upstream behavior | Stonecrab behavior | Status | Test ids |
+| --- | --- | --- | --- | --- |
+| CORE-WRITE-REQUEST | `PlcWriteRequest` is an ordered batch of tags with values (ARCHITECTURE 3.3). | `WriteItem { tag, value }` and `WriteRequest` built by `WriteRequestBuilder` (limits-bound like `ReadRequestBuilder`): the item budget, a value type that contradicts the tag's type hint, and duplicate `TagId`s are rejected as sticky errors before any collection grows; an empty batch is rejected; the absolute deadline is kept as given. No retry state and no cancel slot (S11a). | implemented | `items_pair_a_tag_with_its_value_and_come_apart_without_loss`, `requests_keep_caller_order_deadline_and_untyped_tags_accept_any_value`, `empty_batches_are_rejected`, `a_value_type_that_contradicts_the_tag_hint_is_invalid_config`, `duplicate_identities_are_rejected_and_the_first_error_wins`, `over_budget_batches_fail_before_the_collections_grow`, `bounded_requests_preserve_order_values_and_explicit_deadlines`, `empty_duplicate_and_oversized_requests_fail_before_io` |
+| CORE-WRITE-RESPONSE | `PlcWriteResponse` maps each tag to a response code; an ambiguous timeout has no distinct result (ARCHITECTURE 3.3). | `WriteResponse` built by `WriteResponseBuilder`: exactly one `WriteResult { tag, outcome, status }` per requested identity, restored to request order; missing, duplicate and unexpected identities and a finished-before-started interval are rejected; `iter_confirmed`, `iter_rejected`, `iter_unknown` and counts. `WriteOutcome::Unknown(reason)` survives correlation unchanged and is never collapsed into a rejection or replayed (divergence: Stonecrab addition). | implemented | `results_carry_identity_outcome_and_an_independent_status`, `mixed_outcomes_are_restored_to_request_order_and_counted`, `correlation_rejects_missing_unexpected_and_duplicate_results`, `a_reversed_interval_is_invalid_and_an_empty_one_is_valid`, `mixed_outcomes_restore_request_order_and_keep_unknown_unchanged`, `every_unknown_reason_survives_correlation_unchanged`, `an_all_rejected_batch_is_still_a_valid_correlated_response`, `response_correlation_rejects_missing_unexpected_and_duplicate_results`, `response_time_validation_accepts_equal_edges_and_rejects_reversal`, `every_three_item_permutation_preserves_identity_and_its_distinct_outcome`, `public_foundation_types_are_send_sync_and_static` |
+
 ## Connection string grammar
 Status: planned. No `ConnectionUri` exists yet; the slice that implements it is S08 in
 `docs/ALPHA_PLAN.md`.

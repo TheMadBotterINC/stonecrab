@@ -12,6 +12,8 @@
 - Re-export `ConnectionConfig`, `ConnectionConfigBuilder`, `Endpoint`, `Timeouts`,
   `ReconnectPolicy`, `RetryPolicy`, `AccessPolicy`, `Credentials`, `AddressOptions` and
   `AddressOptionsBuilder` from `stonecrab-core`.
+- Re-export `WriteItem`, `WriteRequest`, `WriteRequestBuilder`, `WriteResult`,
+  `WriteResponse` and `WriteResponseBuilder` from `stonecrab-core`.
 ### stonecrab-codec 0.1.0
 - Add the crate: `BoundedReader` and `BoundedWriter` with bounds-checked integer, float,
   byte-run and least-significant-bit-first coil reads and writes in an explicit
@@ -51,6 +53,11 @@
   `ReconnectPolicy` with pure `next_delay`, `RetryPolicy`, `AccessPolicy` (default
   `ReadOnly`), `Credentials`, and the `AddressOptions` carrier with its builder
   (ADR-0008). Data only; nothing enforces the policies yet.
+- Add write batch contracts: `WriteItem`, `WriteRequest` with its bounded builder (item
+  budget, duplicate identities, value type versus tag hint, deadline) and `WriteResult`,
+  `WriteResponse` with its correlating builder, `iter_confirmed`, `iter_rejected` and
+  `iter_unknown`. Unknown outcomes are first-class and never retried or replayed
+  (ADR-0010). Data only.
 - Add an unpublished deterministic address fixture testkit for contract tests.
 - Add `FakeClock`, `block_on`, `block_on_with`, `poll_once` and a counting waker to the
   unpublished testkit for deterministic, sleep-free async tests.

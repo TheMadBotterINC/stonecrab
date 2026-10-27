@@ -111,6 +111,9 @@ ADR-0004 explicitly overrides the original `main` branch policy with `master`.
   Missing, unexpected and duplicate results are rejected.
 - `WriteOutcome` / `UnknownReason`: confirmed, rejected and unknown-after-transmit
   representations. These types do not implement a write operation or retries.
+- `WriteItem`, `WriteRequest`, `WriteResult`, `WriteResponse`: bounded write batches
+  with exact correlation that keep unknown outcomes first-class (ADR-0010). Data only;
+  nothing transmits, retries or replays.
 
 ### Tests
 
@@ -139,6 +142,7 @@ gates named were run locally before that commit.
 | S07 | 2026-10-27 | Core `ConnectionConfig` and builder, `Endpoint`, `Timeouts`, `ReconnectPolicy` with pure `next_delay`, `RetryPolicy` over `BTreeSet<ErrorKind>`, `AccessPolicy` (default `ReadOnly`), `Credentials`, `AddressOptions` carrier; ADR-0008; parity rows `CORE-CONFIG-SHAPE`, `CORE-RECONNECT-POLICY`, `CORE-RETRY-POLICY`, `CORE-ADDRESS-OPTIONS`; data only, unenforced | check, coverage, lint-attrs, machete, package |
 | S10 | 2026-10-27 | Testkit `FakeClock` (a `Clock` implementation with hand-advanced time and ordered sleepers), `block_on`, `block_on_with` (advances to the next sleeper, fails fast when nothing waits on time), `poll_once`, `poll_once_with`, `CountingWaker`; no dependency | check, coverage, lint-attrs, machete |
 | S20a | 2026-10-27 | New crate `stonecrab-modbus` 0.1.0 with address types only: `UnitId`, `ModbusArea`, `ModbusDataType` (15 alpha types; string and calendar names rejected as deferred), `AddressConvention`, `ModbusAddress` and builder (bit areas accept BOOL only; last register must fit in the address space; long-form `canonical()`); ADR-0015 draft; no parser, PDU or I/O | check, coverage, lint-attrs, features, machete, dependencies, fuzz, package |
+| S09 | 2026-10-27 | Core `WriteItem`, `WriteRequest` and builder, `WriteResult`, `WriteResponse` and builder (exact correlation, request order, unknown outcomes never collapsed); ADR-0010; parity rows `CORE-WRITE-REQUEST`, `CORE-WRITE-RESPONSE`; data only | check, coverage, lint-attrs, machete, package |
 
 ## Verified evidence and reproduction
 
@@ -265,7 +269,7 @@ not native subscriptions. No Rust Modbus implementation or parity claim exists y
   time exists in the testkit).
 - Byte/raw/recursive/calendar `PlcValue` variants (deferred by ADR-0006); the byte and
   word order types exist as data only, with no decoder consuming them.
-- Complete write request/response batches, browse, discovery and subscriptions.
+- Browse, discovery and subscriptions (write batches exist as data).
 - Transport crate, Modbus TCP/RTU parsing and I/O, sensor profiles and board adapters
   (the codec crate and the Modbus address types exist; nothing consumes them yet).
 - OPC UA, EtherNet/IP/Logix, S7 and remaining upstream protocols.

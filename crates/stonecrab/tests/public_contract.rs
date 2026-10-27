@@ -13,7 +13,9 @@ mod tests {
         OpFuture, Operation, PlcError, PlcValue, PlcValueType, ProtocolAddress, ProtocolStatus,
         ReadItem, ReadRequest, ReadRequestBuilder, ReadResponse, ReadResponseBuilder,
         ReconnectPolicy, ResourceLimits, ResourceLimitsBuilder, RetryPolicy, Secret, StateCell,
-        StateWatch, SubscriptionMode, Tag, TagId, Timeouts, UnknownReason, WordOrder, WriteOutcome,
+        StateWatch, SubscriptionMode, Tag, TagId, Timeouts, UnknownReason, WordOrder, WriteItem,
+        WriteOutcome, WriteRequest, WriteRequestBuilder, WriteResponse, WriteResponseBuilder,
+        WriteResult,
     };
 
     #[test]
@@ -59,7 +61,13 @@ mod tests {
         assert_send_sync::<ReadResponseBuilder>();
         assert_send_sync::<UnknownReason>();
         assert_send_sync::<WordOrder>();
+        assert_send_sync::<WriteItem>();
         assert_send_sync::<WriteOutcome>();
+        assert_send_sync::<WriteRequest>();
+        assert_send_sync::<WriteRequestBuilder>();
+        assert_send_sync::<WriteResponse>();
+        assert_send_sync::<WriteResponseBuilder>();
+        assert_send_sync::<WriteResult>();
     }
 
     #[test]

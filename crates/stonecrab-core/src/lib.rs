@@ -21,6 +21,8 @@ mod secret;
 mod state;
 mod tag;
 mod value;
+mod write_request;
+mod write_response;
 
 pub use address_options::{AddressOptions, AddressOptionsBuilder};
 pub use cancel::CancellationToken;
@@ -42,3 +44,5 @@ pub use secret::Secret;
 pub use state::{StateCell, StateWatch};
 pub use tag::{ProtocolAddress, Tag, TagId};
 pub use value::{PlcValue, PlcValueType};
+pub use write_request::{WriteItem, WriteRequest, WriteRequestBuilder};
+pub use write_response::{WriteResponse, WriteResponseBuilder, WriteResult};
