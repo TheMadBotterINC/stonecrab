@@ -188,6 +188,75 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
   reason for the ban); `tracing-core` without `std` would avoid the dependency but loses
   the thread-safe registry the simulator's shared device needs under a real subscriber.
 - Review date: 2026-10-27.
+
+## tracing-subscriber 0.3.23 (stonecrab facade, dev-dependency)
+- Purpose: the `fmt` subscriber that `examples/sim_read.rs` installs to print structured
+  events (ADR-0011 decision 8, ADR-0014 addendum for S14). Examples and facade tests only:
+  it is a `[dev-dependencies]` entry, so it never reaches the packaged runtime graph, and
+  library crates still never install a subscriber (ADR-0012).
+- License: MIT.
+- Features: `[workspace.dependencies]` has `tracing-subscriber = { version = "0.3",
+  default-features = false, features = ["fmt", "std"] }` (the 0.3 series is the minor-level
+  range of 0.3.23, the version resolved on the review date). The resolved set is `alloc`,
+  `fmt`, `registry`, `sharded-slab`, `std` and `thread_local`. `tracing-log` (and therefore
+  `log`, which is banned), `ansi` (`nu-ansi-term`), `smallvec`, `env-filter` (`regex`),
+  `json` (`serde`), `chrono`, `time` and `local-time` stay off.
+- Unsafe: not `forbid(unsafe_code)`; about 28 occurrences of the keyword in its sources.
+  Third-party code, outside the first-party prohibition. No native code, no build script.
+- Transitive crates added to `Cargo.lock`: `sharded-slab` 0.1.7, `lazy_static` 1.5.1 and
+  `thread_local` 1.1.10 (entries below); `tracing-core`, `cfg-if` and `tracing` were
+  already present.
+- Banned crates: the D23 check finds `lazy_static` through `sharded-slab` (wrapped, below)
+  and the existing `once_cell` through `tracing-core`; `log`, `time` and `chrono` match no
+  package.
+- Alternatives: a hand-written `Subscriber` (more first-party code to audit for no gain),
+  and `println!` in the example (denied by `clippy.toml`, ADR-0011).
+- Review date: 2026-10-27. `cargo-deny` passes with the `lazy_static` wrapper; this records
+  the trust boundary, not a memory-safety certification.
+
+## sharded-slab 0.1.7 (via tracing-subscriber)
+- Purpose: the lock-free slab behind `tracing-subscriber`'s `registry` (span storage), which
+  the `fmt` feature requires.
+- License: MIT.
+- Features: none selected.
+- Unsafe: not `forbid(unsafe_code)`; about 74 occurrences of the keyword in its sources
+  (the slab's atomic page and slot handling). Third-party code, reached from dev builds of
+  the facade only.
+- Role in `deny.toml`: the only wrapper allowed to depend on `lazy_static`
+  (`wrappers = ["sharded-slab"]`).
+- Alternatives: none separate from `tracing-subscriber`'s `fmt`; dropping `fmt` would
+  also drop the formatter the example uses.
+- Review date: 2026-10-27.
+
+## lazy_static 1.5.1 (via sharded-slab, banned for first-party use)
+- Purpose: lazy statics inside `sharded-slab`. Reached only through `sharded-slab`; no
+  first-party crate depends on it.
+- License: MIT OR Apache-2.0.
+- Features: none (`spin_no_std` is off).
+- Policy: `deny.toml` keeps the ban with `reason = "use std lazy initialization in
+  first-party code"` and `wrappers = ["sharded-slab"]` (decision D23). Removing the wrapper
+  makes `cargo deny check bans` fail with `crate 'lazy_static = 1.5.1' is explicitly
+  banned`; that was verified on 2026-10-27 and the wrapper restored. Any other crate that
+  starts depending on `lazy_static` fails the same check and needs its own wrapper entry
+  and audit entry.
+- Unsafe: about 2 occurrences of the keyword in its sources. Third-party code.
+- Alternatives: `std::sync::LazyLock` replaces it in first-party code (the reason for the
+  ban).
+- Review date: 2026-10-27.
+
+## thread_local 1.1.10 (via tracing-subscriber, not banned)
+- Purpose: per-thread storage for `tracing-subscriber`'s `registry` (the current span
+  stack). The plan named a `thread_local` path as possible and UNVERIFIED; it exists.
+- License: MIT OR Apache-2.0.
+- Dependencies: `cfg-if` only (already audited via `tokio` and `tracing`). It does not
+  depend on `once_cell`, so no further banned crate comes with it, and `deny.toml` bans
+  nothing named `thread_local`, so no wrapper entry is needed.
+- Unsafe: not `forbid(unsafe_code)`; about 27 occurrences of the keyword in its sources.
+  Third-party code.
+- Alternatives: `std::thread_local!` for first-party needs; this crate is reached only
+  through `tracing-subscriber`.
+- Review date: 2026-10-27.
+
 ## serde 1.0.229 (stonecrab-sensors)
 - Purpose: the `Deserialize` derive for the sensor profile schema types (ADR-0016). Profiles
   are read, never written, so `Serialize` is not derived and no format crate other than

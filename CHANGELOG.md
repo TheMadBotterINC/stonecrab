@@ -16,6 +16,9 @@
   `WriteResponse` and `WriteResponseBuilder` from `stonecrab-core`.
 - Re-export `ConnectionUri` from `stonecrab-core`.
 - Re-export `Driver`, `Connection` and `DriverRegistry` from `stonecrab-core`.
+- Add the `sim` feature (off by default): `stonecrab::sim` re-exports the public items of
+  `stonecrab-driver-sim`, pinned `=0.1.0`, and the `sim_read` example reads three tags from a
+  simulated device through the driver registry.
 ### stonecrab-codec 0.1.0
 - Add the crate: `BoundedReader` and `BoundedWriter` with bounds-checked integer, float,
   byte-run and least-significant-bit-first coil reads and writes in an explicit

@@ -153,10 +153,20 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-hack@0.6.45
+      # The powerset covers the facade's `sim` feature on its own (ADR-0014 addendum, S14).
       # --no-dev-deps edits Cargo.toml while it runs, so this pass cannot use --locked.
       - run: cargo hack check --workspace --feature-powerset --depth 2 --no-dev-deps
       # cargo hack runs one cargo check per package, i.e. --no-default-features per crate.
       - run: cargo hack check --locked --workspace --no-default-features
+  examples:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
+        with:
+          toolchain: "1.99.1"
+      - run: cargo build --locked --examples --all-features
+      - run: cargo run --locked -p stonecrab --example sim_read --features sim
   machete:
     runs-on: ubuntu-latest
     steps:

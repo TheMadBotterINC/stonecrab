@@ -22,6 +22,15 @@ workspace = true
 
 [features]
 default = []
+# The in-process simulator driver, re-exported as `stonecrab::sim` (ARCHITECTURE.md section 10).
+sim = ["dep:stonecrab-driver-sim"]
 
 [dependencies]
 stonecrab-core.workspace = true
+stonecrab-driver-sim = { workspace = true, optional = true }
+
+# Example and test tooling only (ADR-0014 addendum); never part of the packaged runtime graph.
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true

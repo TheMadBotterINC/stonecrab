@@ -394,6 +394,100 @@ declared; the "declared and unused until S19" consequence above is therefore res
   cancellation (connecting, queued, transmitting, awaiting) and F5 reconnect (device
   restart, outage and recovery, exhausted budget, shutdown during reconnect).
 
+## Addendum (S14): the facade `sim` feature and the example tooling
+Slice S14 (the first Tokio edge outside the transport) adds the facade feature `sim`, the
+facade's example and test dev-dependencies, and `examples/sim_read.rs`. It needs no ADR of
+its own: the dependency policy it applies is this ADR's, and the example output rule is
+ADR-0011 decision 8.
+
+- **`sim` feature.** `sim = ["dep:stonecrab-driver-sim"]`; `default = []` is unchanged, so
+  `cargo add stonecrab` still pulls `stonecrab-core` only (`cargo tree -p stonecrab -e
+  normal` shows core, `bytes` and `thiserror` below the facade and nothing else; with
+  `--features sim` the only addition is `stonecrab-driver-sim`, `tracing`, `tracing-core`,
+  `pin-project-lite` and `once_cell`). `pub mod sim` is `#[cfg(feature = "sim")]` with
+  `#[cfg_attr(docsrs, doc(cfg(feature = "sim")))]` and is `pub use
+  stonecrab_driver_sim::*;`, a glob and not a list: the simulator crate is the owner of
+  that surface, the facade pins it exactly, and a list would be one more place to forget a
+  new item. `full` is not added yet (S30 adds `sensors` and `full`).
+- **Pin style.** The workspace entry is `stonecrab-driver-sim = { path =
+  "crates/stonecrab-driver-sim", version = "=0.1.0", default-features = false }` and the
+  facade uses `{ workspace = true, optional = true }`. CODING_STANDARDS 20.1 says the facade
+  pins its siblings so one facade version names one coherent set, so the new sibling is
+  `=0.1.0`. This differs from `stonecrab-core`, `stonecrab-codec` and `stonecrab-transport`,
+  whose workspace entries are the caret range `"0.1"` (15.4 and the existing foundation
+  slices); those entries are not changed here. Section 15.4 forbids `=` pins "except
+  temporarily"; 20.1 is the specific rule for facade-to-sibling edges and wins for this
+  edge. The inconsistency is recorded rather than hidden: the `modbus` and `sensors`
+  features should take the `=` pin too when they arrive, and a later slice may move core
+  onto it.
+- **Dev-dependencies of the facade.** `tokio` (`workspace = true`, features `rt` and
+  `macros`; `#[tokio::main(flavor = "current_thread")]` and `#[tokio::test]`), `tracing`
+  (the `info!` events) and `tracing-subscriber`. They are `[dev-dependencies]`, so the
+  packaged runtime graph is unchanged, and the facade `include` list still ships `src/**`
+  and the three files only: `examples/` and `tests/` are not in the archive.
+- **`tracing-subscriber`.** Workspace entry `{ version = "0.3", default-features = false,
+  features = ["fmt", "std"] }` (the minor-level range of the resolved 0.3.23). The
+  resolved feature set is `alloc`, `fmt`, `registry`, `sharded-slab`, `std` and
+  `thread_local`; `tracing-log` is off, so `log` stays out of the lock file. `fmt`
+  requires `registry`, which requires `sharded-slab` (and `lazy_static` below it) and
+  `thread_local`.
+- **D23 result.** Run on the resolved tree (each name alone, as in decision 12):
+
+  ```text
+  $ cargo tree -e normal,dev -i once_cell
+  once_cell v1.21.4
+  `-- tracing-core v0.1.36
+      |-- tracing v0.1.44
+      |   `-- stonecrab-driver-sim v0.1.0
+      |   [dev-dependencies]
+      |   `-- stonecrab v0.2.0
+      `-- tracing-subscriber v0.3.23
+          [dev-dependencies]
+          `-- stonecrab v0.2.0
+  $ cargo tree -e normal,dev -i lazy_static
+  lazy_static v1.5.1
+  `-- sharded-slab v0.1.7
+      `-- tracing-subscriber v0.3.23
+          [dev-dependencies]
+          `-- stonecrab v0.2.0
+  $ cargo tree -e normal,dev -i thread_local
+  thread_local v1.1.10
+  `-- tracing-subscriber v0.3.23
+      [dev-dependencies]
+      `-- stonecrab v0.2.0
+  $ cargo tree -e normal,dev -i log
+  error: package ID specification `log` did not match any packages
+  $ cargo tree -e normal,dev -i time
+  error: package ID specification `time` did not match any packages
+  $ cargo tree -e normal,dev -i chrono
+  error: package ID specification `chrono` did not match any packages
+  ```
+
+  (The tree drawing is ASCII here; cargo prints box characters.) `lazy_static` is reached
+  only through `sharded-slab`, as D23 predicted, so `deny.toml` now reads `{ crate =
+  "lazy_static", reason = "use std lazy initialization in first-party code", wrappers =
+  ["sharded-slab"] }`. Removing the wrapper makes `cargo deny check bans` fail with
+  `crate 'lazy_static = 1.5.1' is explicitly banned`; the wrapper was restored. The
+  `thread_local` path that D23 listed as possible and UNVERIFIED exists. `thread_local`
+  is not in the ban list and depends on `cfg-if` only (not `once_cell`), so it gets an
+  audit entry and no wrapper. `once_cell` keeps its single wrapper, `tracing-core`; the new
+  `tracing-subscriber` edge reaches it through that same crate. `log`, `time` and
+  `chrono` match no package. `docs/DEPENDENCY_AUDIT.md` has entries for
+  `tracing-subscriber`, `sharded-slab`, `lazy_static` and `thread_local`.
+- **Example rule (ADR-0011 decision 8).** `sim_read` installs the fmt layer in `main`
+  (`with_writer(std::io::stdout)`, no timestamps), emits one `tracing::info!` per item with
+  the fields `name`, `value`, `outcome` and `sampled_at` (microseconds since the example
+  started), never prints with a print macro, and returns `std::process::ExitCode`; every
+  error is mapped to `ExitCode::FAILURE` with an error event, with no `exit`, `unwrap` or
+  panic. It uses only public items that the simulator's tests and the contract suite
+  already exercise, so no item exists to serve it. The deadline is `Deadline::after(
+  Instant::now(), 500 ms)`: the example has no clock handle, and the simulator's default
+  `RealtimeClock` reads `Instant::now()`, so the two agree (D9).
+- **Gates.** `scripts/coverage-gate.sh` excludes `examples/` by regex and keeps the facade
+  at `na`; the `sim` re-export is one `pub use`, which has no executable line. CI gains an
+  `examples` job and `mise run examples` the same two commands; the `features` job's
+  powerset (`--no-dev-deps`) checks `sim` on its own and with every other feature.
+
 ## Alternatives considered
 - **`async-std` or `smol`.** Rejected: CODING_STANDARDS 15.8 names Tokio as the sanctioned
   runtime, the later OPC UA and TLS crates in the ecosystem assume it, and a second

@@ -55,7 +55,8 @@ ADR-0004 explicitly overrides the original `main` branch policy with `master`.
 ### Workspace and development infrastructure
 
 - Resolver-3 Cargo workspace, Rust 2024, shared metadata and strict safety lints.
-- `crates/stonecrab`: public facade, re-exporting core.
+- `crates/stonecrab`: public facade, re-exporting core and, behind the `sim` feature,
+  the simulator driver as `stonecrab::sim`; `examples/sim_read.rs`.
 - `crates/stonecrab-core`: no Tokio, executor or network dependency.
 - `crates/stonecrab-transport`: the only crate with Tokio (scoped features, no spawned
   tasks); TCP transport, framing layer with resync, the reconnecting `ConnectionGuard`,
@@ -179,6 +180,7 @@ gates named were run locally before that commit.
 | S23 | 2026-10-27 | Modbus `TypedDecoder`: registers or packed bits to `PlcValue` for the 15 types under the four byte-order modes (ADR-0006 mapping, narrow values in the low byte or bit 0 under big-endian, bit-exact floats), wrong register counts as `MalformedData` with the received bytes kept in the status within the raw budget, `encode_registers` as the inverse; 85 derived `typed_*` vectors plus the interop map constants; `MB-BYTEORDER-*` and `MB-TYPE-*` rows implemented, automated-verified for byte order waits for the upstream little-endian vectors (P4) | check, coverage, lint-attrs, machete, dependencies, package |
 | S24b | 2026-10-27 | Modbus `ModbusSession` over the transport `ConnectionGuard`: one exchange in flight (a second concurrent request gets `Backpressure` before any I/O; the connection slice serialises chunks), a transaction counter that continues across reconnects and wraps at 0xFFFE, a reply accepted only when transaction id, unit id and function code (exception bit cleared) all match (divergence `MB-READ-MATCH`; upstream matches the transaction id only), mismatches discarded, counted in `SessionStats` as late or mismatched and logged at `warn`, a device exception returned as `Ok(ModbusPdu::Exception)` with `exception_item_error` mapping per D18, a reply that does not decode or fit `MalformedData`; `tracing` adopted by the modbus crate (fuzz lock updated); `MB-READ-MATCH`, `MB-READ-INFLIGHT`, `MB-READ-TIMEOUT` and `MB-EXC-*` rows implemented | check, coverage, lint-attrs, features, machete, dependencies, fuzz, package |
 | S29 | 2026-10-27 | Sensors measurement pipeline: `SensorProfile::tags(&dyn Driver)` (validation first, scheme check, the declared convention passed as `AddressOptions` to every `parse_address`, one tag per measurement and one `<measurement>.<status>` tag per status field), `SensorProfile::measurements(&ReadResponse, wall_now)` with `Measurement` and `Quality` (`Good`, `Uncertain`, `Bad`, `Stale`, `Unknown`; precedence Bad over Stale over Uncertain over Unknown over Good), checked scaling (integers stay integers while every step is integral and in range; Divide or a fractional constant promotes to f64; NaN, infinity and overflow are Bad; `BitField` rolls counters over; integer `Clamp` compares as integers), status bits with inversion, range checks, `source_time` never substituted; testkit `ConventionDriver` double; `SENSORS-TAGS` and `SENSORS-MEASUREMENTS` rows implemented | check, coverage, lint-attrs, features, machete, dependencies, package |
+| S14 | 2026-10-27 | Facade `sim` feature (off by default): `stonecrab::sim` re-exports `stonecrab-driver-sim`, pinned `=0.1.0` per CODING_STANDARDS 20.1 (core, codec and transport keep `0.1`; recorded in the ADR-0014 addendum); `examples/sim_read.rs` reads three tags from `sim://bench` and reports through `tracing` events on a `tracing-subscriber` fmt layer with `ExitCode` (ADR-0011); `tokio`, `tracing` and `tracing-subscriber` 0.3 (`fmt`, `std` only) as facade dev-dependencies; D23 check finds `lazy_static` under `sharded-slab`, wrapped in `deny.toml` and mirrored in `fuzz/deny.toml`, with audit entries for `tracing-subscriber`, `sharded-slab`, `lazy_static` and `thread_local`; `examples` CI job and `mise run examples`; facade test proves the re-export | check, coverage, lint-attrs, features, machete, dependencies, fuzz, examples, package |
 
 ## Verified evidence and reproduction
 
@@ -231,16 +233,17 @@ mise exec -- cargo check --locked --workspace --all-features --target aarch64-un
 mise exec -- cargo check --locked --workspace --all-features --target armv7-unknown-linux-gnueabihf
 ```
 
-Hosted CI for `22b379c` **completed successfully** with the full S03/S03b workflow:
-https://github.com/TheMadBotterINC/stonecrab/actions/runs/40491102565
+Hosted CI for `2430ab6` (S23) **completed successfully** with the full workflow:
+https://github.com/TheMadBotterINC/stonecrab/actions/runs/40503951470
 Green jobs: the six test cells (ubuntu, macOS, Windows on 1.97.1 and 1.99.1), quality
 with the per-crate coverage gate, cross, dependencies, package, dco, features, machete,
-lint-attrs, beta, geiger and fuzz-smoke (four targets). The report-only `semver` job
+lint-attrs, beta, geiger and fuzz-smoke (six targets). The report-only `semver` job
 fails until the sibling crates exist on crates.io (no baseline) and does not fail the
 run. Two platform fixes were needed on the first hosted runs: the prebuilt cargo-fuzz
 binary defaults to a musl target, so the smoke script passes the host triple; and the
 drop-mid-write transport test is ignored on Windows, where loopback accepts a 32 MiB
-write at once. Nothing establishes the interop, mutation, soak or hardware gates yet.
+write at once. The `examples` job added by S14 is unexercised on hosted runners until
+the next push. Nothing establishes the interop, mutation, soak or hardware gates yet.
 
 ## Important implementation and tooling details
 
