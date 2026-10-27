@@ -12,7 +12,9 @@
 /// 3. the driver's configured default.
 ///
 /// The variants are ordered by declaration, which is a stable total order for use in
-/// sorted collections; it carries no protocol meaning.
+/// sorted collections; it carries no protocol meaning. The enum is exhaustive: a word
+/// has exactly two byte orders, so consumers match both variants without a wildcard
+/// arm (ADR-0006 declares the shape final under `CODING_STANDARDS` 9.2).
 ///
 /// # Compatibility: docs/parity/modbus.md#MB-BYTEORDER-BE
 /// Upstream PLC4X has a single four-valued `ModbusByteOrder`. Stonecrab splits it into
@@ -37,7 +39,6 @@
 /// assert_eq!(copy, order, "Copy: the original is still usable");
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[non_exhaustive]
 pub enum ByteOrder {
     /// The most significant byte of a word comes first.
     BigEndian,
@@ -52,7 +53,8 @@ pub enum ByteOrder {
 /// address block, then driver default, per decision D14).
 ///
 /// The variants are ordered by declaration, a stable total order with no protocol
-/// meaning.
+/// meaning. The enum is exhaustive for the same reason as [`ByteOrder`]: a value has
+/// exactly two word orders.
 ///
 /// # Compatibility: docs/parity/modbus.md#MB-BYTEORDER-LE
 /// Upstream has no separate word-order setting; the four-mode mapping is the table on
@@ -71,7 +73,6 @@ pub enum ByteOrder {
 /// assert_eq!(copy, order, "Copy: the original is still usable");
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[non_exhaustive]
 pub enum WordOrder {
     /// The most significant word of a value comes first.
     HighWordFirst,

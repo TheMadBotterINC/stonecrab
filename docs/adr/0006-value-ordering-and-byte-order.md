@@ -23,8 +23,8 @@ keyed by an enum discriminant is not expressible without a cast.
    `RetryPolicy.retry_on` is a `BTreeSet<ErrorKind>`, default
    `{Timeout, Disconnected, Backpressure}`, equal to `is_retryable()`.
 2. **Byte and word order (D14).** Core exports `ByteOrder {BigEndian, LittleEndian}` and
-   `WordOrder {HighWordFirst, LowWordFirst}`, both `Copy`, `Hash`, `Ord` and
-   `#[non_exhaustive]`, and `Tag::with_byte_order`, `Tag::with_word_order` with
+   `WordOrder {HighWordFirst, LowWordFirst}`, both `Copy`, `Hash` and `Ord`, and
+   `Tag::with_byte_order`, `Tag::with_word_order` with
    `byte_order()` and `word_order()` accessors returning `Option`. The builders return
    `Self` (unlike the fallible `Tag::with_type`) because core has no address rule to
    contradict; a driver validates conflicts with its own address syntax.
@@ -59,6 +59,16 @@ keyed by an enum discriminant is not expressible without a cast.
    byte-buffer and recursive collection values keep the status given in ADR-0002. No
    calendar crate enters `stonecrab-core`. A later ADR chooses the representation
    before any milestone needs one; until then nothing is converted to text or floats.
+
+7. **The two order enums are exhaustive (amendment, 2026-10-27).** CODING_STANDARDS 9.2
+   makes public enums `#[non_exhaustive]` unless an ADR declares the shape final. This
+   ADR declares `ByteOrder` and `WordOrder` final: a word has exactly two byte orders
+   and a value exactly two word orders, so no third variant can exist. Consumers in
+   other crates (the codec, the Modbus decoder, the sensors crate) match both variants
+   exhaustively instead of carrying a wildcard arm that either maps an impossible
+   variant to a default (an inference the design forbids) or stays uncovered under the
+   100% line gate. The slice S05 draft had both enums `#[non_exhaustive]`; the first
+   consumer (S15) showed the cost.
 
 ## Consequences
 - `retry_on` can be a `BTreeSet` with no new dependency and no unchecked conversion.
