@@ -240,7 +240,8 @@ impl FakeTransportProbe {
 /// call with nothing queued at all waits out its deadline, as a silent peer would.
 ///
 /// # Closing and poisoning
-/// [`Step::CloseAt`](crate::Step::CloseAt) and a strict script failure queue an end of
+/// [`Step::CloseAt`](crate::Step::CloseAt), a closing [`Reaction`](crate::Reaction) from a
+/// [`Step::React`](crate::Step::React) and a strict script failure queue an end of
 /// stream: after the bytes before it, `recv` returns `Ok(0)` once and the transport is
 /// then unusable, so every later `send` and `recv` fails with `Disconnected`. `shutdown`
 /// is idempotent, like `TcpTransport`'s. A `recv` that times out or is dropped consumes
@@ -540,7 +541,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::{Step, block_on_with, poll_once};
+    use crate::{Reaction, Step, block_on_with, poll_once};
 
     const SECOND: Duration = Duration::from_secs(1);
 
@@ -933,6 +934,95 @@ mod tests {
         send(&clock, &mut transport, &[4]).expect("third");
         recv(&clock, &mut transport, &mut buffer, 1).expect("third answer");
         assert_eq!(&buffer[..], &[5], "answered again");
+    }
+
+    // covers: SPEC mandatory-failure-cases / F5 network outage (peer closes on demand)
+    #[test]
+    fn a_react_close_ends_the_transport_like_close_at() {
+        let clock = FakeClock::default();
+        let mut turns = 0_u8;
+        let mut transport = transport(
+            vec![Step::react(move |request| {
+                turns += 1;
+                if turns == 1 {
+                    Reaction::Reply(request.to_vec())
+                } else {
+                    Reaction::Close
+                }
+            })],
+            &clock,
+        );
+        let probe = transport.probe();
+        let mut buffer = BytesMut::new();
+        send(&clock, &mut transport, &[1, 2]).expect("first");
+        recv(&clock, &mut transport, &mut buffer, 1).expect("first answer");
+        assert_eq!(&buffer[..], &[1, 2], "echoed while the link was up");
+        assert!(!probe.report().closed, "still open");
+        send(&clock, &mut transport, &[3]).expect("second send is accepted");
+        assert!(probe.report().closed, "the reaction closed the script");
+        assert_eq!(
+            recv(&clock, &mut transport, &mut buffer, 1).expect("eof"),
+            0,
+            "end of stream"
+        );
+        assert_eq!(buffer.len(), 2, "nothing appended at end of stream");
+        let error = error_of(recv(&clock, &mut transport, &mut buffer, 1));
+        assert_eq!(error.kind(), ErrorKind::Disconnected, "recv after close");
+        let error = error_of(send(&clock, &mut transport, b"x"));
+        assert_eq!(error.kind(), ErrorKind::Disconnected, "send after close");
+        assert_eq!(
+            probe.report().responses,
+            2,
+            "the closed link ignored later frames"
+        );
+    }
+
+    #[test]
+    fn a_reply_then_close_reaction_delivers_the_bytes_and_then_the_end() {
+        let clock = FakeClock::default();
+        let mut transport = transport(
+            vec![Step::react(|_| Reaction::ReplyThenClose(b"bye".to_vec()))],
+            &clock,
+        );
+        let mut buffer = BytesMut::new();
+        send(&clock, &mut transport, b"hi").expect("send");
+        assert_eq!(
+            recv(&clock, &mut transport, &mut buffer, 1).expect("bytes"),
+            3,
+            "the reply arrives first"
+        );
+        assert_eq!(&buffer[..], b"bye", "reply bytes");
+        assert_eq!(
+            recv(&clock, &mut transport, &mut buffer, 1).expect("eof"),
+            0,
+            "then end of stream"
+        );
+        let error = error_of(recv(&clock, &mut transport, &mut buffer, 1));
+        assert_eq!(error.kind(), ErrorKind::Disconnected, "then Disconnected");
+    }
+
+    #[test]
+    fn a_silent_reaction_times_out_and_a_later_request_is_still_reacted_to() {
+        let clock = FakeClock::default();
+        let mut turns = 0_u8;
+        let mut transport = transport(
+            vec![Step::react(move |_| {
+                turns += 1;
+                if turns == 1 {
+                    Reaction::Silence
+                } else {
+                    Reaction::Reply(vec![7])
+                }
+            })],
+            &clock,
+        );
+        let mut buffer = BytesMut::new();
+        send(&clock, &mut transport, &[1]).expect("first");
+        let error = error_of(recv(&clock, &mut transport, &mut buffer, 1));
+        assert_eq!(error.kind(), ErrorKind::Timeout, "silence times out");
+        send(&clock, &mut transport, &[2]).expect("second");
+        recv(&clock, &mut transport, &mut buffer, 1).expect("answer");
+        assert_eq!(&buffer[..], &[7], "the step stayed armed");
     }
 
     // covers: SPEC mandatory-failure-cases / F2 transport (strict script failure)

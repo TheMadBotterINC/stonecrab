@@ -6,14 +6,66 @@ use std::time::Duration;
 /// `None` to stay silent.
 pub type Responder = Box<dyn FnMut(&[u8]) -> Option<Vec<u8>> + Send>;
 
+/// A reactor closure: given the bytes just received, what the peer does about them.
+pub type Reactor = Box<dyn FnMut(&[u8]) -> Reaction + Send>;
+
+/// What a [`Step::React`] closure decides the peer does about one request.
+///
+/// A [`Responder`] can only answer or stay silent; a reactor can also end the
+/// connection, which is how a fixture injects a lost link on demand. Both
+/// [`FakeTransport`] and [`ScriptedPeer`] honour every reaction.
+///
+/// # Examples
+/// ```
+/// use stonecrab_testkit::{Reaction, Step};
+///
+/// // Answer the first request, then drop the link on the second.
+/// let mut seen = 0_u8;
+/// let step = Step::react(move |request| {
+///     seen += 1;
+///     if seen == 1 { Reaction::Reply(request.to_vec()) } else { Reaction::Close }
+/// });
+/// assert_eq!(format!("{step:?}"), "React(<reactor>)");
+/// assert_eq!(format!("{:?}", Reaction::Silence), "Silence");
+/// ```
+///
+/// [`FakeTransport`]: crate::FakeTransport
+/// [`ScriptedPeer`]: crate::ScriptedPeer
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reaction {
+    /// Send these bytes to the client in one write and keep the connection open.
+    ///
+    /// Armed modifiers ([`Step::Truncate`] and the like) apply to the reply, as they do
+    /// to a [`Step::Respond`] answer.
+    Reply(Vec<u8>),
+    /// Send nothing and keep the connection open; the client runs into its deadline.
+    ///
+    /// The step stays armed for the next request, and armed modifiers wait for the next
+    /// reply.
+    Silence,
+    /// Close the connection without answering.
+    ///
+    /// The client sees end of stream (a half-close on the loopback socket, an end of
+    /// stream and then `Disconnected` on [`FakeTransport`](crate::FakeTransport)), exactly
+    /// as after a trailing [`Step::CloseAt`]`(0)`. Nothing after the close runs and
+    /// armed modifiers are dropped.
+    Close,
+    /// Send these bytes in one write, then close the connection.
+    ///
+    /// The client reads the bytes and then sees the end of stream, as with
+    /// [`Step::CloseAt`] on a reply shorter than its cut. Armed modifiers apply to the
+    /// reply, and an armed `CloseAt(n)` still cuts it at `n` bytes.
+    ReplyThenClose(Vec<u8>),
+}
+
 /// One instruction of a [`Script`].
 ///
 /// A script is a list of steps executed in order by a scripted peer: [`ScriptedPeer`] on
 /// a loopback socket, [`FakeTransport`] in memory. Steps fall in three groups.
 ///
-/// - **Input steps** wait for bytes from the client: [`Expect`](Self::Expect) and
-///   [`Respond`](Self::Respond). A script stalled on an input step sends nothing, so a
-///   client that waits for a reply runs into its deadline.
+/// - **Input steps** wait for bytes from the client: [`Expect`](Self::Expect),
+///   [`Respond`](Self::Respond) and [`React`](Self::React). A script stalled on an input
+///   step sends nothing, so a client that waits for a reply runs into its deadline.
 /// - **Output steps** make the peer speak: [`Reply`](Self::Reply) and
 ///   [`ReplyFragmented`](Self::ReplyFragmented).
 /// - **Modifier steps** change the next output step and produce nothing themselves:
@@ -123,8 +175,18 @@ pub enum Step {
     /// sent as one reply, `None` stays silent. The step never finishes: it answers every
     /// later request, so steps after it do not run, and one fixture can serve a whole
     /// contract suite. Armed modifiers apply to the next answer. It counts once in
-    /// [`ScriptReport::ran`] and every call in [`ScriptReport::responses`].
+    /// [`ScriptReport::ran`] and every call in [`ScriptReport::responses`]. A responder
+    /// cannot end the connection; use [`React`](Self::React) for that.
     Respond(Responder),
+    /// Decide what to do about each received request with a closure.
+    ///
+    /// Like [`Respond`](Self::Respond) the closure is called with all bytes received since
+    /// the previous input step finished, the step never finishes and so serves every later
+    /// request, armed modifiers apply to the next reply, and it counts once in
+    /// [`ScriptReport::ran`] and every call in [`ScriptReport::responses`]. The closure
+    /// returns a [`Reaction`]: reply, stay silent, close the connection, or reply and
+    /// then close. After a close the script is over, so later requests are not reacted to.
+    React(Reactor),
 }
 
 impl Step {
@@ -141,6 +203,21 @@ impl Step {
     #[must_use]
     pub fn respond(responder: impl FnMut(&[u8]) -> Option<Vec<u8>> + Send + 'static) -> Self {
         Self::Respond(Box::new(responder))
+    }
+
+    /// A [`React`](Self::React) step from any closure.
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab_testkit::{Reaction, Script, Step};
+    ///
+    /// // Drop the link on any request.
+    /// let script = Script::new(vec![Step::react(|_| Reaction::Close)]);
+    /// assert_eq!(script.steps.len(), 1);
+    /// ```
+    #[must_use]
+    pub fn react(reactor: impl FnMut(&[u8]) -> Reaction + Send + 'static) -> Self {
+        Self::React(Box::new(reactor))
     }
 }
 
@@ -164,6 +241,7 @@ impl fmt::Debug for Step {
             Self::WrongTransactionId => f.write_str("WrongTransactionId"),
             Self::LateReply(by) => f.debug_tuple("LateReply").field(by).finish(),
             Self::Respond(_) => f.write_str("Respond(<responder>)"),
+            Self::React(_) => f.write_str("React(<reactor>)"),
         }
     }
 }
@@ -271,15 +349,15 @@ pub struct ScriptReport {
     pub received: Vec<u8>,
     /// Every [`Step::Expect`] that did not match, in order.
     pub mismatches: Vec<Mismatch>,
-    /// Indices of the steps that ran, in the order they ran. A [`Step::Respond`] appears
-    /// once, when it first ran.
+    /// Indices of the steps that ran, in the order they ran. A [`Step::Respond`] or
+    /// [`Step::React`] appears once, when it first ran.
     pub ran: Vec<usize>,
-    /// How many times a [`Step::Respond`] closure was called.
+    /// How many times a [`Step::Respond`] or [`Step::React`] closure was called.
     pub responses: usize,
     /// True when a strict script stopped on a mismatch.
     pub failed: bool,
-    /// True when the script closed the connection ([`Step::CloseAt`] or a strict
-    /// failure).
+    /// True when the script closed the connection ([`Step::CloseAt`], a closing
+    /// [`Reaction`] or a strict failure).
     pub closed: bool,
 }
 
@@ -350,7 +428,8 @@ fn reply_pieces(step: Option<&Step>) -> Option<Vec<Vec<u8>>> {
         | Step::Corrupt { .. }
         | Step::WrongTransactionId
         | Step::LateReply(_)
-        | Step::Respond(_) => None,
+        | Step::Respond(_)
+        | Step::React(_) => None,
     }
 }
 
@@ -518,23 +597,55 @@ impl Machine {
                     self.armed.late = self.armed.late.saturating_add(*by);
                     self.advance(index);
                 }
-                Step::Respond(_) => {
-                    if self.inbox.is_empty() {
-                        return None;
-                    }
-                    let request = mem::take(&mut self.inbox);
-                    if self.report.ran.last() != Some(&index) {
-                        self.report.ran.push(index);
-                    }
-                    self.report.responses = self.report.responses.saturating_add(1);
-                    let Some(Step::Respond(responder)) = self.steps.get_mut(index) else {
-                        return None;
+                Step::Respond(_) | Step::React(_) => {
+                    let request = self.take_request(index)?;
+                    let reaction = match self.steps.get_mut(index) {
+                        Some(Step::Respond(responder)) => {
+                            responder(&request).map_or(Reaction::Silence, Reaction::Reply)
+                        }
+                        Some(Step::React(reactor)) => reactor(&request),
+                        _ => return None,
                     };
-                    if let Some(answer) = responder(&request) {
-                        self.armed.coalesce = 0;
-                        return Some(self.write(vec![answer], false));
+                    if let Some(action) = self.react(reaction) {
+                        return Some(action);
                     }
                 }
+            }
+        }
+    }
+
+    /// Take the pending request for the responding step at `index` and count the call;
+    /// `None` while no request has arrived.
+    fn take_request(&mut self, index: usize) -> Option<Vec<u8>> {
+        if self.inbox.is_empty() {
+            return None;
+        }
+        let request = mem::take(&mut self.inbox);
+        if self.report.ran.last() != Some(&index) {
+            self.report.ran.push(index);
+        }
+        self.report.responses = self.report.responses.saturating_add(1);
+        Some(request)
+    }
+
+    /// Turn one reaction into the action it asks for; `None` for silence.
+    fn react(&mut self, reaction: Reaction) -> Option<Action> {
+        match reaction {
+            Reaction::Silence => None,
+            Reaction::Reply(answer) => {
+                self.armed.coalesce = 0;
+                Some(self.write(vec![answer], false))
+            }
+            Reaction::ReplyThenClose(answer) => {
+                self.armed.coalesce = 0;
+                self.armed.close_at = self.armed.close_at.or(Some(usize::MAX));
+                Some(self.write(vec![answer], false))
+            }
+            Reaction::Close => {
+                self.armed = Armed::default();
+                self.halted = true;
+                self.report.closed = true;
+                Some(Action::Close)
             }
         }
     }
@@ -587,6 +698,7 @@ mod tests {
             Step::WrongTransactionId,
             Step::LateReply(Duration::from_secs(2)),
             Step::respond(|_| None),
+            Step::react(|_| Reaction::Silence),
         ];
         let text = format!("{:?}", Script::strict(steps));
         for part in [
@@ -601,6 +713,7 @@ mod tests {
             "WrongTransactionId",
             "LateReply(2s)",
             "Respond(<responder>)",
+            "React(<reactor>)",
             "strict: true",
         ] {
             assert!(text.contains(part), "debug output lacks {part}: {text}");
@@ -864,5 +977,168 @@ mod tests {
         machine.feed(&[0]);
         assert_eq!(machine.next(), Some(write(&[&[1]])), "answer sent");
         assert_eq!(machine.armed.coalesce, 0, "the marker was spent");
+    }
+
+    /// A machine over one `React` step that plays `reactions` in order, one per request.
+    fn reacting(reactions: Vec<Reaction>) -> Machine {
+        let mut queue = reactions.into_iter();
+        machine(vec![Step::react(move |_| {
+            queue.next().unwrap_or(Reaction::Silence)
+        })])
+    }
+
+    #[test]
+    fn every_reaction_maps_to_its_action() {
+        let mut machine = reacting(vec![
+            Reaction::Reply(vec![1, 2]),
+            Reaction::Silence,
+            Reaction::ReplyThenClose(vec![3]),
+        ]);
+        machine.feed(&[0]);
+        assert_eq!(machine.next(), Some(write(&[&[1, 2]])), "reply");
+        machine.feed(&[0]);
+        assert_eq!(machine.next(), None, "silence does nothing");
+        assert!(!machine.report().closed, "silence keeps the link");
+        machine.feed(&[0]);
+        assert_eq!(
+            machine.next(),
+            Some(Action::Write {
+                chunks: vec![vec![3]],
+                late: Duration::ZERO,
+                close: true
+            }),
+            "reply then close"
+        );
+        assert!(machine.report().closed, "the link is closed");
+        machine.feed(&[0]);
+        assert_eq!(machine.next(), None, "halted after the close");
+        let report = machine.into_report();
+        assert_eq!(
+            report.responses, 3,
+            "the fourth request was never reacted to"
+        );
+        assert_eq!(report.ran, vec![0], "counted once");
+        assert!(!report.failed, "a reaction close is not a failure");
+    }
+
+    #[test]
+    fn a_close_reaction_closes_without_a_reply_and_drops_armed_modifiers() {
+        let mut machine = machine(vec![
+            Step::LateReply(Duration::from_secs(3)),
+            Step::Truncate(1),
+            Step::react(|_| Reaction::Close),
+            Step::Reply(vec![9]),
+        ]);
+        machine.feed(&[7]);
+        assert_eq!(machine.next(), Some(Action::Close), "close");
+        assert!(machine.report().closed, "closed");
+        assert_eq!(machine.next(), None, "nothing after the close");
+        machine.feed(&[8]);
+        assert_eq!(machine.next(), None, "still halted");
+        assert_eq!(
+            machine.report().received,
+            vec![7, 8],
+            "bytes still recorded"
+        );
+        assert_eq!(machine.report().responses, 1, "one call");
+    }
+
+    #[test]
+    fn a_react_step_stays_armed_and_the_closure_sees_each_request() {
+        let mut machine = machine(vec![
+            Step::react(|request| Reaction::Reply(request.iter().rev().copied().collect())),
+            Step::Reply(vec![0xEE]),
+        ]);
+        assert_eq!(machine.next(), None, "no request yet");
+        machine.feed(&[1, 2]);
+        assert_eq!(machine.next(), Some(write(&[&[2, 1]])), "first");
+        machine.feed(&[3]);
+        assert_eq!(machine.next(), Some(write(&[&[3]])), "second");
+        machine.feed(&[4, 5, 6]);
+        assert_eq!(machine.next(), Some(write(&[&[6, 5, 4]])), "third");
+        let report = machine.into_report();
+        assert_eq!(report.responses, 3, "three calls");
+        assert_eq!(report.ran, vec![0], "counted once; later steps never run");
+    }
+
+    #[test]
+    fn reactions_that_reply_take_the_armed_modifiers_and_clear_a_pending_coalesce() {
+        let mut machine = machine(vec![
+            Step::ReplyCoalescedWithNext,
+            Step::WrongTransactionId,
+            Step::react(|_| Reaction::Reply(vec![1, 2, 3])),
+        ]);
+        machine.feed(&[0]);
+        assert_eq!(machine.next(), Some(write(&[&[0xFE, 0xFD, 3]])), "edited");
+        assert_eq!(machine.armed.coalesce, 0, "the marker was spent");
+
+        let mut machine = self::machine(vec![
+            Step::Truncate(2),
+            Step::CloseAt(1),
+            Step::react(|_| Reaction::ReplyThenClose(vec![5, 6, 7])),
+        ]);
+        machine.feed(&[0]);
+        assert_eq!(
+            machine.next(),
+            Some(Action::Write {
+                chunks: vec![vec![5]],
+                late: Duration::ZERO,
+                close: true
+            }),
+            "the earlier cut wins; the link closes"
+        );
+        let mut machine = self::machine(vec![
+            Step::WrongTransactionId,
+            Step::react(|_| Reaction::ReplyThenClose(vec![1, 2, 3])),
+        ]);
+        machine.feed(&[0]);
+        assert_eq!(
+            machine.next(),
+            Some(Action::Write {
+                chunks: vec![vec![0xFE, 0xFD, 3]],
+                late: Duration::ZERO,
+                close: true
+            }),
+            "edited, whole, then closed"
+        );
+    }
+
+    #[test]
+    fn a_silent_reaction_keeps_modifiers_armed_for_the_next_reply() {
+        let mut turns = 0_u8;
+        let mut machine = machine(vec![
+            Step::WrongTransactionId,
+            Step::react(move |_| {
+                turns += 1;
+                if turns == 1 {
+                    Reaction::Silence
+                } else {
+                    Reaction::Reply(vec![1, 2])
+                }
+            }),
+        ]);
+        machine.feed(&[0]);
+        assert_eq!(machine.next(), None, "silent");
+        machine.feed(&[0]);
+        assert_eq!(
+            machine.next(),
+            Some(write(&[&[0xFE, 0xFD]])),
+            "edited later"
+        );
+    }
+
+    #[test]
+    fn respond_none_is_silence_and_an_empty_answer_is_an_empty_write() {
+        let mut machine = machine(vec![Step::respond(|_| None)]);
+        machine.feed(&[1]);
+        assert_eq!(machine.next(), None, "respond stayed silent");
+        let mut machine = self::machine(vec![Step::respond(|_| Some(vec![]))]);
+        machine.feed(&[1]);
+        assert_eq!(
+            machine.next(),
+            Some(write(&[])),
+            "an empty answer is an empty write"
+        );
+        assert_eq!(machine.report().responses, 1, "counted");
     }
 }

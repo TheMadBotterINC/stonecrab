@@ -44,4 +44,4 @@ pub use interop::{BitRun, BlockSizes, InteropMap, RegisterEntry};
 #[cfg(feature = "net")]
 pub use peer::{MAX_PEER_DELAY, ScriptedPeer};
 #[cfg(feature = "net")]
-pub use script::{Mismatch, Responder, Script, ScriptReport, Step};
+pub use script::{Mismatch, Reaction, Reactor, Responder, Script, ScriptReport, Step};

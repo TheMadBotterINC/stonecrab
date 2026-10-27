@@ -3,15 +3,15 @@
 //!
 //! This is a test harness, not a double of a Stonecrab trait: it is the peer's side of the
 //! protocol, built from this crate's own codec (`decode_request`, `encode_response`,
-//! `MbapHeader`), and it plugs into the testkit's `Step::Respond`. Nothing here is copied
+//! `MbapHeader`), and it plugs into the testkit's `Step::React`. Nothing here is copied
 //! from an upstream test or fixture; the values come from
 //! `fixtures/modbus/interop/register-map.toml`.
 //!
 //! The device is steered by the contract fixture's hooks through [`Device::arm_swallow`]
-//! (the next request gets no answer, so the fake clock drives the deadline) and
-//! [`Device::arm_exception`] (the next request is refused with a device exception). A
-//! `Step::Respond` closure cannot end the script, so the device cannot close the peer on
-//! demand; see `tests/contract.rs` for what that means for the disconnect cases.
+//! (the next request gets no answer, so the fake clock drives the deadline),
+//! [`Device::arm_exception`] (the next request is refused with a device exception) and
+//! [`Device::arm_disconnect`] (the next request makes the peer close the connection
+//! without answering, a lost link).
 
 #![expect(
     unreachable_pub,
@@ -28,7 +28,7 @@ use stonecrab_modbus::{
     ExceptionCode, FunctionCode, MAX_PDU_BYTES, MbapHeader, ModbusAdu, ModbusPdu, decode_request,
     encode_response,
 };
-use stonecrab_testkit::{InteropMap, RegisterEntry, Responder};
+use stonecrab_testkit::{InteropMap, Reaction, Reactor, RegisterEntry};
 
 /// What the device does to the next request instead of answering it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,6 +37,8 @@ enum Fault {
     Swallow,
     /// Answer with a device exception carrying this code.
     Exception(ExceptionCode),
+    /// Close the connection without answering.
+    Disconnect,
 }
 
 /// The four data blocks, indexed by logical address (wire address plus one), the way the
@@ -143,6 +145,11 @@ impl Device {
         self.with_faults(|faults| faults.push_back(Fault::Exception(code)));
     }
 
+    /// Close the connection on the next request, without answering it.
+    pub fn arm_disconnect(&self) {
+        self.with_faults(|faults| faults.push_back(Fault::Disconnect));
+    }
+
     fn with_faults<R>(&self, f: impl FnOnce(&mut VecDeque<Fault>) -> R) -> R {
         let mut faults = self
             .shared
@@ -152,26 +159,35 @@ impl Device {
         f(&mut faults)
     }
 
-    /// A responder for one fake transport: the bytes of one request in, the bytes of its
-    /// reply out, or `None` to stay silent.
-    pub fn responder(&self) -> Responder {
+    /// A reactor for one fake transport: the bytes of one request in, what the peer does
+    /// about it out (reply, stay silent or close the connection).
+    pub fn reactor(&self) -> Reactor {
         let device = self.clone();
-        Box::new(move |request| device.answer(request))
+        Box::new(move |request| device.react(request))
     }
 
-    /// The reply to one request ADU, or `None` for bytes that are not a request or for a
-    /// swallowed request.
-    fn answer(&self, bytes: &[u8]) -> Option<Vec<u8>> {
-        let header = MbapHeader::decode(bytes).ok()?;
-        let pdu = bytes.get(MbapHeader::ENCODED_LEN..header.adu_len())?;
+    /// What the peer does about one request ADU: answer it, stay silent for bytes that are
+    /// not a request or for a swallowed request, or close the connection for a disconnect.
+    fn react(&self, bytes: &[u8]) -> Reaction {
+        let Ok(header) = MbapHeader::decode(bytes) else {
+            return Reaction::Silence;
+        };
+        let Some(pdu) = bytes.get(MbapHeader::ENCODED_LEN..header.adu_len()) else {
+            return Reaction::Silence;
+        };
         self.shared.reads.fetch_add(1, Ordering::Relaxed);
         let fault = self.with_faults(VecDeque::pop_front);
         let reply = match fault {
-            Some(Fault::Swallow) => return None,
-            Some(Fault::Exception(code)) => refusal(pdu.first().copied()?, code),
-            None => self.serve(pdu)?,
+            Some(Fault::Swallow) => return Reaction::Silence,
+            Some(Fault::Disconnect) => return Reaction::Close,
+            Some(Fault::Exception(code)) => {
+                pdu.first().copied().map(|function| refusal(function, code))
+            }
+            None => self.serve(pdu),
         };
-        wire(header, &reply)
+        reply
+            .and_then(|reply| wire(header, &reply))
+            .map_or(Reaction::Silence, Reaction::Reply)
     }
 
     /// The reply PDU bytes for a request PDU.

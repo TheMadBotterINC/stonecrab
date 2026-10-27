@@ -25,7 +25,7 @@ mod tests {
     use stonecrab_modbus::{ExceptionCode, ModbusTcpDriver};
     use stonecrab_testkit::{
         CaseOutcome, ContractFixture, ContractReport, ContractSuite, FakeClock,
-        FakeTransportFactory, FixtureAddress, InteropMap, Script, Step, block_on_with,
+        FakeTransportFactory, FixtureAddress, InteropMap, Reaction, Script, Step, block_on_with,
     };
 
     use crate::responder::Device;
@@ -84,7 +84,7 @@ mod tests {
             let device = Device::from_map(&register_map());
             let factory = FakeTransportFactory::new(FakeClock::clone(&clock));
             for _ in 0..PLANS {
-                factory.push_script(Script::new(vec![Step::Respond(device.responder())]));
+                factory.push_script(Script::new(vec![Step::React(device.reactor())]));
             }
             let driver = ModbusTcpDriver::new()
                 .with_clock(Arc::<FakeClock>::clone(&clock))
@@ -93,6 +93,7 @@ mod tests {
             let counter = device.clone();
             let timeout = device.clone();
             let exception = device.clone();
+            let disconnect = device.clone();
             let fixture = ContractFixture::new(
                 Arc::<FakeClock>::clone(&clock),
                 READABLE,
@@ -103,6 +104,7 @@ mod tests {
             )
             // A write is refused whatever the address: the name lets the suite prove it.
             .with_writable(READABLE, PlcValue::U16(1))
+            .with_inject_disconnect(move || disconnect.arm_disconnect())
             .with_inject_timeout(move || timeout.arm_swallow())
             .with_inject_device_exception(move || {
                 exception.arm_exception(ExceptionCode::ServerDeviceFailure);
@@ -174,8 +176,8 @@ mod tests {
         );
         assert_eq!(
             report.skipped(),
-            4,
-            "exactly the four named skips:\n{report}"
+            2,
+            "exactly the two write skips:\n{report}"
         );
         // The write cases need a driver that supports write; this one does not (D3).
         for name in [READ_ONLY_POLICY, UNKNOWN_NOT_REPLAYED] {
@@ -187,15 +189,13 @@ mod tests {
                 "{name} is skipped for the missing write capability:\n{report}"
             );
         }
-        // The responder cannot close a fake transport on demand, so the two disconnect
-        // cases have no hook (see the test below that covers a lost link directly).
+        // The responder closes the peer on demand (`Reaction::Close`), so the fixture has
+        // the hook and the two disconnect cases run.
         for name in [DISCONNECT_READ, DISCONNECT_DIAGNOSTICS] {
             assert_eq!(
                 report.outcome(name),
-                Some(&CaseOutcome::Skipped(
-                    "fixture cannot inject disconnect".to_owned()
-                )),
-                "{name} is skipped for the missing hook:\n{report}"
+                Some(&CaseOutcome::Passed),
+                "{name} ran and passed:\n{report}"
             );
         }
         assert_eq!(
@@ -389,7 +389,7 @@ mod tests {
             Step::Expect(vec![0, 1, 0, 0, 0, 6, 1, 3, 0, 12, 0, 1]),
             Step::CloseAt(0),
         ]));
-        factory.push_script(Script::new(vec![Step::Respond(bench.device.responder())]));
+        factory.push_script(Script::new(vec![Step::React(bench.device.reactor())]));
         let driver = ModbusTcpDriver::new()
             .with_clock(Arc::<FakeClock>::clone(&bench.clock))
             .with_transport_factory(Arc::new(factory.clone()));
@@ -441,26 +441,64 @@ mod tests {
     #[test]
     fn the_responder_echoes_ids_and_refuses_what_it_does_not_serve() {
         let device = Device::from_map(&register_map());
-        let mut respond = device.responder();
+        let mut react = device.reactor();
         // Read two holding registers at wire address 12 (logical 13), transaction 0x1234,
         // unit 7: the answer echoes both ids.
-        let reply = respond(&[0x12, 0x34, 0, 0, 0, 6, 7, 3, 0, 12, 0, 2]).expect("an answer");
         assert_eq!(
-            reply,
-            [0x12, 0x34, 0, 0, 0, 7, 7, 3, 4, 0xA5, 0xB8, 0xF1, 0x8C]
+            react(&[0x12, 0x34, 0, 0, 0, 6, 7, 3, 0, 12, 0, 2]),
+            Reaction::Reply(vec![
+                0x12, 0x34, 0, 0, 0, 7, 7, 3, 4, 0xA5, 0xB8, 0xF1, 0x8C
+            ])
         );
         // Function 0x2B is not served: ILLEGAL FUNCTION.
-        let reply = respond(&[0, 9, 0, 0, 0, 3, 1, 0x2B, 0]).expect("an answer");
-        assert_eq!(reply, [0, 9, 0, 0, 0, 3, 1, 0xAB, 1]);
+        assert_eq!(
+            react(&[0, 9, 0, 0, 0, 3, 1, 0x2B, 0]),
+            Reaction::Reply(vec![0, 9, 0, 0, 0, 3, 1, 0xAB, 1])
+        );
         // Quantity 0 for a known function: ILLEGAL DATA VALUE.
-        let reply = respond(&[0, 10, 0, 0, 0, 6, 1, 3, 0, 0, 0, 0]).expect("an answer");
-        assert_eq!(reply, [0, 10, 0, 0, 0, 3, 1, 0x83, 3]);
+        assert_eq!(
+            react(&[0, 10, 0, 0, 0, 6, 1, 3, 0, 0, 0, 0]),
+            Reaction::Reply(vec![0, 10, 0, 0, 0, 3, 1, 0x83, 3])
+        );
         // A span past the block: ILLEGAL DATA ADDRESS.
-        let reply = respond(&[0, 11, 0, 0, 0, 6, 1, 4, 0, 20, 0, 2]).expect("an answer");
-        assert_eq!(reply, [0, 11, 0, 0, 0, 3, 1, 0x84, 2]);
+        assert_eq!(
+            react(&[0, 11, 0, 0, 0, 6, 1, 4, 0, 20, 0, 2]),
+            Reaction::Reply(vec![0, 11, 0, 0, 0, 3, 1, 0x84, 2])
+        );
         // Bytes that are not a request get no answer and are not counted.
-        assert_eq!(respond(&[1, 2, 3]), None);
-        assert_eq!(respond(&[0, 1, 0, 1, 0, 6, 1, 3, 0, 0, 0, 1]), None);
+        assert_eq!(react(&[1, 2, 3]), Reaction::Silence);
+        assert_eq!(
+            react(&[0, 1, 0, 1, 0, 6, 1, 3, 0, 0, 0, 1]),
+            Reaction::Silence
+        );
         assert_eq!(device.reads(), 4, "only the four requests were counted");
+    }
+
+    #[test]
+    fn each_fault_maps_to_its_reaction_and_is_used_once() {
+        let device = Device::from_map(&register_map());
+        let mut react = device.reactor();
+        let request = [0, 1, 0, 0, 0, 6, 1, 3, 0, 12, 0, 1];
+        device.arm_disconnect();
+        device.arm_swallow();
+        device.arm_exception(ExceptionCode::ServerDeviceFailure);
+        assert_eq!(device.armed(), 3, "three faults queued");
+        assert_eq!(
+            react(&request),
+            Reaction::Close,
+            "a disconnect closes, unanswered"
+        );
+        assert_eq!(react(&request), Reaction::Silence, "a swallow is silent");
+        assert_eq!(
+            react(&request),
+            Reaction::Reply(vec![0, 1, 0, 0, 0, 3, 1, 0x83, 4]),
+            "an exception is a refusal"
+        );
+        assert_eq!(device.armed(), 0, "every fault was used once");
+        assert!(
+            matches!(react(&request), Reaction::Reply(reply) if reply.len() == 11),
+            "the next request is answered"
+        );
+        assert_eq!(device.reads(), 4, "the disconnect request counts as read");
     }
 }

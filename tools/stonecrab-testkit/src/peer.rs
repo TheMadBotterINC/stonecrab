@@ -134,7 +134,8 @@ async fn run(
 ///
 /// After the script's last step the peer keeps the connection open, recording any further
 /// bytes, until the client closes or [`close`](Self::close) is called; a
-/// [`Step::CloseAt`](crate::Step::CloseAt) or strict failure sends a FIN instead and
+/// [`Step::CloseAt`](crate::Step::CloseAt), a closing [`Reaction`](crate::Reaction) or a
+/// strict failure sends a FIN instead and
 /// keeps reading, so unread client bytes cannot cause a reset. The listener is dropped
 /// after the first accept, so a second connection is refused.
 ///
@@ -352,7 +353,7 @@ mod tests {
     use std::time::Instant;
 
     use super::*;
-    use crate::Step;
+    use crate::{Reaction, Step};
 
     async fn read_exactly(client: &mut TcpStream, count: usize) -> Vec<u8> {
         let mut bytes = vec![0_u8; count];
@@ -532,6 +533,87 @@ mod tests {
         let report = peer.close().await.expect("close");
         assert_eq!(report.responses, 3, "three requests");
         assert_eq!(report.ran, vec![0], "respond counted once");
+    }
+
+    #[tokio::test]
+    async fn a_react_close_half_closes_the_socket_and_the_client_sees_the_end() {
+        let calls = Arc::new(AtomicU32::new(0));
+        let counter = Arc::clone(&calls);
+        let peer = ScriptedPeer::spawn(Script::new(vec![Step::react(move |request| {
+            if counter.fetch_add(1, Ordering::SeqCst) == 0 {
+                Reaction::Reply(request.to_vec())
+            } else {
+                Reaction::Close
+            }
+        })]))
+        .expect("spawn");
+        let mut client = TcpStream::connect(peer.addr()).await.expect("connect");
+        client.write_all(b"abc").await.expect("write");
+        assert_eq!(
+            read_exactly(&mut client, 3).await,
+            b"abc",
+            "echo while open"
+        );
+        client.write_all(b"x").await.expect("write");
+        assert!(
+            read_to_end(&mut client).await.is_empty(),
+            "FIN without a reply"
+        );
+        // The socket is only half-closed, so the client can still write without a reset.
+        client
+            .write_all(b"more")
+            .await
+            .expect("a write after the FIN");
+        let report = peer.close().await.expect("close");
+        assert!(report.closed && !report.failed, "closed by the reaction");
+        assert_eq!(report.responses, 2, "two requests were reacted to");
+        assert_eq!(report.ran, vec![0], "counted once");
+    }
+
+    #[tokio::test]
+    async fn a_reply_then_close_reaction_sends_the_bytes_then_the_end() {
+        let peer = ScriptedPeer::spawn(Script::new(vec![Step::react(|_| {
+            Reaction::ReplyThenClose(b"bye".to_vec())
+        })]))
+        .expect("spawn");
+        let mut client = TcpStream::connect(peer.addr()).await.expect("connect");
+        client.write_all(b"hi").await.expect("write");
+        assert_eq!(read_to_end(&mut client).await, b"bye", "reply then FIN");
+        let report = peer.close().await.expect("close");
+        assert!(report.closed && !report.failed, "closed by the reaction");
+        assert_eq!(report.received, b"hi", "the request was recorded");
+    }
+
+    #[tokio::test]
+    async fn a_silent_reaction_sends_nothing_and_the_next_request_is_answered() {
+        let calls = Arc::new(AtomicU32::new(0));
+        let counter = Arc::clone(&calls);
+        let peer = ScriptedPeer::spawn(Script::new(vec![Step::react(move |_| {
+            if counter.fetch_add(1, Ordering::SeqCst) == 0 {
+                Reaction::Silence
+            } else {
+                Reaction::Reply(b"ok".to_vec())
+            }
+        })]))
+        .expect("spawn");
+        let mut client = TcpStream::connect(peer.addr()).await.expect("connect");
+        client.write_all(b"1").await.expect("write");
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while calls.load(Ordering::SeqCst) < 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the reactor was called for the first request");
+        client.write_all(b"2").await.expect("write");
+        assert_eq!(
+            read_exactly(&mut client, 2).await,
+            b"ok",
+            "answered the second"
+        );
+        let report = peer.close().await.expect("close");
+        assert!(!report.closed, "silence keeps the link");
+        assert_eq!(report.responses, 2, "two calls");
     }
 
     #[tokio::test]

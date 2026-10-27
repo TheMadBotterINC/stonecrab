@@ -35,7 +35,7 @@ completed by the configuration slice (S26):
 The session and the connection do I/O only through a transport factory the caller
 passes in, so the crate's tests run on the in-memory transport of the repository's
 unpublished testkit. The common driver contract suite passes against the driver over that
-transport, with two write cases and two disconnect cases skipped by name. The crate
+transport, with the two write cases skipped by name. The crate
 depends on `stonecrab-core`, `stonecrab-codec`, `stonecrab-transport` (with its `tcp`
 feature, for `TcpFactory`, and the `Framer` trait, `ConnectionGuard` and
 `TransportFactory`), `bytes` and `tracing`; default features are empty.

@@ -557,31 +557,35 @@ parses it with `Short.parseShort` and the inventoried files show no range check
     - **The responder is a test harness.** `tests/support/responder.rs` is a Modbus
       device built from this crate's own codec (`decode_request`, `encode_response`,
       `MbapHeader`) over the interop register map; it plugs into the testkit's
-      `Step::Respond`. It is the peer's side of the protocol, not a second implementation
-      of a Stonecrab trait, so CODING_STANDARDS 13.5 (no mocks of our own
-      traits outside the testkit) does not apply to it. Its blocks are indexed by logical
-      address (wire address plus one) as the interop server's are, and a span that leaves
-      the block is exception 02. It serves any unit and echoes the unit and transaction
-      ids.
+      `Step::React` (S25c; S25b used `Step::Respond`). It is the peer's side of the
+      protocol, not a second implementation of a Stonecrab trait, so CODING_STANDARDS 13.5
+      (no mocks of our own traits outside the testkit) does not apply to it.
+      Its blocks are indexed by logical address (wire address plus one) as the interop
+      server's are, and a span that leaves the block is exception 02. It serves any unit
+      and echoes the unit and transaction ids.
     - **How the fixture steers it.** `FakeTransportFactory` serves a fresh script for
-      every connect, so the run queues 256 scripts, each a single `Step::Respond` over one
+      every connect, so the run queues 256 scripts, each a single `Step::React` over one
       shared device. `inject_timeout` queues a fault that makes the device swallow the
-      next request, so the fake clock drives the deadline; `inject_device_exception`
-      queues exception 04 (SERVER DEVICE FAILURE); `device_reads` counts every request
-      that reached the device, swallowed ones included, which the retry case needs;
-      `io_probe` is the frames sent plus the opens across every transport the factory
-      created, so the "no I/O" cases are real. A `Step::Respond` closure can answer or stay
-      silent but cannot end the script, so the device cannot close the peer on demand:
-      `inject_disconnect` is left unset and the two disconnect cases are skipped by name.
-      The lost link is covered through the same driver by a test whose script closes the
-      peer after one request. Closing on demand needs a testkit change (a responder that
-      can end the script); no slice in the alpha plan owns that testkit change yet, so the
-      two skips stay until one does.
-    - **Result.** 19 cases pass and 4 are skipped by name: the read-only policy and the
-      unknown-write-outcome cases (`driver reports write unsupported`, decision D3) and the
-      two disconnect cases (`fixture cannot inject disconnect`). `an unsupported write
-      performs no I/O` runs and passes because the fixture names a writable address. The
-      suite runs on `FakeClock`; nothing sleeps.
+      next request (`Reaction::Silence`), so the fake clock drives the deadline;
+      `inject_device_exception` queues exception 04 (SERVER DEVICE FAILURE);
+      `inject_disconnect` queues a fault that makes the device answer the next request
+      with `Reaction::Close`: the peer closes without a reply, the transport yields end of
+      stream and then `Disconnected`, and the connection reports `Disconnected` and
+      reconnects. `device_reads` counts every request that reached the device, swallowed
+      and closing ones included, which the retry case needs; `io_probe` is the frames sent
+      plus the opens across every transport the factory created, so the "no I/O" cases are
+      real. S25b shipped without `inject_disconnect`, because a `Step::Respond` closure can
+      answer or stay silent but cannot end the script, and skipped the two disconnect cases
+      by name; S25c added `Step::React` to the testkit (ADR-0009, S25c addendum) and wired
+      the hook. The lost-link test that scripts `Expect` and `CloseAt(0)` stays as a
+      byte-level check of the exact request and of recovery through the next transport.
+    - **Result.** 21 cases pass and 2 are skipped by name: the read-only policy and the
+      unknown-write-outcome cases (`driver reports write unsupported`, decision D3). The
+      two disconnect cases (`a disconnect during a read yields Disconnected`, `a
+      disconnect carries diagnostics naming operation, state and category`) pass since
+      S25c; S25b had skipped them (`fixture cannot inject disconnect`). `an unsupported
+      write performs no I/O` runs and passes because the fixture names a writable
+      address. The suite runs on `FakeClock`; nothing sleeps.
 
 ## Consequences
 - The rest of the crate builds on a small, fully tested vocabulary. The parser has

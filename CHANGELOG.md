@@ -166,7 +166,9 @@
   value every `ModbusConnection` reports. The crate now enables the `tcp` feature of
   `stonecrab-transport`. The common driver contract suite runs green against the driver over
   the fake transport (`tests/contract.rs`, with a first-party MBAP responder over the
-  interop register map).
+  interop register map); only the two write cases are skipped, by name. The unpublished
+  testkit gains `Step::React` and `Reaction` (reply, stay silent, close, reply then close),
+  so the responder can drop the link on demand and the two disconnect cases pass.
 ### stonecrab-sensors 0.1.0
 - Add the crate: declarative sensor profiles for Stonecrab, depending on `stonecrab-core`,
   `serde` and, behind the default `toml` feature, `toml` (ADR-0016). No driver reads a

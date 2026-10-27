@@ -99,9 +99,19 @@ the first mismatch).
   shares one write with the reply after it), `Delay`, `CloseAt(n)` (send n bytes of the
   next reply, then close), `Truncate(n)` (send n bytes of the next reply, stay open),
   `Corrupt { offset, bytes }`, `WrongTransactionId` (flip the first two bytes of the next
-  reply), `LateReply` (deliver the next reply later) and `Respond(closure)` (answer every
-  request, so one fixture can serve a whole contract suite). Each variant's rustdoc gives
-  the exact rule.
+  reply), `LateReply` (deliver the next reply later), `Respond(closure)` (answer every
+  request, so one fixture can serve a whole contract suite) and `React(closure)`
+  (`Step::react`; like `Respond`, but the closure returns a `Reaction`). Each variant's
+  rustdoc gives the exact rule.
+- `Reaction` is what a `React` closure decides per request: `Reply(bytes)`, `Silence` (no
+  bytes, the client runs into its deadline), `Close` (close the connection without a
+  reply) and `ReplyThenClose(bytes)`. `Step::respond` keeps its meaning (`Some` is a
+  reply, `None` is silence) but cannot close; a fixture that must drop the link on demand,
+  such as the Modbus contract run, uses `React`. `FakeTransport` and `ScriptedPeer` both
+  honour every reaction: a close ends the fake transport exactly as `CloseAt` does (`recv`
+  returns the end of stream once and then fails `Disconnected`, `send` fails
+  `Disconnected`) and half-closes the loopback socket. `ScriptReport::responses` counts the
+  calls of `Respond` and `React` closures alike.
 - `ScriptedPeer::spawn(script)` listens on `127.0.0.1:0` and runs the script on the one
   connection it accepts. It is for bytes only: `Delay` and `LateReply` sleep for at most
   `MAX_PEER_DELAY` (200 ms). It owns the workspace's single `tokio::spawn`; `close()` joins

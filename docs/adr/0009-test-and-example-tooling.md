@@ -218,3 +218,50 @@ which also breaks the fixture on purpose (a probe that moves, a counter that nev
 a rejected address that reads, a device time the simulator lacks, a hook that arms
 nothing) and asserts that the named case fails, so a suite that cannot fail would be
 noticed. Later drivers (S25, S31) add a run of their own.
+
+## Addendum (S25c): responder reactions
+Slice S25c adds one step and one enum to the testkit's `net` feature so that a responder
+can end the connection on demand. It changes no dependency and no earlier decision.
+
+**Why.** `Step::Respond` takes a `FnMut(&[u8]) -> Option<Vec<u8>>`: it can answer or stay
+silent, and nothing else. A fixture for a whole contract suite shares one device over many
+connections and must decide per request, from armed faults, whether to answer, swallow
+the request or drop the link. S25b could do the first two and had to skip the two
+disconnect cases of the S13 suite by name (`fixture cannot inject disconnect`, ADR-0015
+decision 14), because a closure that returns `None` leaves the connection open.
+
+**The step.** `Step::React(Reactor)`, with `pub type Reactor = Box<dyn FnMut(&[u8]) ->
+Reaction + Send>` and the constructor `Step::react(closure)`. `Reaction` has four
+variants: `Reply(Vec<u8>)`, `Silence`, `Close` and `ReplyThenClose(Vec<u8>)`. `React`
+behaves like `Respond` in everything else: it is called with the bytes received since the
+previous input step, it never finishes (so steps after it do not run and one fixture serves
+a whole suite), armed modifiers apply to the next reply, and it counts once in
+`ScriptReport::ran` and each call in `ScriptReport::responses`. `Respond` and `Responder`
+are unchanged (`Some` maps to `Reply`, `None` to `Silence`) and share the machine's code
+path, so the two cannot drift.
+
+**Mapping.** The pure script machine maps a reaction to the actions that both doubles
+already consume, so neither double needed a new action: `Reply` is a write; `Silence`
+produces no action and the step stays armed (modifiers stay pending for the next reply);
+`ReplyThenClose` is a write whose `close` flag is set, with armed modifiers applied to
+the bytes and an armed `CloseAt(n)` still cutting them at `n`; `Close` is `Action::Close`,
+drops pending modifiers and halts the script, which marks `ScriptReport::closed`. A
+reaction close is not a failure (`failed` stays false).
+
+**Both consumers honour it.** `FakeTransport` queues the close behind any bytes still
+queued, so `recv` returns the bytes, then `Ok(0)` once, then `Disconnected`, and `send`
+fails `Disconnected`, exactly as after `CloseAt`. `ScriptedPeer` writes the bytes and
+half-closes the loopback socket (a FIN, keeping the socket so unread client bytes cannot
+turn the close into a reset), as for `CloseAt`. The S26 `ScriptedPeer` contract run uses
+the same hook as the S25b run over `FakeTransport`, so one responder drives both.
+
+**Why not extend `Responder`.** Changing the return type would break every existing
+`Step::respond` caller and make the common "answer or stay silent" case wordier. A sibling
+step keeps `Respond` source-compatible and leaves the new capability opt-in.
+
+**Tests.** The machine tests in `script.rs` cover every reaction's action, the armed step,
+the modifiers and the counters; `fake_transport.rs` covers the close and
+`ReplyThenClose` on the fake clock; `peer.rs` covers the half-close and `ReplyThenClose`
+on loopback. `crates/stonecrab-modbus/tests/contract.rs` wires `inject_disconnect` to
+`Reaction::Close` and the two disconnect cases pass; the run now reports only the two
+write skips.
