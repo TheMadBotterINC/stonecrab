@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as a request.
+# quantity 0 (the legal range is 1 to 2000)
+02 00 C4 00 00

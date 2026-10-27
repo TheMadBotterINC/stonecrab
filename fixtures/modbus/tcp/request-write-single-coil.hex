@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Modbus Application Protocol V1.1b section 6.5, Write Single Coil, request example.
+# Coil 173 ON. Write PDUs are out of the alpha scope (D3).
+05 00 AC FF 00

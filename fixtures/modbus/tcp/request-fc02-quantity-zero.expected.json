@@ -1,0 +1,6 @@
+{
+  "direction": "request",
+  "error": "InvalidDiscriminator",
+  "field": "quantity",
+  "value": 0
+}

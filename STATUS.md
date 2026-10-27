@@ -78,7 +78,8 @@ ADR-0004 explicitly overrides the original `main` branch policy with `master`.
 - `fuzz/` is a separate Cargo workspace with its own lock, nightly pin and deny policy
   (ADR-0009); `scripts/fuzz-smoke.sh` runs cargo-deny on it and every target for 60 s.
   Targets: `fuzz_codec_bounded_reader` (S15), `fuzz_core_connection_string` (S08),
-  `fuzz_modbus_address` (S20b), `fuzz_sensors_profile_toml` (S28a). `fuzz/deny.toml`
+  `fuzz_modbus_address` (S20b), `fuzz_sensors_profile_toml` (S28a), `fuzz_modbus_pdu`
+  (S21). `fuzz/deny.toml`
   must mirror every root `deny.toml` change; the smoke script refuses to run otherwise.
 
 ### Core data contracts
@@ -172,6 +173,7 @@ gates named were run locally before that commit.
 | S11a + S11b-2 | 2026-10-27 | Core `Driver`, `Connection` and `DriverRegistry` traits with cancel slots on both request types (ADR-0011); simulator `SimDriver` and `SimConnection` (scheme `sim`, `sim://<device>?latency-ms=&seed=`, lifecycle through `StateCell`, single in-flight slot with `Backpressure`, latency raced against token and deadline, default-deadline rule, bounded read retry, writes never retried, diagnostics and tracing spans); ADR-0007 and ADR-0012 accepted; parity rows `CORE-DRIVER-TRAIT`, `CORE-CONNECTION-TRAIT`, `CORE-REGISTRY`, `SIM-DRIVER`, `SIM-CONNECTION`; one commit because every commit must pass the 100% core gate | check, coverage, lint-attrs, machete, dependencies, package |
 | S12 | 2026-10-27 | Simulator `FailureStep` and `FailureScript` on the shared device (delay, timeout after transmit, disconnect into `Failed`, device exception, malformed, partial failure, backpressure, unknown after transmit); one step per operation after every pre-I/O check; each retry attempt pops its own step and a read without an explicit deadline gets a fresh default deadline per attempt; parity row `SIM-FAILURE-SCRIPT` implemented | check, coverage, lint-attrs, machete, package |
 | S19 | 2026-10-27 | Transport `ConnectionGuard` over `FramedTransport`: lifecycle through core `ConnectionState` with private idle, in-flight and resyncing phases, request-driven reconnect with capped jittered backoff and `Failed` on exhaustion, one in-flight slot plus an admission queue bounded by `max_pending_requests` (`Backpressure` beyond it), every wait raced against close, token and deadline, a timeout after flush resyncs before the next send, `GuardConfig`, `GuardStats`; parity rows `TRANSPORT-GUARD-LIFECYCLE`, `TRANSPORT-RECONNECT`, `TRANSPORT-QUEUE` implemented | check, coverage, lint-attrs, machete, package |
+| S21 | 2026-10-27 | Modbus PDU codec: `FunctionCode`, `ExceptionCode`, `ModbusPdu` (read requests FC01-04, bit and register responses, exceptions), `encode_request`, `decode_request`, `decode_response` with quantity, byte-count and size bounds checked before allocation, `encode_response`; 59 golden vectors under `fixtures/modbus/tcp` authored from the Modbus Application Protocol V1.1b or adversarial, loaded through the testkit with independently written expected files; fifth fuzz target `fuzz_modbus_pdu`; `MB-EXC-*` rows implemented. The upstream vectors wait for prerequisite P4 | check, coverage, lint-attrs, features, machete, dependencies, fuzz, package |
 
 ## Verified evidence and reproduction
 
@@ -310,14 +312,15 @@ operation row is implemented yet.
 - Byte/raw/recursive/calendar `PlcValue` variants (deferred by ADR-0006); the byte and
   word order types exist as data only, with no decoder consuming them.
 - Browse, discovery and subscriptions (write batches exist as data).
-- Modbus PDU codec, MBAP framing and connection, the sensor measurement pipeline, board
-  adapters (the TCP transport with its generic framing layer, the codec crate, the Modbus
-  address parser, the read batcher and the validated profile loader exist; nothing reads
-  a device yet).
+- MBAP framing, the Modbus session and connection, the sensor measurement pipeline,
+  board adapters (the TCP transport with framing and the connection guard, the codec
+  crate, the Modbus address parser, batcher and PDU codec, and the validated profile
+  loader exist; nothing reads a device yet).
 - OPC UA, EtherNet/IP/Logix, S7 and remaining upstream protocols.
 - Code generation; the retained upstream fixture corpus (blocked on maintainer
   prerequisite P4, approval to redistribute the Apache-2.0 PLC4X vectors). The
-  first-party interop register map and the loader exist under `fixtures/modbus/`.
+  first-party interop register map, the spec-authored and adversarial PDU vectors and
+  the loader exist under `fixtures/modbus/`.
 - Parser fuzzing (the `fuzz-smoke` job exists but has no targets), mutation testing,
   soak/load/benchmark evidence, branch-coverage gates, and the `interop`, `regen` and
   blocking `semver` jobs from the source standards.

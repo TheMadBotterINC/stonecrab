@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as the response to function 3.
+# byte count 3 cannot hold whole registers
+03 03 02 2B 00

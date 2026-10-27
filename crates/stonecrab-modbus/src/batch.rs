@@ -17,10 +17,10 @@ use stonecrab_core::{ByteOrder, ErrorKind, PlcError, Result, Tag, TagId, WordOrd
 use crate::{ModbusAddress, ModbusArea, ModbusDataType, UnitId};
 
 /// Most registers one read request may carry (function codes 03 and 04, V1.1b section 6.3).
-const PROTOCOL_MAX_REGISTERS: u16 = 125;
+const PROTOCOL_MAX_REGISTERS: u16 = crate::MAX_READ_REGISTERS;
 
 /// Most bits one read request may carry (function codes 01 and 02, V1.1b section 6.1).
-const PROTOCOL_MAX_COILS: u16 = 2_000;
+const PROTOCOL_MAX_COILS: u16 = crate::MAX_READ_BITS;
 
 /// Default for [`BatchLimits::max_items`], the core `ResourceLimits` default.
 const DEFAULT_MAX_ITEMS: usize = 1_024;

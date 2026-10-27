@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Modbus Application Protocol V1.1b section 6.1, Read Coils, request example.
+# Read coils 20 to 38: starting address 0x0013 (19), quantity 0x0013 (19).
+01 00 13 00 13

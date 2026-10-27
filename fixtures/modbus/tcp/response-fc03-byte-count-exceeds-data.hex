@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as the response to function 3.
+# byte count 6 but only 4 data bytes follow
+03 06 02 2B 00 00

@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Modbus Application Protocol V1.1b section 6.4, Read Input Registers, request example.
+# Read input register 9: starting address 0x0008, quantity 1.
+04 00 08 00 01

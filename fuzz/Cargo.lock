@@ -197,6 +197,7 @@ dependencies = [
 name = "stonecrab-modbus"
 version = "0.1.0"
 dependencies = [
+ "stonecrab-codec",
  "stonecrab-core",
 ]
 

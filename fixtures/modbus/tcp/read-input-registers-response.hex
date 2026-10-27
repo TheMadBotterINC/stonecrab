@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Modbus Application Protocol V1.1b section 6.4, Read Input Registers, response example.
+# Byte count 2. Input register 9 = 0x000A (10).
+04 02 00 0A

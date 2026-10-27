@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Modbus Application Protocol V1.1b section 6.2, Read Discrete Inputs, request example.
+# Read inputs 197 to 218: starting address 0x00C4 (196), quantity 0x0016 (22).
+02 00 C4 00 16

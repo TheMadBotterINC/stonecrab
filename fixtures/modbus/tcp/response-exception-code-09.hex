@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as the response to function 3.
+# exception code 0x09 is not defined in section 7
+83 09

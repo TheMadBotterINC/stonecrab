@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as the response to function 1.
+# byte count 251 = 2001 or more coils, over the 2000 coil limit; rejected before the data is read
+01 FB 00

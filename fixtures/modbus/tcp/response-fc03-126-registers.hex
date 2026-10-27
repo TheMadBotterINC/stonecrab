@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as the response to function 3.
+# byte count 252 = 126 registers, over the 125 register limit; rejected before the data is read
+03 FC 00 00

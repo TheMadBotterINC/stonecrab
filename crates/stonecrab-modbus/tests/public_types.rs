@@ -4,8 +4,8 @@
 #[cfg(test)]
 mod tests {
     use stonecrab_modbus::{
-        AddressConvention, BatchLimits, Batcher, Chunk, Member, ModbusAddress,
-        ModbusAddressBuilder, ModbusArea, ModbusDataType, UnitId,
+        AddressConvention, BatchLimits, Batcher, Chunk, ExceptionCode, FunctionCode, Member,
+        ModbusAddress, ModbusAddressBuilder, ModbusArea, ModbusDataType, ModbusPdu, UnitId,
     };
 
     #[test]
@@ -21,5 +21,8 @@ mod tests {
         assert_send_sync::<Batcher>();
         assert_send_sync::<Chunk>();
         assert_send_sync::<Member>();
+        assert_send_sync::<FunctionCode>();
+        assert_send_sync::<ExceptionCode>();
+        assert_send_sync::<ModbusPdu>();
     }
 }

@@ -1,0 +1,5 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Modbus Application Protocol V1.1b section 6.1, Read Coils, response example.
+# Byte count 3. Coils 27-20 = CD, 35-28 = 6B, 38-36 = 05; coil 20 is the least
+# significant bit of the first byte. The 5 padding bits of the last byte are zero.
+01 03 CD 6B 05

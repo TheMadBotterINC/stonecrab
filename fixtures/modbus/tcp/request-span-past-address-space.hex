@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as a request.
+# start 65535 with quantity 2 ends at 65537, past the 65536 addresses
+03 FF FF 00 02

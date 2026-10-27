@@ -24,8 +24,9 @@ workspace = true
 default = []
 
 [dependencies]
+stonecrab-codec.workspace = true
 stonecrab-core.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
-stonecrab-testkit.workspace = true
+stonecrab-testkit = { workspace = true, features = ["fixtures"] }

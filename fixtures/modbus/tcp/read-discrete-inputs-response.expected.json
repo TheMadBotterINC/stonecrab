@@ -1,0 +1,7 @@
+{
+  "direction": "response",
+  "function": 2,
+  "bytes": [172, 219, 53],
+  "quantity": 22,
+  "bits": [false, false, true, true, false, true, false, true, true, true, false, true, true, false, true, true, true, false, true, false, true, true]
+}

@@ -1,0 +1,7 @@
+{
+  "direction": "response",
+  "function": 3,
+  "error": "InvalidDiscriminator",
+  "field": "function code",
+  "value": 16
+}

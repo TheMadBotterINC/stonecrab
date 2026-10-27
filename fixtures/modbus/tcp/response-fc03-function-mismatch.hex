@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as the response to function 3.
+# a valid function 04 response where the response to function 03 is expected
+04 02 00 0A

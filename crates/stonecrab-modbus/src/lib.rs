@@ -8,8 +8,13 @@
 
 mod address;
 mod batch;
+mod pdu;
 
 pub use address::{
     AddressConvention, ModbusAddress, ModbusAddressBuilder, ModbusArea, ModbusDataType, UnitId,
 };
 pub use batch::{BatchLimits, Batcher, Chunk, Member};
+pub use pdu::{
+    ExceptionCode, FunctionCode, MAX_PDU_BYTES, MAX_READ_BITS, MAX_READ_REGISTERS, ModbusPdu,
+    decode_request, decode_response, encode_request, encode_response,
+};

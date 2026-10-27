@@ -1,0 +1,7 @@
+{
+  "direction": "response",
+  "function": 1,
+  "error": "Truncated",
+  "needed": 3,
+  "available": 2
+}

@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Modbus Application Protocol V1.1b section 6.4: the starting address ranges over 0x0000 to 0xFFFF.
+# Stonecrab accepts start + quantity up to 65536, the end of the address space (MB-LIMIT-SPAN).
+04 FF FF 00 01

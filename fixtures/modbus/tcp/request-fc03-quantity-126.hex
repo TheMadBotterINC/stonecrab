@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as a request.
+# quantity 126 registers, one over the limit of 125
+03 00 00 00 7E

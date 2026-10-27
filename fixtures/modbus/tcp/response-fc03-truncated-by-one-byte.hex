@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as the response to function 3.
+# the valid response of section 6.3 with its last byte removed
+03 06 02 2B 00 00 00

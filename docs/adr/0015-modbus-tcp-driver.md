@@ -40,7 +40,44 @@ parses it with `Short.parseShort` and the inventoried files show no range check
    from the pinned `modbus.mspec` (439 lines, ASF header). There is no `src/generated/`
    and no `@generated` marker; the MSpec feature matrix in `docs/parity/modbus.md` records
    "nothing generated". A future generator must reproduce this output or pass the same
-   vector corpus.
+   vector corpus. S21 landed the PDU types and settled the following details, none of
+   which changes the decision above:
+   - The module is `src/pdu.rs` with children `src/pdu/code.rs`, `src/pdu/model.rs` and
+     `src/pdu/codec.rs`, not `src/pdu/mod.rs`: `clippy::mod_module_files` is denied
+     (CODING_STANDARDS 10.4). `stonecrab-codec` is now a dependency, and
+     `stonecrab-testkit` with its `fixtures` feature a dev-dependency for the golden
+     loader; no new external crate.
+   - `FunctionCode` names 0x01 to 0x04 and carries any other number as `Unknown(u8)`;
+     `ExceptionCode` names the ten V1.1b section 7 codes (1 to 8, 10, 11) and carries any
+     other number as `Unknown(u8)`. Both are `#[non_exhaustive]`, as is `ModbusPdu`.
+   - `ModbusPdu` has the four read requests (`start`, `quantity`: the zero-based wire
+     address and the count), `ReadBitsResponse { function, bytes }`,
+     `ReadRegistersResponse { function, registers }` and `Exception { function, code }`.
+     A bit response keeps the packed bytes exactly as received, padding bits included,
+     because the response does not repeat the request's quantity: a decoded response
+     re-encodes to the same bytes, which is what `fuzz_modbus_pdu` asserts, and the
+     caller unpacks with `unpack_bits_lsb_first` and the request's quantity.
+   - `decode_response(reader, expected)` takes only the function, so it checks what the
+     bytes can prove: PDU at most 253 bytes, byte count 1 to 250 (even for registers),
+     data exactly as long as the count, no trailing bytes, and the function (with or
+     without the high bit) equal to `expected`. `ModbusPdu::check_reply_to(&request)`
+     proves the rest once the session has the request: the byte count against
+     ceil(quantity / 8) or `2 * quantity`, and the function. The errors reuse
+     `ParseError`: a short payload is `Truncated`, a long one `TrailingBytes`, a count
+     over 250 `OversizedLength` (checked before the data is read or allocated), a zero or
+     odd count and a wrong function `InvalidDiscriminator` with the field named.
+   - Write PDUs are not transcribed (D3). Function codes 05, 06, 15, 16, 20 and 21 decode
+     as `Unknown`; every decoder refuses them (`unsupported function code` when the
+     caller expects one, `function code` when it expects a read and gets one).
+   - `decode_request` and `encode_response` exist for the responder of the contract suite
+     (S25b, S27) and the fuzz target; `decode_request` applies the quantity bounds and
+     the `start + quantity <= 65536` rule that `encode_request` applies, so what the
+     encoder writes the decoder reads.
+   - Until maintainer prerequisite P4 is granted, every golden vector under
+     `fixtures/modbus/tcp/` is first-party: `protocol_spec` bytes written out from the
+     V1.1b examples, or `adversarial` bytes. The upstream FC04 request and response and
+     the four FC20/FC21 ADUs join them as `upstream_fixture` and `must_fail` vectors when
+     P4 is granted; the vector directory's schema is in `fixtures/modbus/PROVENANCE.toml`.
 3. **Interop peer (D8).** The independent peer is pymodbus 3.8.6 (BSD-3, the peer upstream's
    own Docker IT uses), run in a container built from a repository-owned Dockerfile
    (`python:3.12-slim` by digest) with a first-party `server.py`. Its register map equals
@@ -105,7 +142,14 @@ parses it with `Short.parseShort` and the inventoried files show no range check
    code, including 5 ACKNOWLEDGE, to `DeviceException`. Upstream maps 3 to INVALID_DATA and
    5 to OK (`MB-EXC-03`, `MB-EXC-05`); both are documented deviations with tests and
    Modbus Application Protocol V1.1b references. An acknowledge is never reported as
-   success.
+   success. The codec supplies the number and the name (`ExceptionCode::name`, V1.1b
+   section 7); the mapping to `ErrorKind` is the session's (S24b). S21 narrows "every other
+   code": the ten defined codes map as above, but `decode_response` refuses an exception
+   response whose code is none of the ten (0, 9, 12 and above) as `InvalidDiscriminator`
+   with the number in the error, because a reply the codec cannot name is not trusted to
+   be an exception. If the maintainers prefer a `DeviceException` that carries the raw
+   number, only `decode_response`, `encode_response` and the two `must_fail` vectors
+   `tcp/response-exception-code-0c` and `tcp/response-exception-code-09` change.
 7. **Batcher (D19).** Coalescing lands in S24a, before the connection slice. Reads are
    grouped by (unit identifier, area), only adjacent or overlapping spans are merged (no
    gap reads, divergence `MB-READ-GAP`), chunk limits 125 registers and 2000 coils come
@@ -271,6 +315,29 @@ parses it with `Short.parseShort` and the inventoried files show no range check
   row becomes 95 when the session and connection modules land (decision 9). The
   `packaging/stonecrab-modbus.txt` list and the `package` task and job pin the archive to
   `README.md`, `LICENSE`, `NOTICE` and `src/*`; `tests/` is not shipped.
+- S21: `crates/stonecrab-modbus/tests/pdu.rs` holds the CODING_STANDARDS 13.7 list for
+  `decode_request` and `decode_response` (zero length, one byte short at every length,
+  exact, one byte long, the quantity and byte-count maximum plus one, every invalid
+  function discriminator, every undefined exception code, every odd register byte count,
+  PDU 254 bytes), the code tables and the encoders; `tests/pdu_vectors.rs` loads
+  `fixtures/modbus` through `stonecrab_testkit::load_dir`, compares every decoded vector
+  with its hand-written `expected.json`, encodes the PDU the expected file describes and
+  compares the bytes with the `.hex` (two separate assertions), and checks every
+  `must_fail` vector for the named `ParseError` variant and each of its parameters;
+  `tests/pdu_properties.rs` holds `prop_register_count_bounds`,
+  `prop_request_round_trips_exactly_when_it_is_legal` and
+  `prop_decode_never_panics_and_accepted_bytes_re_encode`. `fuzz_modbus_pdu` (six seed
+  files) decodes arbitrary bytes as a request and as a response to each read function and
+  to two unsupported ones, and asserts that an accepted PDU re-encodes to its input. Tests
+  carry `// covers: SPEC mandatory-failure-cases / F1 malformed discriminators, unexpected
+  function codes` and the parity row ids. The `# Compatibility` sections cite
+  `MB-TCP-READ-COIL`, `MB-TCP-READ-DI`, `MB-TCP-READ-HR`, `MB-EXC-01`, `MB-LIMIT-COILS`,
+  `MB-LIMIT-REGISTERS`, `MB-LIMIT-PDU` and `MB-READ-MATCH`. The D23 command
+  (`cargo tree -e normal,dev -i once_cell -i lazy_static -i log -i time -i chrono`, run one
+  name at a time because cargo stops at the first unmatched spec) finds `lazy_static`,
+  `log`, `time` and `chrono` absent and `once_cell` only through `tracing-core` and
+  `stonecrab-driver-sim`, the wrapped path of ADR-0012: the slice adds no external
+  dependency and no new path.
 - Later slices extend this section: S21 (vectors per variant, no `generated/`), S24a
   (batcher property), S24b (exception mapping tests for codes 1 to 8 and 10 to 11), S26
   (`with_transport_factory` in `tests/public_types.rs`) and S27 (the interop job and its

@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Modbus Application Protocol V1.1b section 6.3, Read Holding Registers, request example.
+# Read registers 108 to 110: starting address 0x006B (107), quantity 3.
+03 00 6B 00 03

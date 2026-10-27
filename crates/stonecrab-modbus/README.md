@@ -4,12 +4,14 @@ Native Modbus TCP driver for Stonecrab. The alpha scope is read-only: function c
 registers) over TCP with MBAP framing. RTU, ASCII, TLS, UDP, writes, extended registers
 and string types are out of scope for the alpha.
 
-Nothing is implemented beyond the address types, their text grammar and read batching.
-This crate currently offers `UnitId`, `ModbusArea`, `ModbusDataType`, `AddressConvention`,
-`ModbusAddress` (built with its builder or parsed from text with `ModbusAddress::parse`)
-and `ProtocolAddress` for it, plus `Batcher`, `BatchLimits`, `Chunk` and `Member`. There is no PDU codec, framing, session, connection or
-driver yet, and no I/O of any kind. The crate depends only on `stonecrab-core`; default
-features are empty.
+Nothing is implemented beyond the address types, their text grammar, read batching and
+the PDU codec. This crate currently offers `UnitId`, `ModbusArea`, `ModbusDataType`,
+`AddressConvention`, `ModbusAddress` (built with its builder or parsed from text with
+`ModbusAddress::parse`) and `ProtocolAddress` for it, plus `Batcher`, `BatchLimits`,
+`Chunk` and `Member`, and the PDU types `FunctionCode`, `ExceptionCode` and `ModbusPdu`
+with `encode_request`, `decode_request`, `decode_response` and `encode_response`. There is
+no framing, session, connection or driver yet, and no I/O of any kind. The crate depends
+only on `stonecrab-core` and `stonecrab-codec`; default features are empty.
 
 Upstream behavior is the Apache PLC4X Modbus TCP driver at the commit pinned in
 `upstream/manifest.toml`. Every claim about it, and every divergence, is recorded with a
@@ -20,7 +22,7 @@ stable row id in the
 | --- | --- |
 | Address types: `UnitId`, `ModbusArea`, `ModbusDataType`, `ModbusAddress` | build-tested |
 | Address text grammar and parser (`ModbusAddress::parse`) | unit-tested; fuzzed |
-| PDU codec for function codes 01 to 04 and the exception PDU | planned |
+| PDU codec for function codes 01 to 04 and the exception PDU | unit-tested; vector-tested; property-tested; fuzzed |
 | MBAP framing and transaction correlation | planned |
 | Typed register decoding and byte order | planned |
 | Read batching (`Batcher`) | unit-tested; property-tested |
@@ -104,6 +106,63 @@ assert!(ModbusAddress::parse("40016", &AddressOptions::default()).is_err());
 assert!(ModbusAddress::parse("4x00016", &AddressOptions::default()).is_ok());
 # Ok::<(), stonecrab_core::PlcError>(())
 ```
+
+## PDU codec
+A PDU is the function code and its data, without the MBAP header. `ModbusPdu` has the four
+read requests (`ReadCoils`, `ReadDiscreteInputs`, `ReadHoldingRegisters`,
+`ReadInputRegisters`, each `{ start, quantity }` with the zero-based wire address), the two
+normal responses (`ReadBitsResponse` holding the packed bytes exactly as received, and
+`ReadRegistersResponse` holding the registers) and `Exception { function, code }`. Write
+PDUs are not transcribed: function codes 05, 06, 15, 16, 20 and 21 are
+`FunctionCode::Unknown` and every decoder refuses them.
+
+A request is the function code, the start address and the quantity (5 bytes), with a
+quantity of 1 to 2000 bits or 1 to 125 registers and `start + quantity` at most 65536
+(`decode_request`, `encode_request`). A response is the function code, a byte count of 1 to
+250 (even for registers) and the data, or the function code plus 0x80 and one of the ten
+exception codes (`decode_response`, `encode_response`).
+
+Every length is compared with its bound before anything is allocated, a PDU is at most 253
+bytes, and input must hold exactly one PDU. A response does not repeat the request's
+quantity, so `decode_response` cannot know whether the byte count fits it:
+`ModbusPdu::check_reply_to(&request)` proves that, and the matching function, once the
+session knows the request. Exception codes outside the ten that V1.1b section 7 defines are
+refused as `InvalidDiscriminator` rather than carried (`ExceptionCode::Unknown` exists so
+the number can still be named). The rows are `MB-TCP-READ-*`, `MB-EXC-*` and
+`MB-LIMIT-COILS`, `MB-LIMIT-REGISTERS`, `MB-LIMIT-PDU` in the parity record.
+
+```rust
+use stonecrab_codec::{BoundedReader, BoundedWriter};
+use stonecrab_modbus::{
+    FunctionCode, ModbusPdu, decode_response, encode_request,
+};
+
+// Request registers 108 to 110 (wire address 107): V1.1b section 6.3.
+let request = ModbusPdu::ReadHoldingRegisters { start: 107, quantity: 3 };
+let mut writer = BoundedWriter::new(253);
+encode_request(&request, &mut writer)?;
+assert_eq!(writer.as_slice(), [0x03, 0x00, 0x6B, 0x00, 0x03]);
+
+// The reply of the same section, checked against the request.
+let reply = [0x03, 0x06, 0x02, 0x2B, 0x00, 0x00, 0x00, 0x64];
+let response = decode_response(
+    &mut BoundedReader::new(&reply),
+    FunctionCode::ReadHoldingRegisters,
+)?;
+response.check_reply_to(&request)?;
+assert_eq!(
+    response,
+    ModbusPdu::ReadRegistersResponse {
+        function: FunctionCode::ReadHoldingRegisters,
+        registers: vec![555, 0, 100],
+    }
+);
+# Ok::<(), stonecrab_codec::ParseError>(())
+```
+
+The golden vectors in `fixtures/modbus/tcp/` are written from the examples of the Modbus
+Application Protocol Specification V1.1b or built to break the decoder; they are
+repository fixtures, not part of the published crate.
 
 ## Configuration
 The six connection parameters (request timeout, default unit identifier, ping address,

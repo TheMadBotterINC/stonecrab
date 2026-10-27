@@ -105,6 +105,15 @@
   and area, sorted by wire offset and merged into reads only when adjacent or overlapping
   (no gap reads), never above 125 registers or 2000 bits per chunk or `max_items` tags
   per plan.
+- Add the PDU codec (ADR-0015): `FunctionCode`, `ExceptionCode` (the ten V1.1b section 7
+  codes and `Unknown`) and `ModbusPdu` for the read functions 01 to 04, their normal
+  responses and the exception response, with `encode_request`, `decode_request`,
+  `decode_response`, `encode_response`, `ModbusPdu::check_reply_to` and the limits
+  `MAX_PDU_BYTES`, `MAX_READ_BITS` and `MAX_READ_REGISTERS`. Quantities (1 to 2000 bits,
+  1 to 125 registers), byte counts and the 253-byte PDU bound are checked before any
+  allocation; write PDUs and exception codes outside the ten are refused. The crate now
+  depends on `stonecrab-codec`. Golden vectors under `fixtures/modbus/tcp/` are written
+  from the V1.1b examples or built to fail; the fuzz target is `fuzz_modbus_pdu`.
 ### stonecrab-sensors 0.1.0
 - Add the crate: declarative sensor profiles for Stonecrab, depending on `stonecrab-core`,
   `serde` and, behind the default `toml` feature, `toml` (ADR-0016). No driver reads a

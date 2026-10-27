@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Modbus Application Protocol V1.1b section 6.3, Read Holding Registers, response example.
+# Byte count 6. Register 108 = 0x022B (555), 109 = 0x0000, 110 = 0x0064 (100).
+03 06 02 2B 00 00 00 64

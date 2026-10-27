@@ -309,6 +309,7 @@ name = "stonecrab-modbus"
 version = "0.1.0"
 dependencies = [
  "proptest",
+ "stonecrab-codec",
  "stonecrab-core",
  "stonecrab-testkit",
 ]

@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Modbus Application Protocol V1.1b section 6.12, Write Multiple Registers, response example.
+# Decoded as the response to function 03: the function does not match.
+10 00 01 00 02

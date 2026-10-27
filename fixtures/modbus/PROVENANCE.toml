@@ -20,14 +20,465 @@
 #     license   SPDX expression
 #     note      optional free text
 #
-# No upstream vector is listed yet. The Apache-2.0 PLC4X vectors (the six <raw> frames of
-# ParserSerializerTestsuite.xml and the verbatim XML copies under upstream/) are added
-# under maintainer prerequisite P4 (written approval to redistribute them with NOTICE
-# attribution), with one [[vector]] entry each whose source is "upstream_fixture". Until
-# then this directory holds first-party files only.
+# The tcp/ directory holds Modbus PDU vectors (CODING_STANDARDS 13.6), PDU bytes only: no
+# MBAP header and no unit identifier (those are the S22 framing vectors). Until maintainer
+# prerequisite P4 (written approval to redistribute Apache PLC4X test vectors with NOTICE
+# attribution) is granted, every vector is first-party: "protocol_spec" bytes written out
+# from the examples of the Modbus Application Protocol Specification V1.1b, or "adversarial"
+# bytes built to break the decoder. Nothing was copied from an upstream file. The PDF of
+# the specification is not retained in this repository, so the section numbers are the
+# published table of contents (docs/parity/modbus.md, UNVERIFIED) and the example bytes
+# are transcribed from the published examples; a maintainer should check them against the
+# PDF. When P4 is granted the upstream FC04 request and response vectors and the FC20 and
+# FC21 must_fail vectors are added here with source "upstream_fixture".
+#
+# Every tcp vector has <name>.hex (comment lines, then one hex line) and a
+# <name>.expected.json written by hand (or from the stated byte pattern), never produced
+# by running the decoder. The expected files carry:
+#   direction   "request" or "response": which decoder reads the bytes
+#   function    the function code a response is decoded for
+#   start, quantity       an accepted request
+#   bytes, quantity, bits an accepted bit response (the packed bytes; bits are the first
+#                         `quantity` bits, least significant bit first, optional)
+#   registers             an accepted register response
+#   exception             an accepted exception response: the exception code
+#   error and, as the variant has them, field, value, needed, available, length, max,
+#   remaining             a must_fail vector: the ParseError variant and its parameters
 
 [[file]]
 path = "interop/register-map.toml"
 origin = "docs/parity/modbus.md, section \"Interop register map\" (rows MB-INTEROP-*) and decision D8"
 license = "Apache-2.0"
 note = "First-party. Read by the S25 contract fixture and the S27 pymodbus server generator through stonecrab_testkit::InteropMap. Nothing is copied from upstream's modbus_server.py."
+
+[[vector]]
+name = "tcp/read-coils-request"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.1 (Read Coils), request example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/read-coils-response"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.1 (Read Coils), response example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/read-discrete-inputs-request"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.2 (Read Discrete Inputs), request example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/read-discrete-inputs-response"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.2 (Read Discrete Inputs), response example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/read-holding-registers-request"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.3 (Read Holding Registers), request example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/read-holding-registers-response"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.3 (Read Holding Registers), response example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/read-input-registers-request"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.4 (Read Input Registers), request example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/read-input-registers-response"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.4 (Read Input Registers), response example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/read-coils-exception"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 7 (Exception Responses), worked example for function 01"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/read-discrete-inputs-exception"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 7 (Exception Responses), same shape for function 02"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/read-holding-registers-exception"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 7 (Exception Responses), same shape for function 03"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/read-input-registers-exception"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 7 (Exception Responses), same shape for function 04"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/read-holding-registers-exception-device-busy"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 7 (Exception Responses), code 06"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/read-coils-exception-gateway-path"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 7 (Exception Responses), code 0A"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/read-input-registers-exception-gateway-target"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 7 (Exception Responses), code 0B"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/read-coils-request-quantity-2000"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.1 (Read Coils), quantity of coils 1 to 2000 (0x07D0)"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/read-holding-registers-request-quantity-125"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.3 (Read Holding Registers), quantity of registers 1 to 125 (0x7D)"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/read-input-registers-request-last-address"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.4 (Read Input Registers), starting address 0x0000 to 0xFFFF"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/read-holding-registers-response-125"
+source = "adversarial"
+origin = "Modbus Application Protocol V1.1b, section 6.3 limits (125 registers) and section 4.1 (PDU at most 253 bytes)"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/read-coils-response-250-bytes"
+source = "adversarial"
+origin = "Modbus Application Protocol V1.1b, section 6.1 limits (2000 coils) and section 4.1 (PDU at most 253 bytes)"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/response-fc03-byte-count-exceeds-data"
+source = "adversarial"
+origin = "Authored to break the response decoder: byte count 6 but only 4 data bytes follow"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::Truncated: byte count 6 but only 4 data bytes follow"
+
+[[vector]]
+name = "tcp/response-fc03-byte-count-below-data"
+source = "adversarial"
+origin = "Authored to break the response decoder: byte count 2 but 6 data bytes follow"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::TrailingBytes: byte count 2 but 6 data bytes follow"
+
+[[vector]]
+name = "tcp/response-fc03-odd-byte-count"
+source = "adversarial"
+origin = "Authored to break the response decoder: byte count 3 cannot hold whole registers"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: byte count 3 cannot hold whole registers"
+
+[[vector]]
+name = "tcp/response-fc03-byte-count-zero"
+source = "adversarial"
+origin = "Authored to break the response decoder: byte count 0 (at least one register is required)"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: byte count 0 (at least one register is required)"
+
+[[vector]]
+name = "tcp/response-fc03-126-registers"
+source = "adversarial"
+origin = "Authored to break the response decoder: byte count 252 = 126 registers, over the 125 register limit; rejected before the data is read"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::OversizedLength: byte count 252 = 126 registers, over the 125 register limit; rejected before the data is read"
+
+[[vector]]
+name = "tcp/response-fc01-2001-coils"
+source = "adversarial"
+origin = "Authored to break the response decoder: byte count 251 = 2001 or more coils, over the 2000 coil limit; rejected before the data is read"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::OversizedLength: byte count 251 = 2001 or more coils, over the 2000 coil limit; rejected before the data is read"
+
+[[vector]]
+name = "tcp/response-fc03-truncated-by-one-byte"
+source = "adversarial"
+origin = "Authored to break the response decoder: the valid response of section 6.3 with its last byte removed"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::Truncated: the valid response of section 6.3 with its last byte removed"
+
+[[vector]]
+name = "tcp/response-fc03-one-trailing-byte"
+source = "adversarial"
+origin = "Authored to break the response decoder: the valid response of section 6.3 followed by one extra byte"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::TrailingBytes: the valid response of section 6.3 followed by one extra byte"
+
+[[vector]]
+name = "tcp/response-fc01-truncated-by-one-byte"
+source = "adversarial"
+origin = "Authored to break the response decoder: the valid response of section 6.1 with its last byte removed"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::Truncated: the valid response of section 6.1 with its last byte removed"
+
+[[vector]]
+name = "tcp/response-fc01-one-trailing-byte"
+source = "adversarial"
+origin = "Authored to break the response decoder: the valid response of section 6.1 followed by one extra byte"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::TrailingBytes: the valid response of section 6.1 followed by one extra byte"
+
+[[vector]]
+name = "tcp/response-fc02-byte-count-exceeds-data"
+source = "adversarial"
+origin = "Authored to break the response decoder: the valid response of section 6.2 with its last byte removed"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::Truncated: the valid response of section 6.2 with its last byte removed"
+
+[[vector]]
+name = "tcp/response-fc04-odd-byte-count"
+source = "adversarial"
+origin = "Authored to break the response decoder: byte count 1 cannot hold whole registers"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: byte count 1 cannot hold whole registers"
+
+[[vector]]
+name = "tcp/response-fc03-no-byte-count"
+source = "adversarial"
+origin = "Authored to break the response decoder: the function code alone, no byte count"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::Truncated: the function code alone, no byte count"
+
+[[vector]]
+name = "tcp/response-fc03-function-mismatch"
+source = "adversarial"
+origin = "Authored to break the response decoder: a valid function 04 response where the response to function 03 is expected"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: a valid function 04 response where the response to function 03 is expected"
+
+[[vector]]
+name = "tcp/response-fc03-exception-function-mismatch"
+source = "adversarial"
+origin = "Authored to break the response decoder: an exception for function 04 where the response to function 03 is expected"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: an exception for function 04 where the response to function 03 is expected"
+
+[[vector]]
+name = "tcp/response-function-zero"
+source = "adversarial"
+origin = "Authored to break the response decoder: function code 0x00 is not a function"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: function code 0x00 is not a function"
+
+[[vector]]
+name = "tcp/response-exception-code-zero"
+source = "adversarial"
+origin = "Authored to break the response decoder: exception code 0x00 is not defined in section 7"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: exception code 0x00 is not defined in section 7"
+
+[[vector]]
+name = "tcp/response-exception-code-09"
+source = "adversarial"
+origin = "Authored to break the response decoder: exception code 0x09 is not defined in section 7"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: exception code 0x09 is not defined in section 7"
+
+[[vector]]
+name = "tcp/response-exception-code-0c"
+source = "adversarial"
+origin = "Authored to break the response decoder: exception code 0x0C is not defined in section 7"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: exception code 0x0C is not defined in section 7"
+
+[[vector]]
+name = "tcp/response-exception-truncated"
+source = "adversarial"
+origin = "Authored to break the response decoder: the exception function byte without a code"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::Truncated: the exception function byte without a code"
+
+[[vector]]
+name = "tcp/response-exception-trailing-byte"
+source = "adversarial"
+origin = "Authored to break the response decoder: an exception response followed by one extra byte"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::TrailingBytes: an exception response followed by one extra byte"
+
+[[vector]]
+name = "tcp/response-write-multiple-registers"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.12 (Write Multiple Registers), response example"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: function 0x10 (write multiple registers) is not transcribed (decision D3)"
+
+[[vector]]
+name = "tcp/response-write-multiple-registers-when-fc03-expected"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.12 (Write Multiple Registers), response example"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: a function 0x10 response where the response to function 03 is expected"
+
+[[vector]]
+name = "tcp/response-read-file-record"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.14 (Read File Record), response example"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: function 0x14 (read file record) is not transcribed (decision D3)"
+
+[[vector]]
+name = "tcp/response-pdu-254-bytes"
+source = "adversarial"
+origin = "Authored to break the response decoder: a 254 byte PDU, one over the 253 byte limit of section 4.1; rejected before it is parsed"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::OversizedLength: a 254 byte PDU, one over the 253 byte limit of section 4.1; rejected before it is parsed"
+
+[[vector]]
+name = "tcp/request-quantity-zero"
+source = "adversarial"
+origin = "Authored to break the request decoder: quantity 0 (the legal range is 1 to 125)"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: quantity 0 (the legal range is 1 to 125)"
+
+[[vector]]
+name = "tcp/request-fc02-quantity-zero"
+source = "adversarial"
+origin = "Authored to break the request decoder: quantity 0 (the legal range is 1 to 2000)"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: quantity 0 (the legal range is 1 to 2000)"
+
+[[vector]]
+name = "tcp/request-fc04-quantity-126"
+source = "adversarial"
+origin = "Authored to break the request decoder: quantity 126 registers, one over the limit of 125"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::OversizedLength: quantity 126 registers, one over the limit of 125"
+
+[[vector]]
+name = "tcp/request-fc03-quantity-126"
+source = "adversarial"
+origin = "Authored to break the request decoder: quantity 126 registers, one over the limit of 125"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::OversizedLength: quantity 126 registers, one over the limit of 125"
+
+[[vector]]
+name = "tcp/request-fc01-quantity-2001"
+source = "adversarial"
+origin = "Authored to break the request decoder: quantity 2001 coils, one over the limit of 2000"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::OversizedLength: quantity 2001 coils, one over the limit of 2000"
+
+[[vector]]
+name = "tcp/request-span-past-address-space"
+source = "adversarial"
+origin = "Authored to break the request decoder: start 65535 with quantity 2 ends at 65537, past the 65536 addresses"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::OversizedLength: start 65535 with quantity 2 ends at 65537, past the 65536 addresses"
+
+[[vector]]
+name = "tcp/request-function-zero"
+source = "adversarial"
+origin = "Authored to break the request decoder: function code 0x00 is not a function"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: function code 0x00 is not a function"
+
+[[vector]]
+name = "tcp/request-truncated-by-one-byte"
+source = "adversarial"
+origin = "Authored to break the request decoder: the request of section 6.3 without the last byte of the quantity"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::Truncated: the request of section 6.3 without the last byte of the quantity"
+
+[[vector]]
+name = "tcp/request-one-trailing-byte"
+source = "adversarial"
+origin = "Authored to break the request decoder: the request of section 6.3 followed by one extra byte"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::TrailingBytes: the request of section 6.3 followed by one extra byte"
+
+[[vector]]
+name = "tcp/request-write-single-coil"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.5 (Write Single Coil), request example"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: function 0x05 (write single coil) is not transcribed (decision D3)"
+
+[[vector]]
+name = "tcp/request-write-multiple-registers"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.12 (Write Multiple Registers), request example"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: function 0x10 (write multiple registers) is not transcribed (decision D3)"
+
+[[vector]]
+name = "tcp/request-read-file-record"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.14 (Read File Record), request example"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: function 0x14 (read file record) is not transcribed (decision D3)"
+
+[[vector]]
+name = "tcp/request-exception-pdu"
+source = "adversarial"
+origin = "Authored to break the request decoder: an exception response is not a request (function byte 0x83)"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: an exception response is not a request (function byte 0x83)"
+
+[[vector]]
+name = "tcp/request-pdu-254-bytes"
+source = "adversarial"
+origin = "Authored to break the request decoder: a 254 byte PDU, one over the 253 byte limit of section 4.1; rejected before it is parsed"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::OversizedLength: a 254 byte PDU, one over the 253 byte limit of section 4.1; rejected before it is parsed"

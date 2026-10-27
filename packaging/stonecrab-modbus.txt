@@ -8,3 +8,7 @@ README.md
 src/address.rs
 src/batch.rs
 src/lib.rs
+src/pdu/code.rs
+src/pdu/codec.rs
+src/pdu/model.rs
+src/pdu.rs

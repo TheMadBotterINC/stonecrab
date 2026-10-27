@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Modbus Application Protocol V1.1b section 6.2, Read Discrete Inputs, response example.
+# Byte count 3. Inputs 204-197 = AC, 212-205 = DB, 218-213 = 35 (6 valid bits).
+02 03 AC DB 35

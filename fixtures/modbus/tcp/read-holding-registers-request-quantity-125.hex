@@ -1,0 +1,3 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Modbus Application Protocol V1.1b section 6.3: the largest legal quantity of registers is 125 (0x007D).
+03 00 00 00 7D

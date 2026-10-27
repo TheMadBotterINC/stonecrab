@@ -874,7 +874,14 @@ mod tests {
         // covers: CODING_STANDARDS 13.6, every vector is listed in PROVENANCE.toml
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/modbus");
         let vectors = load_dir(&dir).expect("fixtures/modbus loads: every file is listed");
-        assert!(vectors.is_empty(), "no upstream vector lands before P4");
+        assert!(!vectors.is_empty(), "the first-party Modbus PDU vectors");
+        assert!(
+            vectors.iter().all(|v| matches!(
+                v.source,
+                VectorSource::ProtocolSpec | VectorSource::Adversarial
+            )),
+            "no upstream vector lands before P4"
+        );
         let provenance = load_provenance(&dir).expect("provenance parses");
         let files: Vec<_> = provenance.file.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(
