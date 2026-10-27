@@ -288,91 +288,15 @@ dependencies = [
 name = "stonecrab"
 version = "0.2.0"
 dependencies = [
- "stonecrab-core",
- "stonecrab-driver-sim",
- "stonecrab-modbus",
- "stonecrab-sensors",
+ "bytes",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror",
  "tokio",
+ "toml",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "stonecrab-codec"
-version = "0.1.0"
-dependencies = [
- "proptest",
- "stonecrab-core",
-]
-
-[[package]]
-name = "stonecrab-core"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "proptest",
- "stonecrab-testkit",
- "thiserror",
-]
-
-[[package]]
-name = "stonecrab-driver-sim"
-version = "0.1.0"
-dependencies = [
- "proptest",
- "stonecrab-core",
- "stonecrab-testkit",
- "tracing",
-]
-
-[[package]]
-name = "stonecrab-modbus"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "proptest",
- "serde_json",
- "stonecrab-codec",
- "stonecrab-core",
- "stonecrab-testkit",
- "stonecrab-transport",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "stonecrab-sensors"
-version = "0.1.0"
-dependencies = [
- "proptest",
- "serde",
- "stonecrab-core",
- "stonecrab-driver-sim",
- "stonecrab-testkit",
- "toml",
-]
-
-[[package]]
-name = "stonecrab-testkit"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "serde",
- "serde_json",
- "stonecrab-core",
- "stonecrab-transport",
- "tokio",
- "toml",
-]
-
-[[package]]
-name = "stonecrab-transport"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "stonecrab-core",
- "stonecrab-testkit",
- "tokio",
 ]
 
 [[package]]

@@ -9,8 +9,8 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use stonecrab_codec::{BoundedReader, BoundedWriter};
-use stonecrab_modbus::{
+use stonecrab::codec::{BoundedReader, BoundedWriter};
+use stonecrab::modbus::{
     ExceptionCode, FunctionCode, MAX_PDU_BYTES, ModbusPdu, decode_request, decode_response,
     encode_request, encode_response,
 };

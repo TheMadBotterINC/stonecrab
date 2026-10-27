@@ -101,24 +101,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
         with:
           toolchain: "1.99.1"
-      - run: cargo package --locked --workspace --exclude stonecrab-testkit
+      - run: cargo package --locked -p stonecrab
         env:
           CARGO_HOME: ${{ runner.temp }}/stonecrab-package-home
       - run: |
-          cargo package --locked -p stonecrab-core --list > target/core-package-files.txt
-          diff -u packaging/stonecrab-core.txt target/core-package-files.txt
-          cargo package --locked -p stonecrab-codec --list > target/codec-package-files.txt
-          diff -u packaging/stonecrab-codec.txt target/codec-package-files.txt
-          cargo package --locked -p stonecrab-driver-sim --list > target/driver-sim-package-files.txt
-          diff -u packaging/stonecrab-driver-sim.txt target/driver-sim-package-files.txt
-          cargo package --locked -p stonecrab-modbus --list > target/modbus-package-files.txt
-          diff -u packaging/stonecrab-modbus.txt target/modbus-package-files.txt
-          cargo package --locked -p stonecrab-sensors --list > target/sensors-package-files.txt
-          diff -u packaging/stonecrab-sensors.txt target/sensors-package-files.txt
-          cargo package --locked -p stonecrab-transport --list > target/transport-package-files.txt
-          diff -u packaging/stonecrab-transport.txt target/transport-package-files.txt
-          cargo package --locked -p stonecrab --list > target/facade-package-files.txt
-          diff -u packaging/stonecrab.txt target/facade-package-files.txt
+          cargo package --locked -p stonecrab --list > target/package-files.txt
+          diff -u packaging/stonecrab.txt target/package-files.txt
   dco:
     # Not meaningful on schedule or manual runs, and a new branch push has an all-zero
     # "before" and no base to compare with.
@@ -153,11 +141,13 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-hack@0.6.45
-      # The powerset covers the facade's `sim` feature on its own (ADR-0014 addendum, S14), and
-      # at depth 2 `sensors` alone, `sensors` with `modbus` or `sim`, and `full` (S30).
-      # --no-dev-deps edits Cargo.toml while it runs, so this pass cannot use --locked.
+      # The powerset of the one crate's features (default, full, transport, modbus, sim,
+      # sensors, testkit) at depth 2: every feature alone and every pair, so each module
+      # builds with only the features it needs (modbus brings transport; testkit brings
+      # transport). --no-dev-deps edits Cargo.toml while it runs, so this pass cannot use
+      # --locked.
       - run: cargo hack check --workspace --feature-powerset --depth 2 --no-dev-deps
-      # cargo hack runs one cargo check per package, i.e. --no-default-features per crate.
+      # The crate without default features: the core contracts and the codec only.
       - run: cargo hack check --locked --workspace --no-default-features
   examples:
     runs-on: ubuntu-latest
@@ -199,8 +189,8 @@ jobs:
       - run: interop/pymodbus/interop.sh start
       # Probe until 60 s have elapsed (a real Modbus read, see interop.sh).
       - run: interop/pymodbus/interop.sh wait
-      # cargo nextest run --locked -p stonecrab-modbus --all-features
-      #   --run-ignored ignored-only -E 'test(/^tests::interop_/)'
+      # cargo nextest run --locked -p stonecrab --all-features
+      #   --run-ignored ignored-only -E 'binary(modbus_interop_pymodbus) & test(/^tests::interop_/)'
       # (nextest names a test by its module path, hence the tests:: prefix.) The step
       # fails when the filter does not select exactly the ten interop tests.
       - run: interop/pymodbus/interop.sh tests
@@ -263,7 +253,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: No first-party unsafe outside forbid(unsafe_code)
         run: |
-          if grep -rnw --include='*.rs' unsafe crates tools | grep -v 'forbid(unsafe_code)'; then
+          if grep -rnw --include='*.rs' unsafe crates | grep -v 'forbid(unsafe_code)'; then
             echo "first-party unsafe found; CODING_STANDARDS section 4 forbids it" >&2
             exit 1
           fi
@@ -287,7 +277,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-semver-checks
-      - run: cargo semver-checks --workspace --exclude stonecrab-testkit
+      - run: cargo semver-checks -p stonecrab
   fuzz-smoke:
     # Also runs on workflow_dispatch. cargo-deny on the fuzz workspace comes first inside
     # the script; with zero targets the job is green (ADR-0009).

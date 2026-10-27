@@ -46,8 +46,8 @@ The image runs as an unprivileged user (uid 10001). To run the Stonecrab side by
 
 ```sh
 STONECRAB_INTEROP_MODBUS=modbus-tcp://127.0.0.1:5020 \
-  cargo nextest run -p stonecrab-modbus --all-features --run-ignored ignored-only \
-  -E 'test(/^tests::interop_/)'
+  cargo nextest run -p stonecrab --all-features --run-ignored ignored-only \
+  -E 'binary(modbus_interop_pymodbus) & test(/^tests::interop_/)'
 STONECRAB_URL=modbus-tcp://127.0.0.1:5020 \
   cargo run -p stonecrab --example modbus_tcp_read --features modbus
 STONECRAB_URL='modbus-tcp://127.0.0.1:5020?address-convention=plc4x' \

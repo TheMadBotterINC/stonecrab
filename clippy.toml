@@ -18,7 +18,7 @@ disallowed-methods = [
   { path = "tokio::task::spawn",                       reason = "spawn through an owner that keeps the JoinHandle (§8.7); use JoinSet or a supervised task type" },
   { path = "std::process::exit",                       reason = "libraries do not terminate the process" },
   { path = "std::env::set_var",                        reason = "unsafe in edition 2024; unavailable" },
-  { path = "alloc::string::String::from_utf8_lossy",   reason = "only via stonecrab_codec::text::decode_lossy, which marks Quality::Uncertain and keeps raw bytes" },
+  { path = "alloc::string::String::from_utf8_lossy",   reason = "only via stonecrab::codec::text::decode_lossy, which marks Quality::Uncertain and keeps raw bytes" },
 ]
 
 disallowed-types = [

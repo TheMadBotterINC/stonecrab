@@ -1,7 +1,7 @@
 # Provenance of the first-party files under interop/pymodbus (CODING_STANDARDS 13.6).
 #
 # This is a separate file, not an entry of fixtures/modbus/PROVENANCE.toml, because the
-# loader (stonecrab_testkit::load_provenance) accepts only relative paths without ".."
+# loader (stonecrab::testkit::load_provenance) accepts only relative paths without ".."
 # and checks that each [[file]] exists below the directory of the provenance file it
 # reads. These files are outside fixtures/modbus, so they get their own file in the same
 # schema (see the header of fixtures/modbus/PROVENANCE.toml). It lists no [[vector]].

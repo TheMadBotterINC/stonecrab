@@ -26,6 +26,11 @@ semver-checks` against the specification-stage 0.1.0 package (its API was replac
 measured substitutes are recorded by the release-evidence slice S32.
 
 ### stonecrab 0.2.0 (unreleased)
+- **One crate:** `stonecrab` now contains the former sibling crates as modules
+  (`stonecrab::codec`, `transport`, `modbus`, `sim` and `sensors`, with the core contracts at
+  the crate root), and the test kit as `stonecrab::testkit` behind the off-by-default
+  `testkit` feature; `cargo add stonecrab` gives Modbus TCP, the simulator and the sensor
+  profiles with no feature flags (full reconciliation of this document follows).
 - **Upstream baseline:** Apache PLC4X v1.0.0 (commit
   `ea229918f5d07700e04d7d69ab1645da679cb700`, pinned in `upstream/manifest.toml`; the
   inventory covers the Modbus TCP subset only and the source-release signature was

@@ -6,8 +6,8 @@
       "type": "lldb",
       "request": "launch",
       "cargo": {
-        "args": ["test", "--no-run", "--package", "stonecrab-core", "--lib"],
-        "filter": {"name": "stonecrab_core", "kind": "lib"}
+        "args": ["test", "--no-run", "--package", "stonecrab", "--lib"],
+        "filter": {"name": "stonecrab", "kind": "lib"}
       },
       "args": [],
       "cwd": "${workspaceFolder}"

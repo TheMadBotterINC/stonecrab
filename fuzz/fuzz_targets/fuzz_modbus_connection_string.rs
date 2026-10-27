@@ -14,8 +14,8 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use stonecrab_core::{ConnectionUri, Driver, ErrorKind};
-use stonecrab_modbus::{ModbusOptions, ModbusTcpDriver};
+use stonecrab::{ConnectionUri, Driver, ErrorKind};
+use stonecrab::modbus::{ModbusOptions, ModbusTcpDriver};
 
 fn check(driver: &ModbusTcpDriver, text: &str) {
     match driver.parse_config(text) {

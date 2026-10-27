@@ -78,11 +78,11 @@ cargo run -p stonecrab --example sim_read --features sim
 ```
 
 ```text
- INFO connect{scheme="sim" endpoint=bench op="connect" request_id=0}: stonecrab_driver_sim::connection: sim connection established
+ INFO connect{scheme="sim" endpoint=bench op="connect" request_id=0}: stonecrab::sim::connection: sim connection established
  INFO sim_read: name=temperature value=F32(21.5) outcome="ok" sampled_at=5
  INFO sim_read: name=counter value=U32(100) outcome="ok" sampled_at=5
  INFO sim_read: name=running value=Bool(true) outcome="ok" sampled_at=6
- INFO close{scheme="sim" endpoint=bench op="close" request_id=2}: stonecrab_driver_sim::connection: sim connection closed
+ INFO close{scheme="sim" endpoint=bench op="close" request_id=2}: stonecrab::sim::connection: sim connection closed
 ```
 
 `sampled_at` is microseconds since the example started. The example exits with status 0

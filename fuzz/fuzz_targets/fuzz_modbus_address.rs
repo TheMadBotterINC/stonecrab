@@ -9,8 +9,8 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use stonecrab_core::{AddressOptions, ErrorKind, ProtocolAddress};
-use stonecrab_modbus::ModbusAddress;
+use stonecrab::{AddressOptions, ErrorKind, ProtocolAddress};
+use stonecrab::modbus::ModbusAddress;
 
 fuzz_target!(|data: &[u8]| {
     let Ok(text) = std::str::from_utf8(data) else {

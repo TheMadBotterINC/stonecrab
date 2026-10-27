@@ -6,33 +6,33 @@
 # connection code is out of scope (those modules run on FakeTransport and FakeClock, and
 # mutating them mostly produces timeouts, not information).
 examine_globs = [
-  # stonecrab-core: typed values and the connection-string grammar.
-  "crates/stonecrab-core/src/value.rs",
-  "crates/stonecrab-core/src/uri.rs",
-  # stonecrab-driver-sim: the simulator address grammar and its configuration parser.
-  "crates/stonecrab-driver-sim/src/address.rs",
-  "crates/stonecrab-driver-sim/src/driver.rs",
-  # stonecrab-modbus: addresses, the PDU codec, MBAP framing, the typed decoder, the read
-  # batcher and the configuration parser (driver.rs parse_config and options.rs).
-  "crates/stonecrab-modbus/src/address.rs",
-  "crates/stonecrab-modbus/src/pdu.rs",
-  "crates/stonecrab-modbus/src/pdu/*.rs",
-  "crates/stonecrab-modbus/src/framing.rs",
-  "crates/stonecrab-modbus/src/framing/*.rs",
-  "crates/stonecrab-modbus/src/decode.rs",
-  "crates/stonecrab-modbus/src/batch.rs",
-  "crates/stonecrab-modbus/src/driver.rs",
-  "crates/stonecrab-modbus/src/options.rs",
-  # stonecrab-sensors: the measurement scaling module.
-  "crates/stonecrab-sensors/src/measurement/scale.rs",
+  # core: typed values and the connection-string grammar.
+  "crates/stonecrab/src/value.rs",
+  "crates/stonecrab/src/uri.rs",
+  # sim: the simulator address grammar and its configuration parser.
+  "crates/stonecrab/src/sim/address.rs",
+  "crates/stonecrab/src/sim/driver.rs",
+  # modbus: addresses, the PDU codec, MBAP framing, the typed decoder, the read batcher and
+  # the configuration parser (driver.rs parse_config and options.rs).
+  "crates/stonecrab/src/modbus/address.rs",
+  "crates/stonecrab/src/modbus/pdu.rs",
+  "crates/stonecrab/src/modbus/pdu/*.rs",
+  "crates/stonecrab/src/modbus/framing.rs",
+  "crates/stonecrab/src/modbus/framing/*.rs",
+  "crates/stonecrab/src/modbus/decode.rs",
+  "crates/stonecrab/src/modbus/batch.rs",
+  "crates/stonecrab/src/modbus/driver.rs",
+  "crates/stonecrab/src/modbus/options.rs",
+  # sensors: the measurement scaling module.
+  "crates/stonecrab/src/sensors/measurement/scale.rs",
 ]
 
 # Run the tests with nextest, as `mise run check` does (.config/nextest.toml). Doctests
 # are not run by nextest, so a mutant only a doctest could kill is reported as a survivor.
 test_tool = "nextest"
 
-# Only the tests of the mutated package run (cargo-mutants default). Every in-scope
-# module has its unit, property and golden tests in its own crate.
+# Only the tests of the mutated package run (cargo-mutants default). There is one package
+# now, so every in-scope module is tested by the whole crate's test binaries.
 test_workspace = false
 
 # Same feature set as `mise run check`, and the lock file is never rewritten.

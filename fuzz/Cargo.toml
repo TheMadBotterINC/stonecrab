@@ -23,11 +23,9 @@ ignored = ["arbitrary"]
 libfuzzer-sys = "0.4"
 arbitrary = "1.5"
 bytes = "1.10"
-stonecrab-core = { path = "../crates/stonecrab-core" }
-stonecrab-codec = { path = "../crates/stonecrab-codec" }
-stonecrab-modbus = { path = "../crates/stonecrab-modbus" }
-stonecrab-sensors = { path = "../crates/stonecrab-sensors" }
-stonecrab-transport = { path = "../crates/stonecrab-transport", default-features = false }
+# The core contracts and the codec are always part of the crate; the features add the
+# Modbus driver (with its transport) and the sensor profile loader.
+stonecrab = { path = "../crates/stonecrab", default-features = false, features = ["modbus", "sensors"] }
 # Later slices add path dependencies on the crate each new target exercises.
 
 # Fuzz targets are added as [[bin]] sections by the slice that adds each target, named

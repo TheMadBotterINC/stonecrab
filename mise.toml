@@ -52,7 +52,7 @@ run = [
 ]
 
 [tasks.coverage]
-description = "Per-crate line coverage gate from one instrumented nextest run (ADR-0005)"
+description = "Per-component line coverage gate from one instrumented nextest run (ADR-0005); components are the module groups of the single crate"
 run = "scripts/coverage-gate.sh"
 
 [tasks.lint-attrs]
@@ -67,7 +67,7 @@ run = [
 ]
 
 [tasks.features]
-description = "Check the feature powerset (depth 2) and each crate without default features"
+description = "Check the feature powerset (depth 2) of the single crate and the crate without default features"
 run = [
   # --no-dev-deps rewrites Cargo.toml while it runs, which --locked refuses, so no --locked here.
   "cargo hack check --workspace --feature-powerset --depth 2 --no-dev-deps",
@@ -83,7 +83,7 @@ description = "Recorded cargo-mutants run over the modules named in mutants.toml
 run = "scripts/mutants.sh"
 
 [tasks.sbom]
-description = "Write one CycloneDX SBOM per published crate and the archive file lists to target/release-evidence/ (ADR-0017)"
+description = "Write the CycloneDX SBOM of the one published crate and the archive file list to target/release-evidence/ (ADR-0017)"
 run = "scripts/sbom.sh"
 
 [tasks.dco]
@@ -95,24 +95,12 @@ description = "Check dependency advisories, licenses, bans and sources"
 run = "cargo deny --locked check"
 
 [tasks.package]
-description = "Verify both archives and compare shipped files with reviewed lists"
+description = "Verify the archive of the one published crate and compare shipped files with the reviewed list"
 run = [
-  "CARGO_HOME=$(mktemp -d) cargo package --locked --workspace --exclude stonecrab-testkit",
-  "! cargo package --locked --workspace --exclude stonecrab-testkit --list 2>/dev/null | grep -E '(^|/)(fixtures|testdata)/'",
-  "cargo package --locked -p stonecrab-core --list > target/core-package-files.txt",
-  "diff -u packaging/stonecrab-core.txt target/core-package-files.txt",
-  "cargo package --locked -p stonecrab-codec --list > target/codec-package-files.txt",
-  "diff -u packaging/stonecrab-codec.txt target/codec-package-files.txt",
-  "cargo package --locked -p stonecrab-driver-sim --list > target/driver-sim-package-files.txt",
-  "diff -u packaging/stonecrab-driver-sim.txt target/driver-sim-package-files.txt",
-  "cargo package --locked -p stonecrab-modbus --list > target/modbus-package-files.txt",
-  "diff -u packaging/stonecrab-modbus.txt target/modbus-package-files.txt",
-  "cargo package --locked -p stonecrab-sensors --list > target/sensors-package-files.txt",
-  "diff -u packaging/stonecrab-sensors.txt target/sensors-package-files.txt",
-  "cargo package --locked -p stonecrab-transport --list > target/transport-package-files.txt",
-  "diff -u packaging/stonecrab-transport.txt target/transport-package-files.txt",
-  "cargo package --locked -p stonecrab --list > target/facade-package-files.txt",
-  "diff -u packaging/stonecrab.txt target/facade-package-files.txt",
+  "CARGO_HOME=$(mktemp -d) cargo package --locked -p stonecrab",
+  "! cargo package --locked -p stonecrab --list 2>/dev/null | grep -E '(^|/)(fixtures|testdata)/'",
+  "cargo package --locked -p stonecrab --list > target/package-files.txt",
+  "diff -u packaging/stonecrab.txt target/package-files.txt",
 ]
 
 [tasks.examples]

@@ -9,9 +9,9 @@
 #       12.2 and any prose cross-reference of the same shape) names a file that exists
 #       and a row id that appears in that file;
 #   (b) every row whose status starts with `implemented` or `automated-verified` is named
-#       at least once, as the bare row id, in crates/*/src/**/*.rs, crates/*/tests/**/*.rs
-#       or tools/stonecrab-testkit/src/**/*.rs (a `# Compatibility` section, a `// covers:`
-#       comment, a test name or an assertion message).
+#       at least once, as the bare row id, in crates/*/src/**/*.rs (which includes the
+#       testkit module) or crates/*/tests/**/*.rs (a `# Compatibility` section, a
+#       `// covers:` comment, a test name or an assertion message).
 #
 # Because the exit criterion of S31 is "no implemented row without a test id", a third
 # check rides along: such a row must also carry at least one backticked test id in its
@@ -114,15 +114,14 @@ scan() { # root
   # roots (a fixture, say) is searched in the roots it has.
   local lib_files test_files all_files roots=()
   [ -d crates ] && roots+=(crates)
-  [ -d tools ] && roots+=(tools)
   if [ "${#roots[@]}" -eq 0 ]; then
-    printf 'parity-check: no crates or tools directory under %s\n' "$root" >&2
+    printf 'parity-check: no crates directory under %s\n' "$root" >&2
     return 1
   fi
   lib_files=$(find "${roots[@]}" -type f -name '*.rs' |
     awk '/^crates\/[^\/]+\/src\// { print }' | sort)
   test_files=$(find "${roots[@]}" -type f -name '*.rs' |
-    awk '/^crates\/[^\/]+\/tests\// || /^tools\/stonecrab-testkit\/src\// { print }' | sort)
+    awk '/^crates\/[^\/]+\/tests\// { print }' | sort)
   all_files=$(printf '%s\n%s\n' "$lib_files" "$test_files" | awk 'NF' | sort -u)
   if [ -z "$lib_files" ]; then
     printf 'parity-check: no crates/*/src/**/*.rs under %s\n' "$root" >&2
@@ -177,7 +176,7 @@ EOF
     esac
     subject=$((subject + 1))
     if ! grep -qxF "$id" "$tokens_file"; then
-      report "$file" "$lineno" "$id" "status '$status' but no # Compatibility section or test in crates/*/src, crates/*/tests or tools/stonecrab-testkit/src names it"
+      report "$file" "$lineno" "$id" "status '$status' but no # Compatibility section or test in crates/*/src or crates/*/tests names it"
     fi
     if [ "$hastest" != 1 ]; then
       report "$file" "$lineno" "$id" "status '$status' but the test-id column names no backticked test id"

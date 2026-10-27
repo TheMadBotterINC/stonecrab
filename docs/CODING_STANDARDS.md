@@ -226,7 +226,7 @@ const MAX_REGISTERS: NonZeroU16 = NonZeroU16::new(125).unwrap(); // const-evalua
 
 even this carries `#[expect(clippy::unwrap_used, reason = "const-evaluated")]` on the item. In tests, examples and binaries under `tools/`, `unwrap`/`expect` are allowed (`clippy.toml`), but `expect("…")` with a message describing the *assumption* is preferred.
 
-6.3. **One error type per public boundary.** `stonecrab-core` defines `PlcError`; every public function across the workspace that can fail returns `Result<T, PlcError>` (`stonecrab_core::Result<T>`). Driver and codec crates may define internal error enums (`ParseError`, `ModbusFrameError`) for precision, but they convert into `PlcError` at the crate boundary via `From`, preserving `source()`. Public functions never return `Box<dyn Error>`, `String`, `&'static str` or `anyhow::Error`.
+6.3. **One error type per public boundary.** `stonecrab-core` defines `PlcError`; every public function across the workspace that can fail returns `Result<T, PlcError>` (`stonecrab::Result<T>`). Driver and codec crates may define internal error enums (`ParseError`, `ModbusFrameError`) for precision, but they convert into `PlcError` at the crate boundary via `From`, preserving `source()`. Public functions never return `Box<dyn Error>`, `String`, `&'static str` or `anyhow::Error`.
 
 6.4. **`PlcError` shape.** `ErrorKind` is the discriminator callers match on; the struct carries a message, an optional `source`, and `Diagnostics` (§14.4). The struct body lives behind a `Box` so `Result<T, PlcError>` stays two words wide and `clippy::result_large_err` never fires:
 
@@ -345,7 +345,7 @@ fn public_types_are_send_sync() {
 
 10.2. **`lib.rs`** contains: crate-level docs, `#![forbid(unsafe_code)]`, the docs.rs `cfg_attr`, `mod` declarations, and `pub use` re-exports. No type definitions, no logic.
 
-10.3. **Public surface is deliberate.** Items are private by default; `pub(crate)` for cross-module use; `pub` only for the documented API. `unreachable_pub` warns on `pub` items that are not actually reachable. Re-export at the crate root what applications use; deep paths (`stonecrab_modbus::session::framing::MbapHeader`) are not part of the public API and are marked `#[doc(hidden)]` if they must be `pub` for a sibling crate.
+10.3. **Public surface is deliberate.** Items are private by default; `pub(crate)` for cross-module use; `pub` only for the documented API. `unreachable_pub` warns on `pub` items that are not actually reachable. Re-export at the crate root what applications use; deep paths (`stonecrab::modbus::session::framing::MbapHeader`) are not part of the public API and are marked `#[doc(hidden)]` if they must be `pub` for a sibling crate.
 
 10.4. **Module files.** `foo.rs` with children in `foo/`; `mod.rs` is denied (`clippy::mod_module_files`). Test modules live in the file they test (`#[cfg(test)] mod tests`); integration tests in `tests/`; shared test helpers in `stonecrab-testkit`, not copied between crates.
 
@@ -713,7 +713,7 @@ disallowed-methods = [
   { path = "tokio::task::spawn",                       reason = "spawn through an owner that keeps the JoinHandle (§8.7); use JoinSet or a supervised task type" },
   { path = "std::process::exit",                       reason = "libraries do not terminate the process" },
   { path = "std::env::set_var",                        reason = "unsafe in edition 2024; unavailable" },
-  { path = "alloc::string::String::from_utf8_lossy",   reason = "only via stonecrab_codec::text::decode_lossy, which marks Quality::Uncertain and keeps raw bytes" },
+  { path = "alloc::string::String::from_utf8_lossy",   reason = "only via stonecrab::codec::text::decode_lossy, which marks Quality::Uncertain and keeps raw bytes" },
 ]
 
 disallowed-types = [

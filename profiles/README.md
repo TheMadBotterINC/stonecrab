@@ -1,8 +1,8 @@
 # Sensor profiles
 Declarative sensor profiles for Stonecrab, as repository data. Each file is a TOML document
-in schema version 1 that `stonecrab_sensors::SensorProfile::from_toml` loads, `validate`
+in schema version 1 that `stonecrab::sensors::SensorProfile::from_toml` loads, `validate`
 checks and `tags` turns into the tags a driver reads (see the
-[stonecrab-sensors README](../crates/stonecrab-sensors/README.md) for the format and
+[sensors component document](../crates/stonecrab/docs/components/sensors.md) for the format and
 [ADR-0016](../docs/adr/0016-sensor-profile-schema-and-loader.md) for the decisions).
 
 Profiles are repository data. They are not shipped in any crate archive (the reviewed
@@ -143,7 +143,7 @@ map assumes and is informational: `profile_read` does not apply it, and only che
 profile's `address_convention` against the URL.
 
 ## Checks
-`crates/stonecrab-sensors/tests/profiles.rs` loads and validates every file under
+`crates/stonecrab/tests/sensors_profiles.rs` loads and validates every file under
 `profiles/`, checks the declared conventions, checks that each Modbus file has a sim twin
 and that this README lists every file. The `examples` and `interop` CI jobs read every
 file through `profile_read --expect-good`.

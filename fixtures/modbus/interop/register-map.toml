@@ -2,7 +2,7 @@
 #
 # First-party, Apache-2.0. Authored from docs/parity/modbus.md, section "Interop register
 # map" (rows MB-INTEROP-*); every entry carries its row id in `row`. Nothing here is
-# copied from upstream's modbus_server.py. Parsed by stonecrab_testkit::InteropMap
+# copied from upstream's modbus_server.py. Parsed by stonecrab::testkit::InteropMap
 # (testkit feature `fixtures`), which rejects unknown keys, overlapping entries, a word
 # count that does not match `type`, and entries outside the block sizes.
 #

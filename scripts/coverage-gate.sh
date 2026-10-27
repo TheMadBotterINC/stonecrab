@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Usage: scripts/coverage-gate.sh [--no-run]
 #
-# Per-crate line-coverage gate (ADR-0005, docs/ALPHA_PLAN.md D7). Runs ONE instrumented
-# `cargo llvm-cov nextest` over the workspace, writes target/coverage.lcov and a text
-# summary (target/coverage-summary.txt, region coverage reported but not gated), then
-# runs one `cargo llvm-cov report --fail-under-lines N` pass per crate in the THRESHOLDS
-# table below, each restricted to that crate by --ignore-filename-regex.
+# Per-component line-coverage gate (ADR-0005, docs/ALPHA_PLAN.md D7). Stonecrab is one crate
+# whose components are modules, so the gate groups the files of crates/stonecrab/src by
+# path prefix. Runs ONE instrumented `cargo llvm-cov nextest` over the workspace with all
+# features, writes target/coverage.lcov and a text summary (target/coverage-summary.txt,
+# region coverage reported but not gated), then sums the lcov line totals per component
+# (the THRESHOLDS table below) and compares each sum with its threshold.
 #
 #   --no-run   reuse the profile data of the previous run (skip the instrumented run)
 #
@@ -21,32 +22,41 @@ cd "$(dirname "$0")/.."
 # Excluded from every pass (D7): not handwritten library logic.
 EXCLUDE='(^|/)(examples|benches|fuzz|generated)/'
 
-# crate directory | minimum line coverage in percent, or "na".
+# Where the single crate's sources live; a component is a path prefix below it.
+SRC=crates/stonecrab/src
+
+# component | files it owns | minimum line coverage in percent, or "na".
 #
-# "na" means the crate has no executable lines (the facade only holds `pub use`) and is
-# skipped with a message. The row is listed on purpose: `cargo llvm-cov report
-# --fail-under-lines` exits 1 on an empty file set, so n/a crates are never passed to
-# it, and the gate fails loudly the day a listed n/a crate gains an executable line.
-# A crate directory with no row also fails. Later slices add rows here (driver-sim);
-# codec landed in S15, transport in S16, modbus in S20a and sensors in S28a. The modbus row is 100
-# while the crate is pure (address types only); ADR-0005 sets the whole-crate tier at 95
-# with the pure modules at 100. The session (S24b) and connection (S25) modules run
-# entirely on the in-memory transport and the fake clock, so they have no OS-dependent
-# arm and the row stays 100 (ADR-0015 decision 9).
+#   core       the files directly in src/ other than the module files named below (the
+#              runtime-independent contracts: lib.rs, value.rs, uri.rs and so on)
+#   codec      src/codec.rs and src/codec/
+#   transport  src/transport.rs and src/transport/
+#   sim        src/sim.rs and src/sim/
+#   modbus     src/modbus.rs and src/modbus/
+#   sensors    src/sensors.rs and src/sensors/
+#   testkit    src/testkit.rs and src/testkit/
+#   other      any other file in the lcov that is not under src/ (none today)
+#
+# "na" means the component has no executable lines and is skipped with a message. The row
+# is listed on purpose: the gate fails loudly the day a listed n/a component gains an
+# executable line. A directory under src/ with no row also fails.
 #
 # The transport row is 95 (ADR-0005, ADR-0014): the real-socket connect-timeout arm (the
 # deadline passing while a connect is pending) cannot be induced on loopback, because a
 # listening socket completes the handshake in the kernel backlog and non-loopback
-# addresses are forbidden in tests; it is the first named OS-dependent uncovered arm.
+# addresses are forbidden in tests; it is the first named OS-dependent uncovered arm. The
+# testkit row is 90: it is test support, not shipped runtime logic. The modbus session and
+# connection modules run entirely on the in-memory transport and the fake clock, so they
+# have no OS-dependent arm and the row stays 100 (ADR-0015 decision 9).
 THRESHOLDS="
-crates/stonecrab-core|100
-crates/stonecrab-codec|100
-crates/stonecrab-driver-sim|100
-crates/stonecrab-modbus|100
-crates/stonecrab-sensors|100
-crates/stonecrab-transport|95
-crates/stonecrab|na
-tools/stonecrab-testkit|90
+core|100
+codec|100
+sim|100
+modbus|100
+sensors|100
+transport|95
+testkit|90
+other|100
 "
 
 LCOV=target/coverage.lcov
@@ -72,12 +82,19 @@ fail() {
   failures=$((failures + 1))
 }
 
-# Every crate directory on disk needs a row.
-for manifest in crates/*/Cargo.toml tools/*/Cargo.toml; do
-  [ -f "$manifest" ] || continue
-  dir=${manifest%/Cargo.toml}
-  if ! printf '%s\n' "$THRESHOLDS" | grep -q "^${dir}|"; then
-    fail "$dir has no row in the THRESHOLDS table (add a threshold or na)"
+# Every directory under src/ must be one of the components above, and every component
+# module file must exist, so a new module cannot slip past the gate unmeasured.
+for dir in "$SRC"/*/; do
+  [ -d "$dir" ] || continue
+  name=$(basename "$dir")
+  if ! printf '%s\n' "$THRESHOLDS" | grep -q "^${name}|"; then
+    fail "$SRC/$name/ has no row in the THRESHOLDS table (add a threshold or na)"
+  fi
+done
+
+for name in codec transport sim modbus sensors testkit; do
+  if [ ! -f "$SRC/$name.rs" ]; then
+    fail "$SRC/$name.rs does not exist (a component module has a THRESHOLDS row but no module file)"
   fi
 done
 
@@ -90,51 +107,76 @@ mkdir -p target
 cargo llvm-cov report --lcov --ignore-filename-regex "$EXCLUDE" --output-path "$LCOV"
 cargo llvm-cov report --ignore-filename-regex "$EXCLUDE" | tee "$SUMMARY"
 
-# lcov line totals for one crate directory: prints "<found> <hit>".
+# Maps an lcov source path to its component name. Files under src/ belong to the module of
+# their first path segment (codec.rs and codec/ are both "codec"); a file directly in src/
+# that is not a module file is core; anything else is "other".
+COMPONENT_AWK='
+function component(path,   rel, seg, i) {
+  i = index(path, "/" SRC "/")
+  if (i == 0) return "other"
+  rel = substr(path, i + length(SRC) + 2)
+  if (index(rel, "/") == 0) {
+    seg = rel
+    sub(/\.rs$/, "", seg)
+    if (seg in MODULE) return seg
+    return "core"
+  }
+  seg = substr(rel, 1, index(rel, "/") - 1)
+  return seg
+}'
+
+# lcov line totals for one component: prints "<found> <hit>".
 lcov_lines() {
-  awk -v dir="/$1/" '
-    /^SF:/ { inside = index($0, dir) > 0 }
+  awk -v SRC="$SRC" -v want="$1" "$COMPONENT_AWK"'
+    BEGIN { split("codec transport sim modbus sensors testkit", m, " "); for (k in m) MODULE[m[k]] = 1 }
+    /^SF:/ { inside = (component(substr($0, 4)) == want) }
     inside && /^LF:/ { found += substr($0, 4) }
     inside && /^LH:/ { hit += substr($0, 4) }
     END { printf "%d %d\n", found, hit }' "$LCOV"
 }
 
-printf '\ncoverage-gate: per-crate line coverage (region coverage above is reported, not gated)\n'
-while IFS='|' read -r dir threshold; do
-  [ -n "$dir" ] || continue
-  name=${dir##*/}
-  # The crate under test is every file except the other crates' directories.
-  regex=$EXCLUDE
-  while IFS='|' read -r other _; do
-    if [ -n "$other" ] && [ "$other" != "$dir" ]; then
-      regex="$regex|(^|/)$other/"
-    fi
-  done <<EOT
-$THRESHOLDS
-EOT
+# The uncovered lines of one component, "<file>:<line>", for a failure message.
+lcov_missing() {
+  awk -v SRC="$SRC" -v want="$1" "$COMPONENT_AWK"'
+    BEGIN { split("codec transport sim modbus sensors testkit", m, " "); for (k in m) MODULE[m[k]] = 1 }
+    /^SF:/ { file = substr($0, 4); inside = (component(file) == want) }
+    inside && /^DA:/ { split(substr($0, 4), da, ","); if (da[2] == 0) print file ":" da[1] }' "$LCOV"
+}
+
+printf '\ncoverage-gate: per-component line coverage (region coverage above is reported, not gated)\n'
+while IFS='|' read -r name threshold; do
+  [ -n "$name" ] || continue
   read -r found hit <<EOT
-$(lcov_lines "$dir")
+$(lcov_lines "$name")
 EOT
   if [ "$threshold" = na ]; then
     if [ "$found" -eq 0 ]; then
-      printf 'coverage-gate: %-18s n/a  (no executable lines, skipped)\n' "$name"
+      printf 'coverage-gate: %-10s n/a  (no executable lines, skipped)\n' "$name"
     else
       fail "$name is listed n/a but has $found executable lines ($hit hit); give it a threshold"
     fi
     continue
   fi
   if [ "$found" -eq 0 ]; then
-    fail "$name has no executable lines in $LCOV but requires $threshold% (tests not run?)"
+    # A component with no executable lines at all is n/a, except the real ones, which must
+    # have lines when the tests ran. Only "other" may legitimately be empty.
+    if [ "$name" = other ]; then
+      printf 'coverage-gate: %-10s n/a  (no executable lines, skipped)\n' "$name"
+    else
+      fail "$name has no executable lines in $LCOV but requires $threshold% (tests not run?)"
+    fi
     continue
   fi
   pct=$(awk -v h="$hit" -v f="$found" 'BEGIN { printf "%.2f", 100 * h / f }')
-  if cargo llvm-cov report --ignore-filename-regex "$regex" --fail-under-lines "$threshold" \
-    --show-missing-lines >"target/coverage-$name.txt" 2>&1; then
-    printf 'coverage-gate: %-18s lines %s/%s = %s%%  required %s%%  PASS\n' \
+  # Integer comparison on the line counts, so 99.999 is never rounded up to a pass.
+  if [ $((hit * 100)) -ge $((found * threshold)) ]; then
+    printf 'coverage-gate: %-10s lines %s/%s = %s%%  required %s%%  PASS\n' \
       "$name" "$hit" "$found" "$pct" "$threshold"
   else
-    cat "target/coverage-$name.txt" >&2
+    lcov_missing "$name" >&2
     fail "$name lines $hit/$found = $pct% is below the required $threshold%"
+    printf 'coverage-gate: %-10s lines %s/%s = %s%%  required %s%%  FAIL\n' \
+      "$name" "$hit" "$found" "$pct" "$threshold" >&2
   fi
 done <<EOT
 $THRESHOLDS

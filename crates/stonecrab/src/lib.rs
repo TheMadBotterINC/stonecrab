@@ -2,122 +2,95 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(missing_docs)]
+#![deny(clippy::as_conversions)]
 
-pub use stonecrab_core::{
-    AccessPolicy, AddressOptions, AddressOptionsBuilder, ByteOrder, CancellationToken,
-    Capabilities, Clock, Connection, ConnectionConfig, ConnectionConfigBuilder, ConnectionState,
-    ConnectionUri, Credentials, Deadline, Diagnostics, Driver, DriverOptions, DriverRegistry,
-    Endpoint, ErrorKind, FailureCategory, ItemError, OpFuture, Operation, PlcError, PlcValue,
-    PlcValueType, ProtocolAddress, ProtocolStatus, ReadItem, ReadRequest, ReadRequestBuilder,
-    ReadResponse, ReadResponseBuilder, ReconnectPolicy, ResourceLimits, ResourceLimitsBuilder,
-    Result, RetryPolicy, Secret, StateCell, StateWatch, SubscriptionMode, Tag, TagId, Timeouts,
-    UnknownReason, WordOrder, WriteItem, WriteOutcome, WriteRequest, WriteRequestBuilder,
-    WriteResponse, WriteResponseBuilder, WriteResult,
-};
+// The component documents of docs/components/ are included by the modules they describe.
+// The core contracts live at the crate root, so their document is compiled here, for its
+// code blocks only (they run as doctests; nothing is rendered).
+#[cfg(doctest)]
+#[doc = include_str!("../docs/components/core.md")]
+struct CoreComponentDoc;
 
-/// The in-process simulator driver, behind the `sim` feature.
-///
-/// This module re-exports every public item of the `stonecrab-driver-sim` crate
-/// (`pub use stonecrab_driver_sim::*;`), so `stonecrab::sim::SimDriver` is the type
-/// `stonecrab_driver_sim::SimDriver` and a new simulator item appears here without a
-/// facade change. The facade version pins the sibling crate exactly, so the glob cannot
-/// drift from the version the facade was published with.
-///
-/// The `sim` scheme is registered by the application, not by the facade: build a
-/// [`DriverRegistry`], register a [`SimDriver`](sim::SimDriver) holding the
-/// [`SimDevice`](sim::SimDevice)s you want, and connect with `sim://<device>`.
-///
-/// # Examples
-/// ```
-/// use std::sync::Arc;
-/// use stonecrab::sim::{SimDevice, SimDriver, SimTag};
-/// use stonecrab::{DriverRegistry, PlcValue};
-///
-/// let device = SimDevice::new();
-/// device.set("boiler", SimTag::new(PlcValue::F32(71.5)))?;
-/// let mut registry = DriverRegistry::new();
-/// registry.register(Arc::new(SimDriver::new().with_device("bench", device)?))?;
-/// assert_eq!(registry.schemes(), ["sim"]);
-/// # Ok::<(), stonecrab::PlcError>(())
-/// ```
-#[cfg(feature = "sim")]
-#[cfg_attr(docsrs, doc(cfg(feature = "sim")))]
-pub mod sim {
-    pub use stonecrab_driver_sim::*;
-}
+mod address_options;
+mod cancel;
+mod capability;
+mod clock;
+mod config;
+mod connection;
+mod deadline;
+mod driver;
+mod error;
+mod future;
+mod limits;
+mod order;
+mod read_response;
+mod registry;
+mod request;
+mod response;
+mod secret;
+mod state;
+mod tag;
+mod uri;
+mod value;
+mod write_request;
+mod write_response;
 
-/// The native Modbus TCP driver, behind the `modbus` feature.
-///
-/// This module re-exports every public item of the `stonecrab-modbus` crate
-/// (`pub use stonecrab_modbus::*;`), so `stonecrab::modbus::ModbusTcpDriver` is the type
-/// `stonecrab_modbus::ModbusTcpDriver`, and so is [`SystemClock`](modbus::SystemClock), the
-/// Tokio-backed clock the driver uses by default. The facade version pins the sibling crate
-/// exactly, so the glob cannot drift from the version the facade was published with.
-///
-/// The `modbus-tcp` scheme is registered by the application, not by the facade: build a
-/// [`DriverRegistry`], register a [`ModbusTcpDriver`](modbus::ModbusTcpDriver) and connect
-/// with `modbus-tcp://host[:port]`. The driver opens real sockets and must run inside a
-/// Tokio runtime with the time driver enabled; the `modbus_tcp_read` example shows the
-/// whole path. Alpha scope is read-only (function codes 01 to 04).
-///
-/// # Examples
-/// Parsing opens no socket. The configuration is parsed first so that its address options
-/// can be taken before `connect` consumes it.
-/// ```
-/// use stonecrab::modbus::{ModbusOptions, ModbusTcpDriver};
-/// use stonecrab::{Driver, ProtocolAddress};
-///
-/// let driver = ModbusTcpDriver::new();
-/// let config = driver
-///     .parse_config("modbus-tcp://192.0.2.10:1502?address-convention=plc4x")?;
-/// let options = config.address_options();
-/// let address = driver.parse_address("40001:UINT", &options)?;
-/// assert_eq!(address.canonical(), "holding-register:1:UINT");
-/// assert!(config.driver_options_as::<ModbusOptions>().is_some());
-/// # Ok::<(), stonecrab::PlcError>(())
-/// ```
+#[deny(
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions
+)]
+pub mod codec;
 #[cfg(feature = "modbus")]
+#[deny(
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions
+)]
 #[cfg_attr(docsrs, doc(cfg(feature = "modbus")))]
-pub mod modbus {
-    pub use stonecrab_modbus::*;
-}
-
-/// Declarative sensor profiles, behind the `sensors` feature.
-///
-/// This module re-exports every public item of the `stonecrab-sensors` crate
-/// (`pub use stonecrab_sensors::*;`), so `stonecrab::sensors::SensorProfile` is the type
-/// `stonecrab_sensors::SensorProfile`. The facade version pins the sibling crate exactly, so
-/// the glob cannot drift from the version the facade was published with. The feature also
-/// enables the crate's `toml` loader, because
-/// [`SensorProfile::from_toml`](sensors::SensorProfile::from_toml) is how an application
-/// reads a profile file; the `profile_read` example and the facade test do exactly that.
-///
-/// A profile maps protocol addresses to named, scaled, qualified measurements. It belongs to
-/// one driver scheme, declares its address convention and carries no executable code. The
-/// profiles that ship in the repository under `profiles/` are labeled `synthetic`: they are
-/// authored from a documented register map and describe no real device.
-///
-/// # Examples
-/// ```
-/// use stonecrab::sensors::{SensorProfile, ValidationStatus};
-///
-/// let profile = SensorProfile::from_toml(r#"
-///     id = "synthetic_example"
-///     schema_version = 1
-///     validation = "synthetic"
-///
-///     [connection]
-///     scheme = "sim"
-///
-///     [provenance]
-///     source = "Synthetic reference profile; no real device"
-/// "#)?;
-/// assert_eq!(profile.validation, ValidationStatus::Synthetic);
-/// assert!(profile.validate().is_ok());
-/// # Ok::<(), stonecrab::sensors::ProfileError>(())
-/// ```
+pub mod modbus;
 #[cfg(feature = "sensors")]
 #[cfg_attr(docsrs, doc(cfg(feature = "sensors")))]
-pub mod sensors {
-    pub use stonecrab_sensors::*;
-}
+pub mod sensors;
+#[cfg(feature = "sim")]
+#[deny(
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions
+)]
+#[cfg_attr(docsrs, doc(cfg(feature = "sim")))]
+pub mod sim;
+#[cfg(feature = "testkit")]
+#[cfg_attr(docsrs, doc(cfg(feature = "testkit")))]
+pub mod testkit;
+#[cfg(feature = "transport")]
+#[deny(clippy::indexing_slicing, clippy::as_conversions)]
+#[cfg_attr(docsrs, doc(cfg(feature = "transport")))]
+pub mod transport;
+
+pub use address_options::{AddressOptions, AddressOptionsBuilder};
+pub use cancel::CancellationToken;
+pub use capability::{Capabilities, Operation, SubscriptionMode};
+pub use clock::Clock;
+pub use config::{
+    AccessPolicy, ConnectionConfig, ConnectionConfigBuilder, Credentials, DriverOptions, Endpoint,
+    ReconnectPolicy, RetryPolicy, Timeouts,
+};
+pub use connection::Connection;
+pub use deadline::Deadline;
+pub use driver::Driver;
+pub use error::{ConnectionState, Diagnostics, ErrorKind, FailureCategory, PlcError, Result};
+pub use future::OpFuture;
+pub use limits::{ResourceLimits, ResourceLimitsBuilder};
+pub use order::{ByteOrder, WordOrder};
+pub use read_response::{ReadResponse, ReadResponseBuilder};
+pub use registry::DriverRegistry;
+pub use request::{ReadRequest, ReadRequestBuilder};
+pub use response::{ItemError, ProtocolStatus, ReadItem, UnknownReason, WriteOutcome};
+pub use secret::Secret;
+pub use state::{StateCell, StateWatch};
+pub use tag::{ProtocolAddress, Tag, TagId};
+pub use uri::ConnectionUri;
+pub use value::{PlcValue, PlcValueType};
+pub use write_request::{WriteItem, WriteRequest, WriteRequestBuilder};
+pub use write_response::{WriteResponse, WriteResponseBuilder, WriteResult};

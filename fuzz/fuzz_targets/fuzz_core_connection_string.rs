@@ -9,7 +9,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use stonecrab_core::{ConnectionUri, ErrorKind};
+use stonecrab::{ConnectionUri, ErrorKind};
 
 fn check(text: &str) {
     match ConnectionUri::parse(text) {

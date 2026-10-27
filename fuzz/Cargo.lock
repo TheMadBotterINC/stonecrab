@@ -200,18 +200,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "stonecrab-codec"
-version = "0.1.0"
-dependencies = [
- "stonecrab-core",
-]
-
-[[package]]
-name = "stonecrab-core"
-version = "0.1.0"
+name = "stonecrab"
+version = "0.2.0"
 dependencies = [
  "bytes",
+ "serde",
  "thiserror",
+ "tokio",
+ "toml",
+ "tracing",
 ]
 
 [[package]]
@@ -221,40 +218,7 @@ dependencies = [
  "arbitrary",
  "bytes",
  "libfuzzer-sys",
- "stonecrab-codec",
- "stonecrab-core",
- "stonecrab-modbus",
- "stonecrab-sensors",
- "stonecrab-transport",
-]
-
-[[package]]
-name = "stonecrab-modbus"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "stonecrab-codec",
- "stonecrab-core",
- "stonecrab-transport",
- "tracing",
-]
-
-[[package]]
-name = "stonecrab-sensors"
-version = "0.1.0"
-dependencies = [
- "serde",
- "stonecrab-core",
- "toml",
-]
-
-[[package]]
-name = "stonecrab-transport"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "stonecrab-core",
- "tokio",
+ "stonecrab",
 ]
 
 [[package]]

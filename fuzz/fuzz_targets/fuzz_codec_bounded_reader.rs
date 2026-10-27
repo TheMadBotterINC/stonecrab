@@ -11,11 +11,11 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use stonecrab_codec::{
+use stonecrab::codec::{
     BoundedReader, BoundedWriter, ParseError, coil_byte_count, pack_bits_lsb_first,
     unpack_bits_lsb_first,
 };
-use stonecrab_core::ByteOrder;
+use stonecrab::ByteOrder;
 
 /// Lengths and counts handed to `read_bytes` and `read_bits_lsb_first`.
 const ARGS: [usize; 16] = [

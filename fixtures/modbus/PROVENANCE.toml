@@ -1,6 +1,6 @@
 # Provenance of every fixture under fixtures/modbus (CODING_STANDARDS 13.6).
 #
-# Schema, enforced by stonecrab_testkit::load_dir (testkit feature `fixtures`):
+# Schema, enforced by stonecrab::testkit::load_dir (feature `testkit`):
 #
 #   [[vector]]  one per wire vector; the loader reads <name>.hex and the optional
 #               <name>.expected.json next to this file, and fails when a .hex or
@@ -96,7 +96,7 @@
 path = "interop/register-map.toml"
 origin = "docs/parity/modbus.md, section \"Interop register map\" (rows MB-INTEROP-*) and decision D8"
 license = "Apache-2.0"
-note = "First-party. Read by the S25 contract fixture and the S27 pymodbus server generator through stonecrab_testkit::InteropMap. Nothing is copied from upstream's modbus_server.py."
+note = "First-party. Read by the S25 contract fixture and the S27 pymodbus server generator through stonecrab::testkit::InteropMap. Nothing is copied from upstream's modbus_server.py."
 
 [[vector]]
 name = "tcp/read-coils-request"

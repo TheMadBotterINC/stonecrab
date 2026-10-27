@@ -9,9 +9,10 @@
 # by one, commits with `git commit -s -S`, then tags and publishes by hand in the order
 # and with the commands of docs/adr/0017-release-process-and-evidence.md.
 #
-# Every command is a dry run until `--execute` is given, so
-#   cargo release version patch --workspace --exclude stonecrab-testkit
-# prints the planned version changes and modifies nothing.
+# Stonecrab is one package (crates/stonecrab), so there is nothing to select: every command
+# is a dry run until `--execute` is given, so
+#   cargo release version patch
+# prints the planned version change and modifies nothing.
 
 # Nothing leaves the machine and nothing is tagged or published by cargo-release.
 publish = false
@@ -25,22 +26,17 @@ sign-tag = true
 # Releases are cut from master only.
 allow-branch = ["master"]
 
-# One release per crate, versioned independently (CODING_STANDARDS 20.1), never one
-# commit for the whole workspace.
+# One package, one release commit.
 consolidate-commits = false
 
-# The tag scheme of the ADR: <crate>-v<version>, for example stonecrab-core-v0.1.0 and
-# stonecrab-v0.2.0. It is configured so that a hand-run `cargo release tag` and the ADR
-# agree; with tag = false the step does nothing.
+# The tag scheme of the ADR: <crate>-v<version>, for example stonecrab-v0.2.0. It is
+# configured so that a hand-run `cargo release tag` and the ADR agree; with tag = false the
+# step does nothing.
 tag-name = "{{crate_name}}-v{{version}}"
 tag-message = "{{crate_name}} {{version}}"
 pre-release-commit-message = "chore(release): {{crate_name}} {{version}}"
 
-# A sibling's version requirement is rewritten only when it no longer matches. The facade
-# pins its optional siblings with `=` ranges (CODING_STANDARDS 20.1); never loosen them.
-dependent-version = "fix"
-
 # Pre-release check, run after the version bump and before the commit: the archive list of
 # the crate (manifest, include list, license files) must still be buildable. The full
-# `cargo package` build of every archive is `mise run package`.
+# `cargo package` build of the archive is `mise run package`.
 pre-release-hook = ["cargo", "package", "--locked", "--allow-dirty", "--list", "--package", "{{crate_name}}"]

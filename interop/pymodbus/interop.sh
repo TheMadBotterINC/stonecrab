@@ -31,8 +31,9 @@ NAME="stonecrab-interop"
 PORT="${INTEROP_PORT:-5020}"
 EVIDENCE="${INTEROP_EVIDENCE_DIR:-$ROOT/target/interop-evidence}"
 URL="modbus-tcp://127.0.0.1:${PORT}"
-# nextest names a test by its module path, so the integration test's tests are tests::interop_*.
-FILTER='test(/^tests::interop_/)'
+# nextest names a test by its module path, so the integration test's tests are tests::interop_*;
+# the binary name pins the filter to the one interop test file (tests/modbus_interop_pymodbus.rs).
+FILTER='binary(modbus_interop_pymodbus) & test(/^tests::interop_/)'
 EXPECTED_TESTS=10
 EXPECTED_PROFILES=3
 
@@ -111,11 +112,11 @@ run_tests() {
   export STONECRAB_INTEROP_EVIDENCE_DIR="$EVIDENCE"
   # A filter that matches nothing must not pass: count the tests it selects first.
   local listed
-  listed="$(cargo nextest list --locked -p stonecrab-modbus --all-features \
-    --run-ignored ignored-only -E "$FILTER" --message-format oneline | grep -c 'interop_pymodbus' || true)"
+  listed="$(cargo nextest list --locked -p stonecrab --all-features \
+    --run-ignored ignored-only -E "$FILTER" --message-format oneline | grep -c 'modbus_interop_pymodbus' || true)"
   [ "$listed" = "$EXPECTED_TESTS" ] ||
     die "expected $EXPECTED_TESTS interop tests, the filter selects $listed"
-  cargo nextest run --locked -p stonecrab-modbus --all-features \
+  cargo nextest run --locked -p stonecrab --all-features \
     --run-ignored ignored-only -E "$FILTER" --no-capture 2>&1 | tee "$EVIDENCE/nextest.txt"
 }
 

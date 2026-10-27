@@ -9,8 +9,8 @@
 
 use bytes::BytesMut;
 use libfuzzer_sys::fuzz_target;
-use stonecrab_modbus::MbapFramer;
-use stonecrab_transport::{FrameError, Framer};
+use stonecrab::modbus::MbapFramer;
+use stonecrab::transport::{FrameError, Framer};
 
 fuzz_target!(|data: &[u8]| {
     let mut framer = MbapFramer::new();

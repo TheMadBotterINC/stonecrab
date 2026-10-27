@@ -10,8 +10,8 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use stonecrab_core::{ErrorKind, PlcError};
-use stonecrab_sensors::{ProfileError, ProfileId, SensorProfile};
+use stonecrab::{ErrorKind, PlcError};
+use stonecrab::sensors::{ProfileError, ProfileId, SensorProfile};
 
 /// Independent restatement of the identifier rule, so the check does not call the code
 /// under test: 1 to 64 bytes of ASCII, a lowercase letter first, then lowercase letters,

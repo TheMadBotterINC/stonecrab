@@ -1,20 +1,18 @@
 #!/usr/bin/env bash
 # Usage: scripts/sbom.sh [--help]
 #
-# Release evidence (ADR-0017): one CycloneDX SBOM per published crate and the file list of
-# every release archive, written to target/release-evidence/:
+# Release evidence (ADR-0017): the CycloneDX SBOM of the one published crate and the file
+# list of its release archive, written to target/release-evidence/:
 #
-#   sbom/<crate>.cdx.json   cargo cyclonedx --format json (cargo-cyclonedx 0.5.9)
-#   package-list.txt        cargo package --locked --workspace --exclude stonecrab-testkit --list
-#                           (the workspace form concatenates the crates without names)
-#   package-lists/<crate>.txt  the same list per crate, to review against packaging/*.txt
+#   sbom/stonecrab.cdx.json  cargo cyclonedx --format json (cargo-cyclonedx 0.5.9)
+#   package-list.txt         cargo package --locked -p stonecrab --list, to review against
+#                            packaging/stonecrab.txt
 #
 # `mise run sbom` and the release-evidence workflow (.github/workflows/release-evidence.yml)
 # both run this script, so the two cannot drift. cargo-cyclonedx has no output directory
-# option and writes <crate>.cdx.json next to each Cargo.toml, so the script moves the
-# files of the published crates under target/release-evidence/sbom/ and deletes the one of
-# the unpublished testkit; the source tree is left as it was found. SOURCE_DATE_EPOCH is
-# the commit time so that the same commit gives the same timestamps.
+# option and writes <crate>.cdx.json next to each Cargo.toml, so the script moves the file
+# under target/release-evidence/sbom/; the source tree is left as it was found.
+# SOURCE_DATE_EPOCH is the commit time so that the same commit gives the same timestamps.
 #
 # Needs cargo-cyclonedx 0.5.9 on PATH (pinned in mise.toml). Exit status: 0 success,
 # non-zero when a command fails or no SBOM was produced.
@@ -22,7 +20,7 @@ set -euo pipefail
 
 case "${1:-}" in
   -h | --help)
-    sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
     exit 0
     ;;
   '') ;;
@@ -68,19 +66,12 @@ if grep -Eq '/(Users|home|private|var|tmp)/' "$out"/sbom/*.json; then
   echo "sbom: an absolute path remains in an SBOM" >&2
   exit 1
 fi
-rm -f tools/*/*.cdx.json
 if [ "$count" -eq 0 ]; then
   echo "sbom: cargo cyclonedx produced no file under crates/" >&2
   exit 1
 fi
 
-cargo package --locked --workspace --exclude stonecrab-testkit --list ${allow_dirty:+--allow-dirty} \
+cargo package --locked -p stonecrab --list ${allow_dirty:+--allow-dirty} \
   > "$out/package-list.txt"
-mkdir -p "$out/package-lists"
-for manifest in crates/*/Cargo.toml; do
-  crate="$(basename "$(dirname "$manifest")")"
-  cargo package --locked --package "$crate" --list ${allow_dirty:+--allow-dirty} \
-    > "$out/package-lists/$crate.txt"
-done
-echo "sbom: $count SBOM files, package-list.txt and package-lists/ in $out"
+echo "sbom: $count SBOM file, package-list.txt in $out"
 ls "$out/sbom"
