@@ -3,6 +3,8 @@
 Copyright 2026 The Mad Botter INC and the Stonecrab contributors. Apache-2.0.
 
 ## Current status
+See [`STATUS.md`](STATUS.md) for the current engineering handoff, verification
+evidence, known gaps and continuation steps.
 The published 0.1.0 crate is specification-stage only. The unreleased 0.2.0 facade
 and 0.1.0 core establish the initial workspace. No protocol drivers, network I/O,
 sensor profiles or hardware support are implemented. Upstream compatibility is not claimed.
