@@ -11,9 +11,11 @@ mod clock;
 mod connection;
 mod device;
 mod driver;
+mod script;
 
 pub use address::{SimAddress, SimArea};
 pub use clock::RealtimeClock;
 pub use connection::SimConnection;
 pub use device::{SimDevice, SimTag};
 pub use driver::SimDriver;
+pub use script::{FailureScript, FailureStep};

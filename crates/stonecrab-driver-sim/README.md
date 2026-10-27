@@ -55,11 +55,14 @@ Default features are empty and there are no optional features.
   aliased. A `sim` configuration is read-write, unlike the read-only default, because a
   simulated device has nothing to protect.
 - `SimConnection`: the lifecycle `Disconnected`, `Connecting`, `Connected`, `Closing`,
-  `Closed` (`Failed` is reserved for the failure script); reads of `STATE` and `RANDOM`
-  addresses with per-item errors, writes to `STATE` and `SINK` addresses; one operation in
-  flight at a time (a second one fails with `Backpressure`, there is no wait queue);
-  deadlines and cancellation honored on the connection's clock; whole-request read retry
-  under the configured `RetryPolicy`; `Diagnostics` on every error; `tracing` spans.
+  `Closed` (a scripted disconnect moves a connection to `Failed(Disconnected)`); reads of
+  `STATE` and `RANDOM` addresses with per-item errors, writes to `STATE` and `SINK`
+  addresses; one operation in flight at a time (a second one fails with `Backpressure`,
+  there is no wait queue); deadlines and cancellation honored on the connection's clock;
+  whole-request read retry under the configured `RetryPolicy`; `Diagnostics` on every
+  error; `tracing` spans.
+- `FailureScript` and `FailureStep` (slice S12): a bounded queue of scripted faults on the
+  device that connections consume one per operation. See "Failure script" below.
 - `RealtimeClock`: a `std`-only `Clock` whose `now()` is `Instant::now()`, whose
   `wall_now()` is `SystemTime::now()` and whose `sleep_until` resolves on its first poll
   without moving time. The simulator is not a timer: with it every latency wait is a
@@ -83,13 +86,73 @@ in the connection's `Capabilities` and enforced: the simulator never splits a ba
 | Read, including `RANDOM` and ramps | simulator-tested |
 | Write, including `SINK` | simulator-tested |
 | Subscribe, browse and discover | not supported |
-| Scripted acquisition failures (delay, timeout, disconnect, device exception) | planned |
-| Bounded read retry | planned |
+| Scripted acquisition failures (delay, timeout, disconnect, device exception) | simulator-tested |
+| Bounded read retry | simulator-tested |
 | Common driver contract suite | planned |
 
-Bounded read retry is implemented (the loop exists and is tested against deadline
-failures) but stays `planned` until the failure script of S12 can exercise every
-retryable kind.
+## Failure script
+A `SimDevice` owns a `FailureScript`, a first-in first-out queue of at most 1024
+`FailureStep`s that is shared by every connection to the device. Queue steps with
+`SimDevice::push_failure` or `push_failures` and read what is left with
+`pending_failures`. A connect, read or write takes at most one step, at the point where it
+would touch the device; anything rejected earlier (a foreign address, a batch over the
+item limit, an already cancelled token, an elapsed deadline, a read-only policy, the
+single in-flight slot, a connection that is not open) leaves the step queued. `close`
+ignores the script. Each attempt of a retried read takes its own step.
+
+| Step | Read | Write |
+| --- | --- | --- |
+| `Delay(d)` | waits `d` on the clock, then proceeds normally | the same |
+| `Timeout` | the device is read, the reply is lost; waits for the deadline, then `Timeout` | the device is written, the reply is lost; waits for the deadline, then `Timeout` |
+| `Disconnect` | device untouched; `Disconnected`, connection `Failed(Disconnected)` for good | the same |
+| `DeviceException(status)` | device untouched; every item is a `DeviceException` item error carrying the status | every item `Rejected` with the status |
+| `Malformed` | device untouched; every item is a `MalformedData` item error | the whole call fails with `MalformedData` |
+| `PartialFailure(ids)` | the named items fail with status `("sim", 4)`, the rest are served | the named items are `Rejected` with it, the rest applied |
+| `Backpressure` | device untouched; `Backpressure`, connection stays open, slot released | the same |
+| `UnknownAfterTransmit` | behaves like `Timeout` | applied once; every item `Unknown(TimeoutAfterTransmit)`; never replayed |
+
+Waiting steps (`Delay`, `Timeout`) race the request's cancellation token, the connection
+being closed and the deadline, like the device latency. On a connect only `Delay`,
+`Timeout` (fails at the connect deadline) and `Disconnect` mean anything; the other steps
+are consumed with a `tracing` warning and ignored, so queue steps after the connection is
+open. A request without a deadline gets a fresh `timeouts.request` for each read attempt,
+which is what lets a script of `Timeout` steps exercise the retry loop; an explicit
+deadline is shared by all attempts. With the default `RealtimeClock` a `Delay` is a no-op
+and a `Timeout` returns at once.
+
+```rust
+use std::sync::Arc;
+use std::task::{Context, Poll, Waker};
+use stonecrab_core::{
+    Connection, DriverRegistry, ErrorKind, OpFuture, PlcValue, ProtocolStatus, ReadRequest, Tag,
+    TagId,
+};
+use stonecrab_driver_sim::{FailureStep, SimAddress, SimDevice, SimDriver, SimTag};
+
+fn now_or_never<T>(mut future: OpFuture<'_, T>) -> stonecrab_core::Result<T> {
+    match future.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
+        Poll::Ready(outcome) => outcome,
+        Poll::Pending => unreachable!("the real-time clock never makes an operation wait"),
+    }
+}
+
+let device = SimDevice::new();
+device.set("boiler", SimTag::new(PlcValue::F32(71.5)))?;
+let mut registry = DriverRegistry::new();
+let driver = Arc::new(SimDriver::new().with_device("bench", device)?);
+registry.register(Arc::<SimDriver>::clone(&driver))?;
+let connection = now_or_never(registry.connect("sim://bench"))?;
+
+let bench = driver.device("bench").ok_or("the device is registered")?;
+bench.push_failure(FailureStep::DeviceException(ProtocolStatus::new("sim", 9)))?;
+let tag = Tag::new(TagId::new("boiler")?, Arc::new(SimAddress::parse("STATE/boiler:f32")?));
+let request = ReadRequest::builder(connection.limits()).tag(tag).build()?;
+let response = now_or_never(connection.read(request))?;
+let failed = response.items()[0].outcome().as_ref().err().map(|e| e.kind());
+assert_eq!(failed, Some(ErrorKind::DeviceException));
+assert_eq!(bench.pending_failures(), 0);
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
 
 ## Address grammar
 `SimAddress::parse` reads `STATE|RANDOM|SINK/<name>:<type>`, case-sensitive. The area

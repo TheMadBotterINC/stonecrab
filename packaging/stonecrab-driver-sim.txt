@@ -12,3 +12,4 @@ src/device/random.rs
 src/device.rs
 src/driver.rs
 src/lib.rs
+src/script.rs

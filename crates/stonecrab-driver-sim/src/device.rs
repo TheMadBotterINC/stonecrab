@@ -10,6 +10,8 @@ use std::time::Duration;
 
 use stonecrab_core::{ErrorKind, Operation, PlcError, PlcValue, PlcValueType, Result, TagId};
 
+use crate::{FailureScript, FailureStep};
+
 mod random;
 
 use self::random::XorShift;
@@ -223,6 +225,7 @@ struct DeviceState {
     tags: BTreeMap<String, SimTag>,
     rng: XorShift,
     sink_writes: u64,
+    script: FailureScript,
 }
 
 /// A simulated device: named [`SimTag`]s, a seeded `RANDOM` source and the settings the
@@ -282,6 +285,7 @@ impl SimDevice {
                 tags: BTreeMap::new(),
                 rng: XorShift::new(DEFAULT_SEED),
                 sink_writes: 0,
+                script: FailureScript::new(),
             }),
             latency: Duration::ZERO,
             max_items: None,
@@ -607,6 +611,90 @@ impl SimDevice {
     /// Upstream draws from `SecureRandom`; the seeded xorshift source is a divergence.
     pub fn random(&self, value_type: PlcValueType) -> Result<PlcValue> {
         self.lock().rng.value(value_type)
+    }
+
+    /// Queue a scripted fault for a later connect, read or write.
+    ///
+    /// The script belongs to the device, so every connection to it draws from the same
+    /// queue, in the order operations reach the device. Each operation takes at most one
+    /// step; see [`FailureStep`] for what each one does. Push steps after the connection
+    /// is open: a `connect` also takes a step (only `Delay`, `Timeout` and `Disconnect` mean
+    /// anything to it; the others are consumed and ignored).
+    ///
+    /// # Errors
+    /// Returns [`ErrorKind::ResourceLimit`] when [`FailureScript::MAX_STEPS`] steps are
+    /// already queued.
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab_driver_sim::{FailureStep, SimDevice};
+    ///
+    /// let device = SimDevice::new();
+    /// device.push_failure(FailureStep::Timeout)?;
+    /// assert_eq!(device.pending_failures(), 1);
+    /// # Ok::<(), stonecrab_core::PlcError>(())
+    /// ```
+    ///
+    /// # Compatibility: docs/parity/sim.md#SIM-FAILURE-SCRIPT
+    /// Stonecrab-owned; the upstream simulated driver has no failure injection.
+    pub fn push_failure(&self, step: FailureStep) -> Result<()> {
+        self.lock().script.push(step)
+    }
+
+    /// Queue several scripted faults in order, or none of them.
+    ///
+    /// # Errors
+    /// Returns [`ErrorKind::ResourceLimit`] when the steps would not fit under
+    /// [`FailureScript::MAX_STEPS`]; nothing is queued.
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab_driver_sim::{FailureStep, SimDevice};
+    ///
+    /// let device = SimDevice::new();
+    /// device.push_failures([FailureStep::Timeout, FailureStep::Timeout])?;
+    /// assert_eq!(device.pending_failures(), 2);
+    /// # Ok::<(), stonecrab_core::PlcError>(())
+    /// ```
+    ///
+    /// # Compatibility: docs/parity/sim.md#SIM-FAILURE-SCRIPT
+    /// Stonecrab-owned; the upstream simulated driver has no failure injection.
+    pub fn push_failures(&self, steps: impl IntoIterator<Item = FailureStep>) -> Result<()> {
+        self.lock().script.push_all(steps)
+    }
+
+    /// How many scripted faults are still queued.
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab_driver_sim::SimDevice;
+    ///
+    /// assert_eq!(SimDevice::new().pending_failures(), 0);
+    /// ```
+    #[must_use]
+    pub fn pending_failures(&self) -> usize {
+        self.lock().script.len()
+    }
+
+    /// Drop every queued scripted fault.
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab_driver_sim::{FailureStep, SimDevice};
+    ///
+    /// let device = SimDevice::new();
+    /// device.push_failure(FailureStep::Malformed)?;
+    /// device.clear_failures();
+    /// assert_eq!(device.pending_failures(), 0);
+    /// # Ok::<(), stonecrab_core::PlcError>(())
+    /// ```
+    pub fn clear_failures(&self) {
+        self.lock().script.clear();
+    }
+
+    /// The oldest queued fault, removed; what a connection takes for one operation.
+    pub(crate) fn take_failure(&self) -> Option<FailureStep> {
+        self.lock().script.pop()
     }
 
     fn lock(&self) -> MutexGuard<'_, DeviceState> {

@@ -14,16 +14,19 @@ use stonecrab_core::{
     ConnectionState, Deadline, Diagnostics, ErrorKind, FailureCategory, ItemError, OpFuture,
     Operation, PlcError, PlcValue, ProtocolStatus, ReadItem, ReadRequest, ReadResponse,
     ReadResponseBuilder, ResourceLimits, Result, RetryPolicy, StateCell, StateWatch,
-    SubscriptionMode, Tag, Timeouts, WriteItem, WriteOutcome, WriteRequest, WriteResponse,
-    WriteResponseBuilder, WriteResult,
+    SubscriptionMode, Tag, TagId, Timeouts, UnknownReason, WriteItem, WriteOutcome, WriteRequest,
+    WriteResponse, WriteResponseBuilder, WriteResult,
 };
 use tracing::Instrument;
 
-use crate::{SimAddress, SimArea, SimDevice};
+use crate::{FailureStep, SimAddress, SimArea, SimDevice};
 
 /// The status code of a simulated device that has no tag of the requested name (the
 /// Modbus "illegal data address" code, which is the closest thing to it).
 const UNSET_TAG_CODE: u32 = 2;
+
+/// The status code a `PartialFailure` step gives the items it names.
+const PARTIAL_FAILURE_CODE: u32 = 4;
 
 /// What a `SimConnection` is attached to, resolved by the driver.
 #[expect(
@@ -47,8 +50,10 @@ pub(crate) struct Target {
 /// of the device:
 ///
 /// - **A lifecycle** observed through [`Connection::watch_state`]:
-///   `Disconnected` -> `Connecting` -> `Connected` -> `Closing` -> `Closed`. `Failed` is
-///   reserved for the scripted failures of a later slice.
+///   `Disconnected` -> `Connecting` -> `Connected` -> `Closing` -> `Closed`. A scripted
+///   [`FailureStep::Disconnect`] moves a connected connection to
+///   `Failed(ErrorKind::Disconnected)`, from which every operation fails with
+///   `Disconnected` and `close` still reaches `Closed`.
 /// - **One in-flight operation** (`Capabilities.concurrency` is 1). A second read or write
 ///   that starts while another is in flight fails at once with
 ///   [`ErrorKind::Backpressure`], before any device access. There is no wait queue: the
@@ -60,6 +65,11 @@ pub(crate) struct Target {
 ///   with the testkit's `FakeClock` the test decides when time passes.
 /// - **The default-deadline rule.** A request without a deadline gets
 ///   `Deadline::after(clock.now(), timeouts.request)`.
+/// - **A failure script.** The device's [`FailureScript`](crate::FailureScript) is
+///   consumed one [`FailureStep`] per connect, read or write, at the point where the
+///   operation would touch the device (after every pre-I/O check, so a rejected request
+///   leaves its step queued). `close` ignores the script. The steps are the simulator's
+///   fault injection; their semantics are documented on [`FailureStep`].
 /// - **Diagnostics on every error**: the operation, the connection state at the failure,
 ///   the elapsed time on the clock, the retries made and a category (`Validation` for a
 ///   rejection before the exchange begins, `Protocol` for what the device refused,
@@ -83,8 +93,10 @@ pub(crate) struct Target {
 ///
 /// A read is retried as a whole, never per item, under the configuration's
 /// [`RetryPolicy`] and only for kinds in its retry set. The default policy makes one
-/// attempt. All attempts share one deadline. Until the failure script of a later slice
-/// exists, the only failures a retry can see are deadline-related.
+/// attempt. An explicit request deadline is shared by all attempts; a request without one
+/// gets `timeouts.request` afresh for each attempt (the first attempt's deadline is the
+/// default-deadline rule's). Each attempt takes its own step of the failure script, so a
+/// script of `Timeout` steps drives the retry loop.
 ///
 /// # Writes
 /// A connection whose access policy is read-only refuses every write before anything
@@ -94,8 +106,8 @@ pub(crate) struct Target {
 /// value whose type differs from the stored one, and any `RANDOM` write, is `Rejected` with
 /// an item error. A write is never retried. The device is changed only after the latency
 /// has elapsed, so a timeout, a cancellation or a close during the wait means nothing was
-/// applied; the `Unknown` outcomes that follow a transmitted write are a scripted failure
-/// of a later slice.
+/// applied. The `Unknown` outcome that follows a transmitted write comes from the scripted
+/// [`FailureStep::UnknownAfterTransmit`].
 ///
 /// # Compatibility: docs/parity/sim.md#SIM-CONNECTION
 /// Stonecrab-owned. The upstream simulated driver has no lifecycle, deadline, cancellation
@@ -189,7 +201,10 @@ impl SimConnection {
     /// Open the connection: `Disconnected` -> `Connecting` -> (latency) -> `Connected`.
     ///
     /// The wait is bounded by `timeouts.connect`; a latency that reaches it is a
-    /// `Timeout` and the connection stays in `Connecting`, because `Failed` is reserved.
+    /// `Timeout` and the connection stays in `Connecting`. The connect takes one step of
+    /// the device's failure script: `Delay` waits first, `Timeout` waits for the connect
+    /// deadline and fails, `Disconnect` leaves the connection in `Failed(Disconnected)`,
+    /// and any other step is consumed with a warning and has no effect.
     pub(crate) fn establish(&self) -> OpFuture<'_, ()> {
         let request_id = self.next_request_id();
         let span = tracing::info_span!(
@@ -206,6 +221,24 @@ impl SimConnection {
         let op = self.op(Operation::Connect);
         let deadline = op.after(op.started, self.timeouts.connect)?;
         self.state.set(ConnectionState::Connecting);
+        match self.next_step() {
+            None => {}
+            Some(FailureStep::Delay(pause)) => self.wait(&op, deadline, None, pause).await?,
+            Some(FailureStep::Timeout) => return Err(self.lose(&op, deadline, None).await),
+            Some(FailureStep::Disconnect) => return Err(self.fail_link(&op)),
+            Some(
+                ignored @ (FailureStep::DeviceException(_)
+                | FailureStep::Malformed
+                | FailureStep::PartialFailure(_)
+                | FailureStep::Backpressure
+                | FailureStep::UnknownAfterTransmit),
+            ) => {
+                tracing::warn!(
+                    step = step_name(&ignored),
+                    "a failure step that means nothing to a connect was consumed and ignored"
+                );
+            }
+        }
         self.delay(&op, deadline, None).await?;
         if let Some(seed) = self.seed {
             self.device.reseed(seed);
@@ -271,7 +304,18 @@ impl SimConnection {
     }
 
     /// Wait out the device latency on the connection's clock, racing the request's token,
-    /// its deadline and the connection being closed.
+    /// its deadline and the connection being closed; see [`wait`](Self::wait).
+    async fn delay(
+        &self,
+        op: &Op<'_>,
+        deadline: Deadline,
+        token: Option<&CancellationToken>,
+    ) -> Result<()> {
+        self.wait(op, deadline, token, self.latency).await
+    }
+
+    /// Wait `span` on the connection's clock, racing the request's token, its deadline and
+    /// the connection being closed.
     ///
     /// The wait ends at the earlier of the reply time and the deadline. A reply time at or
     /// after the deadline is a `Timeout` once the deadline is reached (equality means the
@@ -280,50 +324,116 @@ impl SimConnection {
     /// early with `Cancelled` or `Disconnected`. A token is polled before the shutdown and
     /// both before the timer, so a wake-up that coincides with the timer reports the
     /// cancellation.
-    async fn delay(
+    async fn wait(
         &self,
         op: &Op<'_>,
         deadline: Deadline,
         token: Option<&CancellationToken>,
+        span: Duration,
     ) -> Result<()> {
-        let reply = op.after(self.clock.now(), self.latency)?;
+        let reply = op.after(self.clock.now(), span)?;
         let too_slow = deadline.is_elapsed(reply.instant());
         let target = if too_slow { deadline } else { reply };
-        let mut sleep = self.clock.sleep_until(target.instant());
-        let mut cancelled = token.map(CancellationToken::cancelled);
-        let mut closing = self.shutdown.cancelled();
-        let woke = poll_fn(|cx| {
-            if let Some(cancelled) = cancelled.as_mut()
-                && cancelled.as_mut().poll(cx).is_ready()
-            {
-                return Poll::Ready(Wake::Cancelled);
-            }
-            if closing.as_mut().poll(cx).is_ready() {
-                return Poll::Ready(Wake::Closed);
-            }
-            // `Clock::sleep_until` never fails for a correct clock (its contract), and a
-            // broken one that did could only end the wait early, so the result is not read.
-            sleep.as_mut().poll(cx).map(|_slept| Wake::Elapsed)
-        })
-        .await;
-        match woke {
-            Wake::Elapsed if too_slow => Err(op.error(
+        match self.race(target.instant(), token).await {
+            None if too_slow => Err(op.error(
                 ErrorKind::Timeout,
                 "the request deadline passed before the device replied",
                 FailureCategory::Transport,
             )),
-            Wake::Elapsed => Ok(()),
-            Wake::Cancelled => Err(op.error(
-                ErrorKind::Cancelled,
-                "the request was cancelled while waiting for the device",
-                FailureCategory::Internal,
-            )),
-            Wake::Closed => Err(op.error(
-                ErrorKind::Disconnected,
-                "the connection was closed while the request was waiting",
-                FailureCategory::Transport,
-            )),
+            None => Ok(()),
+            Some(interrupt) => Err(op.interrupted(interrupt)),
         }
+    }
+
+    /// Sleep until `target` on the connection's clock unless the token or the shutdown
+    /// fires first; `None` means the sleep elapsed.
+    async fn race(&self, target: Instant, token: Option<&CancellationToken>) -> Option<Interrupt> {
+        let mut sleep = self.clock.sleep_until(target);
+        let mut cancelled = token.map(CancellationToken::cancelled);
+        let mut closing = self.shutdown.cancelled();
+        poll_fn(|cx| {
+            if let Some(cancelled) = cancelled.as_mut()
+                && cancelled.as_mut().poll(cx).is_ready()
+            {
+                return Poll::Ready(Some(Interrupt::Cancelled));
+            }
+            if closing.as_mut().poll(cx).is_ready() {
+                return Poll::Ready(Some(Interrupt::Closed));
+            }
+            // `Clock::sleep_until` never fails for a correct clock (its contract), and a
+            // broken one that did could only end the wait early, so the result is not read.
+            sleep.as_mut().poll(cx).map(|_slept| None)
+        })
+        .await
+    }
+
+    /// Take the next step of the device's failure script for this operation, if any.
+    fn next_step(&self) -> Option<FailureStep> {
+        let step = self.device.take_failure();
+        if let Some(step) = &step {
+            tracing::debug!(step = step_name(step), "consumed a failure step");
+        }
+        step
+    }
+
+    /// The scripted loss of a reply: wait for the deadline (or an interruption) and fail.
+    async fn lose(
+        &self,
+        op: &Op<'_>,
+        deadline: Deadline,
+        token: Option<&CancellationToken>,
+    ) -> PlcError {
+        match self.race(deadline.instant(), token).await {
+            None => op.error(
+                ErrorKind::Timeout,
+                "the device's reply was lost and the request deadline passed",
+                FailureCategory::Transport,
+            ),
+            Some(interrupt) => op.interrupted(interrupt),
+        }
+    }
+
+    /// The scripted loss of the link: the connection is `Failed(Disconnected)` for good.
+    fn fail_link(&self, op: &Op<'_>) -> PlcError {
+        self.state
+            .set(ConnectionState::Failed(ErrorKind::Disconnected));
+        op.error(
+            ErrorKind::Disconnected,
+            "the link to the device was lost",
+            FailureCategory::Transport,
+        )
+    }
+
+    /// Apply the scripted step (if any) that acts before the device replies, then wait out
+    /// the latency, and say what the reply is to be.
+    async fn arrive(
+        &self,
+        op: &Op<'_>,
+        step: Option<FailureStep>,
+        deadline: Deadline,
+        token: Option<&CancellationToken>,
+    ) -> Result<Reply> {
+        let reply = match step {
+            None => Reply::Serve,
+            Some(FailureStep::Delay(pause)) => {
+                self.wait(op, deadline, token, pause).await?;
+                Reply::Serve
+            }
+            Some(FailureStep::Timeout) => Reply::Lose,
+            Some(FailureStep::Disconnect) => return Err(self.fail_link(op)),
+            Some(FailureStep::DeviceException(status)) => Reply::Refuse(status),
+            Some(FailureStep::Malformed) => Reply::Garble,
+            Some(FailureStep::PartialFailure(ids)) => Reply::Partial(ids),
+            Some(FailureStep::Backpressure) => {
+                return Err(op.reject(
+                    ErrorKind::Backpressure,
+                    "the simulator was scripted to refuse the request",
+                ));
+            }
+            Some(FailureStep::UnknownAfterTransmit) => Reply::Unknown,
+        };
+        self.delay(op, deadline, token).await?;
+        Ok(reply)
     }
 
     /// Resolve every tag to a `SimAddress`, rejecting what the simulator cannot serve.
@@ -365,9 +475,16 @@ impl SimConnection {
     async fn read_inner(&self, request: ReadRequest) -> Result<ReadResponse> {
         let mut op = self.op(Operation::Read);
         let addresses = self.resolve(&op, request.items().iter())?;
-        let deadline = self.deadline_for(&op, request.deadline())?;
+        let first = self.deadline_for(&op, request.deadline())?;
         let _slot = self.acquire(&op)?;
         let items = loop {
+            // An explicit deadline is shared by every attempt; a request without one gets
+            // `timeouts.request` afresh for each attempt, so a retry has time to run.
+            let deadline = if request.deadline().is_none() && op.retries > 0 {
+                op.after(self.clock.now(), self.timeouts.request)?
+            } else {
+                first
+            };
             match self.read_attempt(&op, &request, &addresses, deadline).await {
                 Ok(items) => break items,
                 Err(error)
@@ -395,7 +512,7 @@ impl SimConnection {
         Ok(response)
     }
 
-    /// One attempt: gate, wait for the device, then sample every tag.
+    /// One attempt: gate, take a scripted step, wait for the device, then answer.
     async fn read_attempt(
         &self,
         op: &Op<'_>,
@@ -404,13 +521,81 @@ impl SimConnection {
         deadline: Deadline,
     ) -> Result<Vec<ReadItem>> {
         self.gate(op, request.cancel(), deadline)?;
-        self.delay(op, deadline, request.cancel()).await?;
-        Ok(request
+        let step = self.next_step();
+        let reply = self.arrive(op, step, deadline, request.cancel()).await?;
+        match reply {
+            Reply::Serve => Ok(self.sample_all(op, request, addresses, &[])),
+            Reply::Partial(failing) => Ok(self.sample_all(op, request, addresses, &failing)),
+            Reply::Refuse(status) => Ok(self.fail_all(
+                op,
+                request,
+                ErrorKind::DeviceException,
+                "the device refused the request",
+                Some(&status),
+            )),
+            Reply::Garble => Ok(self.fail_all(
+                op,
+                request,
+                ErrorKind::MalformedData,
+                "the device's reply could not be decoded",
+                None,
+            )),
+            Reply::Lose | Reply::Unknown => {
+                // The device answered; the reply never arrived.
+                drop(self.sample_all(op, request, addresses, &[]));
+                Err(self.lose(op, deadline, request.cancel()).await)
+            }
+        }
+    }
+
+    /// Serve every tag, except those named in `failing`, which fail as scripted.
+    fn sample_all(
+        &self,
+        op: &Op<'_>,
+        request: &ReadRequest,
+        addresses: &[&SimAddress],
+        failing: &[TagId],
+    ) -> Vec<ReadItem> {
+        let status = partial_failure_status();
+        request
             .items()
             .iter()
             .zip(addresses)
-            .map(|(tag, address)| self.sample(op, tag, address))
-            .collect())
+            .map(|(tag, address)| {
+                if failing.contains(tag.id()) {
+                    let refusal = op.scripted_item(
+                        ErrorKind::DeviceException,
+                        "the device failed this item",
+                        Some(&status),
+                    );
+                    ReadItem::new(tag.id().clone(), Err(refusal), self.clock.now())
+                } else {
+                    self.sample(op, tag, address)
+                }
+            })
+            .collect()
+    }
+
+    /// Fail every item without touching the device.
+    fn fail_all(
+        &self,
+        op: &Op<'_>,
+        request: &ReadRequest,
+        kind: ErrorKind,
+        message: &'static str,
+        status: Option<&ProtocolStatus>,
+    ) -> Vec<ReadItem> {
+        request
+            .items()
+            .iter()
+            .map(|tag| {
+                ReadItem::new(
+                    tag.id().clone(),
+                    Err(op.scripted_item(kind, message, status)),
+                    self.clock.now(),
+                )
+            })
+            .collect()
     }
 
     fn sample(&self, op: &Op<'_>, tag: &Tag, address: &SimAddress) -> ReadItem {
@@ -445,13 +630,50 @@ impl SimConnection {
         let deadline = self.deadline_for(&op, request.deadline())?;
         let _slot = self.acquire(&op)?;
         self.gate(&op, request.cancel(), deadline)?;
-        self.delay(&op, deadline, request.cancel()).await?;
-        let results: Vec<WriteResult> = request
-            .items()
-            .iter()
-            .zip(&addresses)
-            .map(|(item, address)| self.apply(&op, item, address))
-            .collect();
+        let step = self.next_step();
+        let reply = self.arrive(&op, step, deadline, request.cancel()).await?;
+        let results = match reply {
+            Reply::Serve => self.apply_all(&op, &request, &addresses, &[]),
+            Reply::Partial(failing) => self.apply_all(&op, &request, &addresses, &failing),
+            Reply::Refuse(status) => request
+                .items()
+                .iter()
+                .map(|item| {
+                    let refusal = op.scripted_item(
+                        ErrorKind::DeviceException,
+                        "the device refused the request",
+                        Some(&status),
+                    );
+                    WriteResult::new(item.tag().id().clone(), WriteOutcome::Rejected(refusal))
+                })
+                .collect(),
+            Reply::Garble => {
+                return Err(op.error(
+                    ErrorKind::MalformedData,
+                    "the device's confirmation could not be decoded",
+                    FailureCategory::Protocol,
+                ));
+            }
+            Reply::Lose => {
+                // The device applied the write; the confirmation never arrived.
+                drop(self.apply_all(&op, &request, &addresses, &[]));
+                return Err(self.lose(&op, deadline, request.cancel()).await);
+            }
+            Reply::Unknown => {
+                // Applied exactly once; whether it was is all the caller can know.
+                drop(self.apply_all(&op, &request, &addresses, &[]));
+                request
+                    .items()
+                    .iter()
+                    .map(|item| {
+                        WriteResult::new(
+                            item.tag().id().clone(),
+                            WriteOutcome::Unknown(UnknownReason::TimeoutAfterTransmit),
+                        )
+                    })
+                    .collect()
+            }
+        };
         let finished = self.clock.now();
         let rejected = results
             .iter()
@@ -467,6 +689,34 @@ impl SimConnection {
         let response = op.check(built, FailureCategory::Internal)?;
         tracing::debug!(items = response.results().len(), rejected, "write complete");
         Ok(response)
+    }
+
+    /// Apply every item, except those named in `failing`, which are rejected as scripted.
+    fn apply_all(
+        &self,
+        op: &Op<'_>,
+        request: &WriteRequest,
+        addresses: &[&SimAddress],
+        failing: &[TagId],
+    ) -> Vec<WriteResult> {
+        request
+            .items()
+            .iter()
+            .zip(addresses)
+            .map(|(item, address)| {
+                if failing.contains(item.tag().id()) {
+                    let status = partial_failure_status();
+                    let refusal = op.scripted_item(
+                        ErrorKind::DeviceException,
+                        "the device failed this item",
+                        Some(&status),
+                    );
+                    WriteResult::new(item.tag().id().clone(), WriteOutcome::Rejected(refusal))
+                } else {
+                    self.apply(op, item, address)
+                }
+            })
+            .collect()
     }
 
     fn apply(&self, op: &Op<'_>, item: &WriteItem, address: &SimAddress) -> WriteResult {
@@ -521,6 +771,25 @@ fn expect_type(value: PlcValue, address: &SimAddress) -> Result<PlcValue> {
     }
 }
 
+/// The status of an item a `PartialFailure` step names.
+const fn partial_failure_status() -> ProtocolStatus {
+    ProtocolStatus::new("sim", PARTIAL_FAILURE_CODE)
+}
+
+/// The name of a step, for tracing.
+const fn step_name(step: &FailureStep) -> &'static str {
+    match step {
+        FailureStep::Delay(_) => "delay",
+        FailureStep::Timeout => "timeout",
+        FailureStep::Disconnect => "disconnect",
+        FailureStep::DeviceException(_) => "device-exception",
+        FailureStep::Malformed => "malformed",
+        FailureStep::PartialFailure(_) => "partial-failure",
+        FailureStep::Backpressure => "backpressure",
+        FailureStep::UnknownAfterTransmit => "unknown-after-transmit",
+    }
+}
+
 impl Connection for SimConnection {
     fn state(&self) -> ConnectionState {
         self.state.current()
@@ -545,7 +814,9 @@ impl Connection for SimConnection {
     /// latency wait ends, so dropping the future earlier leaves the device untouched and
     /// releases the single in-flight slot. Cancelling the request's token during the wait
     /// resolves the call with [`ErrorKind::Cancelled`]. The deadline source is the request's
-    /// deadline, or `timeouts.request` of the connection.
+    /// deadline, or `timeouts.request` of the connection. A scripted
+    /// [`FailureStep::Timeout`] serves the read first and then waits for the deadline, so
+    /// dropping the future during that last wait does not undo the device read.
     ///
     /// # Wire effects
     /// None. There is no wire; a read never changes the device except that a ramp steps and
@@ -567,7 +838,9 @@ impl Connection for SimConnection {
     /// # Cancel safety
     /// Cancel-safe. The device is changed only after the latency wait ends, in one synchronous
     /// step, so dropping the future or cancelling the token earlier leaves the device exactly
-    /// as it was. The deadline source is the request's deadline, or `timeouts.request`.
+    /// as it was. The deadline source is the request's deadline, or `timeouts.request`. A
+    /// scripted [`FailureStep::Timeout`] applies the write first and then waits for the
+    /// deadline, so dropping the future during that last wait does not undo the write.
     ///
     /// # Wire effects
     /// None. There is no wire; a confirmed `STATE` write replaces the stored value and a
@@ -609,11 +882,29 @@ impl Connection for SimConnection {
     }
 }
 
-/// How a latency wait ended.
-enum Wake {
-    Elapsed,
+/// What cut a wait short.
+#[derive(Clone, Copy)]
+enum Interrupt {
+    /// The request's token was cancelled.
     Cancelled,
+    /// `close` started.
     Closed,
+}
+
+/// What the device does with a request that reached it, decided by the script.
+enum Reply {
+    /// Answer normally.
+    Serve,
+    /// Answer normally, but fail the named items.
+    Partial(Vec<TagId>),
+    /// Refuse every item with this status.
+    Refuse(ProtocolStatus),
+    /// Answer with data that cannot be decoded.
+    Garble,
+    /// Act on the request, then lose the reply.
+    Lose,
+    /// Act on the request and report that its outcome is unknown.
+    Unknown,
 }
 
 /// Ownership of the single in-flight slot; dropping it, even when the future is dropped
@@ -656,6 +947,22 @@ impl Op<'_> {
         PlcError::new(kind, message).with_diagnostics(self.diagnostics(category))
     }
 
+    /// The error of a wait that was cut short.
+    fn interrupted(&self, interrupt: Interrupt) -> PlcError {
+        match interrupt {
+            Interrupt::Cancelled => self.error(
+                ErrorKind::Cancelled,
+                "the request was cancelled while waiting for the device",
+                FailureCategory::Internal,
+            ),
+            Interrupt::Closed => self.error(
+                ErrorKind::Disconnected,
+                "the connection was closed while the request was waiting",
+                FailureCategory::Transport,
+            ),
+        }
+    }
+
     /// A rejection before the simulated exchange begins.
     fn reject(&self, kind: ErrorKind, message: &'static str) -> PlcError {
         self.error(kind, message, FailureCategory::Validation)
@@ -680,6 +987,21 @@ impl Op<'_> {
             .with_source(error)
     }
 
+    /// A per-item failure a script step produced: `Protocol`, with the status if any.
+    fn scripted_item(
+        &self,
+        kind: ErrorKind,
+        message: &'static str,
+        status: Option<&ProtocolStatus>,
+    ) -> ItemError {
+        let item =
+            ItemError::new(self.wrap(PlcError::new(kind, message), FailureCategory::Protocol));
+        match status {
+            Some(status) => item.with_status(status.clone()),
+            None => item,
+        }
+    }
+
     /// A per-item failure the device reported (`Protocol`). An unset name carries the
     /// device status `("sim", 2)`.
     fn item_error(&self, error: PlcError) -> ItemError {
@@ -698,17 +1020,25 @@ mod tests {
     use std::task::Poll;
 
     use stonecrab_core::Endpoint;
-    use stonecrab_testkit::{FakeClock, poll_once};
+    use stonecrab_testkit::{FakeClock, block_on_with, poll_once};
 
     use super::*;
 
     fn connection(clock: &Arc<FakeClock>, latency: Duration) -> SimConnection {
+        connection_on(clock, Arc::new(SimDevice::new()), latency)
+    }
+
+    fn connection_on(
+        clock: &Arc<FakeClock>,
+        device: Arc<SimDevice>,
+        latency: Duration,
+    ) -> SimConnection {
         let config = ConnectionConfig::builder("sim", Endpoint::Custom("bench".to_owned()))
             .build()
             .expect("config");
         let target = Target {
             name: "bench".to_owned(),
-            device: Arc::new(SimDevice::new()),
+            device,
             latency,
             seed: None,
         };
@@ -758,6 +1088,26 @@ mod tests {
             ],
             "the documented lifecycle, in order"
         );
+    }
+
+    // covers: ALPHA_PLAN S12 / a scripted Disconnect on connect leaves the connection Failed
+    #[test]
+    fn a_scripted_disconnect_on_connect_leaves_the_connection_failed() {
+        let clock = Arc::new(FakeClock::default());
+        let device = Arc::new(SimDevice::new());
+        device
+            .push_failure(FailureStep::Disconnect)
+            .expect("room in script");
+        let connection = connection_on(&clock, Arc::clone(&device), Duration::ZERO);
+        let error = block_on_with(&clock, connection.establish())
+            .expect_err("a scripted disconnect fails the connect");
+        assert_eq!(error.kind(), ErrorKind::Disconnected, "kind");
+        assert_eq!(
+            connection.state(),
+            ConnectionState::Failed(ErrorKind::Disconnected),
+            "the dropped connection is Failed"
+        );
+        assert_eq!(device.pending_failures(), 0, "the step was consumed");
     }
 
     #[test]

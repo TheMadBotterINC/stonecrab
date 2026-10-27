@@ -47,6 +47,12 @@
   support table now marks read and write `simulator-tested`, and a test keeps it equal to
   `SimDriver::capabilities()`.
 - Add `SimDevice::write`, `record_sink_write`, `sink_writes` and `reseed`.
+- Add the failure script: `FailureStep` (`Delay`, `Timeout`, `Disconnect`,
+  `DeviceException`, `Malformed`, `PartialFailure`, `Backpressure`, `UnknownAfterTransmit`),
+  `FailureScript` (a bounded queue) and `SimDevice::push_failure`, `push_failures`,
+  `pending_failures` and `clear_failures`. A connect, read or write takes at most one step;
+  a scripted disconnect leaves the connection `Failed(Disconnected)`; a read without a
+  deadline now gets `timeouts.request` afresh for each retry attempt.
 ### stonecrab-transport 0.1.0
 - Add the crate: the object-safe `Transport` trait (`send`, `recv`, `shutdown`, `peer`,
   `limits`; every call takes a `Deadline`) and `TransportFactory` (both return

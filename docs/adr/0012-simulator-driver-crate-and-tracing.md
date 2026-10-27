@@ -7,7 +7,8 @@ ADR for a new crate), adopts `tracing` workspace-wide (section 15 and section 14
 records decisions D9 and D23 of docs/ALPHA_PLAN.md. It builds on ADR-0005 (coverage
 tiers), ADR-0007 (the `Clock` trait and where its implementations live), ADR-0011 (the
 `Driver` and `Connection` traits) and ADR-0013 (how a dependency is adopted). Decisions 9
-to 14 below are the S11b-2 addendum; decisions 1 to 8 are unchanged.
+to 14 below are the S11b-2 addendum and decision 15 is the S12 addendum (the failure
+script); decisions 1 to 8 are unchanged.
 
 ## Context
 The common driver suite, the sensor profiles and the facade's `sim` feature need a driver
@@ -159,8 +160,8 @@ them, and the first to add `tracing`, whose `std` feature reaches a crate that
 10. **Lifecycle and the single slot.** `SimConnection` holds the clock, the shared device,
     the configuration's timeouts, retry policy, access policy and limits, and a
     `StateCell`. The state runs `Disconnected`, `Connecting`, `Connected`, `Closing`,
-    `Closed`; `Failed` stays reserved for the failure script of S12. A single `AtomicBool`
-    enforces `Capabilities.concurrency` 1: a second read or write that starts while one is
+    `Closed`; `Failed` is used by the failure script (decision 15). A single
+    `AtomicBool` enforces `Capabilities.concurrency` 1: a second read or write that starts while one is
     in flight fails at once with `Backpressure`, before any device access. The queue length
     is zero, there is no wait queue, and a rejected operation is never retried. A guard
     releases the flag when the operation's future ends or is dropped.
@@ -211,6 +212,67 @@ them, and the first to add `tracing`, whose `std` feature reaches a crate that
     own crate, where a wildcard arm is unreachable; the connection names every area.
     Decision 7's foreign-enum pattern applies to enums of other crates such as
     `PlcValueType` and `WriteOutcome`.
+
+15. **The failure script (S12).** `SimDevice` owns a `FailureScript`, a first-in first-out
+    queue of at most 1024 `#[non_exhaustive]` `FailureStep`s (`Delay`, `Timeout`,
+    `Disconnect`, `DeviceException`, `Malformed`, `PartialFailure`, `Backpressure`,
+    `UnknownAfterTransmit`), pushed with `push_failure`/`push_failures` and inspected with
+    `pending_failures`. The script is the device's, so every connection to it draws from
+    one queue in arrival order. The rules:
+    - **One step per operation.** A connect, read or write takes at most one step, at the
+      point where it would touch the device, which is after every pre-I/O check (access
+      policy, address, item limit, the in-flight slot, connection state, token, deadline).
+      A rejected request therefore leaves its step queued. `close` ignores the script.
+      Each attempt of a retried read takes its own step.
+    - **`Timeout` is timeout after transmit.** The device is touched (a read is served and
+      counted, a write applied), the reply is lost, and the connection waits on its clock
+      for the deadline, raced against the token and the shutdown, and fails the whole call
+      with `Timeout` (`Transport`). This is the case the contract suite counts: a script
+      of `Timeout` steps against `max_attempts` N yields N device reads. To make that true,
+      a read without an explicit deadline now gets `timeouts.request` afresh for each
+      attempt (the default-deadline rule of ADR-0007 is unchanged for the first attempt);
+      an explicit deadline stays shared by all attempts, so after it has passed a retry
+      fails at the gate without touching the device or taking a step.
+    - **`Disconnect`** leaves the device untouched, sets `Failed(Disconnected)` (before
+      the error is built, so its diagnostics carry that state) and fails with
+      `Disconnected`. Every later operation fails with `Disconnected` at the gate and
+      takes no step; `close` still ends in `Closed`. This is the only use of `Failed`.
+    - **`DeviceException(status)`, `Malformed`, `PartialFailure(ids)`.** The first two
+      leave the device untouched and fail every item of a read (item errors, `Protocol`).
+      `DeviceException` rejects every write item (`Rejected` with the status). `Malformed`
+      carries no status and fails a write as a whole with `MalformedData`, because a
+      corrupted confirmation cannot be attributed to items. This is a deliberate
+      deviation from the plan text "Malformed (per-item MalformedData)", which holds for
+      reads only. `PartialFailure` fails the named items with
+      `ProtocolStatus::new("sim", 4)` (not served, not applied) and handles the others
+      normally; ids not in the request are ignored.
+    - **`Backpressure`** fails with `Backpressure` (`Validation`) without touching the
+      device; the connection stays open and the slot is released.
+    - **`UnknownAfterTransmit`** applies a write exactly once and reports every item
+      `Unknown(TimeoutAfterTransmit)` without waiting for a deadline and without a retry
+      (writes are never retried); on a read it behaves like `Timeout`.
+    - **`Delay(d)`** waits `d` on the clock, raced like the latency wait, then proceeds
+      normally, before the latency wait. A delay that reaches the deadline is `Timeout`
+      with no device access.
+    - **Connect.** The connect takes one step: `Delay` delays it (there is no request
+      token, so the connect deadline is the only bound), `Timeout` fails it at the connect
+      deadline without touching the device, `Disconnect` fails it and leaves the dropped
+      connection in `Failed(Disconnected)`. The other steps mean nothing to a connect and
+      are consumed with a `tracing` warning and no effect (rejecting them at push time
+      was considered and dropped: the queue does not know which operation will take a
+      step). The consequence is that steps are best pushed after the connection is open.
+      The plan's "cancel while connecting (Delay step)" test cannot exist as written,
+      because `Driver::connect` takes no token and the connection's shutdown token is
+      unreachable before the connection exists. It is replaced by two tests: a delay past
+      the connect deadline is a `Timeout`, and dropping the connect future during its
+      delay leaves the device alone.
+    - **Diagnostics and tracing.** Every scripted failure carries the operation, the
+      connection state at the failure, the latency, the retries and a category as in
+      decision 13; a `debug` event names each consumed step (`step` field) and counts,
+      never values.
+
+    No new dependency; the script lives in `src/script.rs` and the device queue in
+    `src/device.rs`.
 
 ## Consequences
 The simulator can be built on tested data types before the traits exist, and the first
@@ -293,3 +355,13 @@ lifecycle test `the_lifecycle_runs_through_every_state_in_order` in `src/connect
 `tests/readme_matrix.rs` `the_readme_support_table_agrees_with_the_driver_capabilities`
 (the README-versus-`Capabilities` test that S31 reuses); and the new `SimDevice` methods'
 unit tests in `src/device.rs`. Coverage stays at 100% lines for the crate.
+
+S12 tests: `crates/stonecrab-driver-sim/tests/failure_script.rs` (every step on read and
+on write, the connect cases, the retry interaction
+`read_retry_counts_device_reads_up_to_max_attempts`,
+`unknown_after_transmit_write_is_never_replayed`, cancellation during a delay and
+`every_scripted_failure_carries_operation_state_latency_retries_and_category`),
+`tests/failure_trace.rs` `every_consumed_step_is_named_in_a_debug_event`, the unit tests of
+`src/script.rs` and `a_scripted_disconnect_on_connect_leaves_the_connection_failed` in
+`src/connection.rs`; ids are in `docs/parity/sim.md` (`SIM-FAILURE-SCRIPT`). Coverage stays
+at 100% lines for the crate.
