@@ -4,10 +4,10 @@ Native Modbus TCP driver for Stonecrab. The alpha scope is read-only: function c
 registers) over TCP with MBAP framing. RTU, ASCII, TLS, UDP, writes, extended registers
 and string types are out of scope for the alpha.
 
-Nothing is implemented beyond the address types and their text grammar. This crate
-currently offers `UnitId`, `ModbusArea`, `ModbusDataType`, `AddressConvention`,
+Nothing is implemented beyond the address types, their text grammar and read batching.
+This crate currently offers `UnitId`, `ModbusArea`, `ModbusDataType`, `AddressConvention`,
 `ModbusAddress` (built with its builder or parsed from text with `ModbusAddress::parse`)
-and `ProtocolAddress` for it. There is no PDU codec, framing, session, connection or
+and `ProtocolAddress` for it, plus `Batcher`, `BatchLimits`, `Chunk` and `Member`. There is no PDU codec, framing, session, connection or
 driver yet, and no I/O of any kind. The crate depends only on `stonecrab-core`; default
 features are empty.
 
@@ -23,7 +23,7 @@ stable row id in the
 | PDU codec for function codes 01 to 04 and the exception PDU | planned |
 | MBAP framing and transaction correlation | planned |
 | Typed register decoding and byte order | planned |
-| Read batching | planned |
+| Read batching (`Batcher`) | unit-tested; property-tested |
 | Session, connection and `modbus-tcp` driver | planned |
 | Interoperability against an independent server | planned |
 | Hardware verification | planned |

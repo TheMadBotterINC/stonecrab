@@ -28,3 +28,4 @@ stonecrab-core.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+stonecrab-testkit.workspace = true

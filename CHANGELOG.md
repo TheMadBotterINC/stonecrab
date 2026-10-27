@@ -56,6 +56,10 @@
   `address-convention=plc4x`, an optional `{unit-id: N, byte-order: 'NAME'}` block, and
   typed `InvalidAddress` rejections for everything else; `ModbusAddress::MAX_TEXT_BYTES`
   and the fuzz target `fuzz_modbus_address`.
+- Add `Batcher::plan`, `BatchLimits`, `Chunk` and `Member`: tags are grouped by unit id
+  and area, sorted by wire offset and merged into reads only when adjacent or overlapping
+  (no gap reads), never above 125 registers or 2000 bits per chunk or `max_items` tags
+  per plan.
 ### stonecrab-core 0.1.0
 - Add docs.rs metadata (`all-features`, `--cfg docsrs`) for feature-gated item docs.
 - Establish shared metadata, safety lints and foundation contracts.

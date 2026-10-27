@@ -7,7 +7,9 @@
 #![deny(clippy::as_conversions)]
 
 mod address;
+mod batch;
 
 pub use address::{
     AddressConvention, ModbusAddress, ModbusAddressBuilder, ModbusArea, ModbusDataType, UnitId,
 };
+pub use batch::{BatchLimits, Batcher, Chunk, Member};

@@ -111,6 +111,15 @@ parses it with `Short.parseShort` and the inventoried files show no range check
    gap reads, divergence `MB-READ-GAP`), chunk limits 125 registers and 2000 coils come
    from configuration and are enforced there and in S25 request validation, the
    `Capabilities.max_items_per_request` bound is honored and `TagId` membership is kept.
+   S24a implements it as `Batcher::plan(&[Tag], &BatchLimits) -> Result<Vec<Chunk>>`.
+   `BatchLimits` (registers, coils, items) refuses a configured bound above the protocol
+   maxima of 125 and 2000. The item bound is checked against the whole plan before any
+   tag is inspected (`ResourceLimit`), which also bounds every chunk. A `Tag` with
+   `count() != 1` is `InvalidConfig`, a foreign address is `InvalidAddress`, and a tag
+   wider than the bound is `ResourceLimit`. Each `Member` carries its offset in the chunk,
+   its type and, as two independent fields, the byte order and the word order, each
+   resolved from the tag over the address block; a field set by neither stays `None`
+   for the connection default (D14).
 8. **Address type model (this slice).** `address.rs` holds types only:
    - `UnitId(u8)`. A unit identifier is one MBAP byte, so every `u8` is valid and the
      newtype has no failing constructor (`From<u8>`, `get()`, `Display`). Its default is 1,

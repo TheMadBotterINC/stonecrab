@@ -6,4 +6,5 @@ LICENSE
 NOTICE
 README.md
 src/address.rs
+src/batch.rs
 src/lib.rs
