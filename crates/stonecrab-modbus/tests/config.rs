@@ -828,4 +828,23 @@ mod tests {
             }
         }
     }
+
+    // covers: CONTRIBUTING "Fuzz findings" / regression for fuzz artifact crash-edad0273 (hosted run
+    // 40537329063): the input equals a core error message, so the fuzz harness's "never echoes
+    // the connection string" check fired on a fixed template; the library behaviour was and is
+    // a clean InvalidConfig. The input is kept as the corpus seed `regression_message_text`.
+    #[test]
+    fn fuzz_modbus_connection_string_edad0273() {
+        let text = "connection string contains a control character or whitespace";
+        let error = ModbusTcpDriver::new()
+            .parse_config(text)
+            .expect_err("not a connection string");
+        assert_eq!(error.kind(), ErrorKind::InvalidConfig, "kind");
+        let message = error.to_string();
+        assert!(message.is_ascii(), "ASCII template: {message}");
+        assert!(
+            !message.chars().any(char::is_control),
+            "no control characters: {message}"
+        );
+    }
 }
