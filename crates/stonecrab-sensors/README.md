@@ -4,15 +4,17 @@ addresses to named measurements, with a data type, byte and word order, a scalin
 pipeline, a unit, quality rules and the evidence behind it. A profile contains no
 executable code and is never written by this library.
 
-This crate currently offers the schema types, a bounded loader and semantic validation:
-`SensorProfile::from_toml`, `SensorProfile::validate`, `Unit`, `ProfileId`,
-`SchemaVersion` (version 1 is the only schema version; any other value is
+This crate currently offers the schema types, a bounded loader, semantic validation and
+the measurement pipeline: `SensorProfile::from_toml`, `SensorProfile::validate`,
+`SensorProfile::tags`, `SensorProfile::measurements`, `Measurement`, `Quality`, `Unit`,
+`ProfileId`, `SchemaVersion` (version 1 is the only schema version; any other value is
 `ProfileError::IncompatibleSchema`), `DeviceApplicability`, `ConnectionRequirements`,
 `MeasurementDef`, `ScaleStep`, `ValueRange`, `StatusField`, `QualityMapping`,
 `Provenance`, `ValidationStatus` and `ProfileError`. The loader checks the shape of a
-document and `validate` checks its meaning. There is no driver integration yet: nothing
-here builds a `Tag` or reads a device. The crate depends on `stonecrab-core`, `serde`
-and, behind the default `toml` feature, `toml`.
+document, `validate` checks its meaning, `tags` asks a driver to parse its addresses and
+`measurements` turns a read response into qualified engineering values. The crate depends
+on `stonecrab-core`, `serde` and, behind the default `toml` feature, `toml`; it depends on
+no driver.
 
 Profiles declare their address convention. A bare Modbus number such as `40001` is
 ambiguous (holding register 1 under the PLC4X convention, wire address 40001 otherwise),
@@ -28,8 +30,8 @@ register map and its own fixtures.
 | --- | --- |
 | Schema types and `SensorProfile::from_toml` (schema version 1) | build-tested; fuzzed |
 | Semantic validation (`SensorProfile::validate`) and the fixed unit table | build-tested |
-| Scaling and quality evaluation | planned |
-| Driver integration (building tags from a profile) | planned |
+| Scaling and quality evaluation (`SensorProfile::measurements`) | build-tested; property-tested |
+| Driver integration (`SensorProfile::tags` through `Driver::parse_address`) | build-tested; run against the simulator |
 | Synthetic reference profiles | planned |
 | Interoperability against an independent server | planned |
 | Named device profiles | planned |
@@ -106,7 +108,7 @@ checks:
 - quality mappings that name only the measurement's own status fields.
 
 Validation is independent of any driver: address text is compared for equality only, and
-the driver's `parse_address` validates it when tags are built in a later slice.
+the driver's `parse_address` validates it when `SensorProfile::tags` builds the tags.
 
 The unit table is a fixed list of UCUM-style codes with a description each, and there
 is no unit arithmetic: nothing converts between units or parses compound expressions.
@@ -120,6 +122,46 @@ use stonecrab_sensors::Unit;
 assert!(Unit::is_known("Cel"));
 assert_eq!(Unit::description("m3/h"), Some("cubic metre per hour"));
 assert!(!Unit::is_known("celsius"));
+```
+
+## Tags and measurements
+`profile.tags(&driver)` returns the tags to read. The driver's scheme must equal the
+profile's `connection.scheme` (otherwise `ProfileError::SchemeMismatch`), the profile must
+validate, and every address is parsed by `Driver::parse_address` under the profile's
+`address_convention`, so a bare short form such as `40001` parses only under the declared
+convention. A measurement becomes one tag whose `TagId` is the measurement name, with the
+driver's own type hint and the declared byte and word order. Each status field becomes an
+extra tag with the id `<measurement>.<status name>`, for example
+`boiler_temperature.open_circuit`. A rejected address is a `ProfileError` that names the
+measurement by index and never repeats the address text.
+
+After the read, `profile.measurements(&response, wall_now)` returns one `Measurement` per
+definition that the response covers:
+
+- `value` is the scaled value, `raw` the unscaled typed value when the definition sets
+  `keep_raw` (and `None` otherwise), `unit` and `origin` come from the profile.
+- `received_at` is the `wall_now` you pass, `received_mono` is the driver's sampling
+  instant and `source_time` is the device's own timestamp. It is `None` when the driver
+  reports none and is never filled in from another clock.
+- `protocol_status` is the status the driver attached to the item.
+
+Scaling runs in the declared order with checked arithmetic. An integer stays an integer
+through `multiply` and `offset` with an integral constant, through `clamp` with integral
+bounds and through `bit_field`; it keeps its own type when the result fits, else becomes
+`I64`, else `U64`. `divide`, a fractional constant, or a result beyond 64 bits computes in
+`f64`, and a float result is always `F64`. A NaN or infinite input or result, an
+unevaluable step, or a failed read gives quality `Bad` and no value.
+
+Quality is the worst of the rules that apply, in the order `Bad`, `Uncertain`, `Unknown`,
+`Good`: a value outside `range` is `Uncertain`; a status field in `bad_when` that is set
+(after `invert`) is `Bad`, one in `uncertain_when` is `Uncertain`; a status item that is
+missing or unreadable is `Unknown`. `Quality::Stale` is never produced here: only the
+milestone M2 tracker, which knows a value's age, sets it.
+
+```rust
+use stonecrab_sensors::Quality;
+
+assert_eq!(Quality::Uncertain.to_string(), "uncertain");
 ```
 
 The parity record is

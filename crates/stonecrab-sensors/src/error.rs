@@ -10,8 +10,10 @@ use stonecrab_core::{ErrorKind, PlcError};
 /// configuration that the library must not repeat into logs.
 ///
 /// The first four variants come from the loader, which checks the schema only (decision
-/// D17, slice S28a). The rest come from [`SensorProfile::validate`](crate::SensorProfile::validate)
-/// (slice S28b), which checks the meaning of a loaded profile. Validation errors name
+/// D17, slice S28a). The next eleven come from [`SensorProfile::validate`](crate::SensorProfile::validate)
+/// (slice S28b), which checks the meaning of a loaded profile. The last four come from
+/// [`SensorProfile::tags`](crate::SensorProfile::tags) (slice S29), which asks a driver to
+/// parse the profile's addresses. Validation errors name
 /// the offending measurement by its 0-based index in
 /// [`SensorProfile::measurements`](crate::SensorProfile::measurements), not by its name,
 /// which keeps the type `Copy`; `profile.measurements[index].name` gives the name. The
@@ -127,6 +129,40 @@ pub enum ProfileError {
     UnknownAddressConvention,
     /// The scheme is `modbus-tcp` and the connection declares no address convention.
     MissingAddressConvention,
+    /// The driver's scheme is not the profile's connection scheme ([`SensorProfile::tags`]).
+    ///
+    /// [`SensorProfile::tags`]: crate::SensorProfile::tags
+    SchemeMismatch {
+        /// The scheme of the driver that was offered.
+        driver: &'static str,
+    },
+    /// The driver rejected a measurement's address text ([`SensorProfile::tags`]). The
+    /// text is not repeated; `profile.measurements[measurement].address` holds it.
+    ///
+    /// [`SensorProfile::tags`]: crate::SensorProfile::tags
+    AddressRejected {
+        /// Index of the measurement.
+        measurement: usize,
+    },
+    /// The driver rejected a status field's address text ([`SensorProfile::tags`]).
+    ///
+    /// [`SensorProfile::tags`]: crate::SensorProfile::tags
+    StatusAddressRejected {
+        /// Index of the measurement.
+        measurement: usize,
+        /// Index of the status field in the measurement's `status_fields`.
+        status_field: usize,
+    },
+    /// Two status fields of one measurement share a name, so they would share a tag
+    /// identity ([`SensorProfile::tags`]); validation accepts them, tag building cannot.
+    ///
+    /// [`SensorProfile::tags`]: crate::SensorProfile::tags
+    DuplicateStatusFieldName {
+        /// Index of the measurement.
+        measurement: usize,
+        /// Index of the later status field, the one that repeats the name.
+        status_field: usize,
+    },
 }
 
 impl fmt::Display for ProfileError {
@@ -201,6 +237,30 @@ impl fmt::Display for ProfileError {
             Self::MissingAddressConvention => {
                 f.write_str("a modbus-tcp profile must declare its address_convention")
             }
+            Self::SchemeMismatch { driver } => write!(
+                f,
+                "the profile's connection scheme is not the scheme of the {driver} driver"
+            ),
+            Self::AddressRejected { measurement } => {
+                write!(
+                    f,
+                    "the driver rejected the address of measurement {measurement}"
+                )
+            }
+            Self::StatusAddressRejected {
+                measurement,
+                status_field,
+            } => write!(
+                f,
+                "the driver rejected the address of status field {status_field} of measurement {measurement}"
+            ),
+            Self::DuplicateStatusFieldName {
+                measurement,
+                status_field,
+            } => write!(
+                f,
+                "status field {status_field} of measurement {measurement} repeats the name of an earlier status field"
+            ),
         }
     }
 }
@@ -301,6 +361,28 @@ mod tests {
             (
                 ProfileError::MissingAddressConvention,
                 "a modbus-tcp profile must declare its address_convention",
+            ),
+            (
+                ProfileError::SchemeMismatch { driver: "sim" },
+                "the profile's connection scheme is not the scheme of the sim driver",
+            ),
+            (
+                ProfileError::AddressRejected { measurement: 2 },
+                "the driver rejected the address of measurement 2",
+            ),
+            (
+                ProfileError::StatusAddressRejected {
+                    measurement: 2,
+                    status_field: 1,
+                },
+                "the driver rejected the address of status field 1 of measurement 2",
+            ),
+            (
+                ProfileError::DuplicateStatusFieldName {
+                    measurement: 0,
+                    status_field: 1,
+                },
+                "status field 1 of measurement 0 repeats the name of an earlier status field",
             ),
         ];
         for (error, text) in cases {

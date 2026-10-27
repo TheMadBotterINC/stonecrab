@@ -276,3 +276,90 @@ changing them" holds.
    (possible only inside the crate, because the types are `#[non_exhaustive]`), checks
    that `validate` never panics and agrees with an independently written validity
    predicate, and a second property checks that profiles built to be valid validate clean.
+
+## Addendum: tags and the measurement pipeline (slice S29, 2026-10-27)
+This addendum records the S29 decisions. It changes no type above. The crate still
+depends on no driver: `tags` takes a `&dyn Driver` from `stonecrab-core`, and the
+simulator and the testkit join `proptest` as dev-dependencies (`stonecrab-driver-sim`
+by path, `stonecrab-testkit` through the workspace), which adds no external crate.
+
+1. **`SensorProfile::tags(&dyn Driver) -> Result<Vec<Tag>, ProfileError>`.** In order:
+   the driver's scheme must equal `connection.scheme` (`SchemeMismatch { driver }`);
+   `validate()` must pass, and the first error of its list is returned (call `validate`
+   for all of them); the options come from `address_options()`, which is the profile's
+   `address_convention` run through `AddressOptions::builder()` (a name core refuses is
+   `UnknownAddressConvention`); then every address, measurement and status field, goes
+   through `Driver::parse_address(text, &options)`. A bare short form therefore parses
+   only under the convention the profile declared. No driver reads a convention yet
+   (the simulator ignores it), so the testkit's `ConventionDriver` shows the options
+   each `parse_address` call received, and a `tags` test asserts that every measurement
+   and status address saw the declared convention.
+2. **Tag shape.** A measurement yields one tag whose `TagId` is the measurement name,
+   whose value type hint is whatever the driver's parsed address says (it is never
+   overridden; `data_type` stays documentary here, because the type travels in the
+   address), with `with_byte_order` and `with_word_order` taken from the definition when
+   set. A status field yields an extra tag directly after its measurement, with the id
+   `<measurement>.<status name>` (`MeasurementDef::status_tag_id`). Both names are
+   `snake_case` without a dot, so the id cannot equal a measurement's tag, and the longest
+   one is 129 bytes. The status tag keeps the driver's type hint too: an address that
+   parses to `BOOL` (a coil, a discrete input) delivers the bit itself, one that parses to
+   an integer word delivers the word and the pipeline reads `bit` from it. A driver
+   rejection is `AddressRejected { measurement }` or `StatusAddressRejected {
+   measurement, status_field }`, by index, never carrying the address. Two status fields of
+   one measurement with the same name would share a tag id, so `tags` (not `validate`,
+   which S28b left permissive) returns `DuplicateStatusFieldName`. `ProfileError` gains
+   these four variants and stays `Copy`.
+3. **`measurements(&ReadResponse, wall_now) -> Vec<Measurement>`.** One entry per definition
+   whose tag is in the response, in document order; a definition whose item is absent
+   is skipped (a response built from `tags` has every item, a partial request does not).
+   `received_at` is `wall_now`, `received_mono` is the item's `sampled_at`, `source_time`
+   is the item's and is never substituted (F6), `protocol_status` is the item's status on
+   success and failure, `origin` is the profile's `ValidationStatus`, and `unit` is the
+   definition's. `Measurement` is `#[non_exhaustive]` with public fields and a derived
+   `Debug` (the only type that could hold bytes, `ProtocolStatus`, prints their count).
+4. **The promotion rule.** Integers are held exactly in `i128` limited to
+   `i64::MIN..=u64::MAX`; a constant is integral when it is finite, has no fractional
+   part and has a magnitude below 2^64. `Multiply` and `Offset` keep an integer an integer
+   when the constant is integral and the result stays in range; `Clamp` does when both
+   bounds are integral (and then compares as integers); `BitField` always does.
+   `Divide` always computes in `f64`: integer division loses the remainder, and a type
+   that depended on the value (`100 / 10` against `101 / 10`) would be a worse contract.
+   A fractional constant, or any step whose integer result would leave the range,
+   computes in `f64` from then on. An integer result comes back as the input's own type
+   when it fits, else `I64`, else `U64`; a float result is always `F64`; a pipeline with
+   no steps passes the value through unchanged, including its type. All arithmetic is
+   checked, and the module has no `as` cast: `u64` to `f64` is built from two exact
+   32-bit halves (one rounding, as `as` rounds), and the float to integer test reads the
+   IEEE bits. A NaN or infinite input, a non-finite intermediate or final result (so a
+   `Divide` that overflows, and a divide by zero), a non-finite constant, `min > max`, a
+   bit field of width 0 or ending past bit 64, `BitField` on a float and any step on a
+   value that is not a number yield `Bad` with `value` `None`, whether or not the profile
+   was validated. `BitField` reads the 64-bit pattern of the integer, negative values
+   sign-extended, so a 16-bit field of the `U32` `0x0001_FFFF` is `0xFFFF` and the next
+   count is `0`.
+5. **Quality precedence.** `Bad` over `Uncertain` over `Unknown` over `Good`. A failed read
+   or an unscalable value is `Bad`. A scaled value outside `range` (inclusive, compared
+   as `f64`; a non-numeric value has no range check) is `Uncertain`: schema version 1
+   has no way to say a violation is `Bad`, so the plan's "per map" is the fixed
+   default. For each status field named in the quality mapping, its bit is the `Bool`
+   itself or bit `bit` of the integer, flipped by `invert`; when set it is `Bad` for
+   `bad_when` (also when the name is in both lists) or `Uncertain` for `uncertain_when`;
+   a missing, failed, non-integer or out-of-range-bit status item is `Unknown`. A status
+   field no list names, and a definition with no `quality_map`, have no effect. A status
+   outcome never removes the scaled value; only a failed read or a failed scaling does.
+   `Quality::Stale` exists and is never produced here: staleness needs the age of a value,
+   which one response cannot give, so only the M2 tracker sets it. For the tie-break the
+   private severity order is `Good` < `Unknown` < `Uncertain` < `Stale` < `Bad`.
+6. **`keep_raw`.** When set and the read succeeded, `raw` is a clone of the unscaled typed
+   `PlcValue` as the driver delivered it (an `F32` stays `F32`, a NaN stays a NaN). When
+   unset, or when the read failed, `raw` is `None`. It is not wire bytes: a typed-decode
+   failure carries its bytes on the `ItemError` status (D14, ADR-0006).
+7. **Tests.** `tests/pipeline.rs` runs profiles from TOML through the simulator's address
+   grammar and covers F7 (negative and scaled values, NaN and infinity, counter rollover),
+   F6 (absent source time), naming, hints, orders, scheme mismatch, the quality
+   precedence, an end-to-end read from the simulator and four property tests (random
+   steps and values never panic or report a non-finite number; multiply then divide
+   restores a float within an epsilon and an integer exactly; a bit field equals the
+   shift-and-mask definition). Unit tests in `src/measurement/scale.rs` pin every branch
+   of the engine and the conversions, and `src/tags.rs` pins `address_options`.
+   `docs/parity/sensors.md` gains `SENSORS-TAGS` and extends `SENSORS-MEASUREMENTS`.

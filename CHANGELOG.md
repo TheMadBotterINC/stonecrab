@@ -163,6 +163,18 @@
   Modbus types, overlapping status bits, `count != 1`, unevaluable scaling steps, unknown
   quality references, address convention rules), and the fixed unit table `Unit`. Add eleven
   `ProfileError` variants for them; the enum was already `#[non_exhaustive]`.
+- Add the measurement pipeline: `SensorProfile::tags(&dyn Driver)` builds one tag per
+  measurement and one `<measurement>.<status name>` tag per status field, parsing every
+  address under the profile's address convention (`SensorProfile::address_options`), and
+  refusing a scheme mismatch; `SensorProfile::measurements(&ReadResponse, SystemTime)`
+  scales values in declared order with checked arithmetic (integers stay integers without
+  a float step, NaN, infinity and overflow are `Bad`, `BitField` handles counter rollover)
+  and grades them with `Quality` (`Good`, `Uncertain`, `Bad`, `Stale`, `Unknown`) from the
+  range, the item error and the quality mapping. Add `Measurement`, `Quality`,
+  `MeasurementDef::status_tag_id` and four `ProfileError` variants (`SchemeMismatch`,
+  `AddressRejected`, `StatusAddressRejected`, `DuplicateStatusFieldName`). The simulator
+  and the testkit are dev-dependencies for the tests; the unpublished testkit gains the
+  `ConventionDriver` test double of `Driver`.
 ### stonecrab-core 0.1.0
 - Add docs.rs metadata (`all-features`, `--cfg docsrs`) for feature-gated item docs.
 - Establish shared metadata, safety lints and foundation contracts.

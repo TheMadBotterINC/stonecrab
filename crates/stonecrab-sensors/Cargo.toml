@@ -31,3 +31,5 @@ toml = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest.workspace = true
+stonecrab-driver-sim = { path = "../stonecrab-driver-sim" }
+stonecrab-testkit.workspace = true

@@ -8,7 +8,10 @@ README.md
 src/error.rs
 src/ident.rs
 src/lib.rs
+src/measurement/pipeline.rs
+src/measurement/scale.rs
 src/measurement.rs
 src/profile.rs
+src/tags.rs
 src/units.rs
 src/validate.rs

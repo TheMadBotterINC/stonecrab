@@ -7,14 +7,15 @@ mod error;
 mod ident;
 mod measurement;
 mod profile;
+mod tags;
 mod units;
 mod validate;
 
 pub use error::ProfileError;
 pub use ident::{ProfileId, SchemaVersion};
 pub use measurement::{
-    ByteOrderName, MeasurementDef, QualityMapping, ScaleStep, StatusField, ValueRange,
-    WordOrderName,
+    ByteOrderName, Measurement, MeasurementDef, Quality, QualityMapping, ScaleStep, StatusField,
+    ValueRange, WordOrderName,
 };
 pub use profile::{
     ConnectionRequirements, DeviceApplicability, Provenance, SensorProfile, ValidationStatus,

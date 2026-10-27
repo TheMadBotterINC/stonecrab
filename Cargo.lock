@@ -325,6 +325,8 @@ dependencies = [
  "proptest",
  "serde",
  "stonecrab-core",
+ "stonecrab-driver-sim",
+ "stonecrab-testkit",
  "toml",
 ]
 

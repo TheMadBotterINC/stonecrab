@@ -6,6 +6,11 @@ use stonecrab_core::{ByteOrder, TagId, WordOrder};
 
 use crate::{ProfileError, ProfileId};
 
+mod pipeline;
+mod scale;
+
+pub use pipeline::{Measurement, Quality};
+
 /// Name of the byte order inside each 16-bit word, as written in a profile.
 ///
 /// The TOML values are `"big_endian"` and `"little_endian"`. A profile that omits the
