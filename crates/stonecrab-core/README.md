@@ -1,6 +1,6 @@
 # Stonecrab Core
 Runtime-independent foundation for Stonecrab. This crate has no executor or network dependency.
-Default features are empty. Public contracts are experimental; protocol behavior is not implemented.
+Default features are empty. Public contracts are experimental; this crate holds the driver boundary and data contracts, and protocol behavior lives in the driver crates.
 
 See the [foundation parity record](https://github.com/TheMadBotterINC/stonecrab/blob/master/docs/parity/core.md).
 
@@ -19,8 +19,8 @@ Read builders require explicit `ResourceLimits`. Duplicate identifiers and over-
 requests fail before any transport exists. Response builders reject missing, duplicate
 or unexpected identities and invalid sampling intervals; per-item failures remain data.
 Cancellation tokens, the injectable `Clock`, `OpFuture` and connection-state observation
-exist as primitives; enforcement of cancellation and relative deadlines by connections
-lands in later slices (S11a, S11b-2).
+are primitives; the `Driver`, `Connection` and `DriverRegistry` traits define the driver
+boundary, and a connection enforces the token and the default-deadline rule (ADR-0011).
 
 ```rust
 use stonecrab_core::{Deadline, PlcValue, TagId};

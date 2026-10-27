@@ -6,38 +6,90 @@ not a Modbus simulator.
 It mirrors the shape of the Java simulated driver's addresses (`AREA/name:type`) and
 nothing of any wire protocol.
 
-Nothing is a driver yet. The `Driver` and `Connection` traits do not exist in
-`stonecrab-core` (slice S11a), so this first slice (S11b-1) ships the data the simulator
-will be built from: a clock, the address grammar and the device model. `SimDriver` and
-`SimConnection` arrive in S11b-2. The crate depends on `stonecrab-core` and `tracing`
-only, has no Tokio dependency, and its default feature set is empty.
+`SimDriver` is a `Driver` for the scheme `sim`, and `SimConnection` is the `Connection` it
+opens (slice S11b-2). Register the driver with a `DriverRegistry` and connect by
+connection string:
+
+```rust
+use std::sync::Arc;
+use std::task::{Context, Poll, Waker};
+use stonecrab_core::{Connection, DriverRegistry, OpFuture, PlcValue, ReadRequest, Tag, TagId};
+use stonecrab_driver_sim::{SimAddress, SimDevice, SimDriver, SimTag};
+
+// With the default `RealtimeClock` no operation ever waits, so one poll completes it.
+fn now_or_never<T>(mut future: OpFuture<'_, T>) -> stonecrab_core::Result<T> {
+    match future.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
+        Poll::Ready(outcome) => outcome,
+        Poll::Pending => unreachable!("the real-time clock never makes an operation wait"),
+    }
+}
+
+let device = SimDevice::new();
+device.set("boiler", SimTag::new(PlcValue::F32(71.5)))?;
+let mut registry = DriverRegistry::new();
+registry.register(Arc::new(SimDriver::new().with_device("bench", device)?))?;
+
+let connection = now_or_never(registry.connect("sim://bench"))?;
+let tag = Tag::new(TagId::new("boiler")?, Arc::new(SimAddress::parse("STATE/boiler:f32")?));
+let request = ReadRequest::builder(connection.limits()).tag(tag).build()?;
+let response = now_or_never(connection.read(request))?;
+assert_eq!(response.items()[0].outcome().as_ref().ok(), Some(&PlcValue::F32(71.5)));
+# Ok::<(), stonecrab_core::PlcError>(())
+```
+
+The crate depends on `stonecrab-core` and `tracing` only, has no Tokio dependency, and its
+default feature set is empty. Tests that need time to pass inject the unpublished testkit's
+`FakeClock` with `SimDriver::with_clock`.
 
 Upstream behavior is the simulated driver of Apache PLC4X, and the simulator claims no
 parity with it. Stonecrab-owned rows, divergences and planned items are recorded in the
 [simulator record](https://github.com/TheMadBotterINC/stonecrab/blob/master/docs/parity/sim.md).
 
 ## Features
-Default features are empty and there are no optional features. Available now:
+Default features are empty and there are no optional features.
 
+- `SimDriver`: scheme `sim`, a set of named `SimDevice`s and a clock. `with_device(name,
+  device)` registers a device; `sim://<device>?latency-ms=<n>&seed=<u64>` opens it. Unknown
+  devices and unknown options are `InvalidConfig`; `address-convention` is accepted and
+  ignored (the grammar has no conventions), and upstream's `simulated:<name>` form is not
+  aliased. A `sim` configuration is read-write, unlike the read-only default, because a
+  simulated device has nothing to protect.
+- `SimConnection`: the lifecycle `Disconnected`, `Connecting`, `Connected`, `Closing`,
+  `Closed` (`Failed` is reserved for the failure script); reads of `STATE` and `RANDOM`
+  addresses with per-item errors, writes to `STATE` and `SINK` addresses; one operation in
+  flight at a time (a second one fails with `Backpressure`, there is no wait queue);
+  deadlines and cancellation honored on the connection's clock; whole-request read retry
+  under the configured `RetryPolicy`; `Diagnostics` on every error; `tracing` spans.
 - `RealtimeClock`: a `std`-only `Clock` whose `now()` is `Instant::now()`, whose
   `wall_now()` is `SystemTime::now()` and whose `sleep_until` resolves on its first poll
-  without moving time. The simulator is not a timer: a scripted `Delay` step is a no-op
-  and a `Timeout` step returns `ErrorKind::Timeout` directly in real-time use. Tests that
-  need time to pass inject the testkit `FakeClock` and derive their deadlines from it.
+  without moving time. The simulator is not a timer: with it every latency wait is a
+  no-op. Tests that need time to pass inject the testkit `FakeClock` and derive their
+  deadlines from it.
 - `SimAddress` and `SimArea`: the address grammar below.
 - `SimDevice` and `SimTag`: named tags with access flags, a per-read ramp, a read counter,
-  a seeded `RANDOM` source, and stored latency and item-limit settings.
+  a seeded `RANDOM` source, a `SINK` write counter, and the latency and item-limit
+  settings the connection applies.
+
+The device latency (or `latency-ms`) is the time every connect, read, write and close waits
+on the injected clock, raced against the request's cancellation token, its deadline and
+the connection being closed. A device item limit (`SimDevice::with_max_items`) is advertised
+in the connection's `Capabilities` and enforced: the simulator never splits a batch.
 
 | Capability | Support level |
 | --- | --- |
-| Address grammar and device model (types only, no driver) | planned |
-| `sim` driver registration and `parse_address` | planned |
-| Connect, close and connection state | planned |
-| Read, including `RANDOM` and ramps | planned |
-| Write, including `SINK` | planned |
+| Address grammar and device model | simulator-tested |
+| `sim` driver registration and `parse_address` | simulator-tested |
+| Connect, close and connection state | simulator-tested |
+| Read, including `RANDOM` and ramps | simulator-tested |
+| Write, including `SINK` | simulator-tested |
+| Subscribe, browse and discover | not supported |
 | Scripted acquisition failures (delay, timeout, disconnect, device exception) | planned |
 | Bounded read retry | planned |
 | Common driver contract suite | planned |
+
+Bounded read retry is implemented (the loop exists and is tested against deadline
+failures) but stays `planned` until the failure script of S12 can exercise every
+retryable kind.
 
 ## Address grammar
 `SimAddress::parse` reads `STATE|RANDOM|SINK/<name>:<type>`, case-sensitive. The area

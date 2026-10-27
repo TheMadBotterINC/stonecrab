@@ -1,17 +1,23 @@
 use std::collections::BTreeSet;
 use std::num::NonZeroUsize;
 
-use crate::{Deadline, ErrorKind, PlcError, ResourceLimits, Result, Tag, TagId};
+use crate::{CancellationToken, Deadline, ErrorKind, PlcError, ResourceLimits, Result, Tag, TagId};
 
 /// Immutable bounded read batch, validated without performing I/O.
 ///
-/// No deadline means the future connection must supply its configured deadline
-/// before transmission, not that unbounded I/O is permitted.
+/// No deadline means the connection supplies its own bounded default before it
+/// transmits: `Deadline::after(clock.now(), timeouts.request)` from the connection's
+/// clock (the default-deadline rule of ADR-0007). It never means unbounded I/O.
+///
+/// An optional [`CancellationToken`] lets the caller abandon the read. A connection
+/// checks it before transmitting and while it waits; the wire consequence of a
+/// cancellation is documented on [`Connection::read`](crate::Connection::read).
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct ReadRequest {
     items: Vec<Tag>,
     deadline: Option<Deadline>,
+    cancel: Option<CancellationToken>,
 }
 
 impl ReadRequest {
@@ -34,6 +40,7 @@ impl ReadRequest {
             identifiers: BTreeSet::new(),
             max_items: limits.max_items_per_request(),
             deadline: None,
+            cancel: None,
             error: None,
         }
     }
@@ -49,13 +56,27 @@ impl ReadRequest {
     pub const fn deadline(&self) -> Option<Deadline> {
         self.deadline
     }
+
+    /// The token the caller can cancel to abandon this read, if one was supplied.
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab_core::ReadRequest;
+    /// fn is_abandonable(request: &ReadRequest) -> bool {
+    ///     request.cancel().is_some_and(|token| !token.is_cancelled())
+    /// }
+    /// ```
+    #[must_use]
+    pub const fn cancel(&self) -> Option<&CancellationToken> {
+        self.cancel.as_ref()
+    }
 }
 
 /// A bounded read batch under construction.
 ///
-/// Starts empty with no explicit deadline. `tag` checks duplicates and the item
-/// budget before growing internal collections. The first validation error is
-/// sticky: subsequent tags are discarded without allocation, and `build` returns
+/// Starts empty with no explicit deadline and no cancel token. `tag` checks duplicates
+/// and the item budget before growing internal collections. The first validation error
+/// is sticky: subsequent tags are discarded without allocation, and `build` returns
 /// that error. Empty requests are rejected. No I/O is performed.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -65,6 +86,7 @@ pub struct ReadRequestBuilder {
     identifiers: BTreeSet<TagId>,
     max_items: NonZeroUsize,
     deadline: Option<Deadline>,
+    cancel: Option<CancellationToken>,
     error: Option<PlcError>,
 }
 
@@ -99,6 +121,26 @@ impl ReadRequestBuilder {
         self
     }
 
+    /// Attach a token the caller can cancel to abandon the read.
+    ///
+    /// The token is retained as given (a clone shares its flag), and a token that is
+    /// already cancelled is kept: the connection rejects it before transmitting. A second
+    /// call replaces the first.
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab_core::{CancellationToken, ReadRequestBuilder};
+    /// fn abandonable(builder: ReadRequestBuilder) -> (ReadRequestBuilder, CancellationToken) {
+    ///     let token = CancellationToken::new();
+    ///     (builder.cancel(token.clone()), token)
+    /// }
+    /// ```
+    #[must_use = "builder changes must be retained"]
+    pub fn cancel(mut self, token: CancellationToken) -> Self {
+        self.cancel = Some(token);
+        self
+    }
+
     /// Finish validation and retain original order without performing I/O.
     ///
     /// # Errors
@@ -118,6 +160,7 @@ impl ReadRequestBuilder {
         Ok(ReadRequest {
             items: self.items,
             deadline: self.deadline,
+            cancel: self.cancel,
         })
     }
 }

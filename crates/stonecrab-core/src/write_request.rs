@@ -1,7 +1,9 @@
 use std::collections::BTreeSet;
 use std::num::NonZeroUsize;
 
-use crate::{Deadline, ErrorKind, PlcError, PlcValue, ResourceLimits, Result, Tag, TagId};
+use crate::{
+    CancellationToken, Deadline, ErrorKind, PlcError, PlcValue, ResourceLimits, Result, Tag, TagId,
+};
 
 /// One value to write to one tag.
 ///
@@ -70,9 +72,14 @@ impl WriteItem {
 /// do. This type holds no retry state and offers no way to resubmit itself;
 /// reusing the same request is a new, explicit caller decision.
 ///
-/// No deadline means the future connection must supply its configured deadline
-/// before transmission, not that unbounded I/O is permitted. The cancel slot
-/// arrives with the connection contract, together with the read one.
+/// No deadline means the connection supplies its own bounded default before it
+/// transmits: `Deadline::after(clock.now(), timeouts.request)` from the connection's
+/// clock (the default-deadline rule of ADR-0007). It never means unbounded I/O.
+///
+/// An optional [`CancellationToken`] lets the caller abandon the write before it is
+/// transmitted. Cancelling after transmission cannot undo the write: the response then
+/// reports [`crate::WriteOutcome::Unknown`] with a `CancelledAfterTransmit` reason, as
+/// documented on [`Connection::write`](crate::Connection::write).
 ///
 /// # Wire effects
 /// None; this is data. The request is only a description of what a connection
@@ -86,6 +93,7 @@ impl WriteItem {
 pub struct WriteRequest {
     items: Vec<WriteItem>,
     deadline: Option<Deadline>,
+    cancel: Option<CancellationToken>,
 }
 
 impl WriteRequest {
@@ -108,6 +116,7 @@ impl WriteRequest {
             identifiers: BTreeSet::new(),
             max_items: limits.max_items_per_request(),
             deadline: None,
+            cancel: None,
             error: None,
         }
     }
@@ -123,15 +132,29 @@ impl WriteRequest {
     pub const fn deadline(&self) -> Option<Deadline> {
         self.deadline
     }
+
+    /// The token the caller can cancel to abandon this write, if one was supplied.
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab_core::WriteRequest;
+    /// fn is_abandonable(request: &WriteRequest) -> bool {
+    ///     request.cancel().is_some_and(|token| !token.is_cancelled())
+    /// }
+    /// ```
+    #[must_use]
+    pub const fn cancel(&self) -> Option<&CancellationToken> {
+        self.cancel.as_ref()
+    }
 }
 
 /// A bounded write batch under construction.
 ///
-/// Starts empty with no explicit deadline. `item` checks the item budget, the
-/// value type against the tag's type hint and duplicate identity before growing
-/// internal collections. The first validation error is sticky: subsequent items
-/// are discarded without allocation, and `build` returns that error. Empty
-/// requests are rejected. No I/O is performed.
+/// Starts empty with no explicit deadline and no cancel token. `item` checks the item
+/// budget, the value type against the tag's type hint and duplicate identity before
+/// growing internal collections. The first validation error is sticky: subsequent items
+/// are discarded without allocation, and `build` returns that error. Empty requests are
+/// rejected. No I/O is performed.
 ///
 /// # Wire effects
 /// None; this is data.
@@ -143,6 +166,7 @@ pub struct WriteRequestBuilder {
     identifiers: BTreeSet<TagId>,
     max_items: NonZeroUsize,
     deadline: Option<Deadline>,
+    cancel: Option<CancellationToken>,
     error: Option<PlcError>,
 }
 
@@ -198,6 +222,26 @@ impl WriteRequestBuilder {
         self
     }
 
+    /// Attach a token the caller can cancel to abandon the write.
+    ///
+    /// The token is retained as given (a clone shares its flag), and a token that is
+    /// already cancelled is kept: the connection rejects it before transmitting. A second
+    /// call replaces the first.
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab_core::{CancellationToken, WriteRequestBuilder};
+    /// fn abandonable(builder: WriteRequestBuilder) -> (WriteRequestBuilder, CancellationToken) {
+    ///     let token = CancellationToken::new();
+    ///     (builder.cancel(token.clone()), token)
+    /// }
+    /// ```
+    #[must_use = "builder changes must be retained"]
+    pub fn cancel(mut self, token: CancellationToken) -> Self {
+        self.cancel = Some(token);
+        self
+    }
+
     /// Finish validation and retain original order without performing I/O.
     ///
     /// # Errors
@@ -218,6 +262,7 @@ impl WriteRequestBuilder {
         Ok(WriteRequest {
             items: self.items,
             deadline: self.deadline,
+            cancel: self.cancel,
         })
     }
 }

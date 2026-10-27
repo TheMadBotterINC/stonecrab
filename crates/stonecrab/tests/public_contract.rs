@@ -3,19 +3,20 @@
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
     use std::task::{Context, Poll, Waker};
     use std::time::{Duration, Instant};
 
     use stonecrab::{
         AccessPolicy, AddressOptions, AddressOptionsBuilder, ByteOrder, CancellationToken,
-        Capabilities, Clock, ConnectionConfig, ConnectionConfigBuilder, ConnectionState,
-        ConnectionUri, Credentials, Deadline, Diagnostics, Endpoint, ErrorKind, FailureCategory,
-        ItemError, OpFuture, Operation, PlcError, PlcValue, PlcValueType, ProtocolAddress,
-        ProtocolStatus, ReadItem, ReadRequest, ReadRequestBuilder, ReadResponse,
-        ReadResponseBuilder, ReconnectPolicy, ResourceLimits, ResourceLimitsBuilder, RetryPolicy,
-        Secret, StateCell, StateWatch, SubscriptionMode, Tag, TagId, Timeouts, UnknownReason,
-        WordOrder, WriteItem, WriteOutcome, WriteRequest, WriteRequestBuilder, WriteResponse,
-        WriteResponseBuilder, WriteResult,
+        Capabilities, Clock, Connection, ConnectionConfig, ConnectionConfigBuilder,
+        ConnectionState, ConnectionUri, Credentials, Deadline, Diagnostics, Driver, DriverRegistry,
+        Endpoint, ErrorKind, FailureCategory, ItemError, OpFuture, Operation, PlcError, PlcValue,
+        PlcValueType, ProtocolAddress, ProtocolStatus, ReadItem, ReadRequest, ReadRequestBuilder,
+        ReadResponse, ReadResponseBuilder, ReconnectPolicy, ResourceLimits, ResourceLimitsBuilder,
+        RetryPolicy, Secret, StateCell, StateWatch, SubscriptionMode, Tag, TagId, Timeouts,
+        UnknownReason, WordOrder, WriteItem, WriteOutcome, WriteRequest, WriteRequestBuilder,
+        WriteResponse, WriteResponseBuilder, WriteResult,
     };
 
     #[test]
@@ -35,6 +36,7 @@ mod tests {
         assert_send_sync::<ConnectionUri>();
         assert_send_sync::<Deadline>();
         assert_send_sync::<Diagnostics>();
+        assert_send_sync::<DriverRegistry>();
         assert_send_sync::<ErrorKind>();
         assert_send_sync::<FailureCategory>();
         assert_send_sync::<Operation>();
@@ -80,6 +82,23 @@ mod tests {
     }
 
     // covers: SPEC mandatory-failure-cases / F4 cancellation (token semantics)
+    // covers: ALPHA_PLAN S11a / object safety of Driver and Connection (13.5: the traits
+    // are not implemented here; the simulator exercises them)
+    #[test]
+    fn driver_and_connection_are_object_safe_send_sync_traits() {
+        fn assert_send_sync<T: Send + Sync + ?Sized>() {}
+        fn assert_send<T: Send>() {}
+        // A function taking a trait object only compiles if the trait is object safe.
+        fn take_driver(_driver: &dyn Driver) {}
+        fn take_connection(_connection: &dyn Connection) {}
+        assert_send_sync::<dyn Driver>();
+        assert_send_sync::<dyn Connection>();
+        assert_send_sync::<Arc<dyn Driver>>();
+        assert_send_sync::<Box<dyn Connection>>();
+        assert_send::<OpFuture<'static, Box<dyn Connection>>>();
+        std::hint::black_box((take_driver, take_connection));
+    }
+
     #[test]
     fn facade_token_and_watch_can_be_polled_without_a_runtime() {
         let mut cx = Context::from_waker(Waker::noop());

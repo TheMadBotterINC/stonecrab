@@ -3,7 +3,9 @@
 
 #[cfg(test)]
 mod tests {
-    use stonecrab_driver_sim::{RealtimeClock, SimAddress, SimArea, SimDevice, SimTag};
+    use stonecrab_driver_sim::{
+        RealtimeClock, SimAddress, SimArea, SimConnection, SimDevice, SimDriver, SimTag,
+    };
 
     #[test]
     fn public_types_are_send_sync_and_static() {
@@ -11,7 +13,9 @@ mod tests {
         assert_send_sync::<RealtimeClock>();
         assert_send_sync::<SimAddress>();
         assert_send_sync::<SimArea>();
+        assert_send_sync::<SimConnection>();
         assert_send_sync::<SimDevice>();
+        assert_send_sync::<SimDriver>();
         assert_send_sync::<SimTag>();
     }
 }

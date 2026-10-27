@@ -9,12 +9,15 @@ mod cancel;
 mod capability;
 mod clock;
 mod config;
+mod connection;
 mod deadline;
+mod driver;
 mod error;
 mod future;
 mod limits;
 mod order;
 mod read_response;
+mod registry;
 mod request;
 mod response;
 mod secret;
@@ -33,12 +36,15 @@ pub use config::{
     AccessPolicy, ConnectionConfig, ConnectionConfigBuilder, Credentials, Endpoint,
     ReconnectPolicy, RetryPolicy, Timeouts,
 };
+pub use connection::Connection;
 pub use deadline::Deadline;
+pub use driver::Driver;
 pub use error::{ConnectionState, Diagnostics, ErrorKind, FailureCategory, PlcError, Result};
 pub use future::OpFuture;
 pub use limits::{ResourceLimits, ResourceLimitsBuilder};
 pub use order::{ByteOrder, WordOrder};
 pub use read_response::{ReadResponse, ReadResponseBuilder};
+pub use registry::DriverRegistry;
 pub use request::{ReadRequest, ReadRequestBuilder};
 pub use response::{ItemError, ProtocolStatus, ReadItem, UnknownReason, WriteOutcome};
 pub use secret::Secret;

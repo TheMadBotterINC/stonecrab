@@ -7,9 +7,9 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use stonecrab_core::{
-        Deadline, ErrorKind, ItemError, PlcError, PlcValue, PlcValueType, ProtocolStatus,
-        ResourceLimits, Tag, TagId, UnknownReason, WriteItem, WriteOutcome, WriteRequest,
-        WriteResponse, WriteResult,
+        CancellationToken, Deadline, ErrorKind, ItemError, PlcError, PlcValue, PlcValueType,
+        ProtocolStatus, ResourceLimits, Tag, TagId, UnknownReason, WriteItem, WriteOutcome,
+        WriteRequest, WriteResponse, WriteResult,
     };
     use stonecrab_testkit::FixtureAddress;
 
@@ -328,5 +328,57 @@ mod tests {
                 .collect();
             assert_eq!(ids, ["a", "b", "c"], "request order restored");
         }
+    }
+
+    // covers: SPEC mandatory-failure-cases / F4 cancellation (request slot)
+    #[test]
+    fn the_cancel_slot_is_absent_by_default_and_shares_the_callers_token() {
+        let plain = request(&["a"]);
+        assert!(
+            plain.cancel().is_none(),
+            "no token unless the caller sets one"
+        );
+
+        let token = CancellationToken::new();
+        let first = CancellationToken::new();
+        let with_token = WriteRequest::builder(limits(2))
+            .item(tag("a", None), PlcValue::Bool(true))
+            .cancel(first.clone())
+            .cancel(token.clone())
+            .item(tag("b", None), PlcValue::Bool(false))
+            .build()
+            .expect("valid batch");
+        let carried = with_token.cancel().expect("token set");
+        assert!(!carried.is_cancelled(), "live token stays live");
+        token.cancel();
+        assert!(carried.is_cancelled(), "the slot shares the caller's flag");
+        assert!(
+            !first.is_cancelled(),
+            "a second call replaced the first token"
+        );
+        assert!(
+            with_token
+                .clone()
+                .cancel()
+                .is_some_and(CancellationToken::is_cancelled),
+            "clones of the request carry the same token"
+        );
+    }
+
+    #[test]
+    fn an_already_cancelled_token_is_retained_for_the_connection_to_reject() {
+        let token = CancellationToken::new();
+        token.cancel();
+        let cancelled = WriteRequest::builder(limits(1))
+            .item(tag("a", None), PlcValue::Bool(true))
+            .cancel(token)
+            .build()
+            .expect("cancelled tokens are not a request error");
+        assert!(
+            cancelled
+                .cancel()
+                .is_some_and(CancellationToken::is_cancelled),
+            "kept as given"
+        );
     }
 }

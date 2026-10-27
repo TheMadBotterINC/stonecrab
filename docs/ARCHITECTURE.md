@@ -312,6 +312,21 @@ classDiagram
     note for RetryPolicy "Applies to reads only. Some registers have read\nside effects, so the budget is per-connection configurable."
 ```
 
+**Implementation note (ADR-0011).** `Driver` and `Connection` are defined in
+`stonecrab-core` as drawn, with these differences. `Connection` is the narrow set `state`,
+`watch_state`, `capabilities`, `limits`, `read`, `write` and `close`; `subscribe`, `browse`
+and `discover` are added later as provided methods returning `Unsupported` (D2, D4), and
+`limits()` exists because the request builders need the item budget. `Driver::parse_address`
+takes a second argument, `&AddressOptions`, and returns `Arc<dyn ProtocolAddress>` (D16).
+`DriverRegistry::parse` returns the driver together with the `ConnectionConfig`;
+`register(&mut self, ..)` is setup-time only and the registry map has no lock. `Endpoint`
+has only `Tcp` and `Custom` variants until the UDP and serial transports exist, and
+`ConnectionConfig` has private fields with accessors and carries the shared
+`address-convention` key as `AddressOptions` instead of an options map. The item budget is
+mandatory: `ResourceLimits.max_items_per_request` is a `NonZeroUsize`, not an `Option`.
+`Capabilities` and `ResourceLimits` are `Copy` and returned by value. `Timeouts.idle` is
+recorded and not enforced at alpha. The diagram is not redrawn.
+
 ### 3.2 Tags, addresses, and values
 
 ```mermaid
@@ -440,6 +455,11 @@ classDiagram
     note for ProtocolAddress "Drivers own parsing and the concrete type. Any is a supertrait,\nso a driver downcasts its own addresses via trait upcasting (no as_any shim)."
     note for RawValue "Escape hatch for diagnosis: the bytes as received,\nwith the ordering the driver used to interpret them."
 ```
+
+**Implementation note (ADR-0011).** `Tag` holds `Arc<dyn ProtocolAddress>`, not a `Box`,
+because `Tag::new` shares the address that `Driver::parse_address` returned and a profile
+reuses one address for several tags. `Tag` also has optional byte and word order fields
+(ADR-0006). The diagram is not redrawn.
 
 ### 3.3 Requests, responses, and errors
 
@@ -662,6 +682,15 @@ classDiagram
     note for PlcError "One error type crate-wide. Connection-level failures and\nper-tag device exceptions are never conflated."
 ```
 
+**Implementation note (ADR-0011).** Request builders are limits-bound:
+`ReadRequest::builder(limits)` and `WriteRequest::builder(limits)` take the connection's
+`ResourceLimits`, whose item budget is mandatory, and `cancel(token)` fills the cancel
+slot (S11a). `Diagnostics` fields are optional (`operation`, `connection_state`,
+`latency` and `category` are `Option`, `retries` is a count) and a core validation error
+does not invent them; a connection populates every one at the failure site. The
+`Subscribe*`, `Browse*` and `Discover*` types, `QueuePolicy` and `LossCounters` do not
+exist at alpha. The diagram is not redrawn.
+
 ### 3.4 Time and cancellation primitives
 
 ```mermaid
@@ -710,6 +739,14 @@ classDiagram
     note for Clock "Monotonic for deadlines and freshness; wall clock only\nfor receipt timestamps. The testkit FakeClock implements this."
     note for StaleTracker "A missed acquisition marks the retained value Stale.\nIt never republishes the previous value as a new Good reading."
 ```
+
+**Implementation note (ADR-0011).** `Deadline::after(now, duration)` takes the clock
+reading explicitly, with no hidden clock: a connection computes the default deadline from
+its own `Clock`, `Deadline::after(clock.now(), timeouts.request)` (ADR-0007). `SystemClock`
+is not in `stonecrab-core`: core has no timer, so it lives in `stonecrab-transport`, and the
+Tokio-free implementations are `FakeClock` in the testkit and `RealtimeClock` in
+`stonecrab-driver-sim`. `StaleTracker` does not exist at alpha. The diagram is not
+redrawn.
 
 ---
 

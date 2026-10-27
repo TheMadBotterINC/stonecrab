@@ -1,5 +1,5 @@
-//! The simulated device: named tags, a ramp rule, a seeded RANDOM source and the
-//! settings S11b-2's connection reads.
+//! The simulated device: named tags, a ramp rule, a seeded RANDOM source, a SINK counter
+//! and the settings the simulator connection reads.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -61,7 +61,7 @@ fn advance(value: &PlcValue, step: &PlcValue) -> Option<PlcValue> {
 ///
 /// `value` is the value the next served read returns. A tag made with [`SimTag::new`] is
 /// readable and writable; [`read_only`](Self::read_only) clears `writable`. The fields
-/// are public so S11b-2's write path can store a value; the type is `#[non_exhaustive]`
+/// are public so a test can build the tag it wants; the type is `#[non_exhaustive]`
 /// because the ramp and the counter are private state.
 ///
 /// `Debug` prints the value's type, the flags and whether a ramp or counter is attached,
@@ -88,7 +88,7 @@ pub struct SimTag {
     pub value: PlcValue,
     /// Whether reads are served. A tag that is not readable refuses them.
     pub readable: bool,
-    /// Whether writes are accepted. Enforced by S11b-2's connection, not by the tag.
+    /// Whether writes are accepted. [`SimDevice::write`] enforces it.
     pub writable: bool,
     ramp_step: Option<PlcValue>,
     reads: Option<Arc<AtomicU32>>,
@@ -222,12 +222,13 @@ impl fmt::Debug for SimTag {
 struct DeviceState {
     tags: BTreeMap<String, SimTag>,
     rng: XorShift,
+    sink_writes: u64,
 }
 
 /// A simulated device: named [`SimTag`]s, a seeded `RANDOM` source and the settings the
 /// simulator connection reads.
 ///
-/// The device is shared (`Arc<SimDevice>`) by S11b-2's connection, so every method takes
+/// The device is shared (`Arc<SimDevice>`) by the simulator connections, so every method takes
 /// `&self` and the tag map sits behind a `std::sync::Mutex`. A poisoned lock is
 /// recovered, not propagated: every operation leaves the map consistent before it can
 /// panic, so the data is still valid. At most [`SimDevice::MAX_TAGS`] tags are held.
@@ -235,7 +236,9 @@ struct DeviceState {
 ///
 /// The builder methods [`with_latency`](Self::with_latency),
 /// [`with_max_items`](Self::with_max_items) and [`with_seed`](Self::with_seed) are
-/// stored for S11b-2 (scripted delay, the `Capabilities` report and the `seed=` option).
+/// stored settings that `SimConnection` reads: the per-operation delay, the
+/// `Capabilities` report and the `RANDOM` seed (which `sim://<device>?seed=` replaces
+/// with [`reseed`](Self::reseed) when a connection opens).
 ///
 /// # Examples
 /// ```
@@ -278,6 +281,7 @@ impl SimDevice {
             state: Mutex::new(DeviceState {
                 tags: BTreeMap::new(),
                 rng: XorShift::new(DEFAULT_SEED),
+                sink_writes: 0,
             }),
             latency: Duration::ZERO,
             max_items: None,
@@ -307,14 +311,15 @@ impl SimDevice {
         self
     }
 
-    /// Store the per-operation latency S11b-2 applies through the connection's clock.
+    /// Store the per-operation latency the connection applies through its clock.
     #[must_use]
     pub const fn with_latency(mut self, latency: Duration) -> Self {
         self.latency = latency;
         self
     }
 
-    /// Store the item limit S11b-2 reports as `Capabilities.max_items_per_request`.
+    /// Store the item limit the connection reports as `Capabilities.max_items_per_request`
+    /// and enforces on every request.
     #[must_use]
     pub const fn with_max_items(mut self, max_items: NonZeroUsize) -> Self {
         self.max_items = Some(max_items);
@@ -482,6 +487,104 @@ impl SimDevice {
                 "no tag with that name has been set",
             )),
         }
+    }
+
+    /// Replace `value` of the stored tag `name`, the way a write to a `STATE` address does.
+    ///
+    /// The new value must have the stored value's type exactly (no widening). A ramp keeps
+    /// stepping from the new value. The check and the replacement happen under one lock, so
+    /// a concurrent reader sees either the old value or the new one.
+    ///
+    /// # Errors
+    /// Returns [`ErrorKind::InvalidAddress`] when no tag has that name,
+    /// [`ErrorKind::Unsupported`] for [`Operation::Write`] when the tag is not writable, and
+    /// [`ErrorKind::InvalidConfig`] when `value` has another type than the stored value. A
+    /// refused write changes nothing.
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab_core::{ErrorKind, PlcValue};
+    /// use stonecrab_driver_sim::{SimDevice, SimTag};
+    ///
+    /// let device = SimDevice::new();
+    /// device.set("setpoint", SimTag::new(PlcValue::I16(20)))?;
+    /// device.write("setpoint", PlcValue::I16(25))?;
+    /// assert_eq!(device.serve_read("setpoint")?, PlcValue::I16(25));
+    /// let wrong = device.write("setpoint", PlcValue::U16(1));
+    /// assert_eq!(wrong.map_err(|e| e.kind()), Err(ErrorKind::InvalidConfig));
+    /// # Ok::<(), stonecrab_core::PlcError>(())
+    /// ```
+    ///
+    /// # Compatibility: docs/parity/sim.md#SIM-DEVICE-MODEL
+    /// Stonecrab-owned; no upstream behavior is claimed.
+    pub fn write(&self, name: &str, value: PlcValue) -> Result<()> {
+        match self.lock().tags.get_mut(name) {
+            None => Err(PlcError::new(
+                ErrorKind::InvalidAddress,
+                "no tag with that name has been set",
+            )),
+            Some(tag) if !tag.writable => Err(PlcError::new(
+                ErrorKind::Unsupported(Operation::Write),
+                "the tag is not writable",
+            )),
+            Some(tag) if tag.value.value_type() != value.value_type() => Err(PlcError::new(
+                ErrorKind::InvalidConfig,
+                "the value's type differs from the stored tag's type",
+            )),
+            Some(tag) => {
+                tag.value = value;
+                Ok(())
+            }
+        }
+    }
+
+    /// Count one write to a `SINK` address. The value is discarded; only the count stays.
+    ///
+    /// `SimConnection` calls this for every confirmed `SINK` write. The count saturates at
+    /// `u64::MAX`.
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab_driver_sim::SimDevice;
+    ///
+    /// let device = SimDevice::new();
+    /// device.record_sink_write();
+    /// assert_eq!(device.sink_writes(), 1);
+    /// ```
+    pub fn record_sink_write(&self) {
+        let mut state = self.lock();
+        state.sink_writes = state.sink_writes.saturating_add(1);
+    }
+
+    /// How many writes to `SINK` addresses have been counted and discarded.
+    #[must_use]
+    pub fn sink_writes(&self) -> u64 {
+        self.lock().sink_writes
+    }
+
+    /// Restart the `RANDOM` source from `seed`, as [`with_seed`](Self::with_seed) does at
+    /// construction.
+    ///
+    /// A zero seed is replaced by the same fixed nonzero constant. The generator belongs to
+    /// the device, not to a connection, so every connection to the device shares it;
+    /// opening `sim://<device>?seed=<n>` reseeds it. [`seed`](Self::seed) keeps reporting
+    /// the seed given at construction.
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab_core::PlcValueType;
+    /// use stonecrab_driver_sim::SimDevice;
+    ///
+    /// let (a, b) = (SimDevice::new().with_seed(3), SimDevice::new());
+    /// b.reseed(3);
+    /// assert_eq!(a.random(PlcValueType::U64)?, b.random(PlcValueType::U64)?);
+    /// # Ok::<(), stonecrab_core::PlcError>(())
+    /// ```
+    ///
+    /// # Compatibility: docs/parity/sim.md#SIM-RANDOM-SEEDED
+    /// Upstream draws from `SecureRandom`, which cannot be seeded; seeding is a divergence.
+    pub fn reseed(&self, seed: u64) {
+        self.lock().rng = XorShift::new(seed);
     }
 
     /// The next `RANDOM` value of `value_type`, from the device's seeded generator.
@@ -1114,6 +1217,115 @@ mod tests {
         let tag = format!("{:?}", device.get("t"));
         assert!(!tag.contains(secret), "tag Debug hides the value: {tag}");
         assert!(tag.contains("String"), "but shows its type: {tag}");
+    }
+
+    // covers: SIM-DEVICE-MODEL (write)
+    #[test]
+    fn write_replaces_a_writable_value_of_the_same_type() {
+        let device = SimDevice::new();
+        device
+            .set("t", SimTag::new(PlcValue::I16(1)))
+            .expect("set t");
+        device.write("t", PlcValue::I16(7)).expect("same type");
+        assert_eq!(
+            device.serve_read("t").ok(),
+            Some(PlcValue::I16(7)),
+            "replaced"
+        );
+        device
+            .ramp("r", PlcValue::U8(0), PlcValue::U8(2))
+            .expect("ramp");
+        device
+            .write("r", PlcValue::U8(10))
+            .expect("ramp is writable");
+        assert_eq!(
+            device.serve_read("r").ok(),
+            Some(PlcValue::U8(10)),
+            "new start"
+        );
+        assert_eq!(
+            device.serve_read("r").ok(),
+            Some(PlcValue::U8(12)),
+            "keeps stepping"
+        );
+    }
+
+    // covers: SIM-DEVICE-MODEL (write refusals change nothing)
+    #[test]
+    fn write_refusals_are_typed_and_change_nothing() {
+        let device = SimDevice::new();
+        device
+            .set("t", SimTag::new(PlcValue::I16(1)))
+            .expect("set t");
+        device
+            .set("ro", SimTag::new(PlcValue::I16(2)).read_only())
+            .expect("set ro");
+        assert_eq!(
+            kind(device.write("missing", PlcValue::I16(3))),
+            Some(ErrorKind::InvalidAddress),
+            "unset name"
+        );
+        assert_eq!(
+            kind(device.write("ro", PlcValue::I16(3))),
+            Some(ErrorKind::Unsupported(Operation::Write)),
+            "not writable"
+        );
+        assert_eq!(
+            kind(device.write("t", PlcValue::I32(3))),
+            Some(ErrorKind::InvalidConfig),
+            "other type"
+        );
+        assert_eq!(
+            device.serve_read("t").ok(),
+            Some(PlcValue::I16(1)),
+            "t unchanged"
+        );
+        assert_eq!(
+            device.serve_read("ro").ok(),
+            Some(PlcValue::I16(2)),
+            "ro unchanged"
+        );
+    }
+
+    // covers: SIM-DEVICE-MODEL (SINK counter)
+    #[test]
+    fn sink_writes_are_counted() {
+        let device = SimDevice::new();
+        assert_eq!(device.sink_writes(), 0, "none yet");
+        device.record_sink_write();
+        device.record_sink_write();
+        assert_eq!(device.sink_writes(), 2, "two counted");
+        device.lock().sink_writes = u64::MAX;
+        device.record_sink_write();
+        assert_eq!(device.sink_writes(), u64::MAX, "the count saturates");
+    }
+
+    // covers: SIM-RANDOM-SEEDED (reseed)
+    #[test]
+    fn reseed_restarts_the_random_source_without_changing_the_reported_seed() {
+        let expected = SimDevice::new()
+            .with_seed(11)
+            .random(PlcValueType::U64)
+            .ok();
+        let device = SimDevice::new();
+        let before = device.random(PlcValueType::U64).ok();
+        device.reseed(11);
+        assert_eq!(
+            device.random(PlcValueType::U64).ok(),
+            expected,
+            "same sequence as a device built with the seed"
+        );
+        assert_ne!(before, expected, "the default sequence differs");
+        assert_eq!(
+            device.seed(),
+            DEFAULT_SEED,
+            "seed() is the construction seed"
+        );
+        device.reseed(0);
+        assert!(
+            device.random(PlcValueType::U64).is_ok(),
+            "zero reseeds to the constant"
+        );
     }
 
     // covers: SIM-DEVICE-MODEL (poison recovery)

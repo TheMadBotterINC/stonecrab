@@ -1,13 +1,13 @@
 # 0012: Simulator driver crate and tracing adoption
 ## Status
-Proposed, drafted in slice S11b-1 on 2026-10-27; accepted when S11b-2 lands `SimDriver`
-and `SimConnection`. It adds the new crate `stonecrab-driver-sim` (CODING_STANDARDS 12.6
-requires an ADR for a new crate), adopts `tracing` workspace-wide (section 15 and
-section 14), and records decisions D9 and D23 of docs/ALPHA_PLAN.md. It builds on ADR-0005
-(coverage tiers), ADR-0007 (the `Clock` trait and where its implementations live) and
-ADR-0013 (how a dependency is adopted). Only data types exist when this draft is written:
-the `Driver` and `Connection` traits are slice S11a, so ADR-0001's trait rule is
-untouched. S11b-2 adds its changes to the Compliance section rather than replacing it.
+Accepted by the sole maintainer on 2026-10-27, when slice S11b-2 landed `SimDriver` and
+`SimConnection` (in one commit with S11a, ADR-0011). It was proposed in slice S11b-1 on
+2026-10-27. It adds the new crate `stonecrab-driver-sim` (CODING_STANDARDS 12.6 requires an
+ADR for a new crate), adopts `tracing` workspace-wide (section 15 and section 14), and
+records decisions D9 and D23 of docs/ALPHA_PLAN.md. It builds on ADR-0005 (coverage
+tiers), ADR-0007 (the `Clock` trait and where its implementations live), ADR-0011 (the
+`Driver` and `Connection` traits) and ADR-0013 (how a dependency is adopted). Decisions 9
+to 14 below are the S11b-2 addendum; decisions 1 to 8 are unchanged.
 
 ## Context
 The common driver suite, the sensor profiles and the facade's `sim` feature need a driver
@@ -137,6 +137,81 @@ them, and the first to add `tracing`, whose `std` feature reaches a crate that
    job list it; `scripts/coverage-gate.sh` has the row `crates/stonecrab-driver-sim|100`;
    `scripts/lint-attrs.sh` already permitted the four promotions.
 
+9. **`SimDriver` and the connection string (S11b-2).** Scheme `sim`; `SimDriver::new()`
+   uses `RealtimeClock`, `with_clock(Arc<dyn Clock>)` takes the testkit's `FakeClock`,
+   `with_device(name, SimDevice)` registers a device (a name is 1 to 64 ASCII letters,
+   digits, `-`, `_` or `.`; a duplicate is `InvalidConfig`) and `device(name)` returns the
+   shared handle. `parse_config` reads `sim://<device>?latency-ms=<n>&seed=<u64>` through
+   `ConnectionUri`: the authority must name a registered device, `latency-ms` (at most one
+   hour) and `seed` are optional, `address-convention` is accepted because every driver
+   accepts that shared key and is ignored, and any other key, a transport code, another
+   scheme or an unknown device is `InvalidConfig`. Upstream's `simulated:<name>` form is
+   not aliased. The configuration carries `Endpoint::Custom` holding the device name, with
+   `?latency-ms=..&seed=..` appended only when an option was given, because the
+   configuration has no other place to carry them and `connect` reads the text back with
+   `ConnectionUri`. Timeouts, retry policy and limits are the defaults; the access policy
+   is `ReadWrite`, the one departure from the read-only default (ADR-0008), because a
+   simulated device has nothing to protect. `parse_address` parses `SimAddress` and
+   ignores `AddressOptions.convention`. `SimDriver::capabilities()` is read and write true,
+   concurrency 1, subscribe `Unsupported`, no item limit (the driver does not know which
+   device a connection will open); `SimConnection::capabilities()` adds the device's
+   `max_items`.
+10. **Lifecycle and the single slot.** `SimConnection` holds the clock, the shared device,
+    the configuration's timeouts, retry policy, access policy and limits, and a
+    `StateCell`. The state runs `Disconnected`, `Connecting`, `Connected`, `Closing`,
+    `Closed`; `Failed` stays reserved for the failure script of S12. A single `AtomicBool`
+    enforces `Capabilities.concurrency` 1: a second read or write that starts while one is
+    in flight fails at once with `Backpressure`, before any device access. The queue length
+    is zero, there is no wait queue, and a rejected operation is never retried. A guard
+    releases the flag when the operation's future ends or is dropped.
+11. **Time.** Connect, read, write and close each wait once on the connection's clock for
+    the device latency (the `latency-ms` option, else `SimDevice::with_latency`). The wait
+    is a race between `Clock::sleep_until(min(reply time, deadline))`, the request's
+    cancellation token and a connection-wide shutdown token that `close` cancels; a reply
+    time at or after the deadline waits for the deadline and is `Timeout` (equality means
+    elapsed), a cancelled token is `Cancelled`, and a close during the wait is
+    `Disconnected`, each with no partial response and no device access. A request without
+    a deadline gets `Deadline::after(clock.now(), timeouts.request)` (ADR-0007). `close`
+    waits the latency, at most `timeouts.request`, and always ends in `Closed`. A device is
+    read or changed only after the wait, in one synchronous step, so cancelling or dropping
+    earlier leaves it untouched.
+12. **Reads and writes.** Before any device access: the access policy (writes only, first
+    of all), then each tag's address must be a `SimAddress` with count 1
+    (`InvalidAddress`) and the batch within the device's `max_items` (`ResourceLimit`; the
+    simulator never splits, so `split_into` is 1), then the single slot, then the
+    connection state, token and deadline. `STATE` reads call `SimDevice::serve_read`,
+    `RANDOM` reads call `SimDevice::random`, `SINK` reads are a per-item `Unsupported`
+    error. An unset `STATE` name is a per-item `InvalidAddress` error with
+    `ProtocolStatus::new("sim", 2)`; a tag that is not readable is a per-item
+    `Unsupported(Operation::Read)` error; a stored value whose type differs from its
+    address is a per-item `InvalidConfig` error. `sampled_at` is the clock reading taken per
+    item, `source_time` is `None`, and `ReadResponseBuilder` is constructed after the last
+    sample. A read is retried as a whole under `RetryPolicy` and only for kinds in its
+    retry set, with one shared deadline; the default policy makes one attempt. A write is
+    never retried: `SINK` writes are counted and `Confirmed`, `STATE` writes replace the
+    value of a writable tag (`Confirmed`), and a non-writable tag, an unset name, a
+    mismatched stored type and any `RANDOM` write are `Rejected` with an item error. To
+    support this `SimDevice` gains `write`, `record_sink_write`/`sink_writes` and
+    `reseed` (all `&self`, under the existing lock); `seed=` in the connection string
+    calls `reseed` when the connection becomes `Connected`, so the generator, which is the
+    device's, is restarted for every connection to it.
+13. **Diagnostics and tracing.** Every `PlcError` and `ItemError` the connection produces
+    carries `Diagnostics` with the operation, the connection state at the failure, the
+    elapsed time on the clock, the retries made and a category. The category is
+    `Validation` for a rejection before the exchange (policy, address, limit, backpressure,
+    cancelled token), `Transport` for `Timeout` and `Disconnected`, `Protocol` for what the device refused
+    (per-item errors) and `Internal` for the rest: a response builder that refuses what
+    the connection assembled, and a cancellation while waiting (the slice text lists
+    Transport for Timeout and Disconnected only). Connect, read, write and
+    close open spans `connect`, `read`, `write` and `close` with `scheme`, `endpoint` (the
+    device name), `op` and `request_id`, a per-connection counter from 0 (the connect), drawn eagerly for every span whether or
+    not a subscriber enables it.
+    Events carry counts, never values (CODING_STANDARDS 14.5).
+14. **`SimArea` match arms.** `SimArea` is `#[non_exhaustive]` but is matched inside its
+    own crate, where a wildcard arm is unreachable; the connection names every area.
+    Decision 7's foreign-enum pattern applies to enums of other crates such as
+    `PlcValueType` and `WriteOutcome`.
+
 ## Consequences
 The simulator can be built on tested data types before the traits exist, and the first
 `tracing` dependency in the workspace is audited, wrapped and visible in one place. The
@@ -186,3 +261,35 @@ short and long of the minimal form, control characters), `device::tests::*`,
 `dependencies` job enforce the `once_cell` wrapper; the D23 `cargo tree -i` check is rerun
 by every slice that adds a dependency. `mise run lint-attrs` checks the four promotions.
 `mise run machete` keeps `tracing` honest: it is used by the device's events.
+
+S11b-2 tests: `crates/stonecrab-driver-sim/tests/driver_contract.rs` (through
+`DriverRegistry` on the testkit's `FakeClock`): `registration_lookup_and_listing`,
+`parse_returns_the_driver_and_a_configuration_without_opening_anything`,
+`parse_config_rejects_everything_it_does_not_understand`,
+`connect_rejects_configurations_that_are_not_sim_ones`,
+`parse_address_ignores_the_convention_and_reports_bad_text`,
+`the_driver_advertises_read_and_write_with_one_operation_at_a_time`,
+`device_names_are_validated_and_unique`,
+`the_registry_connects_reads_state_random_and_a_ramp_and_writes_state_and_sink`,
+`connections_to_one_device_share_it_and_a_seed_makes_random_reproducible`,
+`close_moves_through_closing_to_closed_and_is_observed_by_value`,
+`operations_after_close_are_disconnected_and_close_is_idempotent`,
+`close_ends_a_waiting_read_with_disconnected_and_no_device_read`,
+`second_concurrent_read_fails_backpressure_without_device_access`,
+`dropping_a_waiting_operation_releases_the_slot`,
+`a_cancelled_token_before_transmit_is_cancelled_with_no_device_access`,
+`cancelling_while_waiting_ends_the_call_with_cancelled_and_no_partial_response`,
+`an_elapsed_deadline_is_a_timeout_with_no_device_access`,
+`an_absent_deadline_uses_timeouts_request`,
+`a_foreign_address_or_a_multi_element_tag_is_rejected_before_io`,
+`the_device_item_limit_is_advertised_and_enforced`,
+`an_unset_state_name_is_a_per_item_error_with_status_sim_2`,
+`unreadable_write_only_and_mistyped_reads_are_per_item_errors`,
+`a_read_only_policy_rejects_writes_before_any_device_access`,
+`writes_the_device_refuses_are_rejected_per_item_and_change_nothing`,
+`a_read_is_one_attempt_by_default_and_retries_the_whole_request_when_allowed`; the
+lifecycle test `the_lifecycle_runs_through_every_state_in_order` in `src/connection.rs`;
+`tests/spans.rs` `every_operation_opens_a_span_with_a_monotonic_request_id`;
+`tests/readme_matrix.rs` `the_readme_support_table_agrees_with_the_driver_capabilities`
+(the README-versus-`Capabilities` test that S31 reuses); and the new `SimDevice` methods'
+unit tests in `src/device.rs`. Coverage stays at 100% lines for the crate.

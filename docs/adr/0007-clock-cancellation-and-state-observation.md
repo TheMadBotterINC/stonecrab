@@ -1,11 +1,11 @@
 # 0007: Clock, cancellation and state observation
 ## Status
-Proposed, drafted in slice S06 on 2026-10-27; it supersedes the ADR-0003 deferral of
-cancellation only when S11b-2 accepts it, where `SimConnection` first enforces the token
-and the default-deadline rule. Until then the primitives below exist and are tested, and
-no request type carries a cancel slot (that is S11a). It records decisions D9 and D15 of
-docs/ALPHA_PLAN.md and adjusts ARCHITECTURE.md section 3.4, which the S31 reconciliation
-slice updates.
+Accepted by the sole maintainer on 2026-10-27, in slice S11b-2 (landed in one commit with
+S11a, ADR-0011), where `SimConnection` first enforces the token and the default-deadline
+rule. It was proposed in slice S06 on 2026-10-27 and supersedes the ADR-0003 deferral of
+cancellation. S11a added the cancel slots to `ReadRequest` and `WriteRequest`. It records
+decisions D9 and D15 of docs/ALPHA_PLAN.md and adjusts ARCHITECTURE.md section 3.4, which
+the S31 reconciliation slice updates.
 
 ## Context
 ADR-0002 shipped explicit absolute `Deadline`s and no clock, and ADR-0003 deferred
@@ -87,9 +87,10 @@ disallows `std::thread::sleep`, and core has no timer. `async-trait` is banned
   and the task is woken twice, which is harmless.
 - A `StateWatch` whose cell is dropped without a terminal state pends forever; observers
   that must not hang combine it with a deadline or a token.
-- No request type has a cancel slot until S11a, so this slice proves token semantics
-  only, not cancellation of an operation on the wire. Wire behavior (unknown-after-
-  transmit outcomes, resync) is S19 and its tests.
+- S06 proved token semantics only. S11a gave `ReadRequest` and `WriteRequest` a cancel slot
+  and S11b-2 enforces it in the simulator (a cancelled token before the exchange is
+  `Cancelled`; so is a token cancelled while the operation waits). Cancellation of an
+  operation on a real wire (unknown-after-transmit outcomes, resync) is S19 and its tests.
 
 ## Alternatives considered
 - **Re-export `tokio_util::sync::CancellationToken`.** Rejected: it pulls Tokio and
@@ -137,3 +138,18 @@ through the facade. Doctests on every public item compile and run.
 `scripts/coverage-gate.sh` holds core at 100% lines including every `Poll::Pending`
 arm. Enforcement of the token and of the default-deadline rule by a connection is tested
 from S11b-2 onward.
+
+S11b-2 (2026-10-27) enforces both decisions in `SimConnection`, through the registry on
+the testkit's `FakeClock`, in `crates/stonecrab-driver-sim/tests/driver_contract.rs`:
+`an_absent_deadline_uses_timeouts_request` (decision 7: an absent deadline becomes
+`Deadline::after(clock.now(), timeouts.request)`, and an explicit one wins),
+`an_elapsed_deadline_is_a_timeout_with_no_device_access` and
+`a_latency_that_reaches_the_deadline_times_out_when_the_deadline_is_reached` (deadlines
+compare against the connection's clock, equality meaning elapsed),
+`a_cancelled_token_before_transmit_is_cancelled_with_no_device_access` and
+`cancelling_while_waiting_ends_the_call_with_cancelled_and_no_partial_response`
+(decision 4, tokens through `OpFuture`), `connect_waits_the_latency_and_is_bounded_by_the_connect_timeout`
+and `close_is_bounded_by_the_request_timeout`, and
+`the_lifecycle_runs_through_every_state_in_order` in `src/connection.rs` (decision 6, each
+state of a `StateWatch` observed by value). `SimDriver::new()` uses `RealtimeClock`
+(decision 3) and `with_clock` takes the `FakeClock`.

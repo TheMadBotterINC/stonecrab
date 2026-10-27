@@ -15,6 +15,7 @@
 - Re-export `WriteItem`, `WriteRequest`, `WriteRequestBuilder`, `WriteResult`,
   `WriteResponse` and `WriteResponseBuilder` from `stonecrab-core`.
 - Re-export `ConnectionUri` from `stonecrab-core`.
+- Re-export `Driver`, `Connection` and `DriverRegistry` from `stonecrab-core`.
 ### stonecrab-codec 0.1.0
 - Add the crate: `BoundedReader` and `BoundedWriter` with bounds-checked integer, float,
   byte-run and least-significant-bit-first coil reads and writes in an explicit
@@ -24,10 +25,8 @@
 - Lengths are checked against the caller's maximum and the remaining input before any
   allocation or copy; no function panics on any input (ADR-0013).
 ### stonecrab-driver-sim 0.1.0
-- Add the crate: the in-process simulator driver's building blocks, depending on
-  `stonecrab-core` and `tracing` only, Tokio-free, default features empty. There is no
-  `Driver` or `Connection` implementation yet (they arrive with S11a and S11b-2); ADR-0012
-  is proposed.
+- Add the crate: the in-process simulator driver, depending on `stonecrab-core` and
+  `tracing` only, Tokio-free, default features empty (ADR-0012, accepted).
 - Add `RealtimeClock`, a `std`-only `Clock` whose `now()` is `Instant::now()` and whose
   `sleep_until` resolves immediately without moving time.
 - Add `SimAddress` and `SimArea`: the grammar `STATE|RANDOM|SINK/<name>:<type>` with
@@ -38,6 +37,16 @@
   latency and item limit, and a seeded xorshift `RANDOM` source (`SimDevice::with_seed`).
 - Adopt `tracing` 0.1 (`std` only) workspace-wide; `deny.toml` lets only `tracing-core`
   depend on the banned `once_cell`.
+- Add `SimDriver` (scheme `sim`; `sim://<device>?latency-ms=<n>&seed=<u64>`; `new`,
+  `with_clock`, `with_device`, `device`) and `SimConnection`, the `Connection` it opens: the
+  lifecycle `Disconnected`, `Connecting`, `Connected`, `Closing`, `Closed`; reads of
+  `STATE` and `RANDOM` with per-item errors, writes to `STATE` and `SINK`; one operation in
+  flight (a second fails with `Backpressure`); the default-deadline rule, cancellation and
+  deadlines on the injected clock; whole-request read retry under `RetryPolicy`;
+  `Diagnostics` on every error; `connect`, `read`, `write` and `close` spans. The README
+  support table now marks read and write `simulator-tested`, and a test keeps it equal to
+  `SimDriver::capabilities()`.
+- Add `SimDevice::write`, `record_sink_write`, `sink_writes` and `reseed`.
 ### stonecrab-transport 0.1.0
 - Add the crate: the object-safe `Transport` trait (`send`, `recv`, `shutdown`, `peer`,
   `limits`; every call takes a `Deadline`) and `TransportFactory` (both return
@@ -116,11 +125,11 @@
   `Operation` and `PlcValueType` (ADR-0006).
 - Add `OpFuture`, the `Clock` trait (no implementation in core), `CancellationToken` with
   child tokens and `StateCell`/`StateWatch` latest-value connection-state observation,
-  all on `std` only (ADR-0007, proposed).
+  all on `std` only (ADR-0007).
 - Add `ConnectionConfig` (not `Clone`) with its validating builder, `Endpoint`, `Timeouts`,
   `ReconnectPolicy` with pure `next_delay`, `RetryPolicy`, `AccessPolicy` (default
   `ReadOnly`), `Credentials`, and the `AddressOptions` carrier with its builder
-  (ADR-0008). Data only; nothing enforces the policies yet.
+  (ADR-0008). The simulator connection enforces the timeouts, retry and access policies.
 - Add write batch contracts: `WriteItem`, `WriteRequest` with its bounded builder (item
   budget, duplicate identities, value type versus tag hint, deadline) and `WriteResult`,
   `WriteResponse` with its correlating builder, `iter_confirmed`, `iter_rejected` and
@@ -130,6 +139,13 @@
   ordered `options()`; it rejects percent-encoding, credentials in the authority, empty
   or duplicate keys, whitespace and input over 4096 bytes, and `Display` renders the
   canonical text. Covered by the `fuzz_core_connection_string` target.
+- Add the `Driver` and `Connection` traits (object safe, `Send + Sync`; the narrow D2
+  surface) and `DriverRegistry` (`register` takes `&mut self`, duplicate scheme
+  `InvalidConfig`, unknown scheme `Unsupported(Operation::Connect)`, `parse` and `connect`
+  through `ConnectionUri`), and the default-deadline rule they document (ADR-0011).
+- Add `ReadRequestBuilder::cancel`, `ReadRequest::cancel`, `WriteRequestBuilder::cancel`
+  and `WriteRequest::cancel`: an optional `CancellationToken` carried by a request.
+- Accept ADR-0007: the simulator connection enforces the token and the default deadline.
 - Add an unpublished deterministic address fixture testkit for contract tests.
 - Add `FakeClock`, `block_on`, `block_on_with`, `poll_once` and a counting waker to the
   unpublished testkit for deterministic, sleep-free async tests.

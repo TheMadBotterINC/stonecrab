@@ -7,6 +7,8 @@ NOTICE
 README.md
 src/address.rs
 src/clock.rs
+src/connection.rs
 src/device/random.rs
 src/device.rs
+src/driver.rs
 src/lib.rs

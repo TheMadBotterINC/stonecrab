@@ -9,9 +9,11 @@ its own commit; the slice log below records what each one landed.
 
 Stonecrab is an independent native Rust port of Apache PLC4X, prioritizing sensor
 acquisition. It is **not yet a functioning industrial protocol client**.
-The repository currently contains tested, runtime-independent core data contracts, a
-bounded codec crate and the Modbus address model with its text parser. There are no
-connections, device reads, protocol drivers or hardware integrations.
+The repository contains the runtime-independent core contracts and driver boundary, a
+simulator driver that reads and writes an in-process device through `DriverRegistry`,
+a bounded codec crate, the TCP transport with framing, the Modbus address model with its
+parser and batcher, and the validated sensor profile loader. There is no protocol
+driver that reads a real device yet, and no hardware integration.
 
 - Repository: https://github.com/TheMadBotterINC/stonecrab
 - Primary/default branch: **`master`**, locally and remotely.
@@ -102,8 +104,10 @@ ADR-0004 explicitly overrides the original `main` branch policy with `master`.
 - `OpFuture`, `Clock`, `CancellationToken`, `StateCell` / `StateWatch`: the boxed `Send`
   future type, the injectable clock trait (no implementation in core), a hand-written
   cancellation token with child tokens, and latest-value connection-state observation
-  (ADR-0007, proposed). Primitives only: no request carries a cancel slot and no
-  connection enforces a default deadline yet.
+  (ADR-0007, accepted). Both request types carry an optional cancel slot.
+- `Driver`, `Connection`, `DriverRegistry`: the object-safe driver boundary (ADR-0011).
+  The registry extracts the scheme with `ConnectionUri` and hands the text to the
+  driver; an unknown scheme is `Unsupported(Connect)`.
 - `ConnectionUri`: the connection-string grammar `scheme(:transport)?://authority(?k=v...)`
   as validated text parts; no driver semantics, no host resolution.
 - `ConnectionConfig` and builder, `Endpoint`, `Timeouts`, `ReconnectPolicy`,
@@ -165,6 +169,7 @@ gates named were run locally before that commit.
 | S28b | 2026-10-27 | Sensors `SensorProfile::validate` collecting every error (duplicate names, unknown or empty unit, missing byte or word order for wide Modbus types, overlapping status bits, count above one, invalid scale steps, unknown quality references, unknown or missing address convention) and a fixed 19-entry UCUM-style unit table; eleven new `ProfileError` variants; parity row `SENSORS-VALIDATION` implemented | check, coverage, lint-attrs, machete, package |
 | S18 | 2026-10-27 | Transport `Framer` trait and `FramedTransport` (bounded receive buffer, `next_frame`, `send_frame`, `resync` that discards until a boundary and fails `Disconnected` at its deadline); testkit `LengthPrefixedFramer`; parity rows `TRANSPORT-FRAMING`, `TRANSPORT-RESYNC` implemented | check, coverage, lint-attrs, machete, package |
 | S04a (part) | 2026-10-27 | Testkit `fixtures` feature: golden-vector loader (`load_dir`, `load_hex`, `PROVENANCE.toml` schema enforced: every `.hex` listed, every listed vector present), `InteropMap` over the first-party `fixtures/modbus/interop/register-map.toml` authored from the `MB-INTEROP-*` rows; `serde_json` adopted (D23 clean). The upstream vector copies and the NOTICE update wait for prerequisite P4 | check, coverage, lint-attrs, machete, dependencies, package |
+| S11a + S11b-2 | 2026-10-27 | Core `Driver`, `Connection` and `DriverRegistry` traits with cancel slots on both request types (ADR-0011); simulator `SimDriver` and `SimConnection` (scheme `sim`, `sim://<device>?latency-ms=&seed=`, lifecycle through `StateCell`, single in-flight slot with `Backpressure`, latency raced against token and deadline, default-deadline rule, bounded read retry, writes never retried, diagnostics and tracing spans); ADR-0007 and ADR-0012 accepted; parity rows `CORE-DRIVER-TRAIT`, `CORE-CONNECTION-TRAIT`, `CORE-REGISTRY`, `SIM-DRIVER`, `SIM-CONNECTION`; one commit because every commit must pass the 100% core gate | check, coverage, lint-attrs, machete, dependencies, package |
 
 ## Verified evidence and reproduction
 
@@ -194,14 +199,14 @@ Most recent local results for the implementation baseline:
 - Formatting, strict Clippy, nextest, `cargo test` with doctests, documentation with
   warnings denied, no-default-features, lint-attrs, feature powerset and unused-
   dependency checks passed.
-- Per-crate line coverage (ADR-0005): `stonecrab-core` 2704/2704 lines (gate 100%),
-  `stonecrab-codec` 181/181 lines (gate 100%), `stonecrab-modbus` 585/585 lines (gate
-  100%), `stonecrab-transport` 457/459 lines (gate 95%; the uncovered lines are the
+- Per-crate line coverage (ADR-0005): `stonecrab-core` 3514/3514 lines (gate 100%),
+  `stonecrab-codec` 181/181 (gate 100%), `stonecrab-modbus` 755/755 (gate 100%),
+  `stonecrab-driver-sim` 1718/1718 (gate 100%), `stonecrab-sensors` 626/626 (gate
+  100%), `stonecrab-transport` 613/615 (gate 95%; the uncovered lines are the
   real-socket deadline-expiry and resolver-failure arms named in ADR-0014),
-  `stonecrab-driver-sim` 1046/1046 lines (gate 100%), `stonecrab-sensors` 198/198 lines
-  (gate 100%), `stonecrab-testkit` 2137/2147 lines (gate 90%), `stonecrab` n/a (no executable lines). Error paths are not excluded. Region
-  coverage is reported in `target/coverage-summary.txt` and not gated; do not describe
-  it as branch coverage.
+  `stonecrab-testkit` 3102/3118 (gate 90%), `stonecrab` n/a (no executable lines).
+  Error paths are not excluded. Region coverage is reported in
+  `target/coverage-summary.txt` and not gated; do not describe it as branch coverage.
 - Workspace tests and doctests passed on Rust 1.97.1.
 - Cross-compilation checks passed for `aarch64-unknown-linux-gnu` and
   `armv7-unknown-linux-gnueabihf`. These are compile checks, not device tests.
@@ -290,13 +295,13 @@ operation row is implemented yet.
 
 ## Not implemented or not yet evidenced
 
-- Driver registry, driver/connection traits and operational connection lifecycle.
-- Access-policy enforcement and actual read/write I/O (typed configuration exists as
-  data only).
-- Enforcement of cancellation and default deadlines by a connection (`SystemClock` and
-  `FakeClock` exist; `RealtimeClock` lands with the simulator).
-- The simulator `Driver`/`Connection` implementation, scripted acquisition failures and
-  the common driver suite (the simulator's data model and fake time exist).
+- An operational connection lifecycle over a real transport (the simulator has one).
+- Actual read/write I/O against a device (the simulator enforces the access policy and
+  serves in-process reads and writes).
+- Enforcement of cancellation and default deadlines over a real transport (the
+  simulator connection enforces both).
+- Scripted acquisition failures (S12) and the common driver suite (S13); the simulator
+  driver itself exists.
 - Byte/raw/recursive/calendar `PlcValue` variants (deferred by ADR-0006); the byte and
   word order types exist as data only, with no decoder consuming them.
 - Browse, discovery and subscriptions (write batches exist as data).
