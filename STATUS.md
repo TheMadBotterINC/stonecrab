@@ -222,14 +222,16 @@ mise exec -- cargo check --locked --workspace --all-features --target aarch64-un
 mise exec -- cargo check --locked --workspace --all-features --target armv7-unknown-linux-gnueabihf
 ```
 
-Hosted CI for `e7d887e` **completed successfully**:
-https://github.com/TheMadBotterINC/stonecrab/actions/runs/40442677439
-That run covered the earlier test, quality, cross-target, dependency and package
-jobs. The S03/S03b workflow (nextest, coverage gate, dco, features, machete,
-lint-attrs, beta, geiger, semver, fuzz-smoke, scheduled) has not run on GitHub yet; the first push must
-confirm the pinned action commit, the install-action tool names and the dco job on
-both event types. Nothing establishes the fuzz, mutation, soak, interoperability or
-hardware gates yet.
+Hosted CI for `22b379c` **completed successfully** with the full S03/S03b workflow:
+https://github.com/TheMadBotterINC/stonecrab/actions/runs/40491102565
+Green jobs: the six test cells (ubuntu, macOS, Windows on 1.97.1 and 1.99.1), quality
+with the per-crate coverage gate, cross, dependencies, package, dco, features, machete,
+lint-attrs, beta, geiger and fuzz-smoke (four targets). The report-only `semver` job
+fails until the sibling crates exist on crates.io (no baseline) and does not fail the
+run. Two platform fixes were needed on the first hosted runs: the prebuilt cargo-fuzz
+binary defaults to a musl target, so the smoke script passes the host triple; and the
+drop-mid-write transport test is ignored on Windows, where loopback accepts a 32 MiB
+write at once. Nothing establishes the interop, mutation, soak or hardware gates yet.
 
 ## Important implementation and tooling details
 
