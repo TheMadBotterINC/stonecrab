@@ -38,6 +38,8 @@
 - Adopt `tokio` with scoped features (`rt`, `time`, `sync`, `io-util`, and `net` through
   `tcp`); `deny.toml` bans its `full` feature. No task is spawned and nothing runs between
   calls.
+- Test the transport against the unpublished testkit's new `net` feature (`Script`,
+  `ScriptedPeer`, `FakeTransport`, `FakeTransportFactory`); no change to the public API.
 ### stonecrab-modbus 0.1.0
 - Add the crate scaffold: the native Modbus TCP driver crate, depending only on
   `stonecrab-core`, with default features empty. Nothing but address types and their

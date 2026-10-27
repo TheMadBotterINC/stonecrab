@@ -215,7 +215,10 @@ dependencies = [
 name = "stonecrab-testkit"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "stonecrab-core",
+ "stonecrab-transport",
+ "tokio",
 ]
 
 [[package]]

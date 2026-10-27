@@ -18,3 +18,13 @@ workspace = true
 
 [dependencies]
 stonecrab-core.workspace = true
+bytes = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["rt", "net", "time", "sync", "io-util", "macros"] }
+stonecrab-transport = { path = "../../crates/stonecrab-transport", optional = true, default-features = false }
+
+[features]
+# The scripted network doubles: `Script`, `ScriptedPeer`, `FakeTransport` and
+# `FakeTransportFactory`. Off by default so core's dev-dependency on this crate stays
+# Tokio-free (ADR-0014, addendum). Pulls `stonecrab-transport`, which in turn has this
+# crate as a dev-dependency (the same cycle shape as core, ADR-0003).
+net = ["dep:bytes", "dep:tokio", "dep:stonecrab-transport"]

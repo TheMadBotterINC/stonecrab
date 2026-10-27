@@ -31,5 +31,5 @@ bytes.workspace = true
 tokio = { workspace = true, features = ["rt", "time", "sync", "io-util"] }
 
 [dev-dependencies]
-stonecrab-testkit.workspace = true
+stonecrab-testkit = { workspace = true, features = ["net"] }
 tokio = { workspace = true, features = ["macros", "test-util", "rt-multi-thread"] }

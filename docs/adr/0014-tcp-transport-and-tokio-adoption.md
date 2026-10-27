@@ -203,6 +203,35 @@ The write-failure arm in `send` is covered by
 reset to become visible with `TcpStream::readable` before writing so the result does not
 depend on timing.
 
+## Addendum (S17): the testkit `net` feature
+Slice S17 adds the scripted network doubles to `tools/stonecrab-testkit` behind the
+feature `net` (`net = ["dep:bytes", "dep:tokio", "dep:stonecrab-transport"]`), off by
+default so that `stonecrab-core`'s dev-dependency on the testkit stays Tokio-free. The
+transport crate dev-depends on the testkit with `features = ["net"]`, and the testkit
+depends optionally on the transport (`default-features = false`, since the traits need no
+`tcp`): a dev-dependency cycle of the same shape as core and testkit in ADR-0003, which
+Cargo allows because a dev-dependency edge is not part of the normal graph. The testkit
+enables the Tokio features `rt`, `net`, `time`, `sync`, `io-util` and `macros`, and takes
+`bytes` because the `Transport` signatures use `Bytes` and `BytesMut`; none of it reaches
+a published crate's normal graph. Decision 9 above ("no `tokio::spawn`") holds for the
+published crates: the one sanctioned `tokio::spawn` in the workspace is in the testkit's
+`ScriptedPeer`, which owns the `JoinHandle`, joins it in `close()`, aborts it on drop and
+carries `#[expect(clippy::disallowed_methods, reason = ...)]` naming itself as owner
+(CODING_STANDARDS 8.7); its stop signal is a one-slot `oneshot` channel. Loopback tests on
+`ScriptedPeer` keep to bytes (decision 14): its `Delay` and `LateReply` sleeps are capped
+at `MAX_PEER_DELAY` (200 ms), and timing is tested on `FakeTransport` and
+`FakeTransportFactory` with `FakeClock`. The transport's loopback tests whose subject is
+bytes (fragmented and coalesced delivery, peer close mid-frame, buffer bound, free-space
+reads, send order, frame limit, elapsed deadlines, dropped `recv` and the worker-thread
+echo) run on `ScriptedPeer`. Five tests
+stay on raw sockets because a script cannot express them: the refused connect
+(`connecting_to_a_closed_loopback_port_is_disconnected_before_the_deadline`, needs a
+dropped listener), `the_opened_transport_reports_its_peer_and_limits` (no traffic),
+`a_connection_reset_surfaces_as_disconnected` (needs `SO_LINGER` 0),
+`shutdown_completes_tells_the_peer_and_closes_the_transport` (observes the half-close on
+the accepted socket) and `a_send_cut_short_poisons_the_transport` (needs a peer that
+never reads).
+
 ## Alternatives considered
 - **`async-std` or `smol`.** Rejected: CODING_STANDARDS 15.8 names Tokio as the sanctioned
   runtime, the later OPC UA and TLS crates in the ecosystem assume it, and a second

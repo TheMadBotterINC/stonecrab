@@ -15,9 +15,9 @@ mod tests {
     use stonecrab_core::{
         Deadline, Endpoint, ErrorKind, Operation, PlcError, ResourceLimits, Result,
     };
-    use stonecrab_testkit::poll_once;
+    use stonecrab_testkit::{Script, ScriptedPeer, Step, poll_once};
     use stonecrab_transport::{TcpFactory, Transport, TransportFactory};
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::AsyncReadExt;
     use tokio::net::{TcpListener, TcpStream};
     use tokio::task::JoinSet;
 
@@ -49,6 +49,19 @@ mod tests {
             .expect("open against a listening socket");
         let (device, _) = listener.accept().await.expect("accept");
         (transport, device)
+    }
+
+    /// A transport opened against a `ScriptedPeer` that runs `script` on the connection.
+    async fn connected_to_script(
+        limits: ResourceLimits,
+        script: Script,
+    ) -> (Box<dyn Transport>, ScriptedPeer) {
+        let peer = ScriptedPeer::spawn(script).expect("spawn the scripted peer");
+        let transport = TcpFactory::default()
+            .open(&peer.endpoint(), limits, deadline())
+            .await
+            .expect("open against the scripted peer");
+        (transport, peer)
     }
 
     /// Receive until `buffer` holds at least `want` bytes; returns the size of each read.
@@ -123,21 +136,33 @@ mod tests {
     // covers: SPEC mandatory-failure-cases / F2 transport (fragmented delivery)
     #[tokio::test]
     async fn a_frame_written_in_fragments_accumulates_across_recv_calls() {
-        let (mut transport, mut device) = connected(limits(64, 128)).await;
+        // The peer waits for a "next" byte before each fragment, so every fragment is
+        // read before the following one is written.
+        let script = Script::strict(vec![
+            Step::Expect(b"go".to_vec()),
+            Step::ReplyFragmented(vec![b"012".to_vec()]),
+            Step::Expect(b"n".to_vec()),
+            Step::ReplyFragmented(vec![b"345".to_vec()]),
+            Step::Expect(b"n".to_vec()),
+            Step::ReplyFragmented(vec![b"6789".to_vec()]),
+        ]);
+        let (mut transport, peer) = connected_to_script(limits(64, 128), script).await;
         let frame = b"0123456789";
         let mut buffer = BytesMut::new();
         let mut received = 0;
-        for fragment in [&frame[..3], &frame[3..6], &frame[6..]] {
-            device.write_all(fragment).await.expect("write fragment");
-            device.flush().await.expect("flush");
-            received += fragment.len();
-            tokio::task::yield_now().await;
+        for (index, size) in [3_usize, 3, 4].into_iter().enumerate() {
+            let request: &'static [u8] = if index == 0 { b"go" } else { b"n" };
+            transport
+                .send(Bytes::from_static(request), deadline())
+                .await
+                .expect("send");
+            received += size;
             let reads = recv_until(transport.as_mut(), &mut buffer, received)
                 .await
                 .expect("recv");
             assert_eq!(
                 reads.iter().sum::<usize>(),
-                fragment.len(),
+                size,
                 "bytes added by this fragment"
             );
             assert_eq!(buffer.len(), received, "buffer holds everything so far");
@@ -147,16 +172,27 @@ mod tests {
             frame,
             "fragments joined into the original frame"
         );
+        let report = peer.close().await.expect("close the peer");
+        assert!(
+            report.mismatches.is_empty(),
+            "the peer saw what it expected"
+        );
     }
 
     // covers: SPEC mandatory-failure-cases / F2 transport (coalesced delivery)
     #[tokio::test]
     async fn two_frames_written_together_arrive_in_one_recv() {
-        let (mut transport, mut device) = connected(limits(64, 128)).await;
-        device
-            .write_all(b"first-frame|second-frame")
+        let script = Script::strict(vec![
+            Step::Expect(b"go".to_vec()),
+            Step::ReplyCoalescedWithNext,
+            Step::Reply(b"first-frame|".to_vec()),
+            Step::Reply(b"second-frame".to_vec()),
+        ]);
+        let (mut transport, peer) = connected_to_script(limits(64, 128), script).await;
+        transport
+            .send(Bytes::from_static(b"go"), deadline())
             .await
-            .expect("one write");
+            .expect("send");
         let mut buffer = BytesMut::new();
         let read = transport.recv(&mut buffer, deadline()).await.expect("recv");
         assert_eq!(read, 24, "a single recv returned both frames");
@@ -165,17 +201,17 @@ mod tests {
             b"first-frame|second-frame",
             "both frames present"
         );
+        peer.close().await.expect("close the peer");
     }
 
     // covers: SPEC mandatory-failure-cases / F2 transport (peer close mid-frame)
     #[tokio::test]
     async fn peer_close_mid_frame_reads_zero_then_every_call_is_disconnected() {
-        let (mut transport, mut device) = connected(limits(64, 128)).await;
-        device
-            .write_all(b"half a fra")
-            .await
-            .expect("partial frame");
-        drop(device);
+        let script = Script::new(vec![
+            Step::CloseAt(10),
+            Step::Reply(b"half a frame, cut short".to_vec()),
+        ]);
+        let (mut transport, peer) = connected_to_script(limits(64, 128), script).await;
         let mut buffer = BytesMut::new();
         recv_until(transport.as_mut(), &mut buffer, 10)
             .await
@@ -197,6 +233,8 @@ mod tests {
         assert_eq!(error.kind(), ErrorKind::Disconnected, "recv after close");
         let error = expect_err(transport.send(Bytes::from_static(b"x"), deadline())).await;
         assert_eq!(error.kind(), ErrorKind::Disconnected, "send after close");
+        let report = peer.close().await.expect("close the peer");
+        assert!(report.closed, "the script closed the connection");
     }
 
     #[tokio::test]
@@ -218,8 +256,8 @@ mod tests {
     // covers: SPEC mandatory-failure-cases / F2 transport (buffer bound)
     #[tokio::test]
     async fn recv_refuses_a_full_buffer_without_reading() {
-        let (mut transport, mut device) = connected(limits(4, 8)).await;
-        device.write_all(b"ABCD").await.expect("write");
+        let script = Script::new(vec![Step::Reply(b"ABCD".to_vec())]);
+        let (mut transport, peer) = connected_to_script(limits(4, 8), script).await;
         let mut full = BytesMut::from(&b"12345678"[..]);
         let error = expect_err(transport.recv(&mut full, deadline())).await;
         assert_eq!(
@@ -244,12 +282,13 @@ mod tests {
             (4, &b"ABCD"[..]),
             "the refused calls consumed nothing"
         );
+        peer.close().await.expect("close the peer");
     }
 
     #[tokio::test]
     async fn recv_reads_no_more_than_the_free_space() {
-        let (mut transport, mut device) = connected(limits(4, 8)).await;
-        device.write_all(b"ABCDEFGHIJKL").await.expect("write");
+        let script = Script::new(vec![Step::Reply(b"ABCDEFGHIJKL".to_vec())]);
+        let (mut transport, peer) = connected_to_script(limits(4, 8), script).await;
         let mut buffer = BytesMut::from(&b"12345"[..]);
         let mut total = 0;
         while total < 3 {
@@ -267,12 +306,17 @@ mod tests {
             }
         }
         assert_eq!(rest, 9, "the other bytes were still on the socket");
+        peer.close().await.expect("close the peer");
     }
 
     // covers: SPEC mandatory-failure-cases / F2 transport (frame bound on send)
     #[tokio::test]
     async fn send_refuses_a_frame_over_the_limit_and_sends_nothing() {
-        let (mut transport, mut device) = connected(limits(4, 8)).await;
+        let script = Script::strict(vec![
+            Step::Expect(b"1234".to_vec()),
+            Step::Reply(b"ok".to_vec()),
+        ]);
+        let (mut transport, peer) = connected_to_script(limits(4, 8), script).await;
         let error = expect_err(transport.send(Bytes::from_static(b"12345"), deadline())).await;
         assert_eq!(
             error.kind(),
@@ -283,14 +327,28 @@ mod tests {
             .send(Bytes::from_static(b"1234"), deadline())
             .await
             .expect("frame at the limit");
-        let mut seen = [0_u8; 4];
-        device.read_exact(&mut seen).await.expect("read");
-        assert_eq!(&seen, b"1234", "the refused frame never reached the wire");
+        let mut buffer = BytesMut::new();
+        recv_until(transport.as_mut(), &mut buffer, 2)
+            .await
+            .expect("the peer answers once it has the frame");
+        let report = peer.close().await.expect("close the peer");
+        assert_eq!(
+            report.received, b"1234",
+            "the refused frame never reached the wire"
+        );
+        assert!(
+            report.mismatches.is_empty(),
+            "the peer saw what it expected"
+        );
     }
 
     #[tokio::test]
     async fn send_delivers_the_bytes_in_order() {
-        let (mut transport, mut device) = connected(limits(64, 128)).await;
+        let script = Script::strict(vec![
+            Step::Expect(b"onetwo".to_vec()),
+            Step::Reply(b"ok".to_vec()),
+        ]);
+        let (mut transport, peer) = connected_to_script(limits(64, 128), script).await;
         transport
             .send(Bytes::from_static(b"one"), deadline())
             .await
@@ -303,9 +361,16 @@ mod tests {
             .send(Bytes::from_static(b"two"), deadline())
             .await
             .expect("second");
-        let mut seen = [0_u8; 6];
-        device.read_exact(&mut seen).await.expect("read");
-        assert_eq!(&seen, b"onetwo", "bytes arrive in order");
+        let mut buffer = BytesMut::new();
+        recv_until(transport.as_mut(), &mut buffer, 2)
+            .await
+            .expect("the peer answers once it has every byte");
+        let report = peer.close().await.expect("close the peer");
+        assert_eq!(report.received, b"onetwo", "bytes arrive in order");
+        assert!(
+            report.mismatches.is_empty(),
+            "the peer saw what it expected"
+        );
     }
 
     #[tokio::test]
@@ -337,7 +402,11 @@ mod tests {
     // covers: SPEC mandatory-failure-cases / F2 transport (elapsed deadline)
     #[tokio::test]
     async fn an_elapsed_deadline_fails_with_timeout_before_any_io() {
-        let (mut transport, mut device) = connected(limits(64, 128)).await;
+        let script = Script::strict(vec![
+            Step::Expect(b"ok".to_vec()),
+            Step::Reply(b"back".to_vec()),
+        ]);
+        let (mut transport, peer) = connected_to_script(limits(64, 128), script).await;
         let elapsed = Deadline::at(Instant::now());
 
         let error = expect_err(transport.send(Bytes::from_static(b"late"), elapsed)).await;
@@ -359,32 +428,38 @@ mod tests {
             .send(Bytes::from_static(b"ok"), deadline())
             .await
             .expect("still usable");
-        let mut seen = [0_u8; 2];
-        device.read_exact(&mut seen).await.expect("read");
-        assert_eq!(&seen, b"ok", "nothing but the later frame was sent");
-        device.write_all(b"back").await.expect("write");
-        let read = transport.recv(&mut buffer, deadline()).await.expect("recv");
-        assert_eq!(read, 4, "recv still works and nothing was consumed");
+        recv_until(transport.as_mut(), &mut buffer, 4)
+            .await
+            .expect("recv still works and nothing was consumed");
+        assert_eq!(&buffer[..], b"back", "the peer's reply");
+        let report = peer.close().await.expect("close the peer");
+        assert_eq!(
+            report.received, b"ok",
+            "nothing but the later frame was sent"
+        );
     }
 
     #[tokio::test]
     async fn a_dropped_recv_loses_nothing() {
-        let (mut transport, mut device) = connected(limits(64, 128)).await;
+        let script = Script::strict(vec![
+            Step::Expect(b"go".to_vec()),
+            Step::Reply(b"data".to_vec()),
+        ]);
+        let (mut transport, peer) = connected_to_script(limits(64, 128), script).await;
         let mut buffer = BytesMut::new();
         {
             let mut pending = transport.recv(&mut buffer, deadline());
             assert!(poll_once(&mut pending).is_pending(), "nothing to read yet");
         }
-        device.write_all(b"data").await.expect("write");
-        let read = transport
-            .recv(&mut buffer, deadline())
+        transport
+            .send(Bytes::from_static(b"go"), deadline())
+            .await
+            .expect("send");
+        recv_until(transport.as_mut(), &mut buffer, 4)
             .await
             .expect("recv after a cancelled one");
-        assert_eq!(
-            (read, &buffer[..]),
-            (4, &b"data"[..]),
-            "the transport stayed usable"
-        );
+        assert_eq!(&buffer[..], b"data", "the transport stayed usable");
+        peer.close().await.expect("close the peer");
     }
 
     // covers: SPEC mandatory-failure-cases / F4 cancellation (send is not cancel-safe)
@@ -418,26 +493,32 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_boxed_transport_can_be_driven_from_another_worker_thread() {
-        let (mut transport, mut device) = connected(limits(64, 128)).await;
+        let script = Script::strict(vec![
+            Step::Reply(b"echo".to_vec()),
+            Step::Expect(b"echo".to_vec()),
+            Step::Reply(b"done".to_vec()),
+        ]);
+        let (mut transport, peer) = connected_to_script(limits(64, 128), script).await;
         let mut tasks = JoinSet::new();
         tasks.spawn(async move {
             let mut buffer = BytesMut::new();
-            transport.recv(&mut buffer, deadline()).await?;
-            transport.send(buffer.freeze(), deadline()).await?;
-            transport.shutdown(deadline()).await
+            recv_until(transport.as_mut(), &mut buffer, 4).await?;
+            transport.send(buffer.split().freeze(), deadline()).await?;
+            recv_until(transport.as_mut(), &mut buffer, 4).await?;
+            transport.shutdown(deadline()).await?;
+            Ok::<_, PlcError>(buffer)
         });
-        device.write_all(b"echo").await.expect("write");
-        let mut seen = Vec::new();
-        device
-            .read_to_end(&mut seen)
-            .await
-            .expect("read until the transport shuts down");
-        assert_eq!(seen, b"echo", "the task echoed the bytes");
         let finished = tasks
             .join_next()
             .await
             .expect("one task")
             .expect("task joined");
-        finished.expect("echo task succeeded");
+        assert_eq!(
+            &finished.expect("task succeeded")[..],
+            b"done",
+            "peer's last word"
+        );
+        let report = peer.close().await.expect("close the peer");
+        assert_eq!(report.received, b"echo", "the task echoed the bytes");
     }
 }
