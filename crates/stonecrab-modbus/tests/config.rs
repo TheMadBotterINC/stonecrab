@@ -847,4 +847,52 @@ mod tests {
             "no control characters: {message}"
         );
     }
+
+    // covers: CONTRIBUTING "Fuzz findings" / regression for fuzz artifact crash-d69b53f6: an
+    // unknown key with non-ASCII text is named in the message (shortened), which the first
+    // harness wrongly treated as an echo of the connection string; the authority is not
+    // repeated. The input is kept as the corpus seed `regression_unknown_key_non_ascii`.
+    #[test]
+    fn fuzz_modbus_connection_string_d69b53f6() {
+        let text = "modbus-tcp://0?tcw\u{3e4}/@9c=a";
+        let error = ModbusTcpDriver::new()
+            .parse_config(text)
+            .expect_err("an unknown key");
+        assert_eq!(error.kind(), ErrorKind::InvalidConfig, "kind");
+        let message = error.to_string();
+        assert!(
+            message.contains("unknown connection parameter"),
+            "names the problem: {message}"
+        );
+        assert!(
+            !message.chars().any(char::is_control),
+            "no control characters: {message}"
+        );
+        assert!(
+            !message.contains("//0?"),
+            "the authority is not repeated: {message}"
+        );
+    }
+
+    // covers: CONTRIBUTING "Fuzz findings" / regression for fuzz artifact crash-fa68d98a: a value
+    // that also occurs inside an unknown key surfaces through the key echo, which the harness
+    // wrongly read as a value echo; the library names the key and nothing else. The input is
+    // kept as the corpus seed `regression_value_inside_key`.
+    #[test]
+    fn fuzz_modbus_connection_string_fa68d98a() {
+        let text = "modbus-tcp://10.92..110?pinder-agdsso\u{4e8}\u{4e8}=o\u{4e8}";
+        let error = ModbusTcpDriver::new()
+            .parse_config(text)
+            .expect_err("an unknown key");
+        assert_eq!(error.kind(), ErrorKind::InvalidConfig, "kind");
+        let message = error.to_string();
+        assert!(
+            message.contains("unknown connection parameter"),
+            "names the problem: {message}"
+        );
+        assert!(
+            !message.contains("10.92..110"),
+            "the authority is not repeated: {message}"
+        );
+    }
 }
