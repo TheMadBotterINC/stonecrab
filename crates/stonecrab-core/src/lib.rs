@@ -20,6 +20,7 @@ mod response;
 mod secret;
 mod state;
 mod tag;
+mod uri;
 mod value;
 mod write_request;
 mod write_response;
@@ -43,6 +44,7 @@ pub use response::{ItemError, ProtocolStatus, ReadItem, UnknownReason, WriteOutc
 pub use secret::Secret;
 pub use state::{StateCell, StateWatch};
 pub use tag::{ProtocolAddress, Tag, TagId};
+pub use uri::ConnectionUri;
 pub use value::{PlcValue, PlcValueType};
 pub use write_request::{WriteItem, WriteRequest, WriteRequestBuilder};
 pub use write_response::{WriteResponse, WriteResponseBuilder, WriteResult};

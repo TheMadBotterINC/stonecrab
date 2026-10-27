@@ -35,4 +35,11 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "fuzz_core_connection_string"
+path = "fuzz_targets/fuzz_core_connection_string.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]

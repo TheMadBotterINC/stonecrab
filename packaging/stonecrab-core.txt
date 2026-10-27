@@ -22,6 +22,7 @@ src/response.rs
 src/secret.rs
 src/state.rs
 src/tag.rs
+src/uri.rs
 src/value.rs
 src/write_request.rs
 src/write_response.rs

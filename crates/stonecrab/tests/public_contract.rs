@@ -9,13 +9,13 @@ mod tests {
     use stonecrab::{
         AccessPolicy, AddressOptions, AddressOptionsBuilder, ByteOrder, CancellationToken,
         Capabilities, Clock, ConnectionConfig, ConnectionConfigBuilder, ConnectionState,
-        Credentials, Deadline, Diagnostics, Endpoint, ErrorKind, FailureCategory, ItemError,
-        OpFuture, Operation, PlcError, PlcValue, PlcValueType, ProtocolAddress, ProtocolStatus,
-        ReadItem, ReadRequest, ReadRequestBuilder, ReadResponse, ReadResponseBuilder,
-        ReconnectPolicy, ResourceLimits, ResourceLimitsBuilder, RetryPolicy, Secret, StateCell,
-        StateWatch, SubscriptionMode, Tag, TagId, Timeouts, UnknownReason, WordOrder, WriteItem,
-        WriteOutcome, WriteRequest, WriteRequestBuilder, WriteResponse, WriteResponseBuilder,
-        WriteResult,
+        ConnectionUri, Credentials, Deadline, Diagnostics, Endpoint, ErrorKind, FailureCategory,
+        ItemError, OpFuture, Operation, PlcError, PlcValue, PlcValueType, ProtocolAddress,
+        ProtocolStatus, ReadItem, ReadRequest, ReadRequestBuilder, ReadResponse,
+        ReadResponseBuilder, ReconnectPolicy, ResourceLimits, ResourceLimitsBuilder, RetryPolicy,
+        Secret, StateCell, StateWatch, SubscriptionMode, Tag, TagId, Timeouts, UnknownReason,
+        WordOrder, WriteItem, WriteOutcome, WriteRequest, WriteRequestBuilder, WriteResponse,
+        WriteResponseBuilder, WriteResult,
     };
 
     #[test]
@@ -32,6 +32,7 @@ mod tests {
         assert_send_sync::<Credentials>();
         assert_send_sync::<Endpoint>();
         assert_send_sync::<ConnectionState>();
+        assert_send_sync::<ConnectionUri>();
         assert_send_sync::<Deadline>();
         assert_send_sync::<Diagnostics>();
         assert_send_sync::<ErrorKind>();

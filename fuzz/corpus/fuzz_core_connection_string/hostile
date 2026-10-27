@@ -1,0 +1,1 @@
+modbus-tcp://operator@192.0.2.10:502?x=%41&=&y

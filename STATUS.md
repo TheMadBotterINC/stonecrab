@@ -67,7 +67,7 @@ ADR-0004 explicitly overrides the original `main` branch policy with `master`.
   fuzz-finding policies. `deny.toml` also bans `failure`, `error-chain`, `color-eyre`.
 - `fuzz/` is a separate Cargo workspace with its own lock, nightly pin and deny policy
   (ADR-0009); `scripts/fuzz-smoke.sh` runs cargo-deny on it and every target for 60 s.
-  The first target, `fuzz_codec_bounded_reader`, landed with the codec crate (S15).
+  Targets: `fuzz_codec_bounded_reader` (S15), `fuzz_core_connection_string` (S08).
 
 ### Core data contracts
 
@@ -94,6 +94,8 @@ ADR-0004 explicitly overrides the original `main` branch policy with `master`.
   cancellation token with child tokens, and latest-value connection-state observation
   (ADR-0007, proposed). Primitives only: no request carries a cancel slot and no
   connection enforces a default deadline yet.
+- `ConnectionUri`: the connection-string grammar `scheme(:transport)?://authority(?k=v...)`
+  as validated text parts; no driver semantics, no host resolution.
 - `ConnectionConfig` and builder, `Endpoint`, `Timeouts`, `ReconnectPolicy`,
   `RetryPolicy`, `AccessPolicy`, `Credentials`, `AddressOptions`: validated connection
   configuration as data (ADR-0008); the reconnect backoff is a pure function of attempt
@@ -143,6 +145,7 @@ gates named were run locally before that commit.
 | S10 | 2026-10-27 | Testkit `FakeClock` (a `Clock` implementation with hand-advanced time and ordered sleepers), `block_on`, `block_on_with` (advances to the next sleeper, fails fast when nothing waits on time), `poll_once`, `poll_once_with`, `CountingWaker`; no dependency | check, coverage, lint-attrs, machete |
 | S20a | 2026-10-27 | New crate `stonecrab-modbus` 0.1.0 with address types only: `UnitId`, `ModbusArea`, `ModbusDataType` (15 alpha types; string and calendar names rejected as deferred), `AddressConvention`, `ModbusAddress` and builder (bit areas accept BOOL only; last register must fit in the address space; long-form `canonical()`); ADR-0015 draft; no parser, PDU or I/O | check, coverage, lint-attrs, features, machete, dependencies, fuzz, package |
 | S09 | 2026-10-27 | Core `WriteItem`, `WriteRequest` and builder, `WriteResult`, `WriteResponse` and builder (exact correlation, request order, unknown outcomes never collapsed); ADR-0010; parity rows `CORE-WRITE-REQUEST`, `CORE-WRITE-RESPONSE`; data only | check, coverage, lint-attrs, machete, package |
+| S08 | 2026-10-27 | Core `ConnectionUri::parse` for the upstream connection-string grammar (strict subset: 4096-byte bound, no percent-encoding, no credentials in the authority, unique keys); second fuzz target `fuzz_core_connection_string` (60 s clean); proptest adopted by core; parity row `CORE-URI-GRAMMAR` implemented | check, coverage, lint-attrs, machete, dependencies, fuzz, package |
 
 ## Verified evidence and reproduction
 

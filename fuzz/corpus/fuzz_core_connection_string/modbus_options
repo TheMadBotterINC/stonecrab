@@ -1,0 +1,1 @@
+modbus-tcp://[2001:db8::1]:502?unit-id=1&request-timeout-ms=2000&address-convention=plc4x&empty=

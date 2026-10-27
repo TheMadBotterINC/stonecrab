@@ -56,9 +56,10 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
 - Alternatives: hand-parsing `&[u8]` in each target; rejected for structured inputs.
 - Review date: 2026-10-27.
 
-## proptest 1.12.0 (dev-dependency of stonecrab-codec)
+## proptest 1.12.0 (dev-dependency of stonecrab-codec and stonecrab-core)
 - Purpose: property tests of the codec (`prop_round_trip_exact_integers`,
-  `prop_length_checked_before_allocation`), with shrinking and the tracked
+  `prop_length_checked_before_allocation`) and of the connection URI parser in
+  `stonecrab-core` (`crates/stonecrab-core/tests/uri_properties.rs`), with shrinking and the tracked
   `proptest-regressions/` files of CODING_STANDARDS 13.3.
 - License: MIT OR Apache-2.0.
 - Features: `std` only; default features are disabled in `[workspace.dependencies]`
@@ -67,8 +68,8 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
   `rand/std`, `rand/sys_rng`, `regex-syntax` and `num-traits/std`; it does not enable
   `lazy_static`. The D23 check (`cargo tree -e normal,dev -i once_cell -i lazy_static -i log
   -i time -i chrono`) matches no package, so no `deny.toml` wrapper is needed (ADR-0013).
-- Reaches only dev builds of `stonecrab-codec`: it is not in the codec's `[dependencies]`,
-  not in the packaged manifest's runtime graph, and absent from the fuzz workspace lock.
+- Reaches only dev builds of `stonecrab-codec` and `stonecrab-core`: it is in neither
+  crate's `[dependencies]`, not in the packaged manifests' runtime graph, and absent from the fuzz workspace lock.
 - Resolved transitive crates in `Cargo.lock`, all MIT OR Apache-2.0: `rand` 0.10.3,
   `rand_core` 0.10.1, `rand_xorshift` 0.5.0, `chacha20` 0.10.2, `getrandom` 0.4.3,
   `cfg-if`, `cpufeatures` and `core_detect` (CPU feature probes), `libc` and `r-efi`

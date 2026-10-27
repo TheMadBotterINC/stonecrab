@@ -14,6 +14,7 @@
   `AddressOptionsBuilder` from `stonecrab-core`.
 - Re-export `WriteItem`, `WriteRequest`, `WriteRequestBuilder`, `WriteResult`,
   `WriteResponse` and `WriteResponseBuilder` from `stonecrab-core`.
+- Re-export `ConnectionUri` from `stonecrab-core`.
 ### stonecrab-codec 0.1.0
 - Add the crate: `BoundedReader` and `BoundedWriter` with bounds-checked integer, float,
   byte-run and least-significant-bit-first coil reads and writes in an explicit
@@ -58,6 +59,10 @@
   `WriteResponse` with its correlating builder, `iter_confirmed`, `iter_rejected` and
   `iter_unknown`. Unknown outcomes are first-class and never retried or replayed
   (ADR-0010). Data only.
+- Add `ConnectionUri::parse` for `scheme(:transport)?://authority(?k=v(&k=v)*)?` with
+  ordered `options()`; it rejects percent-encoding, credentials in the authority, empty
+  or duplicate keys, whitespace and input over 4096 bytes, and `Display` renders the
+  canonical text. Covered by the `fuzz_core_connection_string` target.
 - Add an unpublished deterministic address fixture testkit for contract tests.
 - Add `FakeClock`, `block_on`, `block_on_with`, `poll_once` and a counting waker to the
   unpublished testkit for deterministic, sleep-free async tests.
