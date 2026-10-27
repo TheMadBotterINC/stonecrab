@@ -8,9 +8,11 @@ mod deadline;
 mod error;
 mod secret;
 mod tag;
+mod value;
 
 pub use capability::{Capabilities, Operation, SubscriptionMode};
 pub use deadline::Deadline;
 pub use error::{ConnectionState, Diagnostics, ErrorKind, FailureCategory, PlcError, Result};
 pub use secret::Secret;
 pub use tag::TagId;
+pub use value::{PlcValue, PlcValueType};
