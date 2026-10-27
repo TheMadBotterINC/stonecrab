@@ -28,7 +28,12 @@ mod tests {
             .expect("fixtures/modbus loads: every file listed, every listed vector present")
             .into_iter()
             .filter(|vector| {
-                vector.name.starts_with("tcp/") && !vector.name.starts_with("tcp/adu_")
+                // The adu_* vectors are framing-level ADUs (tests/framing.rs) and the
+                // typed_* vectors hold register bytes for the typed decoder
+                // (tests/decode.rs), not PDUs.
+                vector.name.starts_with("tcp/")
+                    && !vector.name.starts_with("tcp/adu_")
+                    && !vector.name.starts_with("tcp/typed_")
             })
             .collect()
     }
@@ -412,11 +417,16 @@ mod tests {
             .lines()
             .filter(|l| l.starts_with("name = \"tcp/adu_"))
             .count();
+        let typed = provenance
+            .lines()
+            .filter(|l| l.starts_with("name = \"tcp/typed_"))
+            .count();
         let entries = provenance
             .lines()
             .filter(|l| *l == "[[vector]]")
             .count()
-            .saturating_sub(adu_entries);
+            .saturating_sub(adu_entries)
+            .saturating_sub(typed);
         assert_eq!(
             entries,
             vectors().len(),

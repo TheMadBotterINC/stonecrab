@@ -1,0 +1,6 @@
+{
+  "data_type": "DWORD",
+  "byte_order": "LITTLE_ENDIAN_BYTE_SWAP",
+  "type": "U32",
+  "value": 16909060
+}

@@ -1,0 +1,6 @@
+{
+  "data_type": "SINT",
+  "byte_order": "BIG_ENDIAN_BYTE_SWAP",
+  "type": "I8",
+  "value": -42
+}

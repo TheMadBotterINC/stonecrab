@@ -1,0 +1,4 @@
+# Typed decode vector: REAL under LITTLE_ENDIAN_BYTE_SWAP.
+# Registers as sent on the wire, high byte of each register first.
+# Layout: the big-endian bytes of the value permuted as the LITTLE_ENDIAN_BYTE_SWAP layout of docs/parity/modbus.md (Byte order).
+0F DB 3F C9

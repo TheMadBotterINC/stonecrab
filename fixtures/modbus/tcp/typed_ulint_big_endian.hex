@@ -1,0 +1,4 @@
+# Typed decode vector: ULINT under BIG_ENDIAN.
+# Registers as sent on the wire, high byte of each register first.
+# Layout: the big-endian bytes of the value permuted as the BIG_ENDIAN layout of docs/parity/modbus.md (Byte order).
+3A E0 2E E8 4D 04 49 B2

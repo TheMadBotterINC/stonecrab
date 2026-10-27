@@ -1,0 +1,6 @@
+{
+  "data_type": "BOOL",
+  "byte_order": "LITTLE_ENDIAN_BYTE_SWAP",
+  "type": "Bool",
+  "value": true
+}

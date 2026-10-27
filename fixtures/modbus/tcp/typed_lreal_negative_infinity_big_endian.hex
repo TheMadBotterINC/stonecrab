@@ -1,0 +1,4 @@
+# Typed decode vector: LREAL negative infinity under BIG_ENDIAN.
+# Bits 0xFFF0000000000000.
+# Registers as sent on the wire, high byte of each register first.
+FF F0 00 00 00 00 00 00

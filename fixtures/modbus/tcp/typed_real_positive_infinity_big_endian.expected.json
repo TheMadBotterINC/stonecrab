@@ -1,0 +1,7 @@
+{
+  "data_type": "REAL",
+  "byte_order": "BIG_ENDIAN",
+  "type": "F32",
+  "bits": "0x7f800000",
+  "decimal": "inf"
+}

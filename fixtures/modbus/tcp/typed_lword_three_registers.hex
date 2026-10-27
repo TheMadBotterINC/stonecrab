@@ -1,0 +1,3 @@
+# Typed decode vector (must fail): LWORD given 3 register(s); one register short.
+# Registers as sent on the wire, high byte of each register first.
+10 20 11 21 12 22

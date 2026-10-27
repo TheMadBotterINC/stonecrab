@@ -1,0 +1,3 @@
+# Typed decode vector (must fail): REAL given 1 register(s); one register short.
+# Registers as sent on the wire, high byte of each register first.
+10 20

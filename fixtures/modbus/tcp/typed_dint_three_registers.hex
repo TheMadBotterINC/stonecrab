@@ -1,0 +1,3 @@
+# Typed decode vector (must fail): DINT given 3 register(s); three registers for a two register type.
+# Registers as sent on the wire, high byte of each register first.
+10 20 11 21 12 22

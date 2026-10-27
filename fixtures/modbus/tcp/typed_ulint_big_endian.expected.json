@@ -1,0 +1,6 @@
+{
+  "data_type": "ULINT",
+  "byte_order": "BIG_ENDIAN",
+  "type": "U64",
+  "value": 4242442424242424242
+}

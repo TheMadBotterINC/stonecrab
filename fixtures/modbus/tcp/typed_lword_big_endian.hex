@@ -1,0 +1,4 @@
+# Typed decode vector: LWORD under BIG_ENDIAN.
+# Registers as sent on the wire, high byte of each register first.
+# Layout: the big-endian bytes of the value permuted as the BIG_ENDIAN layout of docs/parity/modbus.md (Byte order).
+01 02 03 04 05 06 07 08

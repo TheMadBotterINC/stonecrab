@@ -272,6 +272,59 @@ parses it with `Short.parseShort` and the inventoried files show no range check
       the tests check as `Ok(None)` with the buffer untouched. The PDU vector tests
       exclude the `adu_` names.
 
+11. **Typed decoder (S23, amendment 2026-10-27).** `src/decode.rs` holds the unit struct
+    `TypedDecoder` with three associated functions and no state. Nothing here changes
+    decisions 1 to 10.
+    - `decode_registers(registers, data_type, byte_order, word_order, raw_budget)` returns
+      the `PlcValue` of `ModbusDataType::value_type` (BYTE and USINT `U8`, WORD and UINT
+      `U16`, DWORD and UDINT `U32`, LWORD and ULINT `U64`, SINT `I8`, INT `I16`, DINT
+      `I32`, LINT `I64`, REAL `F32`, LREAL `F64`, BOOL `Bool`). `decode_bits(packed,
+      index, data_type, raw_budget)` reads one bit of a packed coil or discrete-input
+      response, least significant bit first, and accepts `BOOL` only.
+      `encode_registers(value, data_type, byte_order, word_order)` is the inverse for
+      tests and the future write path; a value of another variant is `InvalidConfig`,
+      never converted.
+    - The layout is two independent axes (ADR-0006): the two bytes of a register are the
+      value's bytes in order under `BigEndian` and swapped under `LittleEndian`; the
+      registers of a value are most significant first under `HighWordFirst` and reversed
+      under `LowWordFirst`. The four upstream modes are the four pairs of ADR-0006 and lay
+      `0x01020304` out as `[1,2,3,4]`, `[4,3,2,1]`, `[2,1,4,3]` and `[3,4,1,2]`. The code
+      normalises the registers to the value's big-endian bytes with `BoundedWriter` and
+      reads them with `BoundedReader` (ADR-0013); floats go through `from_bits` and
+      `to_bits`, so NaN payloads, infinities and the sign of zero survive bit for bit and
+      integers are exact.
+    - A lone BOOL, BYTE, SINT or USINT is the low-order part of the 16-bit value those
+      rules lay out: bit 0 and the low byte of the register under `BigEndian`, bit 8 and
+      the high byte under `LittleEndian`. The parity record states this for BIG_ENDIAN
+      and LITTLE_ENDIAN (`MB-BYTEORDER-BE`, `MB-BYTEORDER-LE`); for the two byte-swap
+      modes it is an INFERENCE from the pair mapping. Padding bits are written as zero and
+      ignored on decode, also an inference: the interop register map stores SINT -42 as
+      the sign-extended `0xFFD6`, which decodes to -42 only if the pad byte is ignored.
+      The `address.rs` rustdoc for `ModbusDataType::Bool` now says the same.
+    - A register count other than `ModbusDataType::register_size` (and a bit index beyond
+      the received bytes) is an `ItemError` of kind `MalformedData` with
+      `ProtocolStatus::new("modbus", 0).with_name("decode")` and the received registers as
+      bytes, each register high byte first as on the wire, attached through
+      `with_raw(bytes, raw_budget)` (D14, ADR-0006 decision 5). The budget is checked
+      before the bytes are copied; when they do not fit, the error keeps the status
+      without raw bytes (`raw()` is `None`) instead of a truncated copy. The caller passes
+      `limits.max_frame_bytes()`. A non-BOOL type on a bit area is `InvalidConfig` with
+      the same status and no raw bytes.
+    - Vector provenance. `fixtures/modbus/tcp/typed_*` (85 vectors: 60 matrix vectors of
+      15 types in each of the four modes, 14 special values, 6 interop constants and 5
+      `must_fail` register-count cases) are first-party. The `.hex` holds register bytes.
+      The matrix and special values were produced by a throwaway generator, not kept in
+      the repository, that applies the documented byte permutations to one value's
+      big-endian bytes and shares no code with the decoder; the interop vectors copy the
+      words of `fixtures/modbus/interop/register-map.toml`. The sources are
+      `protocol_spec` (origin: "derived from the documented 4-byte layouts in
+      docs/parity/modbus.md Byte order and ADR-0006") and `adversarial`. The upstream
+      little-endian all-datatypes vectors are not present because maintainer prerequisite
+      P4 is open: the four byte-order rows are therefore `implemented`, not
+      `automated-verified`, and the S23 exit criterion "little-endian upstream vectors
+      pass" is not met. It is met by adding `ADT` and `ADTLE` as `upstream_fixture`
+      vectors once P4 is granted.
+
 ## Consequences
 - The rest of the crate builds on a small, fully tested vocabulary. The parser has
   nothing to decide about types, areas, bounds or rendering; it maps text to builder
@@ -366,7 +419,7 @@ parses it with `Short.parseShort` and the inventoried files show no range check
   function discriminator, every undefined exception code, every odd register byte count,
   PDU 254 bytes), the code tables and the encoders; `tests/pdu_vectors.rs` loads
   `fixtures/modbus` through `stonecrab_testkit::load_dir`, compares every decoded vector
-  with its hand-written `expected.json`, encodes the PDU the expected file describes and
+  with its `expected.json`, encodes the PDU the expected file describes and
   compares the bytes with the `.hex` (two separate assertions), and checks every
   `must_fail` vector for the named `ParseError` variant and each of its parameters;
   `tests/pdu_properties.rs` holds `prop_register_count_bounds`,
@@ -383,6 +436,24 @@ parses it with `Short.parseShort` and the inventoried files show no range check
   `log`, `time` and `chrono` absent and `once_cell` only through `tracing-core` and
   `stonecrab-driver-sim`, the wrapped path of ADR-0012: the slice adds no external
   dependency and no new path.
+- S23: `crates/stonecrab-modbus/tests/decode.rs` loads the `typed_*` vectors through
+  `stonecrab_testkit::load_dir`, decodes each accepted vector and compares the value with
+  its `expected.json`, authored from the stated byte pattern (floats by bit pattern),
+  encodes the expected value and
+  compares the bytes with the `.hex` (two separate assertions), and checks every
+  `must_fail` vector for `MalformedData`, the status name and the raw length. It also
+  holds the layout tests for the four modes (`decode_dword_layout_2143`, `_3412`,
+  `decode_lword_layout_21436587`, `_78563412`), the single-register padding tests, the
+  boundary, NaN, infinity and signed-zero tests, the wrong-register-count and bit-area
+  rejections with the raw bytes asserted, the interop map decoded entry by entry, and
+  `prop_encode_decode_exact_integers`, `prop_encode_decode_floats_bitwise` and two more
+  properties. Tests carry `// covers: SPEC mandatory-failure-cases / F7 negative and
+  scaled values, swapped words, integer boundaries` and the parity row ids. The
+  `# Compatibility` sections cite `MB-BYTEORDER-BE`, `MB-BYTEORDER-LE`,
+  `MB-BYTEORDER-BE-SWAP`, `MB-BYTEORDER-LE-SWAP`, `MB-TYPE-BOOL` to `MB-TYPE-LREAL` and
+  `MB-ADDR-BIT-TYPES`. `tests/pdu_vectors.rs` now skips the `tcp/typed_` names. The slice
+  adds no dependency: `stonecrab-codec`, `stonecrab-core` and the existing
+  dev-dependencies are all it uses, so the D23 check is unchanged.
 - Later slices extend this section: S21 (vectors per variant, no `generated/`), S24a
   (batcher property), S24b (exception mapping tests for codes 1 to 8 and 10 to 11), S26
   (`with_transport_factory` in `tests/public_types.rs`) and S27 (the interop job and its

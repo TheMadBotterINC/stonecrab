@@ -1,0 +1,4 @@
+# Typed decode vector: SINT under LITTLE_ENDIAN.
+# Registers as sent on the wire, high byte of each register first.
+# Layout: the big-endian bytes of the value permuted as the LITTLE_ENDIAN layout of docs/parity/modbus.md (Byte order).
+D6 00

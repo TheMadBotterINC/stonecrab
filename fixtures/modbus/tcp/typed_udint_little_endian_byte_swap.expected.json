@@ -1,0 +1,6 @@
+{
+  "data_type": "UDINT",
+  "byte_order": "LITTLE_ENDIAN_BYTE_SWAP",
+  "type": "U32",
+  "value": 4242442424
+}

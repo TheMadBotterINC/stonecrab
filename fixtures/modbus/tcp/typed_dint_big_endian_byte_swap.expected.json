@@ -1,0 +1,6 @@
+{
+  "data_type": "DINT",
+  "byte_order": "BIG_ENDIAN_BYTE_SWAP",
+  "type": "I32",
+  "value": -242442424
+}

@@ -1,0 +1,3 @@
+# Typed decode vector: the interop constant of MB-INTEROP-LE (holding registers 300 and 301).
+# Registers copied from fixtures/modbus/interop/register-map.toml; LITTLE_ENDIAN.
+DC 0F 49 40

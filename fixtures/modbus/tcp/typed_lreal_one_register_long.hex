@@ -1,0 +1,3 @@
+# Typed decode vector (must fail): LREAL given 5 register(s); one register long.
+# Registers as sent on the wire, high byte of each register first.
+10 20 11 21 12 22 13 23 14 24

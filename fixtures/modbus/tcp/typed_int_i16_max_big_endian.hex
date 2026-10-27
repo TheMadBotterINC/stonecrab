@@ -1,0 +1,4 @@
+# Typed decode vector: INT maximum 32767 under BIG_ENDIAN.
+# Register 0x7FFF.
+# Registers as sent on the wire, high byte of each register first.
+7F FF

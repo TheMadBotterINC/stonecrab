@@ -1,0 +1,4 @@
+# Typed decode vector: LINT maximum under BIG_ENDIAN.
+# Registers 7FFF FFFF FFFF FFFF.
+# Registers as sent on the wire, high byte of each register first.
+7F FF FF FF FF FF FF FF

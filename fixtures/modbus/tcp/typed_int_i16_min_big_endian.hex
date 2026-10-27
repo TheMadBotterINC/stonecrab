@@ -1,0 +1,4 @@
+# Typed decode vector: INT minimum -32768 under BIG_ENDIAN.
+# Register 0x8000.
+# Registers as sent on the wire, high byte of each register first.
+80 00

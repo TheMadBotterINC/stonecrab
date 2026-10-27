@@ -1,0 +1,4 @@
+# Typed decode vector: REAL negative zero under BIG_ENDIAN.
+# Bits 0x80000000; the sign of zero must survive decoding.
+# Registers as sent on the wire, high byte of each register first.
+80 00 00 00

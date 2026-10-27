@@ -5,14 +5,15 @@ registers) over TCP with MBAP framing. RTU, ASCII, TLS, UDP, writes, extended re
 and string types are out of scope for the alpha.
 
 Nothing is implemented beyond the address types, their text grammar, read batching, the
-PDU codec and MBAP framing. This crate currently offers `UnitId`, `ModbusArea`,
+PDU codec, MBAP framing and the typed decoder. This crate currently offers `UnitId`, `ModbusArea`,
 `ModbusDataType`, `AddressConvention`, `ModbusAddress` (built with its builder or parsed
 from text with `ModbusAddress::parse`) and `ProtocolAddress` for it, plus `Batcher`,
 `BatchLimits`, `Chunk` and `Member`, the PDU types `FunctionCode`, `ExceptionCode` and
 `ModbusPdu` with `encode_request`, `decode_request`, `decode_response` and
-`encode_response`, and the framing types `MbapHeader`, `TransactionId`, `ModbusAdu` and
-`MbapFramer`. There is no session, connection or driver yet, and no I/O of any kind. The
-crate depends on `stonecrab-core`, `stonecrab-codec`, `stonecrab-transport` (without its
+`encode_response`, the framing types `MbapHeader`, `TransactionId`, `ModbusAdu` and
+`MbapFramer`, and `TypedDecoder`, which turns registers or coil bits into `PlcValue`s.
+There is no session, connection or driver yet, and no I/O of any kind. The crate
+depends on `stonecrab-core`, `stonecrab-codec`, `stonecrab-transport` (without its
 `tcp` feature, for the `Framer` trait only) and `bytes`; default features are empty.
 
 Upstream behavior is the Apache PLC4X Modbus TCP driver at the commit pinned in
@@ -27,7 +28,7 @@ stable row id in the
 | PDU codec for function codes 01 to 04 and the exception PDU | unit-tested; vector-tested; property-tested; fuzzed |
 | MBAP framing (`MbapFramer`, `MbapHeader`, `ModbusAdu`, `TransactionId`) | unit-tested; vector-tested; fuzzed |
 | Transaction correlation | planned |
-| Typed register decoding and byte order | planned |
+| Typed register decoding and byte order (`TypedDecoder`) | unit-tested; vector-tested; property-tested; the little-endian modes are derived from the documented layouts, not yet confirmed by upstream vectors |
 | Read batching (`Batcher`) | unit-tested; property-tested |
 | Session, connection and `modbus-tcp` driver | planned |
 | Interoperability against an independent server | planned |
@@ -216,6 +217,79 @@ The golden ADU vectors in `fixtures/modbus/tcp/adu_*` wrap the V1.1b example PDU
 header layout of the Modbus Messaging on TCP/IP Implementation Guide V1.0b, and add
 the adversarial cases (lengths 255, 1 and 0, protocol id 1, a truncated header, a body that
 has not arrived, a 261 byte ADU and a 1 KiB stream of seven coalesced ADUs).
+## Decoding values
+`TypedDecoder` turns the registers of a holding or input register read into a typed
+`PlcValue`, and one bit of a coil or discrete-input read into a `Bool`. The layout is two
+independent axes, the core `ByteOrder` and `WordOrder`; the four upstream byte-order
+names are four pairs of them (ADR-0006) and lay the value `0x01020304` out as shown:
+
+| Upstream mode | `ByteOrder` | `WordOrder` | Bytes on the wire |
+| --- | --- | --- | --- |
+| `BIG_ENDIAN` | `BigEndian` | `HighWordFirst` | `[1,2,3,4]` |
+| `LITTLE_ENDIAN` | `LittleEndian` | `LowWordFirst` | `[4,3,2,1]` |
+| `BIG_ENDIAN_BYTE_SWAP` | `LittleEndian` | `HighWordFirst` | `[2,1,4,3]` |
+| `LITTLE_ENDIAN_BYTE_SWAP` | `BigEndian` | `LowWordFirst` | `[3,4,1,2]` |
+
+The mapping is derived from the documented layouts. The first-party vectors and the
+pymodbus register map agree with it, but the upstream little-endian vectors are not in the
+repository until the maintainer approval P4 is granted, so the byte-order rows of the
+parity record are `implemented`, not `automated-verified`.
+
+A lone `BOOL`, `BYTE`, `SINT` or `USINT` occupies one register: the low byte (and, for a
+`BOOL`, bit 0) under `BigEndian`, the high byte (bit 8) under `LittleEndian`. The other
+bits are padding, ignored when decoding and written as zero. Integers are exact; `REAL`
+and `LREAL` keep NaN payloads, infinities and the sign of zero bit for bit, and judging
+them is the sensor layer's job. The wrong number of registers for the type is an
+`ErrorKind::MalformedData` item error whose `ProtocolStatus` (protocol `modbus`, code 0,
+name `decode`) keeps the received registers as bytes, high byte first, when they fit the
+caller's budget. A type other than `BOOL` on a bit area is `ErrorKind::InvalidConfig`.
+
+```rust
+use std::num::NonZeroUsize;
+use stonecrab_core::{ByteOrder, ErrorKind, PlcValue, WordOrder};
+use stonecrab_modbus::{ModbusDataType, TypedDecoder};
+
+let budget = NonZeroUsize::new(250).ok_or("budget")?;
+
+// REAL 3.141593 as the pymodbus map stores it (holding registers 26 and 27)...
+let big = TypedDecoder::decode_registers(
+    &[0x4049, 0x0FDC],
+    ModbusDataType::Real,
+    ByteOrder::BigEndian,
+    WordOrder::HighWordFirst,
+    budget,
+)?;
+// ...and under LITTLE_ENDIAN (registers 300 and 301 of the map).
+let little = TypedDecoder::decode_registers(
+    &[0xDC0F, 0x4940],
+    ModbusDataType::Real,
+    ByteOrder::LittleEndian,
+    WordOrder::LowWordFirst,
+    budget,
+)?;
+assert_eq!(big, little);
+
+// Two registers are not an INT; the bytes stay inspectable.
+let error = TypedDecoder::decode_registers(
+    &[0x0001, 0x0002],
+    ModbusDataType::Int,
+    ByteOrder::BigEndian,
+    WordOrder::HighWordFirst,
+    budget,
+)
+.unwrap_err();
+assert_eq!(error.kind(), ErrorKind::MalformedData);
+assert_eq!(error.status().and_then(|s| s.raw()), Some(&[0, 1, 0, 2][..]));
+
+// Coil 3 of a bit response packed as 0b0000_0101.
+let coil = TypedDecoder::decode_bits(&[0b0000_0101], 2, ModbusDataType::Bool, budget)?;
+assert_eq!(coil, PlcValue::Bool(true));
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+The typed vectors in `fixtures/modbus/tcp/typed_*` hold register bytes for every type in
+every mode, written by byte permutation of the documented layouts and kept apart from the
+decoder; they are repository fixtures, not part of the published crate.
 
 ## Configuration
 The six connection parameters (request timeout, default unit identifier, ping address,

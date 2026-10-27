@@ -1,0 +1,4 @@
+# Typed decode vector: SINT minimum -128 under BIG_ENDIAN.
+# Register 0x0080: the low byte.
+# Registers as sent on the wire, high byte of each register first.
+00 80

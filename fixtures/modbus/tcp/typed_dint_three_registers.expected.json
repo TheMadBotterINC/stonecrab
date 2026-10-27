@@ -1,0 +1,7 @@
+{
+  "data_type": "DINT",
+  "byte_order": "BIG_ENDIAN",
+  "error": "MalformedData",
+  "register_count": 3,
+  "raw_len": 6
+}

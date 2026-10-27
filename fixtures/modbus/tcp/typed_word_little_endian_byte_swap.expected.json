@@ -1,0 +1,6 @@
+{
+  "data_type": "WORD",
+  "byte_order": "LITTLE_ENDIAN_BYTE_SWAP",
+  "type": "U16",
+  "value": 258
+}

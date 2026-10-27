@@ -255,23 +255,30 @@ from the mspec at build time), so sizes come from the mspec text only.
 Registers are 16-bit units. "Registers" below is the number of registers one element of
 the type occupies when read alone.
 
+Status (S23): the 15 numeric and bit types are `implemented` by `TypedDecoder`
+(`crates/stonecrab-modbus/src/decode.rs`). A register count other than the type's size is
+a `MalformedData` item error carrying the received bytes (ADR-0006 decision 5). The
+interop run (S27) adds `interop_reads_all_fifteen_holding_register_types` to every row; the
+rows do not wait for it, because the `register_map_decodes_every_entry_to_the_row_value`
+test already decodes the register words of the interop map for every row's type.
+
 | Row id | Type, mspec enum line, `dataTypeSize` | Registers and DataItem encoding (`Mspec` line) | Stonecrab alpha behavior | Status | Test ids |
 | --- | --- | --- | --- | --- | --- |
-| MB-TYPE-BOOL | BOOL, 381, 2 | 1; `simple bit` (320-322); lone value padded by 15 bits | Accepted on all four areas (bit areas read one bit; register areas read one register). | planned | `decode_bool_register_value_1_is_true`, `decode_bool_coil_bit`, `interop_reads_all_fifteen_holding_register_types` |
-| MB-TYPE-BYTE | BYTE, 382, 2 | 1; `uint 8` (323-325); padded by 8 bits | Accepted on register areas; rejected on bit areas. | planned | `decode_byte_42_from_register`, `interop_reads_all_fifteen_holding_register_types` |
-| MB-TYPE-WORD | WORD, 383, 2 | 1; `uint 16` (326-328) | As above. | planned | `decode_word_42424`, `interop_reads_all_fifteen_holding_register_types` |
-| MB-TYPE-DWORD | DWORD, 384, 4 | 2; `uint 32` (329-331) | As above. | planned | `decode_dword_4242442424_big_endian`, `interop_reads_all_fifteen_holding_register_types` |
-| MB-TYPE-LWORD | LWORD, 385, 8 | 4; `uint 64` (332-334) | As above; u64 range exact. | planned | `decode_lword_u64_exact`, `interop_reads_all_fifteen_holding_register_types` |
-| MB-TYPE-SINT | SINT, 386, 2 | 1; `int 8` (335-337); padded by 8 bits | As above; negative values. | planned | `decode_sint_minus_42`, `interop_reads_all_fifteen_holding_register_types` |
-| MB-TYPE-INT | INT, 387, 2 | 1; `int 16` (338-340); default type of register areas | As above; i16 boundaries. | planned | `decode_int_minus_2424`, `decode_int_boundaries`, `interop_reads_all_fifteen_holding_register_types` |
-| MB-TYPE-DINT | DINT, 388, 4 | 2; `int 32` (341-343) | As above. | planned | `decode_dint_minus_242442424`, `interop_reads_all_fifteen_holding_register_types` |
-| MB-TYPE-LINT | LINT, 389, 8 | 4; `int 64` (344-346) | As above; i64 boundaries. | planned | `decode_lint_i64_boundaries`, `interop_reads_all_fifteen_holding_register_types` |
-| MB-TYPE-USINT | USINT, 390, 2 | 1; `uint 8` (347-349); padded by 8 bits | As above. | planned | `decode_usint_42`, `interop_reads_all_fifteen_holding_register_types` |
-| MB-TYPE-UINT | UINT, 391, 2 | 1; `uint 16` (350-352) | As above. | planned | `decode_uint_42424`, `interop_reads_all_fifteen_holding_register_types` |
-| MB-TYPE-UDINT | UDINT, 392, 4 | 2; `uint 32` (353-355) | As above. | planned | `decode_udint_4242442424`, `interop_reads_all_fifteen_holding_register_types` |
-| MB-TYPE-ULINT | ULINT, 393, 8 | 4; `uint 64` (356-358) | As above; u64 maximum exact. | planned | `decode_ulint_u64_max_exact`, `interop_reads_all_fifteen_holding_register_types` |
-| MB-TYPE-REAL | REAL, 394, 4 | 2; `float 32` (359-361) | As above; NaN and infinity preserved as `F32`. | planned | `decode_real_3_141593_big_endian`, `decode_real_nan_and_infinity_preserved`, `interop_little_endian_region_decodes_real` |
-| MB-TYPE-LREAL | LREAL, 395, 8 | 4; `float 64` (362-364) | As above. | planned | `decode_lreal_2_71828182846`, `interop_reads_all_fifteen_holding_register_types` |
+| MB-TYPE-BOOL | BOOL, 381, 2 | 1; `simple bit` (320-322); lone value padded by 15 bits | Accepted on all four areas. A bit area yields the bit; on a register area a lone BOOL is bit 0 of the register under `BigEndian` and bit 8 under `LittleEndian` (the other bits are padding, ignored on decode, written as zero). | implemented | `decode_bool_register_value_1_is_true`, `decode_bool_coil_bit`, `a_lone_bool_is_bit_0_under_big_and_bit_8_under_little`, `padding_bits_are_ignored_when_decoding`, `the_interop_coils_and_discrete_inputs_decode_bit_by_bit`, `prop_encode_decode_exact_integers`, `typed_vectors_decode_to_the_expected_values`, `typed_vectors_encode_to_the_register_bytes`, `register_map_decodes_every_entry_to_the_row_value` |
+| MB-TYPE-BYTE | BYTE, 382, 2 | 1; `uint 8` (323-325); padded by 8 bits | Accepted on register areas; rejected on bit areas. A lone BYTE is the low byte of the register under `BigEndian`, the high byte under `LittleEndian`; padding ignored on decode. | implemented | `decode_byte_42_from_register`, `a_lone_eight_bit_value_is_the_low_byte_under_big_and_the_high_byte_under_little`, `padding_bits_are_ignored_when_decoding`, `a_non_bool_type_on_a_bit_area_is_rejected`, `prop_encode_decode_exact_integers`, `typed_vectors_decode_to_the_expected_values`, `typed_vectors_encode_to_the_register_bytes`, `register_map_decodes_every_entry_to_the_row_value` |
+| MB-TYPE-WORD | WORD, 383, 2 | 1; `uint 16` (326-328) | As above. | implemented | `decode_word_42424`, `prop_encode_decode_exact_integers`, `typed_vectors_decode_to_the_expected_values`, `typed_vectors_encode_to_the_register_bytes`, `register_map_decodes_every_entry_to_the_row_value` |
+| MB-TYPE-DWORD | DWORD, 384, 4 | 2; `uint 32` (329-331) | As above. | implemented | `decode_dword_4242442424_big_endian`, `decode_dword_layout_2143`, `decode_dword_layout_3412`, `prop_encode_decode_exact_integers`, `typed_vectors_decode_to_the_expected_values`, `typed_vectors_encode_to_the_register_bytes`, `register_map_decodes_every_entry_to_the_row_value` |
+| MB-TYPE-LWORD | LWORD, 385, 8 | 4; `uint 64` (332-334) | As above; u64 range exact. | implemented | `decode_lword_u64_exact`, `decode_lword_layout_21436587`, `decode_lword_layout_78563412`, `prop_encode_decode_exact_integers`, `typed_vectors_decode_to_the_expected_values`, `typed_vectors_encode_to_the_register_bytes`, `register_map_decodes_every_entry_to_the_row_value` |
+| MB-TYPE-SINT | SINT, 386, 2 | 1; `int 8` (335-337); padded by 8 bits | As above; negative values. The interop map stores SINT -42 sign-extended as `0xFFD6`; it decodes to -42 because the padding byte is ignored. | implemented | `decode_sint_minus_42`, `a_lone_eight_bit_value_is_the_low_byte_under_big_and_the_high_byte_under_little`, `negative_values_round_trip_under_every_mode`, `prop_encode_decode_exact_integers`, `typed_vectors_decode_to_the_expected_values`, `typed_vectors_encode_to_the_register_bytes`, `register_map_decodes_every_entry_to_the_row_value` |
+| MB-TYPE-INT | INT, 387, 2 | 1; `int 16` (338-340); default type of register areas | As above; i16 boundaries. | implemented | `decode_int_minus_2424`, `decode_int_boundaries`, `prop_encode_decode_exact_integers`, `typed_vectors_decode_to_the_expected_values`, `typed_vectors_encode_to_the_register_bytes`, `register_map_decodes_every_entry_to_the_row_value` |
+| MB-TYPE-DINT | DINT, 388, 4 | 2; `int 32` (341-343) | As above. | implemented | `decode_dint_minus_242442424`, `negative_values_round_trip_under_every_mode`, `prop_encode_decode_exact_integers`, `typed_vectors_decode_to_the_expected_values`, `typed_vectors_encode_to_the_register_bytes`, `register_map_decodes_every_entry_to_the_row_value` |
+| MB-TYPE-LINT | LINT, 389, 8 | 4; `int 64` (344-346) | As above; i64 boundaries. | implemented | `decode_lint_i64_boundaries`, `prop_encode_decode_exact_integers`, `typed_vectors_decode_to_the_expected_values`, `typed_vectors_encode_to_the_register_bytes`, `register_map_decodes_every_entry_to_the_row_value` |
+| MB-TYPE-USINT | USINT, 390, 2 | 1; `uint 8` (347-349); padded by 8 bits | As above. | implemented | `decode_usint_42`, `a_lone_eight_bit_value_is_the_low_byte_under_big_and_the_high_byte_under_little`, `prop_encode_decode_exact_integers`, `typed_vectors_decode_to_the_expected_values`, `typed_vectors_encode_to_the_register_bytes`, `register_map_decodes_every_entry_to_the_row_value` |
+| MB-TYPE-UINT | UINT, 391, 2 | 1; `uint 16` (350-352) | As above. | implemented | `decode_uint_42424`, `prop_encode_decode_exact_integers`, `typed_vectors_decode_to_the_expected_values`, `typed_vectors_encode_to_the_register_bytes`, `register_map_decodes_every_entry_to_the_row_value` |
+| MB-TYPE-UDINT | UDINT, 392, 4 | 2; `uint 32` (353-355) | As above. | implemented | `decode_udint_4242442424`, `prop_encode_decode_exact_integers`, `typed_vectors_decode_to_the_expected_values`, `typed_vectors_encode_to_the_register_bytes`, `register_map_decodes_every_entry_to_the_row_value` |
+| MB-TYPE-ULINT | ULINT, 393, 8 | 4; `uint 64` (356-358) | As above; u64 maximum exact. | implemented | `decode_ulint_u64_max_exact`, `prop_encode_decode_exact_integers`, `typed_vectors_decode_to_the_expected_values`, `typed_vectors_encode_to_the_register_bytes`, `register_map_decodes_every_entry_to_the_row_value` |
+| MB-TYPE-REAL | REAL, 394, 4 | 2; `float 32` (359-361) | As above; NaN payloads, infinities and the sign of zero preserved bit for bit as `F32`. | implemented | `decode_real_3_141593_big_endian`, `decode_real_nan_and_infinity_preserved`, `decode_real_little_endian_region`, `signed_zero_is_preserved`, `prop_encode_decode_floats_bitwise`, `typed_vectors_decode_to_the_expected_values`, `typed_vectors_encode_to_the_register_bytes`, `register_map_decodes_every_entry_to_the_row_value` |
+| MB-TYPE-LREAL | LREAL, 395, 8 | 4; `float 64` (362-364) | As above; preserved bit for bit as `F64`. | implemented | `decode_lreal_2_71828182846`, `decode_lreal_nan_and_infinity_preserved`, `signed_zero_is_preserved`, `prop_encode_decode_floats_bitwise`, `typed_vectors_decode_to_the_expected_values`, `typed_vectors_encode_to_the_register_bytes`, `register_map_decodes_every_entry_to_the_row_value` |
 | MB-TYPE-CHAR | CHAR, 404, 1 | a lone CHAR is unpadded (RegCodec:135-139); a packed run is padded to a whole register (RegCodec:196-205); `string 8` UTF8 (365-367) | Rejected at parse time. | deferred (M2); rejection implemented | `char_type_is_rejected_at_parse_time` |
 | MB-TYPE-WCHAR | WCHAR, 405, 2 | 1; `string 16` UTF16BE (368-370) | Rejected at parse time. | deferred (M2); rejection implemented | `wchar_type_is_rejected_at_parse_time` |
 | MB-TYPE-STRING | STRING, 406, 1 per character | `ceil(n/2)` registers for `STRING(n)`; `vstring stringLength * 8` UTF8 (371-373) | Rejected at parse time. | deferred (M2); rejection implemented | `string_type_is_rejected_at_parse_time` |
@@ -307,20 +314,40 @@ documented layouts above. Precedence is the tag field (`Tag::with_byte_order` an
 
 | Row id | Upstream behavior (file:line) | Stonecrab alpha behavior | Status | Test ids |
 | --- | --- | --- | --- | --- |
-| MB-BYTEORDER-BE | `BIG_ENDIAN`, 4-byte layout `[1,2,3,4]` (BO:22-24); no swap, big-endian buffer (Opt:169; Conn:607-612). Lone narrow values are padded first (RegCodec:65-68). Vectors: REAL 3.141593 is registers `0x4049 0x0FDC`, DWORD 4242442424 is `0xFCDE 0x88B8` (Srv:95-97, 137-139). | (BigEndian, HighWordFirst). | planned | `byte_order_big_endian_maps_big_high`, `decode_real_3_141593_big_endian`, `decode_dword_4242442424_big_endian`, `adt_big_endian_vectors_decode` |
-| MB-BYTEORDER-LE | `LITTLE_ENDIAN`, `[4,3,2,1]` (BO:25-27); no swap, little-endian buffer (Opt:172-178; Conn:600-606). Lone narrow values: BOOL has 7 leading pad bits, the bit, then 8 trailing; BYTE value first (RegCodec:69-75, 158-160). | (LittleEndian, LowWordFirst). | planned | `byte_order_little_endian_maps_little_low`, `decode_real_little_endian_region`, `interop_little_endian_region_decodes_real`, `adtle_little_endian_vectors_decode` |
-| MB-BYTEORDER-BE-SWAP | `BIG_ENDIAN_BYTE_SWAP`, `[2,1,4,3]` (BO:28-30); bytes swapped pairwise, then big-endian read (Opt:166-169). | (LittleEndian, HighWordFirst). | planned | `byte_order_big_endian_byte_swap_maps_little_high`, `decode_dword_layout_2143`, `decode_lword_layout_21436587` |
-| MB-BYTEORDER-LE-SWAP | `LITTLE_ENDIAN_BYTE_SWAP`, `[3,4,1,2]` (BO:31-33); bytes swapped pairwise, then little-endian read (Opt:166-178). | (BigEndian, LowWordFirst). | planned | `byte_order_little_endian_byte_swap_maps_big_low`, `decode_dword_layout_3412`, `decode_lword_layout_78563412` |
+| MB-BYTEORDER-BE | `BIG_ENDIAN`, 4-byte layout `[1,2,3,4]` (BO:22-24); no swap, big-endian buffer (Opt:169; Conn:607-612). Lone narrow values are padded first (RegCodec:65-68). Vectors: REAL 3.141593 is registers `0x4049 0x0FDC`, DWORD 4242442424 is `0xFCDE 0x88B8` (Srv:95-97, 137-139). | (BigEndian, HighWordFirst). `TypedDecoder` (S23). A lone BOOL is bit 0 of the register and a lone BYTE, SINT or USINT the low byte; padding is ignored on decode. | implemented (not `automated-verified`: the upstream little-endian vectors wait for P4) | `byte_order_big_endian_maps_big_high`, `decode_real_3_141593_big_endian`, `decode_dword_4242442424_big_endian`, `decode_dword_layout_1234_and_4321`, `the_two_axes_are_independent`, `typed_vectors_decode_to_the_expected_values`, `register_map_decodes_every_entry_to_the_row_value` |
+| MB-BYTEORDER-LE | `LITTLE_ENDIAN`, `[4,3,2,1]` (BO:25-27); no swap, little-endian buffer (Opt:172-178; Conn:600-606). Lone narrow values: BOOL has 7 leading pad bits, the bit, then 8 trailing; BYTE value first (RegCodec:69-75, 158-160). | (LittleEndian, LowWordFirst). `TypedDecoder` (S23). A lone BOOL is bit 8 of the register and a lone BYTE, SINT or USINT the high byte, as the upstream padding rule states (7 leading pad bits, the bit, 8 trailing; value byte first). | implemented (not `automated-verified`: the upstream little-endian vectors wait for P4) | `byte_order_little_endian_maps_little_low`, `decode_real_little_endian_region`, `decode_lword_layout_87654321`, `a_lone_bool_is_bit_0_under_big_and_bit_8_under_little`, `typed_vectors_decode_to_the_expected_values`, `register_map_decodes_every_entry_to_the_row_value` |
+| MB-BYTEORDER-BE-SWAP | `BIG_ENDIAN_BYTE_SWAP`, `[2,1,4,3]` (BO:28-30); bytes swapped pairwise, then big-endian read (Opt:166-169). | (LittleEndian, HighWordFirst). `TypedDecoder` (S23). Lone narrow values follow the byte order alone (high byte, bit 8): INFERENCE, the record states the padding rule for `BIG_ENDIAN` and `LITTLE_ENDIAN` only. | implemented (not `automated-verified`: the upstream little-endian vectors wait for P4) | `byte_order_big_endian_byte_swap_maps_little_high`, `decode_dword_layout_2143`, `decode_lword_layout_21436587`, `typed_vectors_decode_to_the_expected_values` |
+| MB-BYTEORDER-LE-SWAP | `LITTLE_ENDIAN_BYTE_SWAP`, `[3,4,1,2]` (BO:31-33); bytes swapped pairwise, then little-endian read (Opt:166-178). | (BigEndian, LowWordFirst). `TypedDecoder` (S23). Lone narrow values follow the byte order alone (low byte, bit 0): INFERENCE, as for `BIG_ENDIAN_BYTE_SWAP`. | implemented (not `automated-verified`: the upstream little-endian vectors wait for P4) | `byte_order_little_endian_byte_swap_maps_big_low`, `decode_dword_layout_3412`, `decode_lword_layout_78563412`, `typed_vectors_decode_to_the_expected_values` |
 | MB-BYTEORDER-PRECEDENCE | Tag field over connection default (Conn:590-596). The tag field comes from the `{byte-order}` block (Tag:225-229). `equals` and `hashCode` ignore the byte order (Tag:301-319). | Tag field, then address block, then `default-payload-byte-order`; a name outside the four is `InvalidAddress` or `InvalidConfig`. S24a (`Batcher::plan`) resolves byte order and word order independently, tag over block, and leaves an unset field `None` for the connection default; covered by `tag_order_fields_win_over_the_address_block`, `a_lone_tag_order_field_leaves_the_other_to_the_connection_default` and `member_offsets_are_relative_and_carry_type_and_order`. | planned | `precedence_tag_field_beats_address_block`, `precedence_address_block_beats_default`, `unknown_byte_order_name_is_rejected` |
 
-Status note: the four mode rows cannot become `automated-verified` before the upstream
-little-endian vectors (`ADTLE`) pass in S23. The BIG_ENDIAN row can be verified by the big-endian
-vectors and the pymodbus fixture, but the mapping rows move together. The D14 derivation is
-from documented layouts, not from a run against a device that swaps bytes. Since S20b the
-address parser maps the four names in an address block through the same table
-(`byte_order_names_map_per_adr_0006`, with the `canonical()` rendering checked by
-`prop_canonical_round_trips`), so the address-block half of MB-BYTEORDER-PRECEDENCE is
-in place; the rows stay planned until the decoder and the tag-field precedence exist.
+Status note (S23): the four mode rows are `implemented` by `TypedDecoder` and are not
+`automated-verified`. The upstream little-endian all-datatypes vectors (`ADTLE`) cannot be
+added until maintainer prerequisite P4 is granted, so no test here is an upstream vector.
+The mapping is DERIVED from the documented 4-byte layouts (and checked against the
+first-party `tcp/typed_*` vectors, written out by byte permutation, and the pymodbus
+interop map for BIG_ENDIAN plus its little-endian region), not confirmed by a run against
+a device or an upstream suite that swaps bytes. The rows move to `automated-verified`
+together, when the upstream little-endian vectors pass. Since S20b the address parser maps
+the four names in an address block through the same table (`byte_order_names_map_per_adr_0006`,
+with the `canonical()` rendering checked by `prop_canonical_round_trips`); S23's
+`byte_order_*_maps_*` tests assert that table and the decoder agree. `MB-BYTEORDER-PRECEDENCE`
+stays `planned`: the decoder takes an explicit pair, and the resolution of tag field, address
+block and `default-payload-byte-order` arrives with the connection (S25, S26).
+
+Layout rules implemented by `TypedDecoder` (ADR-0015 decision 11): a register's two bytes
+are the value's bytes in order under `BigEndian` and swapped within the register under
+`LittleEndian`; a multi-register value puts its most significant register first under
+`HighWordFirst` and last under `LowWordFirst`. The 4-byte value `0x01020304` is
+`[1,2,3,4]`, `[4,3,2,1]`, `[2,1,4,3]` and `[3,4,1,2]` for the four modes. Single-register
+narrow values: the record states the upstream padding for BIG_ENDIAN (padded first: BOOL by
+15 bits, BYTE, SINT and USINT by 8, so bit 0 and the low byte) and LITTLE_ENDIAN (BOOL has
+7 leading pad bits, the bit, then 8 trailing; the BYTE value first, so bit 8 and the high
+byte). The two byte-swap modes are INFERENCES from the pair mapping: swapping the bytes of
+the padded register gives the high byte (bit 8) for `BIG_ENDIAN_BYTE_SWAP` and the low byte
+(bit 0) for `LITTLE_ENDIAN_BYTE_SWAP`, which is also what the byte order of the pair gives.
+Also INFERRED: padding bits are ignored on decode (the interop map stores SINT -42 as the
+sign-extended `0xFFD6`, which only decodes to -42 if the pad byte is ignored) and written
+as zero on encode; upstream's behavior on non-zero padding was not observed.
 
 ## Exception codes
 Upstream enum `ModbusErrorCode` has ten values and no code 9 (Mspec:410-421). The mapping to

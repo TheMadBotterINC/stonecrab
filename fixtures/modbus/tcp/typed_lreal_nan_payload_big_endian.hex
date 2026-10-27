@@ -1,0 +1,4 @@
+# Typed decode vector: LREAL quiet NaN with payload 1 under BIG_ENDIAN.
+# Bits 0x7FF8000000000001; the payload must survive decoding.
+# Registers as sent on the wire, high byte of each register first.
+7F F8 00 00 00 00 00 01

@@ -1,0 +1,4 @@
+# Typed decode vector: SINT maximum 127 under BIG_ENDIAN.
+# Register 0x007F: the low byte.
+# Registers as sent on the wire, high byte of each register first.
+00 7F

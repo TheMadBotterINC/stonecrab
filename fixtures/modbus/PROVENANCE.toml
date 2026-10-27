@@ -65,6 +65,32 @@
 #             means decode returns Ok(None) and leaves the buffer alone (adu_len, the ADU
 #             length the header declares, when the header is complete); header_error
 #             "Truncated" is what MbapHeader::decode says about the same bytes
+# The vectors named tcp/typed_* (S23) are the exception to "PDU bytes only": their .hex
+# holds REGISTER bytes, the data section of a read response without the function code and
+# byte count, each register high byte first as sent on the wire, and they are read by the
+# typed decoder (tests/decode.rs), not the PDU codec. They are first-party, like the rest of
+# the directory. Their expected files carry:
+#   data_type   the upstream type name (BOOL ... LREAL)
+#   byte_order  one of the four upstream mode names (BIG_ENDIAN, LITTLE_ENDIAN,
+#               BIG_ENDIAN_BYTE_SWAP, LITTLE_ENDIAN_BYTE_SWAP)
+#   type        the core value type the register bytes decode to (Bool, U8 ... F64)
+#   value       an accepted integer or Boolean vector: the decoded value
+#   bits, decimal  an accepted float vector: the IEEE 754 bit pattern in hex (the truth,
+#               compared bit for bit) and its decimal rendering (documentation)
+#   error, register_count, raw_len  a must_fail vector: the ItemError kind, how many
+#               registers were supplied and how many raw bytes the error must keep
+# The 60 matrix vectors (15 types x 4 modes) and the 14 special-value vectors were written
+# out by a throwaway generator that is not kept in the repository. It applies the
+# documented byte permutations of docs/parity/modbus.md "Byte order" to the big-endian
+# bytes of one value (identity, reversal, adjacent byte-pair swap, reversal then pair swap
+# for the 4-byte layouts [1,2,3,4], [4,3,2,1], [2,1,4,3], [3,4,1,2] and their 8-byte
+# forms) and pads a lone BOOL, BYTE, SINT or USINT to the 16-bit value 0x00vv before the
+# permutation. It shares no code with the decoder; the decoder is never run to make an
+# expected file. The six tcp/typed_interop_* vectors copy the register words of
+# fixtures/modbus/interop/register-map.toml. The little-endian modes are therefore
+# DERIVED from the documented layouts, not confirmed by an upstream vector: the upstream
+# little-endian all-datatypes vectors wait for maintainer prerequisite P4, and until they
+# pass docs/parity/modbus.md keeps the byte-order rows below "automated-verified".
 
 [[file]]
 path = "interop/register-map.toml"
@@ -687,3 +713,523 @@ origin = "Authored to break the framer: a header whose length exceeds the bytes 
 license = "Apache-2.0"
 must_fail = true
 note = "decode returns Ok(None): the header declares a 260 byte ADU and 17 bytes are present"
+
+[[vector]]
+name = "tcp/typed_bool_big_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_bool_little_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_bool_big_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_bool_little_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_byte_big_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_byte_little_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_byte_big_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_byte_little_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_word_big_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_word_little_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_word_big_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_word_little_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_dword_big_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_dword_little_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_dword_big_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_dword_little_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_lword_big_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_lword_little_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_lword_big_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_lword_little_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_sint_big_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_sint_little_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_sint_big_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_sint_little_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_usint_big_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_usint_little_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_usint_big_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_usint_little_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_int_big_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_int_little_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_int_big_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_int_little_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_uint_big_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_uint_little_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_uint_big_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_uint_little_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_dint_big_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_dint_little_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_dint_big_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_dint_little_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_udint_big_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_udint_little_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_udint_big_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_udint_little_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_lint_big_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_lint_little_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_lint_big_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_lint_little_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_ulint_big_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_ulint_little_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_ulint_big_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_ulint_little_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_real_big_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_real_little_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_real_big_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_real_little_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_lreal_big_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_lreal_little_endian"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_lreal_big_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_lreal_little_endian_byte_swap"
+source = "protocol_spec"
+origin = "derived from the documented 4-byte layouts in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_real_nan_payload_big_endian"
+source = "protocol_spec"
+origin = "IEEE 754 or two's-complement bit pattern laid out per the BIG_ENDIAN layout in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_real_negative_zero_big_endian"
+source = "protocol_spec"
+origin = "IEEE 754 or two's-complement bit pattern laid out per the BIG_ENDIAN layout in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_real_positive_infinity_big_endian"
+source = "protocol_spec"
+origin = "IEEE 754 or two's-complement bit pattern laid out per the BIG_ENDIAN layout in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_real_negative_infinity_big_endian"
+source = "protocol_spec"
+origin = "IEEE 754 or two's-complement bit pattern laid out per the BIG_ENDIAN layout in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_lreal_nan_payload_big_endian"
+source = "protocol_spec"
+origin = "IEEE 754 or two's-complement bit pattern laid out per the BIG_ENDIAN layout in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_lreal_negative_zero_big_endian"
+source = "protocol_spec"
+origin = "IEEE 754 or two's-complement bit pattern laid out per the BIG_ENDIAN layout in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_lreal_negative_infinity_big_endian"
+source = "protocol_spec"
+origin = "IEEE 754 or two's-complement bit pattern laid out per the BIG_ENDIAN layout in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_int_i16_min_big_endian"
+source = "protocol_spec"
+origin = "IEEE 754 or two's-complement bit pattern laid out per the BIG_ENDIAN layout in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_int_i16_max_big_endian"
+source = "protocol_spec"
+origin = "IEEE 754 or two's-complement bit pattern laid out per the BIG_ENDIAN layout in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_sint_i8_min_big_endian"
+source = "protocol_spec"
+origin = "IEEE 754 or two's-complement bit pattern laid out per the BIG_ENDIAN layout in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_sint_i8_max_big_endian"
+source = "protocol_spec"
+origin = "IEEE 754 or two's-complement bit pattern laid out per the BIG_ENDIAN layout in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_lint_i64_min_big_endian"
+source = "protocol_spec"
+origin = "IEEE 754 or two's-complement bit pattern laid out per the BIG_ENDIAN layout in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_lint_i64_max_big_endian"
+source = "protocol_spec"
+origin = "IEEE 754 or two's-complement bit pattern laid out per the BIG_ENDIAN layout in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_ulint_u64_max_big_endian"
+source = "protocol_spec"
+origin = "IEEE 754 or two's-complement bit pattern laid out per the BIG_ENDIAN layout in docs/parity/modbus.md Byte order and ADR-0006"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_interop_hr01_bool_true"
+source = "protocol_spec"
+origin = "fixtures/modbus/interop/register-map.toml, row MB-INTEROP-HR-01 (first-party register map); words copied from the map, value from docs/parity/modbus.md"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_interop_hr03_dword_4242442424"
+source = "protocol_spec"
+origin = "fixtures/modbus/interop/register-map.toml, row MB-INTEROP-HR-03 (first-party register map); words copied from the map, value from docs/parity/modbus.md"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_interop_hr06_lint_minus_4242442424242424242"
+source = "protocol_spec"
+origin = "fixtures/modbus/interop/register-map.toml, row MB-INTEROP-HR-06 (first-party register map); words copied from the map, value from docs/parity/modbus.md"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_interop_hr07_real_3_141593"
+source = "protocol_spec"
+origin = "fixtures/modbus/interop/register-map.toml, row MB-INTEROP-HR-07 (first-party register map); words copied from the map, value from docs/parity/modbus.md"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_interop_hr07_lreal_2_71828182846"
+source = "protocol_spec"
+origin = "fixtures/modbus/interop/register-map.toml, row MB-INTEROP-HR-07 (first-party register map); words copied from the map, value from docs/parity/modbus.md"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_interop_le_real_3_141593"
+source = "protocol_spec"
+origin = "fixtures/modbus/interop/register-map.toml, row MB-INTEROP-LE (first-party register map); words copied from the map, value from docs/parity/modbus.md"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/typed_real_one_register_short"
+source = "adversarial"
+origin = "Authored to break the typed decoder: REAL needs a different register count than 1"
+license = "Apache-2.0"
+must_fail = true
+note = "MalformedData: the 1 register(s) are rejected and kept as 2 raw bytes on the ItemError"
+
+[[vector]]
+name = "tcp/typed_lreal_one_register_long"
+source = "adversarial"
+origin = "Authored to break the typed decoder: LREAL needs a different register count than 5"
+license = "Apache-2.0"
+must_fail = true
+note = "MalformedData: the 5 register(s) are rejected and kept as 10 raw bytes on the ItemError"
+
+[[vector]]
+name = "tcp/typed_dint_three_registers"
+source = "adversarial"
+origin = "Authored to break the typed decoder: DINT needs a different register count than 3"
+license = "Apache-2.0"
+must_fail = true
+note = "MalformedData: the 3 register(s) are rejected and kept as 6 raw bytes on the ItemError"
+
+[[vector]]
+name = "tcp/typed_int_two_registers"
+source = "adversarial"
+origin = "Authored to break the typed decoder: INT needs a different register count than 2"
+license = "Apache-2.0"
+must_fail = true
+note = "MalformedData: the 2 register(s) are rejected and kept as 4 raw bytes on the ItemError"
+
+[[vector]]
+name = "tcp/typed_lword_three_registers"
+source = "adversarial"
+origin = "Authored to break the typed decoder: LWORD needs a different register count than 3"
+license = "Apache-2.0"
+must_fail = true
+note = "MalformedData: the 3 register(s) are rejected and kept as 6 raw bytes on the ItemError"

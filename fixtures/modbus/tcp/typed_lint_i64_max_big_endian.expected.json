@@ -1,0 +1,6 @@
+{
+  "data_type": "LINT",
+  "byte_order": "BIG_ENDIAN",
+  "type": "I64",
+  "value": 9223372036854775807
+}

@@ -1,0 +1,7 @@
+{
+  "data_type": "LREAL",
+  "byte_order": "BIG_ENDIAN",
+  "type": "F64",
+  "bits": "0xfff0000000000000",
+  "decimal": "-inf"
+}

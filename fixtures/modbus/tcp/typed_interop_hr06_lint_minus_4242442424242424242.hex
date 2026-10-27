@@ -1,0 +1,3 @@
+# Typed decode vector: the interop constant of MB-INTEROP-HR-06 (holding register 18).
+# Registers copied from fixtures/modbus/interop/register-map.toml; BIG_ENDIAN.
+C5 1F D1 17 B2 FB B6 4E

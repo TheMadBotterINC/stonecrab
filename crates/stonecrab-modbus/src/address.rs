@@ -268,7 +268,9 @@ impl ModbusArea {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum ModbusDataType {
-    /// One bit on a bit area, one 16-bit register (0 or non-zero) on a register area.
+    /// One bit on a bit area; on a register area bit 0 of one 16-bit register (bit 8 under
+    /// little-endian byte order), the other bits being padding that is ignored
+    /// (docs/parity/modbus.md#MB-TYPE-BOOL).
     Bool,
     /// Unsigned 8-bit value in one register.
     Byte,

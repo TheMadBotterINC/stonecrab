@@ -1,0 +1,7 @@
+{
+  "data_type": "LREAL",
+  "byte_order": "BIG_ENDIAN",
+  "error": "MalformedData",
+  "register_count": 5,
+  "raw_len": 10
+}

@@ -1,0 +1,4 @@
+# Typed decode vector: LINT minimum under BIG_ENDIAN.
+# Registers 8000 0000 0000 0000.
+# Registers as sent on the wire, high byte of each register first.
+80 00 00 00 00 00 00 00

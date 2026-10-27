@@ -1,0 +1,4 @@
+# Typed decode vector: ULINT maximum under BIG_ENDIAN.
+# Registers FFFF FFFF FFFF FFFF; exact, never through a float.
+# Registers as sent on the wire, high byte of each register first.
+FF FF FF FF FF FF FF FF

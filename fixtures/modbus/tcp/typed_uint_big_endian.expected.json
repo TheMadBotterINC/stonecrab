@@ -1,0 +1,6 @@
+{
+  "data_type": "UINT",
+  "byte_order": "BIG_ENDIAN",
+  "type": "U16",
+  "value": 42424
+}

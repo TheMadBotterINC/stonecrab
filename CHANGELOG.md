@@ -122,6 +122,14 @@
   waits. The crate now depends on `stonecrab-transport` (without its `tcp` feature) and
   `bytes`. Golden ADU vectors are `fixtures/modbus/tcp/adu_*`; the fuzz target is
   `fuzz_modbus_mbap`.
+- Add `TypedDecoder`: `decode_registers`, `decode_bits` and `encode_registers` map the 15
+  numeric and bit types to `PlcValue`s in the four upstream byte-order modes (a `ByteOrder`
+  and a `WordOrder`; `0x01020304` is `[1,2,3,4]`, `[4,3,2,1]`, `[2,1,4,3]`, `[3,4,1,2]`),
+  with exact integers, bit-for-bit floats and the single-register padding of `BOOL`,
+  `BYTE`, `SINT` and `USINT`. A wrong register count is a `MalformedData` item error that
+  keeps the received bytes within the caller's budget. The little-endian modes are derived
+  from the documented layouts; they are not `automated-verified` until the upstream
+  little-endian vectors are added. Vectors are under `fixtures/modbus/tcp/typed_*`.
 ### stonecrab-sensors 0.1.0
 - Add the crate: declarative sensor profiles for Stonecrab, depending on `stonecrab-core`,
   `serde` and, behind the default `toml` feature, `toml` (ADR-0016). No driver reads a
