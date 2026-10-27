@@ -114,6 +114,14 @@
   allocation; write PDUs and exception codes outside the ten are refused. The crate now
   depends on `stonecrab-codec`. Golden vectors under `fixtures/modbus/tcp/` are written
   from the V1.1b examples or built to fail; the fuzz target is `fuzz_modbus_pdu`.
+- Add MBAP framing (ADR-0015): `MbapHeader`, `TransactionId` (1 to 0xFFFE, wrapping as
+  upstream, never 0 or 0xFFFF), `ModbusAdu` (a header and an opaque PDU of 1 to 253
+  bytes) and `MbapFramer`, a `stonecrab_transport::Framer`. The header is judged before
+  the body is awaited or allocated: protocol id other than 0 or length 0 or 1 is
+  `Malformed`, length above 254 (ADU above 260 bytes) is `Oversized`, an incomplete ADU
+  waits. The crate now depends on `stonecrab-transport` (without its `tcp` feature) and
+  `bytes`. Golden ADU vectors are `fixtures/modbus/tcp/adu_*`; the fuzz target is
+  `fuzz_modbus_mbap`.
 ### stonecrab-sensors 0.1.0
 - Add the crate: declarative sensor profiles for Stonecrab, depending on `stonecrab-core`,
   `serde` and, behind the default `toml` feature, `toml` (ADR-0016). No driver reads a

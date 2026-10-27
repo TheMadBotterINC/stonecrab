@@ -1,0 +1,4 @@
+# ADU bytes: the 7 byte MBAP header (transaction id, protocol id, length, unit id), then the PDU.
+# A valid header declaring length 254 (an ADU of 260 bytes) followed by only 10 PDU bytes.
+# The framer waits for the rest: decode returns Ok(None), the buffer is untouched and nothing is allocated for the missing 243 bytes.
+00 01 00 00 00 FE 11 01 02 03 04 05 06 07 08 09 0A

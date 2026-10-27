@@ -4,14 +4,16 @@ Native Modbus TCP driver for Stonecrab. The alpha scope is read-only: function c
 registers) over TCP with MBAP framing. RTU, ASCII, TLS, UDP, writes, extended registers
 and string types are out of scope for the alpha.
 
-Nothing is implemented beyond the address types, their text grammar, read batching and
-the PDU codec. This crate currently offers `UnitId`, `ModbusArea`, `ModbusDataType`,
-`AddressConvention`, `ModbusAddress` (built with its builder or parsed from text with
-`ModbusAddress::parse`) and `ProtocolAddress` for it, plus `Batcher`, `BatchLimits`,
-`Chunk` and `Member`, and the PDU types `FunctionCode`, `ExceptionCode` and `ModbusPdu`
-with `encode_request`, `decode_request`, `decode_response` and `encode_response`. There is
-no framing, session, connection or driver yet, and no I/O of any kind. The crate depends
-only on `stonecrab-core` and `stonecrab-codec`; default features are empty.
+Nothing is implemented beyond the address types, their text grammar, read batching, the
+PDU codec and MBAP framing. This crate currently offers `UnitId`, `ModbusArea`,
+`ModbusDataType`, `AddressConvention`, `ModbusAddress` (built with its builder or parsed
+from text with `ModbusAddress::parse`) and `ProtocolAddress` for it, plus `Batcher`,
+`BatchLimits`, `Chunk` and `Member`, the PDU types `FunctionCode`, `ExceptionCode` and
+`ModbusPdu` with `encode_request`, `decode_request`, `decode_response` and
+`encode_response`, and the framing types `MbapHeader`, `TransactionId`, `ModbusAdu` and
+`MbapFramer`. There is no session, connection or driver yet, and no I/O of any kind. The
+crate depends on `stonecrab-core`, `stonecrab-codec`, `stonecrab-transport` (without its
+`tcp` feature, for the `Framer` trait only) and `bytes`; default features are empty.
 
 Upstream behavior is the Apache PLC4X Modbus TCP driver at the commit pinned in
 `upstream/manifest.toml`. Every claim about it, and every divergence, is recorded with a
@@ -23,7 +25,8 @@ stable row id in the
 | Address types: `UnitId`, `ModbusArea`, `ModbusDataType`, `ModbusAddress` | build-tested |
 | Address text grammar and parser (`ModbusAddress::parse`) | unit-tested; fuzzed |
 | PDU codec for function codes 01 to 04 and the exception PDU | unit-tested; vector-tested; property-tested; fuzzed |
-| MBAP framing and transaction correlation | planned |
+| MBAP framing (`MbapFramer`, `MbapHeader`, `ModbusAdu`, `TransactionId`) | unit-tested; vector-tested; fuzzed |
+| Transaction correlation | planned |
 | Typed register decoding and byte order | planned |
 | Read batching (`Batcher`) | unit-tested; property-tested |
 | Session, connection and `modbus-tcp` driver | planned |
@@ -163,6 +166,56 @@ assert_eq!(
 The golden vectors in `fixtures/modbus/tcp/` are written from the examples of the Modbus
 Application Protocol Specification V1.1b or built to break the decoder; they are
 repository fixtures, not part of the published crate.
+
+## MBAP framing
+On Modbus TCP every PDU travels behind a 7 byte MBAP header: the transaction id, the
+protocol id (always 0), a length that counts the unit id plus the PDU, and the unit id, all
+big-endian. `MbapFramer` implements the transport crate's `Framer` for `ModbusAdu`, an
+`MbapHeader` plus the PDU as opaque `Bytes`; the PDU is decoded after the session has
+matched the reply to its request. `decode` follows these rules:
+
+- fewer than 7 bytes buffered is `Ok(None)`: wait for the header;
+- the header is judged as soon as it is complete, before anything is allocated or
+  awaited: a protocol id other than 0 or a length of 0 or 1 is `FrameError::Malformed`
+  (the protocol id is checked first), and a length above 254, which would make the ADU
+  larger than 260 bytes, is `FrameError::Oversized` carrying the declared ADU size;
+- an incomplete body is `Ok(None)` and leaves the buffer untouched, so a fragmented ADU is
+  reassembled by the caller feeding more bytes;
+- a whole ADU is removed from the front of the buffer, exactly, and bytes behind it stay
+  for the next call, so a coalesced read yields one ADU per call.
+
+`encode` writes the header then the PDU. `ModbusAdu::new` is the only constructor and keeps
+the halves consistent: a PDU of 1 to 253 bytes, protocol id 0 and the matching length, so
+an ADU is 8 to 260 bytes and always encodes. `TransactionId` is the request counter: it
+starts at 1, wraps from 0xFFFE to 1 as upstream does, and never yields 0 or 0xFFFF;
+a reply's id is whatever the peer sent and is not restricted. The rows are
+`MB-READ-FRAMING`, `MB-LIMIT-ADU` and `MB-READ-TXN` in the parity record.
+
+```rust
+use bytes::BytesMut;
+use stonecrab_modbus::{MbapFramer, TransactionId};
+use stonecrab_transport::Framer;
+
+// A reply arrives in two pieces; the first 9 bytes are not a whole ADU yet.
+let mut framer = MbapFramer::new();
+let mut buffer = BytesMut::from(&[0x00, 0x03, 0x00, 0x00, 0x00, 0x09, 0x11, 0x03, 0x06][..]);
+assert_eq!(framer.decode(&mut buffer)?, None);
+buffer.extend_from_slice(&[0x02, 0x2B, 0x00, 0x00, 0x00, 0x64]);
+
+let adu = framer.decode(&mut buffer)?.expect("a whole ADU");
+assert_eq!(adu.transaction_id(), 3);
+assert_eq!(adu.pdu().len(), 8);
+assert!(buffer.is_empty());
+
+let mut ids = TransactionId::default();
+assert_eq!(ids.next().get(), 1);
+# Ok::<(), stonecrab_transport::FrameError>(())
+```
+
+The golden ADU vectors in `fixtures/modbus/tcp/adu_*` wrap the V1.1b example PDUs in the
+header layout of the Modbus Messaging on TCP/IP Implementation Guide V1.0b, and add
+the adversarial cases (lengths 255, 1 and 0, protocol id 1, a truncated header, a body that
+has not arrived, a 261 byte ADU and a 1 KiB stream of seven coalesced ADUs).
 
 ## Configuration
 The six connection parameters (request timeout, default unit identifier, ping address,

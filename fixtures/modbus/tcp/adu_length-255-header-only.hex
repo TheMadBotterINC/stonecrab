@@ -1,0 +1,4 @@
+# ADU bytes: the 7 byte MBAP header (transaction id, protocol id, length, unit id), then the PDU.
+# Length 255 is one over the largest legal 254, so the ADU would be 261 bytes. Only the 7 header bytes are present:
+# the framer must judge the header alone and not wait for the body.
+00 01 00 00 00 FF 11

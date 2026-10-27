@@ -7,6 +7,8 @@ NOTICE
 README.md
 src/address.rs
 src/batch.rs
+src/framing/mbap.rs
+src/framing.rs
 src/lib.rs
 src/pdu/code.rs
 src/pdu/codec.rs

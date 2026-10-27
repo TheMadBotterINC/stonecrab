@@ -1,0 +1,4 @@
+# ADU bytes: the 7 byte MBAP header (transaction id, protocol id, length, unit id), then the PDU.
+# The first 6 bytes of a header only (the unit id byte is missing).
+# Framed, the framer waits: decode returns Ok(None) and the buffer is untouched. Read as one whole header, MbapHeader::decode reports Truncated.
+00 01 00 00 00 06

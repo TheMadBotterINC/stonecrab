@@ -1,0 +1,3 @@
+# ADU bytes: the 7 byte MBAP header (transaction id, protocol id, length, unit id), then the PDU.
+# Length 0 cannot even hold the unit id. The bytes of a request follow the header to show that they do not rescue it.
+00 01 00 00 00 00 11 01 00 13 00 13

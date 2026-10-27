@@ -22,10 +22,12 @@ ignored = ["arbitrary"]
 [dependencies]
 libfuzzer-sys = "0.4"
 arbitrary = "1.5"
+bytes = "1.10"
 stonecrab-core = { path = "../crates/stonecrab-core" }
 stonecrab-codec = { path = "../crates/stonecrab-codec" }
 stonecrab-modbus = { path = "../crates/stonecrab-modbus" }
 stonecrab-sensors = { path = "../crates/stonecrab-sensors" }
+stonecrab-transport = { path = "../crates/stonecrab-transport", default-features = false }
 # Later slices add path dependencies on the crate each new target exercises.
 
 # Fuzz targets are added as [[bin]] sections by the slice that adds each target, named
@@ -47,6 +49,13 @@ bench = false
 [[bin]]
 name = "fuzz_modbus_address"
 path = "fuzz_targets/fuzz_modbus_address.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_modbus_mbap"
+path = "fuzz_targets/fuzz_modbus_mbap.rs"
 test = false
 doc = false
 bench = false

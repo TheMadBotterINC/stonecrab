@@ -3,7 +3,8 @@
 //! The expected files are written by hand from the Modbus Application Protocol
 //! Specification V1.1b, never produced by this decoder. Decode and encode are asserted
 //! separately and each against a PDU built from the expected file, so a decoder bug and an
-//! encoder bug cannot cancel out. Every vector is PDU bytes only, without an MBAP header.
+//! encoder bug cannot cancel out. Every vector is PDU bytes only, without an MBAP header; the
+//! whole-ADU vectors (`tcp/adu_*`) belong to `tests/framing.rs`.
 #![forbid(unsafe_code)]
 
 #[cfg(test)]
@@ -26,7 +27,9 @@ mod tests {
         load_dir(&dir)
             .expect("fixtures/modbus loads: every file listed, every listed vector present")
             .into_iter()
-            .filter(|vector| vector.name.starts_with("tcp/"))
+            .filter(|vector| {
+                vector.name.starts_with("tcp/") && !vector.name.starts_with("tcp/adu_")
+            })
             .collect()
     }
 
@@ -405,7 +408,15 @@ mod tests {
     fn spec_vectors_cite_a_section_and_adversarial_vectors_say_why() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/modbus");
         let provenance = std::fs::read_to_string(dir.join("PROVENANCE.toml")).expect("readable");
-        let entries = provenance.lines().filter(|l| *l == "[[vector]]").count();
+        let adu_entries = provenance
+            .lines()
+            .filter(|l| l.starts_with("name = \"tcp/adu_"))
+            .count();
+        let entries = provenance
+            .lines()
+            .filter(|l| *l == "[[vector]]")
+            .count()
+            .saturating_sub(adu_entries);
         assert_eq!(
             entries,
             vectors().len(),

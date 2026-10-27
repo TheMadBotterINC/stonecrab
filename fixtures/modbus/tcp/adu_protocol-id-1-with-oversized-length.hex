@@ -1,0 +1,3 @@
+# ADU bytes: the 7 byte MBAP header (transaction id, protocol id, length, unit id), then the PDU.
+# Protocol id 1 and length 255 together: the protocol id is judged first, because a header that is not Modbus has no meaningful length.
+00 01 00 01 00 FF 11

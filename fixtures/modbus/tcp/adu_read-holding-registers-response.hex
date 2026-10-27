@@ -1,0 +1,4 @@
+# ADU bytes: the 7 byte MBAP header (transaction id, protocol id, length, unit id), then the PDU.
+# Modbus Messaging on TCP/IP Implementation Guide V1.0b (the MBAP header description; section number not checked, the PDF is not retained), wrapped around the Modbus Application Protocol V1.1b section 6.3, Read Holding Registers, response example.
+# Transaction 3, protocol id 0, length 9 (unit id plus 8 PDU bytes), unit id 17 (0x11). Byte count 6.
+00 03 00 00 00 09 11 03 06 02 2B 00 00 00 64

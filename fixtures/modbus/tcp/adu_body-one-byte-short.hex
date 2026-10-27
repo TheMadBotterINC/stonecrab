@@ -1,0 +1,4 @@
+# ADU bytes: the 7 byte MBAP header (transaction id, protocol id, length, unit id), then the PDU.
+# A valid header with length 2 (a 1 byte PDU) and no PDU byte: the ADU is 8 bytes and 7 are present.
+# The framer waits: decode returns Ok(None) and the buffer is untouched.
+00 01 00 00 00 02 11

@@ -1,0 +1,4 @@
+# ADU bytes: the 7 byte MBAP header (transaction id, protocol id, length, unit id), then the PDU.
+# Smallest ADU the framer accepts: a 1 byte PDU, so length 2 and 8 bytes in all.
+# Transaction 8, unit id 1. The single PDU byte 0x03 is a function code with no data; judging that is the PDU codec's job.
+00 08 00 00 00 02 01 03

@@ -1,0 +1,5 @@
+# ADU bytes: the 7 byte MBAP header (transaction id, protocol id, length, unit id), then the PDU.
+# Header extremes the framer must not police: transaction id 0xFFFF and unit id 0xFF (255).
+# Only the counter that makes request ids avoids 0 and 0xFFFF; a reply carries whatever the peer sent and correlation judges it later.
+# Read input register 9 request, Modbus Application Protocol V1.1b section 6.4 example PDU.
+FF FF 00 00 00 06 FF 04 00 08 00 01

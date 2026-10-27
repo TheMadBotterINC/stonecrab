@@ -24,9 +24,12 @@ workspace = true
 default = []
 
 [dependencies]
+bytes.workspace = true
 stonecrab-codec.workspace = true
 stonecrab-core.workspace = true
+stonecrab-transport.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
-stonecrab-testkit = { workspace = true, features = ["fixtures"] }
+serde_json.workspace = true
+stonecrab-testkit = { workspace = true, features = ["fixtures", "net"] }

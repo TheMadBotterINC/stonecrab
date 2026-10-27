@@ -44,6 +44,27 @@
 #   exception             an accepted exception response: the exception code
 #   error and, as the variant has them, field, value, needed, available, length, max,
 #   remaining             a must_fail vector: the ParseError variant and its parameters
+#
+# The vectors named tcp/adu_* (S22) are whole Modbus TCP ADUs, MBAP header included, for
+# the framer, not the PDU codec. They were written out by hand from the layout of the
+# Modbus Messaging on TCP/IP Implementation Guide V1.0b (transaction id, protocol id 0,
+# length, unit id, then the PDU) around the V1.1b example PDUs above or built to break the
+# framer; the PDF is not retained, so the Implementation Guide section number of the
+# header description is UNVERIFIED: the framing-level citation in every tcp/adu_* origin
+# names the document and topic only, and a maintainer should add the section number after
+# checking the PDF. The small vectors are spelled out byte by byte in their expected files; the
+# 125 register, 253 byte PDU and 1 KiB stream vectors come from the byte patterns stated
+# in their .hex comments. Their expected files carry:
+#   adus      an accepted vector: the ADUs the framer must cut from the front of the
+#             bytes, in order, each with transaction_id, protocol_id, length, unit_id and
+#             pdu (hex), so re-encoding them must give the vector bytes back
+#   leftover  an accepted vector: bytes after the last ADU that stay in the buffer
+#   error     a must_fail vector the framer rejects: "Malformed", or "Oversized" with
+#             size, the whole-frame bytes the header declares
+#   outcome   a must_fail vector that is not an error to a streaming framer: "incomplete"
+#             means decode returns Ok(None) and leaves the buffer alone (adu_len, the ADU
+#             length the header declares, when the header is complete); header_error
+#             "Truncated" is what MbapHeader::decode says about the same bytes
 
 [[file]]
 path = "interop/register-map.toml"
@@ -482,3 +503,187 @@ origin = "Authored to break the request decoder: a 254 byte PDU, one over the 25
 license = "Apache-2.0"
 must_fail = true
 note = "ParseError::OversizedLength: a 254 byte PDU, one over the 253 byte limit of section 4.1; rejected before it is parsed"
+
+[[vector]]
+name = "tcp/adu_read-coils-request"
+source = "protocol_spec"
+origin = "Modbus Messaging on TCP/IP Implementation Guide V1.0b (the MBAP header description; section number not checked, the PDF is not retained), around Modbus Application Protocol V1.1b section 6.1 (Read Coils), request example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/adu_read-coils-response"
+source = "protocol_spec"
+origin = "Modbus Messaging on TCP/IP Implementation Guide V1.0b (the MBAP header description; section number not checked, the PDF is not retained), around Modbus Application Protocol V1.1b section 6.1 (Read Coils), response example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/adu_read-discrete-inputs-request"
+source = "protocol_spec"
+origin = "Modbus Messaging on TCP/IP Implementation Guide V1.0b (the MBAP header description; section number not checked, the PDF is not retained), around Modbus Application Protocol V1.1b section 6.2 (Read Discrete Inputs), request example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/adu_read-discrete-inputs-response"
+source = "protocol_spec"
+origin = "Modbus Messaging on TCP/IP Implementation Guide V1.0b (the MBAP header description; section number not checked, the PDF is not retained), around Modbus Application Protocol V1.1b section 6.2 (Read Discrete Inputs), response example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/adu_read-holding-registers-request"
+source = "protocol_spec"
+origin = "Modbus Messaging on TCP/IP Implementation Guide V1.0b (the MBAP header description; section number not checked, the PDF is not retained), around Modbus Application Protocol V1.1b section 6.3 (Read Holding Registers), request example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/adu_read-holding-registers-response"
+source = "protocol_spec"
+origin = "Modbus Messaging on TCP/IP Implementation Guide V1.0b (the MBAP header description; section number not checked, the PDF is not retained), around Modbus Application Protocol V1.1b section 6.3 (Read Holding Registers), response example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/adu_read-input-registers-request"
+source = "protocol_spec"
+origin = "Modbus Messaging on TCP/IP Implementation Guide V1.0b (the MBAP header description; section number not checked, the PDF is not retained), around Modbus Application Protocol V1.1b section 6.4 (Read Input Registers), request example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/adu_read-input-registers-response"
+source = "protocol_spec"
+origin = "Modbus Messaging on TCP/IP Implementation Guide V1.0b (the MBAP header description; section number not checked, the PDF is not retained), around Modbus Application Protocol V1.1b section 6.4 (Read Input Registers), response example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/adu_read-coils-exception"
+source = "protocol_spec"
+origin = "Modbus Messaging on TCP/IP Implementation Guide V1.0b (the MBAP header description; section number not checked, the PDF is not retained), around Modbus Application Protocol V1.1b section 7 (Exception Responses), exception example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/adu_read-holding-registers-response-125"
+source = "adversarial"
+origin = "Authored boundary case: the Modbus Application Protocol V1.1b section 6.3 limit of 125 registers inside an MBAP header (length 253, ADU 259 bytes)"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/adu_pdu-253-bytes-largest-adu"
+source = "adversarial"
+origin = "Authored boundary case: length 254, the largest the Modbus Messaging on TCP/IP Implementation Guide V1.0b (the MBAP header description; section number not checked, the PDF is not retained) bound allows given Modbus Application Protocol V1.1b section 4.1 (PDU at most 253 bytes)"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/adu_pdu-1-byte-smallest-adu"
+source = "adversarial"
+origin = "Authored boundary case: length 2, the smallest legal MBAP length (unit id plus one PDU byte)"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/adu_transaction-id-ffff-unit-255"
+source = "adversarial"
+origin = "Authored: the Modbus Messaging on TCP/IP Implementation Guide V1.0b (the MBAP header description; section number not checked, the PDF is not retained) header with transaction id 0xFFFF and unit id 0xFF around the Modbus Application Protocol V1.1b section 6.4 request example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/adu_transaction-id-0"
+source = "adversarial"
+origin = "Authored: the Modbus Messaging on TCP/IP Implementation Guide V1.0b (the MBAP header description; section number not checked, the PDF is not retained) header with transaction id 0 and unit id 0 around the Modbus Application Protocol V1.1b section 6.1 request example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/adu_read-coils-request-one-trailing-byte"
+source = "adversarial"
+origin = "Authored: one ADU followed by the first byte of another, to prove a frame is cut at its declared end"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/adu_stream-coalesced-1024"
+source = "adversarial"
+origin = "Authored stress case: a 1 KiB stream of seven ADUs built from the V1.1b section 6 PDU shapes, to prove the framer splits a coalesced read exactly"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/adu_length-255-header-only"
+source = "adversarial"
+origin = "Authored to break the framer: MBAP length 255, one over the 254 bound (PDU at most 253 bytes, V1.1b section 4.1)"
+license = "Apache-2.0"
+must_fail = true
+note = "FrameError::Oversized: length 255 declares a 261 byte ADU; rejected from the header alone, before any body is awaited"
+
+[[vector]]
+name = "tcp/adu_261-bytes-full"
+source = "adversarial"
+origin = "Authored to break the framer: a complete ADU of 261 bytes (254 byte PDU); the 260 byte maximum is exceeded even though every byte is present"
+license = "Apache-2.0"
+must_fail = true
+note = "FrameError::Oversized: a complete 261 byte ADU is refused, not delivered"
+
+[[vector]]
+name = "tcp/adu_length-ffff-header-only"
+source = "adversarial"
+origin = "Authored to break the framer: MBAP length 0xFFFF, the largest the 16 bit field can hold"
+license = "Apache-2.0"
+must_fail = true
+note = "FrameError::Oversized: length 65535 declares a 65541 byte ADU; rejected from the header alone"
+
+[[vector]]
+name = "tcp/adu_length-1"
+source = "adversarial"
+origin = "Authored to break the framer: MBAP length 1, below the smallest legal 2"
+license = "Apache-2.0"
+must_fail = true
+note = "FrameError::Malformed: length 1 is a unit id with no PDU"
+
+[[vector]]
+name = "tcp/adu_length-0"
+source = "adversarial"
+origin = "Authored to break the framer: MBAP length 0"
+license = "Apache-2.0"
+must_fail = true
+note = "FrameError::Malformed: length 0 cannot hold the unit id"
+
+[[vector]]
+name = "tcp/adu_protocol-id-1"
+source = "adversarial"
+origin = "Authored to break the framer: MBAP protocol id 1; Modbus Messaging on TCP/IP Implementation Guide V1.0b (the MBAP header description; section number not checked, the PDF is not retained) fixes the protocol id of Modbus at 0"
+license = "Apache-2.0"
+must_fail = true
+note = "FrameError::Malformed: protocol id 1, Modbus requires 0"
+
+[[vector]]
+name = "tcp/adu_protocol-id-0100"
+source = "adversarial"
+origin = "Authored to break the framer: MBAP protocol id 0x0100; Modbus Messaging on TCP/IP Implementation Guide V1.0b (the MBAP header description; section number not checked, the PDF is not retained) fixes the protocol id of Modbus at 0"
+license = "Apache-2.0"
+must_fail = true
+note = "FrameError::Malformed: protocol id 0x0100, Modbus requires 0"
+
+[[vector]]
+name = "tcp/adu_protocol-id-1-with-oversized-length"
+source = "adversarial"
+origin = "Authored to break the framer: MBAP protocol id 1 with length 255"
+license = "Apache-2.0"
+must_fail = true
+note = "FrameError::Malformed: protocol id 1 is reported before the length is judged"
+
+[[vector]]
+name = "tcp/adu_truncated-header-6-bytes"
+source = "adversarial"
+origin = "Authored to break the framer: an MBAP header cut one byte short"
+license = "Apache-2.0"
+must_fail = true
+note = "decode returns Ok(None): the header is 6 of 7 bytes; MbapHeader::decode on the same bytes is FrameError::Truncated"
+
+[[vector]]
+name = "tcp/adu_body-one-byte-short"
+source = "adversarial"
+origin = "Authored to break the framer: the smallest ADU with its single PDU byte missing"
+license = "Apache-2.0"
+must_fail = true
+note = "decode returns Ok(None): the header is complete and its one PDU byte has not arrived"
+
+[[vector]]
+name = "tcp/adu_length-exceeds-bytes-present"
+source = "adversarial"
+origin = "Authored to break the framer: a header whose length exceeds the bytes present"
+license = "Apache-2.0"
+must_fail = true
+note = "decode returns Ok(None): the header declares a 260 byte ADU and 17 bytes are present"

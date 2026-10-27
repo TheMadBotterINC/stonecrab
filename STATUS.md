@@ -79,7 +79,7 @@ ADR-0004 explicitly overrides the original `main` branch policy with `master`.
   (ADR-0009); `scripts/fuzz-smoke.sh` runs cargo-deny on it and every target for 60 s.
   Targets: `fuzz_codec_bounded_reader` (S15), `fuzz_core_connection_string` (S08),
   `fuzz_modbus_address` (S20b), `fuzz_sensors_profile_toml` (S28a), `fuzz_modbus_pdu`
-  (S21). `fuzz/deny.toml`
+  (S21), `fuzz_modbus_mbap` (S22). `fuzz/deny.toml`
   must mirror every root `deny.toml` change; the smoke script refuses to run otherwise.
 
 ### Core data contracts
@@ -175,6 +175,7 @@ gates named were run locally before that commit.
 | S19 | 2026-10-27 | Transport `ConnectionGuard` over `FramedTransport`: lifecycle through core `ConnectionState` with private idle, in-flight and resyncing phases, request-driven reconnect with capped jittered backoff and `Failed` on exhaustion, one in-flight slot plus an admission queue bounded by `max_pending_requests` (`Backpressure` beyond it), every wait raced against close, token and deadline, a timeout after flush resyncs before the next send, `GuardConfig`, `GuardStats`; parity rows `TRANSPORT-GUARD-LIFECYCLE`, `TRANSPORT-RECONNECT`, `TRANSPORT-QUEUE` implemented | check, coverage, lint-attrs, machete, package |
 | S21 | 2026-10-27 | Modbus PDU codec: `FunctionCode`, `ExceptionCode`, `ModbusPdu` (read requests FC01-04, bit and register responses, exceptions), `encode_request`, `decode_request`, `decode_response` with quantity, byte-count and size bounds checked before allocation, `encode_response`; 59 golden vectors under `fixtures/modbus/tcp` authored from the Modbus Application Protocol V1.1b or adversarial, loaded through the testkit with independently written expected files; fifth fuzz target `fuzz_modbus_pdu`; `MB-EXC-*` rows implemented. The upstream vectors wait for prerequisite P4 | check, coverage, lint-attrs, features, machete, dependencies, fuzz, package |
 | S13 | 2026-10-27 | Testkit `ContractSuite` (23 cases named as sentences with their SPEC coverage; skips are named, never silent; driver failures become report entries) with `ContractFixture` hooks and `ContractReport`; run against the simulator: 22 passed, 0 failed, 1 named skip (the unsupported-write case, covered by the testkit's always-unsupported double); parity row `SIM-CONTRACT-SUITE` | check, coverage, lint-attrs, machete |
+| S22 | 2026-10-27 | Modbus MBAP framing: `MbapHeader`, `TransactionId` (1 to 0xFFFE, wrapping), `ModbusAdu` with an opaque PDU, `MbapFramer` implementing the transport `Framer` (protocol id 0, length 2 to 254, ADU at most 260 bytes, header judged before any allocation, incomplete frames wait); the modbus crate now depends on the transport crate; spec-authored and adversarial `adu_*` vectors; sixth fuzz target `fuzz_modbus_mbap`; parity rows `MB-READ-FRAMING`, `MB-READ-TXN` implemented | check, coverage, lint-attrs, machete, dependencies, fuzz, package |
 
 ## Verified evidence and reproduction
 
@@ -313,10 +314,10 @@ operation row is implemented yet.
 - Byte/raw/recursive/calendar `PlcValue` variants (deferred by ADR-0006); the byte and
   word order types exist as data only, with no decoder consuming them.
 - Browse, discovery and subscriptions (write batches exist as data).
-- MBAP framing, the Modbus session and connection, the sensor measurement pipeline,
-  board adapters (the TCP transport with framing and the connection guard, the codec
-  crate, the Modbus address parser, batcher and PDU codec, and the validated profile
-  loader exist; nothing reads a device yet).
+- The Modbus session and connection, the sensor measurement pipeline, board adapters
+  (the TCP transport with framing and the connection guard, the codec crate, the Modbus
+  address parser, batcher, PDU codec and MBAP framer, and the validated profile loader
+  exist; nothing reads a device yet).
 - OPC UA, EtherNet/IP/Logix, S7 and remaining upstream protocols.
 - Code generation; the retained upstream fixture corpus (blocked on maintainer
   prerequisite P4, approval to redistribute the Apache-2.0 PLC4X vectors). The

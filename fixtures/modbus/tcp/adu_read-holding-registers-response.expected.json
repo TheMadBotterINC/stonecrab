@@ -1,0 +1,12 @@
+{
+  "adus": [
+    {
+      "transaction_id": 3,
+      "protocol_id": 0,
+      "length": 9,
+      "unit_id": 17,
+      "pdu": "03 06 02 2B 00 00 00 64"
+    }
+  ],
+  "leftover": 0
+}

@@ -1,0 +1,4 @@
+# ADU bytes: the 7 byte MBAP header (transaction id, protocol id, length, unit id), then the PDU.
+# Modbus Messaging on TCP/IP Implementation Guide V1.0b (the MBAP header description; section number not checked, the PDF is not retained), wrapped around the Modbus Application Protocol V1.1b section 7, Exception Responses, exception example.
+# Transaction 5, protocol id 0, length 3 (unit id plus 2 PDU bytes), unit id 17 (0x11). Function 0x01 refused with exception code 0x02.
+00 05 00 00 00 03 11 81 02

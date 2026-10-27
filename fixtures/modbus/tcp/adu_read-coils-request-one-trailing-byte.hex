@@ -1,0 +1,4 @@
+# ADU bytes: the 7 byte MBAP header (transaction id, protocol id, length, unit id), then the PDU.
+# The ADU of read-coils-request followed by one byte of the next ADU (0x00).
+# The framer consumes exactly the 12 ADU bytes and leaves the extra byte in the buffer.
+00 01 00 00 00 06 11 01 00 13 00 13 00

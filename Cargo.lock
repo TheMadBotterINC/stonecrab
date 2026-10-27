@@ -308,10 +308,13 @@ dependencies = [
 name = "stonecrab-modbus"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "proptest",
+ "serde_json",
  "stonecrab-codec",
  "stonecrab-core",
  "stonecrab-testkit",
+ "stonecrab-transport",
 ]
 
 [[package]]

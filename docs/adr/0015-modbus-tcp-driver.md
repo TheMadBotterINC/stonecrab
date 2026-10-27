@@ -29,9 +29,10 @@ parses it with `Short.parseShort` and the inventoried files show no range check
 ## Decision
 1. **Crate boundary and alpha scope (D5).** `stonecrab-modbus` is a published crate. At
    S20a its only dependency is `stonecrab-core`; the codec arrives with the PDU codec
-   (S21), transport and Tokio with the session and connection (S24b, S25). Default
-   features are empty. TCP with MBAP framing is the only transport. `pdu/` takes and
-   returns PDU bytes without framing, `framing/` holds `mbap.rs` only, and
+   (S21), `stonecrab-transport` (the `Framer` trait only, without Tokio's `net`) with the
+   framing (S22, decision 11), Tokio's `net` with the session and connection (S24b,
+   S25). Default features are empty. TCP with MBAP framing is the only transport. `pdu/`
+   takes and returns PDU bytes without framing, `framing/` holds `mbap.rs` only, and
    `Crc16Modbus`, `rtu.rs` and the serial transport are M2. The alpha reads function
    codes 01 to 04 and decodes the exception PDU. There is no write on the wire (D3):
    `modbus-tcp` answers `write` with `Unsupported(Operation::Write)` and no I/O, and
@@ -226,6 +227,50 @@ parses it with `Short.parseShort` and the inventoried files show no range check
     it as a crate-private constructor for the contract suite and S26 makes it public and
     adds the driver to `tests/public_types.rs`. A global registry of test transports or a
     Cargo feature for fakes is not used.
+11. **MBAP framing and the transport edge (S22).** `src/framing.rs` with the single child
+    `src/framing/mbap.rs` holds `MbapHeader`, `TransactionId`, `ModbusAdu` and `MbapFramer`
+    (`mod.rs` is denied, as for `pdu/`). `stonecrab-modbus` gains a dependency on
+    `stonecrab-transport` and on `bytes`, the edge `MODBUS --> TRANSPORT` of
+    ARCHITECTURE.md section 1. The dependency is declared with `default-features = false`
+    in `[workspace.dependencies]`, mirroring `stonecrab-core`: the `Framer` trait and
+    `FrameError` need no `tcp` feature, so the Modbus crate does not pull Tokio's `net`
+    feature; the driver crates enable `tcp` where they build the real factory (S26). The
+    decisions this slice settles:
+    - An ADU is an `MbapHeader` and the PDU as opaque `Bytes`. PDU decoding stays in
+      `pdu/` and runs after the session has matched the reply to its request (S24b), so
+      the framer needs no function-code knowledge and a malformed PDU never desynchronizes
+      the stream.
+    - `MbapFramer::decode` waits for 7 header bytes (`Ok(None)`), then judges the header
+      alone, before it allocates or awaits the body: a protocol id other than 0 and a
+      length of 0 or 1 are `FrameError::Malformed` (the protocol id first, because a
+      header that is not Modbus has no meaningful length), a length above 254 is
+      `FrameError::Oversized` carrying the declared ADU size (6 plus the length, so
+      255 is 261). Only then does it wait for the body, and it consumes exactly the ADU.
+      `max_frame_bytes()` is 260. The bound is the V1.1b section 4.1 PDU limit of 253
+      bytes plus the header; upstream sizes a frame from the length field with no upper
+      bound (`MB-LIMIT-ADU`, a divergence row).
+    - `stonecrab_codec::ParseError` from the bounded reader converts into `FrameError`
+      by a private function in `mbap.rs` (decision D22: `FrameError` is the transport's
+      own type and the orphan rule forbids a `From` impl): `Truncated` to `Truncated`,
+      `OversizedLength` to `Oversized(length)`, every other variant to `Malformed`.
+      `MbapHeader::decode` on a short slice is how `Truncated` is reachable; the streaming
+      `decode` reports a short buffer as `Ok(None)`.
+    - `ModbusAdu` has no public fields and one constructor, `ModbusAdu::new`, which keeps
+      protocol id 0, a PDU of 1 to 253 bytes and the matching length together, so every
+      ADU encodes. `MbapHeader`'s fields are public because a decoded header is plain
+      data; `MbapHeader::encode` validates its own fields. `unit_id` is the `UnitId`
+      newtype (CODING_STANDARDS 9.3 rejects a bare `u8` unit id in a public signature)
+      and `transaction_id` is the wire `u16`, because a peer's reply may carry any id.
+    - `TransactionId` is the request counter only: it starts at 1, `next()` returns the
+      current id and advances, wrapping from 0xFFFE to 1, so 0 and 0xFFFF are never
+      issued, as upstream's `getAndIncrement` with its reset at 0xFFFF. Where the counter
+      lives (the driver, so ids continue across a reconnect) is S25's decision.
+    - The ADU golden vectors are named `tcp/adu_*` in the same `fixtures/modbus` directory
+      and are first-party (`protocol_spec` or `adversarial`) for the same P4 reason as
+      the PDU vectors. `must_fail` there means "the framer yields no ADU": an `error`
+      expectation, or `outcome: incomplete` for bytes a streaming framer waits on, which
+      the tests check as `Ok(None)` with the buffer untouched. The PDU vector tests
+      exclude the `adu_` names.
 
 ## Consequences
 - The rest of the crate builds on a small, fully tested vocabulary. The parser has
@@ -344,3 +389,28 @@ parses it with `Short.parseShort` and the inventoried files show no range check
   evidence artifact, which moves this ADR to accepted).
 - The `deny` job stays blocking. This slice adds no dependency, so the D23 check is
   unchanged: `stonecrab-modbus` resolves only `stonecrab-core` and its existing graph.
+- S22: `crates/stonecrab-modbus/tests/framing.rs` loads the `tcp/adu_*` vectors through
+  `stonecrab_testkit::load_dir` and asserts decode-compare (the ADUs and leftover bytes the
+  expected file lists), re-encode-compare (the ADUs built from the expected file encode to
+  the `.hex`, a separate assertion), the byte-at-a-time feed of every accepted vector,
+  and, for every `must_fail` vector, the named `FrameError` variant or `Ok(None)` with the
+  buffer unchanged. It also holds the CODING_STANDARDS 13.7 list for `MbapFramer::decode`
+  (empty, 1 to 6 bytes, seven bytes with length 2 and the body one byte short, the exact
+  minimal ADU, one extra byte left in the buffer, length 254 with its full body accepted
+  at 260 bytes, 255 rejected, protocol id 1 rejected), the `TransactionId` tests
+  (`txn_ids_start_at_1`, `txn_ids_wrap_from_fffe_to_1`, a full cycle that never yields 0 or
+  0xFFFF) and `FramedTransport` over the testkit `FakeTransport` (a fragmented ADU
+  reassembled, coalesced ADUs delivered one at a time, a truncated ADU then close, bad
+  headers as `MalformedData` and `ResourceLimit`, `resync` past a bad header, and the
+  encoded bytes on the wire). Tests carry `// covers: SPEC mandatory-failure-cases / F1
+  truncated headers, oversized lengths` and the F2 fragmentation tag. `fuzz_modbus_mbap`
+  (thirteen seed files taken from the vectors) feeds arbitrary bytes to `decode` and
+  asserts that an accepted ADU re-encodes to the bytes it consumed, that the buffer
+  never grows and that a wait or an error leaves it untouched. The `# Compatibility`
+  sections cite `MB-READ-FRAMING`, `MB-READ-TXN`, `MB-LIMIT-ADU` and `MB-READ-MATCH`.
+  `stonecrab-testkit` gains the `net` feature as a dev-dependency (the `FakeTransport`)
+  and `serde_json` is a dev-dependency for the expected files. The D23 check
+  (`cargo tree -e normal,dev -i <name>`, one name at a time) still finds `lazy_static`,
+  `log`, `time` and `chrono` absent and `once_cell` only through `tracing-core` and
+  `stonecrab-driver-sim`; the only new crate edge is `stonecrab-modbus` to
+  `stonecrab-transport`, and the transport crate builds with its default features off.

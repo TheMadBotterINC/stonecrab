@@ -1,0 +1,4 @@
+# ADU bytes: the 7 byte MBAP header (transaction id, protocol id, length, unit id), then the PDU.
+# Transaction id 0 is a legal value on the wire; the framer passes it through.
+# Read coils request, Modbus Application Protocol V1.1b section 6.1 example PDU, unit id 0 (broadcast on serial lines).
+00 00 00 00 00 06 00 01 00 13 00 13

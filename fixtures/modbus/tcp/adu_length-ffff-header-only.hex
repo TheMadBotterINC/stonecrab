@@ -1,0 +1,3 @@
+# ADU bytes: the 7 byte MBAP header (transaction id, protocol id, length, unit id), then the PDU.
+# Length 0xFFFF, the largest value of the field: nothing may be allocated or awaited for 65541 bytes.
+00 01 00 00 FF FF 11

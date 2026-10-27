@@ -1,0 +1,3 @@
+# ADU bytes: the 7 byte MBAP header (transaction id, protocol id, length, unit id), then the PDU.
+# Protocol id 1 where the Modbus protocol requires 0. Otherwise the read-coils-request ADU.
+00 01 00 01 00 06 11 01 00 13 00 13
