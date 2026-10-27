@@ -464,6 +464,10 @@ mod tests {
 
     // covers: SPEC mandatory-failure-cases / F4 cancellation (send is not cancel-safe)
     #[tokio::test]
+    #[cfg_attr(
+        windows,
+        ignore = "Windows loopback accepts a 32 MiB write at once (IOCP), so the write never pends; the drop-mid-write poison path is exercised on Unix and by the unit test on a reset connection"
+    )]
     async fn a_send_cut_short_poisons_the_transport() {
         const FRAME: usize = 32 * 1024 * 1024;
         let (mut transport, _device) = connected(limits(FRAME, FRAME)).await;

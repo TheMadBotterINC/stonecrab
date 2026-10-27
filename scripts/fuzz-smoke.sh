@@ -48,6 +48,14 @@ cd fuzz
 unset RUSTUP_TOOLCHAIN
 cargo deny --locked check
 
+# A prebuilt cargo-fuzz binary defaults to the triple it was built for (the CI binary
+# is musl-linked), so name the host triple of the pinned nightly explicitly.
+host="$(rustc -vV | sed -n 's/^host: //p')"
+if [ -z "$host" ]; then
+  echo "could not determine the host triple from rustc -vV" >&2
+  exit 1
+fi
+
 targets="$(cargo fuzz list)"
 if [ -z "$targets" ]; then
   echo "no fuzz targets yet; nothing to run"
@@ -60,5 +68,5 @@ while IFS= read -r target; do
   echo "fuzzing $target for ${seconds}s"
   scratch="target/smoke-corpus/$target"
   mkdir -p "$scratch"
-  cargo fuzz run "$target" "$scratch" "corpus/$target" -- "-max_total_time=$seconds"
+  cargo fuzz run --target "$host" "$target" "$scratch" "corpus/$target" -- "-max_total_time=$seconds"
 done <<< "$targets"
