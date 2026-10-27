@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug core unit tests",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": ["test", "--no-run", "--package", "stonecrab-core", "--lib"],
+        "filter": {"name": "stonecrab_core", "kind": "lib"}
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

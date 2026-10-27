@@ -1,0 +1,10 @@
+# Changelog
+## Unreleased
+### stonecrab 0.2.0
+- Move the facade into a resolver-3 workspace with a runtime-independent core crate.
+- Remove the specification-only `placeholder::status` API. There is no replacement
+  status API; consult the capability and parity documentation.
+### stonecrab-core 0.1.0
+- Establish shared metadata, safety lints and foundation contracts.
+## stonecrab 0.1.0
+- Publish the specification-stage package. No industrial protocol support.

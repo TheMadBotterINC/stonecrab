@@ -1,13 +1,118 @@
-[package]
-name = "stonecrab"
-version = "0.1.0"
+[workspace]
+resolver = "3"
+members = ["crates/stonecrab", "crates/stonecrab-core"]
+
+[workspace.package]
 edition = "2024"
-authors = ["The Mad Botter INC"]
+rust-version = "1.97"
 license = "Apache-2.0"
-description = "Apache PLC4X, carcinized. An independent, native Rust port of Apache PLC4X: one API for industrial protocols, built for sensor acquisition first."
+authors = ["The Mad Botter INC"]
 repository = "https://github.com/themadbotter/stonecrab"
 homepage = "https://github.com/themadbotter/stonecrab"
 keywords = ["plc", "industrial", "modbus", "opcua", "protocols"]
 categories = ["network-programming", "embedded"]
 
-[dependencies]
+[workspace.dependencies]
+stonecrab-core = { path = "crates/stonecrab-core", version = "0.1", default-features = false }
+thiserror = { version = "2.0", default-features = false, features = ["std"] }
+
+[workspace.lints.rust]
+unsafe_code                   = "forbid"
+non_ascii_idents              = "deny"
+rust_2018_idioms              = { level = "warn", priority = -1 }
+rust_2024_compatibility       = { level = "warn", priority = -1 }
+missing_docs                  = "warn"   # promoted to deny in published crates' lib.rs (§5.1)
+missing_debug_implementations = "warn"
+unreachable_pub               = "warn"
+unused_qualifications         = "warn"
+unused_import_braces          = "warn"
+unused_lifetimes              = "warn"
+single_use_lifetimes          = "warn"
+trivial_casts                 = "warn"
+trivial_numeric_casts         = "warn"
+let_underscore_drop           = "warn"
+macro_use_extern_crate        = "warn"
+meta_variable_misuse          = "warn"
+variant_size_differences      = "warn"
+
+[workspace.lints.clippy]
+all      = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+cargo    = { level = "warn", priority = -1 }
+
+# denied even locally — never acceptable to run
+unwrap_used                   = "deny"
+expect_used                   = "deny"
+panic                         = "deny"
+unimplemented                 = "deny"
+todo                          = "deny"
+unreachable                   = "deny"
+string_slice                  = "deny"
+mem_forget                    = "deny"
+exit                          = "deny"
+dbg_macro                     = "deny"
+print_stdout                  = "deny"
+print_stderr                  = "deny"
+use_debug                     = "deny"
+allow_attributes              = "deny"
+allow_attributes_without_reason = "deny"
+map_err_ignore                = "deny"
+mod_module_files              = "deny"
+
+# restriction, warn — the first three are promoted to deny in lib.rs of the crates named in §5.1
+indexing_slicing              = "warn"
+arithmetic_side_effects       = "warn"
+as_conversions                = "warn"
+integer_division              = "warn"
+float_cmp_const               = "warn"
+lossy_float_literal           = "warn"
+missing_assert_message        = "warn"
+tests_outside_test_module     = "warn"
+unwrap_in_result              = "warn"
+let_underscore_must_use       = "warn"
+let_underscore_untyped        = "warn"
+clone_on_ref_ptr              = "warn"
+rc_buffer                     = "warn"
+rest_pat_in_fully_bound_structs = "warn"
+same_name_method              = "warn"
+wildcard_enum_match_arm       = "warn"
+str_to_string                 = "warn"
+string_add                    = "warn"
+format_push_string            = "warn"
+pub_without_shorthand         = "warn"
+renamed_function_params       = "warn"
+large_include_file            = "warn"
+
+# nursery, individually
+future_not_send               = "warn"
+missing_const_for_fn          = "warn"
+redundant_pub_crate           = "warn"
+use_self                      = "warn"
+needless_pass_by_ref_mut      = "warn"
+iter_on_single_items          = "warn"
+significant_drop_in_scrutinee = "warn"
+significant_drop_tightening   = "warn"
+branches_sharing_code         = "warn"
+
+# pedantic noise, allowed with reasons in §5.7
+module_name_repetitions       = "allow"
+must_use_candidate            = "allow"
+similar_names                 = "allow"
+too_many_lines                = "allow"
+struct_excessive_bools        = "allow"
+
+[workspace.lints.rustdoc]
+all                       = { level = "warn", priority = -1 }
+broken_intra_doc_links    = "deny"
+private_intra_doc_links   = "deny"
+bare_urls                 = "deny"
+
+[profile.release]
+lto             = "thin"
+codegen-units   = 1
+debug           = "line-tables-only"
+overflow-checks = true
+
+[profile.bench]
+inherits = "release"
+debug    = true

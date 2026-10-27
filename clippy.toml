@@ -1,0 +1,35 @@
+msrv = "1.97"
+avoid-breaking-exported-api = false
+cognitive-complexity-threshold = 25
+too-many-arguments-threshold = 7
+too-many-lines-threshold = 120
+large-error-threshold = 64
+enum-variant-size-threshold = 128
+
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-dbg-in-tests = true
+allow-print-in-tests = true
+
+disallowed-methods = [
+  { path = "std::thread::sleep",                       reason = "blocks a runtime worker; use tokio::time or a BlockingWorker" },
+  { path = "tokio::sync::mpsc::unbounded_channel",     reason = "channels are bounded (CODING_STANDARDS §8.8)" },
+  { path = "tokio::task::spawn",                       reason = "spawn through an owner that keeps the JoinHandle (§8.7); use JoinSet or a supervised task type" },
+  { path = "std::process::exit",                       reason = "libraries do not terminate the process" },
+  { path = "std::env::set_var",                        reason = "unsafe in edition 2024; unavailable" },
+  { path = "alloc::string::String::from_utf8_lossy",   reason = "only via stonecrab_codec::text::decode_lossy, which marks Quality::Uncertain and keeps raw bytes" },
+]
+
+disallowed-types = [
+  { path = "tokio::sync::mpsc::UnboundedSender",   reason = "channels are bounded (§8.8)" },
+  { path = "tokio::sync::mpsc::UnboundedReceiver", reason = "channels are bounded (§8.8)" },
+  { path = "std::sync::mpsc::Sender",              reason = "std channels have no capacity bound; use tokio::sync::mpsc with a capacity" },
+]
+
+disallowed-macros = [
+  { path = "std::println",  reason = "use tracing (§14)" },
+  { path = "std::print",    reason = "use tracing (§14)" },
+  { path = "std::eprintln", reason = "use tracing (§14)" },
+  { path = "std::eprint",   reason = "use tracing (§14)" },
+]

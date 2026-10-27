@@ -1,0 +1,23 @@
+[package]
+name = "stonecrab"
+version = "0.2.0"
+description = "Public facade for the native Rust industrial protocol library Stonecrab"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+include = ["src/**", "README.md", "LICENSE", "NOTICE"]
+
+[lints]
+workspace = true
+
+[features]
+default = []
+
+[dependencies]
+stonecrab-core.workspace = true

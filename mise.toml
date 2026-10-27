@@ -1,0 +1,16 @@
+[tools]
+rust = "1.99.1"
+
+[tasks.check]
+description = "Run local formatting, strict lint, tests and documentation gates"
+run = [
+  "cargo fmt --all --check",
+  "cargo clippy --locked --workspace --all-targets --all-features -- -D warnings",
+  "cargo test --locked --workspace --all-features",
+  "RUSTDOCFLAGS='-D warnings' cargo doc --locked --workspace --all-features --no-deps",
+  "cargo check --locked --workspace --no-default-features",
+]
+
+[tasks.coverage]
+description = "Require every handwritten executable line to be covered"
+run = "cargo llvm-cov --locked --workspace --all-features --fail-under-lines 100 --show-missing-lines"
