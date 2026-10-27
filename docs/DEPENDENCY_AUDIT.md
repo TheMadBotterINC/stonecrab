@@ -8,7 +8,7 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
 - First-party error code remains safe; the derive implementation and its compiler
   dependencies execute at build time. Treat the procedural macro chain as trusted
   build tooling, not as a reason to relax first-party unsafe prohibition.
-- No RustSec audit has been run yet. Advisory/license/source checks remain required
-  before release; this entry does not certify the transitive dependency tree.
+- `cargo-deny` 0.20.2 passed advisory, license, ban and registry-source checks on
+  2026-10-27. Repeat at release; this does not certify memory safety of the tree.
 - Alternatives: handwritten Error/Display implementations are possible, but the
   normative standards specify `thiserror` 2.

@@ -1,5 +1,7 @@
 [tools]
 rust = "1.99.1"
+cargo-deny = "0.20.2"
+"aqua:taiki-e/cargo-llvm-cov" = "0.9.1"
 
 [tasks.check]
 description = "Run local formatting, strict lint, tests and documentation gates"
@@ -14,3 +16,17 @@ run = [
 [tasks.coverage]
 description = "Require every handwritten executable line to be covered"
 run = "cargo llvm-cov --locked --workspace --all-features --fail-under-lines 100 --show-missing-lines"
+
+[tasks.dependencies]
+description = "Check dependency advisories, licenses, bans and sources"
+run = "cargo deny --locked check"
+
+[tasks.package]
+description = "Verify both archives and compare shipped files with reviewed lists"
+run = [
+  "cargo package --locked --workspace",
+  "cargo package --locked -p stonecrab-core --list > target/core-package-files.txt",
+  "diff -u packaging/stonecrab-core.txt target/core-package-files.txt",
+  "cargo package --locked -p stonecrab --list > target/facade-package-files.txt",
+  "diff -u packaging/stonecrab.txt target/facade-package-files.txt",
+]

@@ -1,0 +1,32 @@
+[upstream]
+project = "Apache PLC4X"
+version = "1.0.0"
+repository = "https://github.com/apache/plc4x"
+canonical_repository = "https://gitbox.apache.org/repos/asf/plc4x.git"
+tag = "v1.0.0"
+tag_object = "32a524591841ab56d26b032914ce06918148fbb6"
+commit = "ea229918f5d07700e04d7d69ab1645da679cb700"
+verified_on = "2026-10-27"
+verification = "git ls-remote refs/tags/v1.0.0* and GitHub git-ref API; annotated tag peeled to commit"
+release_url = "https://github.com/apache/plc4x/releases/tag/v1.0.0"
+signature_verified = false
+inventory_complete = false
+
+[paths]
+api = "plc4j/api/src/main/java/org/apache/plc4x/java/api"
+connection_base = "plc4j/spi/drivers/src/main/java/org/apache/plc4x/java/spi/drivers/ConnectionBase.java"
+modbus_driver = "plc4j/drivers/modbus"
+modbus_mspec = "protocols/modbus/src/main/resources/protocols/modbus/modbus.mspec"
+modbus_vectors = "protocols/modbus/src/test/resources/protocols/modbus"
+simulator = "plc4j/drivers/simulated"
+transports = "plc4j/transports"
+subscription_emulation = "plc4j/utils/subscription-emulation"
+
+[pending]
+items = [
+  "Complete protocol-by-transport-by-operation source inventory",
+  "Inventory capabilities in non-Java implementations",
+  "Verify source-release signatures",
+  "Map every required behavior to a planned test ID",
+  "Review all configuration and address aliases before implementation",
+]

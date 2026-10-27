@@ -11,7 +11,7 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
-include = ["src/**", "README.md", "LICENSE", "NOTICE"]
+include = ["src/**", "tests/**", "README.md", "LICENSE", "NOTICE"]
 
 [lints]
 workspace = true
