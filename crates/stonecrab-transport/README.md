@@ -14,6 +14,7 @@ types are Stonecrab's own contract. The behavior that is specified is recorded i
 | --- | --- |
 | `Transport` and `TransportFactory` traits, `FrameError` | build-tested |
 | `TcpTransport` and `TcpFactory` (feature `tcp`) | build-tested |
+| `Framer` trait and `FramedTransport` (`next_frame`, `send_frame`, `resync`) | build-tested |
 | `SystemClock` (Tokio timer) | build-tested |
 | `Jitter` (xorshift64* sample source for `ReconnectPolicy::next_delay`) | build-tested |
 | Serial, UDP and TLS transports | planned |
@@ -24,6 +25,11 @@ tests move bytes only; they exercise no protocol, no simulator and no device, so
 support level stays build-tested. Deadline expiry is tested on paused Tokio time against a
 future that never completes, not on a socket. Simulator, interoperability and hardware
 verification are not claimed.
+
+The framing layer has tests over the in-memory transport double and a fake clock only:
+fragmentation, coalescing, peer close at each framing boundary, the buffer bound, resync
+and deadline expiry. No protocol framer ships in this crate yet, so the support level
+stays build-tested.
 
 ## Features
 - `tcp` (default): `TcpTransport` and `TcpFactory`, and Tokio's `net` feature. Without it
@@ -40,6 +46,24 @@ only deadline source: there is no default and no hidden timeout. A deadline that
 already passed fails with `ErrorKind::Timeout` before any I/O. Deadlines are compared with
 Tokio's clock, which is the ordinary `std::time::Instant` clock unless a test pauses time;
 build them from `SystemClock::now()` and they agree in both cases.
+
+## Framing
+A `Framer<F>` turns bytes into frames (`decode`, `encode`, `max_frame_bytes`) and does no
+I/O. `FramedTransport<F, R>` joins a `Box<dyn Transport>` with a framer `R` and owns the
+receive buffer, bounded by `max_buffered_bytes`:
+
+- `next_frame(deadline)` receives until the framer yields a whole frame. Fragmented
+  frames are assembled, coalesced frames come out of successive calls, a frame over the
+  framer's maximum fails with `ResourceLimit` as soon as its header is in, and a peer that
+  closes mid-frame is `Disconnected`.
+- `send_frame(&frame, deadline)` encodes into a scratch buffer and sends one transport
+  frame; a frame over the smaller of the framer's and the transport's frame limit fails
+  with `ResourceLimit` before anything is sent.
+- `resync(deadline)` realigns after a framing error or an abandoned request: it discards
+  bytes from the front, one at a time, while the framer rejects them, and keeps
+  receiving. It fails with `Disconnected` when the deadline passes without a frame
+  boundary. Its deadline is the remaining deadline of the request whose timeout triggered
+  it, or `Deadline::after(clock.now(), timeouts.request)` from close or recovery.
 
 ## Limits
 `recv` appends only up to `ResourceLimits::max_buffered_bytes` and fails with

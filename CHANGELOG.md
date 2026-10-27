@@ -55,6 +55,11 @@
   calls.
 - Test the transport against the unpublished testkit's new `net` feature (`Script`,
   `ScriptedPeer`, `FakeTransport`, `FakeTransportFactory`); no change to the public API.
+- Add the `Framer<F>` trait (`decode`, `encode`, `max_frame_bytes`) and
+  `FramedTransport<F, R>` over a `Box<dyn Transport>`: `next_frame` assembles fragmented
+  and coalesced frames within `max_buffered_bytes`, `send_frame` encodes and sends one
+  bounded frame, and `resync(Deadline)` discards bytes until the framer finds a frame
+  boundary and fails with `Disconnected` at the deadline (ADR-0014 addendum).
 ### stonecrab-modbus 0.1.0
 - Add the crate scaffold: the native Modbus TCP driver crate, depending only on
   `stonecrab-core`, with default features empty. Nothing but address types and their

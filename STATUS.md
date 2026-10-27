@@ -56,7 +56,8 @@ ADR-0004 explicitly overrides the original `main` branch policy with `master`.
 - `crates/stonecrab`: public facade, re-exporting core.
 - `crates/stonecrab-core`: no Tokio, executor or network dependency.
 - `crates/stonecrab-transport`: the only crate with Tokio (scoped features, no spawned
-  tasks); TCP transport, `SystemClock` and the reconnect jitter source (ADR-0014).
+  tasks); TCP transport, framing layer with resync, `SystemClock` and the reconnect
+  jitter source (ADR-0014).
 - `tools/stonecrab-testkit`: unpublished deterministic fixtures, development-only:
   `FixtureAddress`, `FakeClock`, `block_on`, `block_on_with`, `poll_once`, `CountingWaker`,
   and behind its `net` feature `Script`, `ScriptedPeer`, `FakeTransport` and
@@ -160,6 +161,7 @@ gates named were run locally before that commit.
 | S11b-1 | 2026-10-27 | New crate `stonecrab-driver-sim` 0.1.0 with the simulator data model only: `RealtimeClock`, `SimAddress` grammar (`STATE|RANDOM|SINK/name:type`), `SimDevice` and `SimTag` with ramps, read counters and a seeded RANDOM source; `tracing` 0.1 adopted workspace-wide (std only; `attributes` deferred, see ADR-0012) with the `once_cell` wrapper via `tracing-core` in deny.toml; ADR-0012 proposed; ADR-0005 addendum on wildcard arms; `docs/parity/sim.md`; no `Driver` yet | check, coverage, lint-attrs, machete, dependencies |
 | S28a | 2026-10-27 | New crate `stonecrab-sensors` 0.1.0 with the profile schema (version 1, unknown fields rejected) and the `toml` feature loader with a size bound; `serde` 1 and `toml` 0.9 adopted (D23 check clean; `toml_parser` pinned in the lock to keep one `winnow`); fourth fuzz target `fuzz_sensors_profile_toml` (60 s clean); ADR-0016; `docs/parity/sensors.md`; validation and the measurement pipeline are S28b/S29 | check, coverage, lint-attrs, features, machete, dependencies, fuzz, package |
 | S28b | 2026-10-27 | Sensors `SensorProfile::validate` collecting every error (duplicate names, unknown or empty unit, missing byte or word order for wide Modbus types, overlapping status bits, count above one, invalid scale steps, unknown quality references, unknown or missing address convention) and a fixed 19-entry UCUM-style unit table; eleven new `ProfileError` variants; parity row `SENSORS-VALIDATION` implemented | check, coverage, lint-attrs, machete, package |
+| S18 | 2026-10-27 | Transport `Framer` trait and `FramedTransport` (bounded receive buffer, `next_frame`, `send_frame`, `resync` that discards until a boundary and fails `Disconnected` at its deadline); testkit `LengthPrefixedFramer`; parity rows `TRANSPORT-FRAMING`, `TRANSPORT-RESYNC` implemented | check, coverage, lint-attrs, machete, package |
 
 ## Verified evidence and reproduction
 
@@ -295,9 +297,10 @@ operation row is implemented yet.
 - Byte/raw/recursive/calendar `PlcValue` variants (deferred by ADR-0006); the byte and
   word order types exist as data only, with no decoder consuming them.
 - Browse, discovery and subscriptions (write batches exist as data).
-- Modbus PDU codec, framing and connection, the sensor measurement pipeline, board
-  adapters (the TCP transport, the codec crate, the Modbus address parser, the read
-  batcher and the validated profile loader exist; nothing reads a device yet).
+- Modbus PDU codec, MBAP framing and connection, the sensor measurement pipeline, board
+  adapters (the TCP transport with its generic framing layer, the codec crate, the Modbus
+  address parser, the read batcher and the validated profile loader exist; nothing reads
+  a device yet).
 - OPC UA, EtherNet/IP/Logix, S7 and remaining upstream protocols.
 - Code generation or retained upstream fixture corpus.
 - Parser fuzzing (the `fuzz-smoke` job exists but has no targets), mutation testing,

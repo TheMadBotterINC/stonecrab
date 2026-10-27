@@ -8,6 +8,8 @@ README.md
 src/clock.rs
 src/deadline.rs
 src/error.rs
+src/framed.rs
+src/framer.rs
 src/jitter.rs
 src/lib.rs
 src/tcp.rs

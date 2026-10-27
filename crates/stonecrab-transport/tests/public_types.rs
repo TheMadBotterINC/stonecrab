@@ -3,7 +3,9 @@
 
 #[cfg(test)]
 mod tests {
-    use stonecrab_transport::{FrameError, Jitter, SystemClock, Transport, TransportFactory};
+    use stonecrab_transport::{
+        FrameError, Framer, Jitter, SystemClock, Transport, TransportFactory,
+    };
 
     #[test]
     fn public_types_are_send_sync_and_static() {
@@ -21,6 +23,12 @@ mod tests {
         assert_send::<Box<dyn Transport>>();
         assert_send_sync::<dyn TransportFactory>();
         assert_send_sync::<Box<dyn TransportFactory>>();
+    }
+
+    #[test]
+    fn the_framer_trait_is_object_safe_and_send() {
+        fn assert_send<T: Send + ?Sized>() {}
+        assert_send::<dyn Framer<Vec<u8>>>();
     }
 
     #[cfg(feature = "tcp")]

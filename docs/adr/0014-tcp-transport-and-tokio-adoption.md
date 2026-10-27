@@ -168,7 +168,8 @@ Decision D21 fixes how the transport is tested: timing on fakes, bytes on loopba
   TransportFactory` and be tested with doubles that live in the testkit.
 - A timed-out `send` costs a reconnect. That is deliberate (section 6.8: ambiguous
   outcomes are first-class); a framer that wants to resynchronize instead needs a
-  different contract, which S19's `FramedTransport::resync` would add on top.
+  different contract, which `FramedTransport::resync` (S18, see the addendum below)
+  provides on top.
 - Every `OpFuture` is one allocation. Accepted in ADR-0007.
 - Name resolution is outside the transport's control once started (blocking pool), and a
   host name may query the network. Documented on `TransportFactory::open`; tests use IP
@@ -231,6 +232,76 @@ dropped listener), `the_opened_transport_reports_its_peer_and_limits` (no traffi
 `shutdown_completes_tells_the_peer_and_closes_the_transport` (observes the half-close on
 the accepted socket) and `a_send_cut_short_poisons_the_transport` (needs a peer that
 never reads).
+
+## Addendum (S18): the framing layer
+Slice S18 adds `Framer<F>` and `FramedTransport<F, R>` to this crate (no ADR of its own:
+the layer is the byte-stream half of the transport contract above, uses no new dependency,
+and is not behind `tcp`, so `--no-default-features` and the testkit's
+`default-features = false` edge still see it).
+
+- **`Framer<F>: Send`** has `decode(&mut self, &mut BytesMut) -> Result<Option<F>,
+  FrameError>`, `encode(&mut self, &F, &mut BytesMut) -> Result<(), FrameError>` and
+  `max_frame_bytes(&self) -> usize`. Sizes are bytes on the wire, header included, the
+  unit of `ResourceLimits::max_frame_bytes`. `decode` takes bytes off the front of the
+  buffer only when it returns `Ok(Some(_))`; `Ok(None)` means more bytes are needed; an
+  oversized declared size is `Oversized` and an invalid header `Malformed`, both
+  reported as soon as the header is complete (before any payload is awaited or any
+  allocation sized from the declared length) and both leaving the buffer untouched, so
+  the error repeats until `resync` discards the offending bytes. A decoder never panics.
+  `encode` only appends and appends nothing on error. The trait is object safe, but no
+  `impl Framer<F> for Box<dyn Framer<F>>` exists; a slice that wants a boxed framer adds
+  that blanket impl.
+- **Deviations from the S18 text.** The type has a second generic parameter `R` (the
+  framer) and `send_frame` takes `&F`, not `F`; S22 and S24b write
+  `FramedTransport<Adu, MbapFramer>` and pass frames by reference.
+- **`FramedTransport<F, R: Framer<F>>` is generic over the frame and framer and boxes only
+  the byte pipe** (`Box<dyn Transport>`). A driver holds a concrete
+  `FramedTransport<Adu, MbapFramer>`; a trait object would force every frame through
+  `dyn Any` or a second boxed future for no gain. It owns the receive buffer (never
+  longer than `limits().max_buffered_bytes()`, checked before every `recv`, so a full
+  buffer without a frame is `ResourceLimit`), a scratch buffer for `send_frame`, and at
+  most one frame recognised by `resync`. It has no `Debug` derive: the manual impl prints
+  the peer and byte counts, never buffered bytes.
+- **`next_frame(Deadline)`** decodes what is buffered first (a coalesced second frame
+  costs no I/O and is returned even after the deadline), then loops `recv` and `decode`.
+  Timeout, `Disconnected` on a 0-byte read (with or without a partial frame) and
+  `ResourceLimit` are as the deliverable lists; transport errors pass through. It is
+  cancel-safe because `Transport::recv` is and the bytes live in the buffer.
+- **`send_frame(&F, Deadline)`** encodes at call time into the scratch buffer (so the
+  returned future does not borrow the frame, and `F` need not be `Sync`), refuses an
+  encoded frame over `min(framer.max_frame_bytes(), limits().max_frame_bytes())` with
+  `ResourceLimit` before anything is sent, then makes one `Transport::send`. It inherits
+  `send`'s non-cancel-safety and poisoning; `resync` is never the answer to a failed send.
+- **`resync(Deadline)` and the boundary rule.** The framer's `decode` is the only judge,
+  so a framer needs no extra method (the optional `skip_to_boundary` hook that was
+  considered is omitted until a framer with a cheap sync-marker search needs it). Loop:
+  `decode` the front of the buffer. `Ok(Some(frame))` is the boundary: the frame is
+  held and returned by the next `next_frame` (so `resync` followed by `next_frame`
+  loses nothing). `Ok(None)` with room in the buffer keeps the front (a header the
+  framer accepts, or one too short to judge) and receives more; this is what lets a frame
+  that was half received when its request timed out be completed instead of skipped.
+  `Err(_)`, or `Ok(None)` with a full buffer (a header that can never complete in the
+  buffer), discards exactly one byte and asks again. Every loop either discards a byte or
+  calls `recv`, and `recv` checks the deadline on entry, so the loop ends. A frame held
+  by an earlier `resync` is dropped first. Protocols with a sync marker (the MBAP
+  protocol id) lock on reliably; a bare length prefix can lock onto a false header in
+  garbage, so the caller verifies correlation and reopens the connection if it still
+  gets a wrong frame. A late reply that is itself a whole valid frame is delivered by the
+  next `next_frame`; the owner discards it by correlation (S24b `late_replies`).
+- **Deadline source (D15).** `resync` receives, so it takes a `Deadline` and has no
+  default. The rustdoc names the two sources: the remaining deadline of the request whose
+  timeout triggered it, or `Deadline::after(clock.now(), timeouts.request)` when
+  `ConnectionGuard::close` or recovery runs it (S19 builds that value; this crate has no
+  clock of its own for it). The transport's `Timeout` at that deadline is turned into
+  `Disconnected` (the original kept as the source): a stream that found no boundary in
+  time cannot be trusted, and the owner reopens it. Other errors, including the peer
+  closing during the resync, pass through.
+- **Test framer.** `LengthPrefixedFramer` (testkit, feature `net`) frames `Vec<u8>` with a
+  2-byte big-endian length, the sanctioned framer double of CODING_STANDARDS 13.5. Tests
+  live in `crates/stonecrab-transport/tests/framed.rs` over `FakeTransport` and
+  `FakeClock`; they carry `// covers: SPEC mandatory-failure-cases / F2 fragmentation and
+  coalescing, peer close at each framing boundary`. Row ids: `TRANSPORT-FRAMING` and
+  `TRANSPORT-RESYNC` in `docs/parity/transport.md`.
 
 ## Alternatives considered
 - **`async-std` or `smol`.** Rejected: CODING_STANDARDS 15.8 names Tokio as the sanctioned

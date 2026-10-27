@@ -78,6 +78,12 @@ the first mismatch).
   them without waiting; a deadline that passes first is a `Timeout`. It logs every frame
   (`FakeTransportProbe::sent`) and honors the same frame and buffer bounds as the TCP
   transport.
+- `LengthPrefixedFramer` is the sanctioned test `Framer<Vec<u8>>` for
+  `stonecrab_transport::FramedTransport`: a 2-byte big-endian payload length, then the
+  payload (`b"hi"` is `00 02 68 69`), with a configurable maximum frame size counted in
+  wire bytes, prefix included (clamped to 65,537). Any two bytes are a valid header, so
+  it never reports `Malformed`; a header over the maximum is `Oversized` at once. It has
+  no sync marker, so `resync` slides over garbage one byte at a time.
 - `FakeTransportFactory` implements `TransportFactory` from a queue of scripts, a
   scripted connect timeout (parks until the fake clock passes the deadline, then fails
   with `Timeout` and `Operation::Connect`) or a refusal, and records every `open` call.

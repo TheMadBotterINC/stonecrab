@@ -9,6 +9,8 @@ mod fake_factory;
 #[cfg(feature = "net")]
 mod fake_transport;
 #[cfg(feature = "net")]
+mod framer;
+#[cfg(feature = "net")]
 mod peer;
 #[cfg(feature = "net")]
 mod script;
@@ -20,6 +22,8 @@ pub use executor::{CountingWaker, block_on, block_on_with, poll_once, poll_once_
 pub use fake_factory::{FakeTransportFactory, OpenCall};
 #[cfg(feature = "net")]
 pub use fake_transport::{FakeTransport, FakeTransportProbe};
+#[cfg(feature = "net")]
+pub use framer::LengthPrefixedFramer;
 #[cfg(feature = "net")]
 pub use peer::{MAX_PEER_DELAY, ScriptedPeer};
 #[cfg(feature = "net")]
