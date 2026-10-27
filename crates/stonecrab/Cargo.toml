@@ -11,7 +11,11 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
-include = ["src/**", "tests/**", "README.md", "LICENSE", "NOTICE"]
+include = ["src/**", "README.md", "LICENSE", "NOTICE"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [lints]
 workspace = true

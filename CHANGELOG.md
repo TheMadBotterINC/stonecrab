@@ -4,7 +4,10 @@
 - Move the facade into a resolver-3 workspace with a runtime-independent core crate.
 - Remove the specification-only `placeholder::status` API. There is no replacement
   status API; consult the capability and parity documentation.
+- Add docs.rs metadata (`all-features`, `--cfg docsrs`) and stop shipping `tests/` in
+  the crate archive.
 ### stonecrab-core 0.1.0
+- Add docs.rs metadata (`all-features`, `--cfg docsrs`) for feature-gated item docs.
 - Establish shared metadata, safety lints and foundation contracts.
 - Add exact-width scalar values, validated tag identifiers, monotonic deadlines,
   immutable finite resource budgets, explicit capabilities, typed diagnostic

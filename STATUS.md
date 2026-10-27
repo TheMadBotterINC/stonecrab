@@ -1,9 +1,9 @@
 # Stonecrab status and engineering handoff
 
 Updated: 2026-10-27.
-Implementation baseline: `e7d887ee19d9285aa2eff7726cce51689cab83df`.
-This document describes that code baseline; subsequent documentation commits may
-follow it. Update this file when another implementation slice lands.
+Implementation baseline: the commit that last modified this file
+(`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
+its own commit; the slice log below records what each one landed.
 
 ## Start here
 
@@ -21,8 +21,8 @@ There are no connections, device reads, protocol drivers or hardware integration
 - The facade's minor bump records removal of the published `placeholder::status`
   API. Do not restore a compatibility shim without a real consumer requirement.
 
-The code through the baseline above has been pushed. No new release was published.
-There is no unfinished source edit at this handoff.
+Pushing is a manual maintainer action; `git status -sb` shows unpushed commits.
+No new release was published. There is no unfinished source edit at this handoff.
 
 ## Source documents and precedence
 
@@ -53,6 +53,12 @@ ADR-0004 explicitly overrides the original `main` branch policy with `master`.
 - Empty default feature sets in the publishable crates; no protocol feature flags yet.
 - Apache license/notices, contribution/security policy, changelog and ADRs.
 - Local mise tasks, CI workflow, package allow-lists and VS Code test debugging.
+- docs.rs metadata (`all-features`, `--cfg docsrs`) in both published crates; the
+  facade archive no longer ships `tests/`; the stray root `src/lib.rs` is gone.
+- Community files: `CODE_OF_CONDUCT.md`, `.github/PULL_REQUEST_TEMPLATE.md`,
+  `.github/dependabot.yml`, `docs/hardware/TEMPLATE.md` (a template, not a record).
+  `CONTRIBUTING.md` mirrors standards section 18 plus the upstream-baseline and
+  fuzz-finding policies. `deny.toml` also bans `failure`, `error-chain`, `color-eyre`.
 
 ### Core data contracts
 
@@ -94,6 +100,15 @@ deliberately not a driver or a real protocol parser.
 Read correlation tests cover mixed success, all-item failure, missing/duplicate/
 unexpected identities, time boundaries, and all six three-item result orderings
 with distinct values attached to their identities.
+
+## Alpha slices landed
+
+Slices follow [`docs/ALPHA_PLAN.md`](docs/ALPHA_PLAN.md). Each row is one commit;
+gates named were run locally before that commit.
+
+| Slice | Date | Landed | Gates |
+| --- | --- | --- | --- |
+| S02 | 2026-10-27 | Repository hygiene and community files; docs.rs metadata; facade archive without tests; GitHub community-profile check deferred until the next push | check, coverage, dependencies, package |
 
 ## Verified evidence and reproduction
 

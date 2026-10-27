@@ -6,4 +6,3 @@ LICENSE
 NOTICE
 README.md
 src/lib.rs
-tests/public_contract.rs

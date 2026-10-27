@@ -25,6 +25,9 @@ deny = [
   { crate = "jiff", reason = "calendar types are not adopted in core" },
   { crate = "lazy_static", reason = "use std lazy initialization" },
   { crate = "once_cell", reason = "use std lazy initialization" },
+  { crate = "failure", reason = "published code uses PlcError" },
+  { crate = "error-chain", reason = "published code uses PlcError" },
+  { crate = "color-eyre", reason = "published code uses PlcError" },
   { crate = "log", reason = "use tracing when diagnostics need output" },
 ]
 
