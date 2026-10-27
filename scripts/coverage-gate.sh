@@ -28,10 +28,14 @@ EXCLUDE='(^|/)(examples|benches|fuzz|generated)/'
 # --fail-under-lines` exits 1 on an empty file set, so n/a crates are never passed to
 # it, and the gate fails loudly the day a listed n/a crate gains an executable line.
 # A crate directory with no row also fails. Later slices add rows here (driver-sim,
-# sensors 100; transport 95; modbus 95 with the pure modules at 100); codec landed in S15.
+# sensors 100; transport 95); codec landed in S15 and modbus in S20a. The modbus row is 100
+# while the crate is pure (address types only); ADR-0005 sets the whole-crate tier at 95
+# with the pure modules at 100, so the row becomes 95 in the slice that adds the session
+# and connection modules (S24b/S25), which carry the OS-dependent error arms.
 THRESHOLDS="
 crates/stonecrab-core|100
 crates/stonecrab-codec|100
+crates/stonecrab-modbus|100
 crates/stonecrab|na
 tools/stonecrab-testkit|90
 "

@@ -20,6 +20,19 @@
 - Add `coil_byte_count`, `pack_bits_lsb_first` and `unpack_bits_lsb_first`.
 - Lengths are checked against the caller's maximum and the remaining input before any
   allocation or copy; no function panics on any input (ADR-0013).
+### stonecrab-modbus 0.1.0
+- Add the crate scaffold: the native Modbus TCP driver crate, depending only on
+  `stonecrab-core`, with default features empty. Nothing but address types is
+  implemented; there is no parser, codec, framing, session, connection or driver yet.
+- Add `UnitId` (one MBAP byte; default 1; 0 and 255 are carried, not rejected),
+  `ModbusArea` (`Coil`, `DiscreteInput`, `HoldingRegister`, `InputRegister`),
+  `ModbusDataType` (the 15 numeric and bit types, with `from_upstream_name` recognising
+  all 27 upstream names and refusing the 12 deferred ones by name),
+  `AddressConvention::Plc4xCompatible` and `ModbusAddress` built through a validating
+  `ModbusAddressBuilder`.
+- `ModbusAddress` implements `ProtocolAddress` with protocol `modbus` and a canonical
+  long form such as `holding-register:16:INT{unit-id: 10, byte-order: 'LITTLE_ENDIAN'}`
+  (ADR-0015, proposed).
 ### stonecrab-core 0.1.0
 - Add docs.rs metadata (`all-features`, `--cfg docsrs`) for feature-gated item docs.
 - Establish shared metadata, safety lints and foundation contracts.

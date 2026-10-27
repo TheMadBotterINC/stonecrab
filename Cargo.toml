@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
-members = ["crates/stonecrab", "crates/stonecrab-codec", "crates/stonecrab-core", "tools/stonecrab-testkit"]
-default-members = ["crates/stonecrab", "crates/stonecrab-codec", "crates/stonecrab-core"]
+members = ["crates/stonecrab", "crates/stonecrab-codec", "crates/stonecrab-core", "crates/stonecrab-modbus", "tools/stonecrab-testkit"]
+default-members = ["crates/stonecrab", "crates/stonecrab-codec", "crates/stonecrab-core", "crates/stonecrab-modbus"]
 exclude = ["fuzz"]
 
 [workspace.package]

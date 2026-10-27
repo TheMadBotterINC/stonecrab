@@ -9,17 +9,17 @@ its own commit; the slice log below records what each one landed.
 
 Stonecrab is an independent native Rust port of Apache PLC4X, prioritizing sensor
 acquisition. It is **not yet a functioning industrial protocol client**.
-The repository currently contains tested, runtime-independent core data contracts and
-a bounded codec crate. There are no connections, device reads, protocol drivers or
-hardware integrations.
+The repository currently contains tested, runtime-independent core data contracts, a
+bounded codec crate and the Modbus address data model. There are no connections,
+device reads, protocol drivers or hardware integrations.
 
 - Repository: https://github.com/TheMadBotterINC/stonecrab
 - Primary/default branch: **`master`**, locally and remotely.
 - Author: **The Mad Botter INC**.
 - License: **Apache-2.0**.
 - Published on crates.io: **`stonecrab` 0.1.0**, a specification-stage placeholder.
-- Current development versions: facade **0.2.0**, core **0.1.0**, codec **0.1.0**, all
-  unreleased.
+- Current development versions: facade **0.2.0**, core **0.1.0**, codec **0.1.0**,
+  modbus **0.1.0**, all unreleased.
 - The facade's minor bump records removal of the published `placeholder::status`
   API. Do not restore a compatibility shim without a real consumer requirement.
 - Review policy: ADR-0005 waives the two-approval rule of CODING_STANDARDS 18.6
@@ -138,6 +138,7 @@ gates named were run locally before that commit.
 | S06 | 2026-10-27 | Core `OpFuture`, `Clock` trait (no implementation in core; `SystemClock` moves to transport), `CancellationToken` with child tokens and waker dedup, `StateCell`/`StateWatch` latest-value observation; ADR-0007 proposed (accepted when S11b-2 enforces it); parity rows `CORE-OPFUTURE`, `CORE-CLOCK`, `CORE-CANCEL-TOKEN`, `CORE-STATE-WATCH`; no cancel slot on requests yet | check, coverage, lint-attrs, machete, dependencies, package |
 | S07 | 2026-10-27 | Core `ConnectionConfig` and builder, `Endpoint`, `Timeouts`, `ReconnectPolicy` with pure `next_delay`, `RetryPolicy` over `BTreeSet<ErrorKind>`, `AccessPolicy` (default `ReadOnly`), `Credentials`, `AddressOptions` carrier; ADR-0008; parity rows `CORE-CONFIG-SHAPE`, `CORE-RECONNECT-POLICY`, `CORE-RETRY-POLICY`, `CORE-ADDRESS-OPTIONS`; data only, unenforced | check, coverage, lint-attrs, machete, package |
 | S10 | 2026-10-27 | Testkit `FakeClock` (a `Clock` implementation with hand-advanced time and ordered sleepers), `block_on`, `block_on_with` (advances to the next sleeper, fails fast when nothing waits on time), `poll_once`, `poll_once_with`, `CountingWaker`; no dependency | check, coverage, lint-attrs, machete |
+| S20a | 2026-10-27 | New crate `stonecrab-modbus` 0.1.0 with address types only: `UnitId`, `ModbusArea`, `ModbusDataType` (15 alpha types; string and calendar names rejected as deferred), `AddressConvention`, `ModbusAddress` and builder (bit areas accept BOOL only; last register must fit in the address space; long-form `canonical()`); ADR-0015 draft; no parser, PDU or I/O | check, coverage, lint-attrs, features, machete, dependencies, fuzz, package |
 
 ## Verified evidence and reproduction
 
@@ -168,8 +169,8 @@ Most recent local results for the implementation baseline:
   warnings denied, no-default-features, lint-attrs, feature powerset and unused-
   dependency checks passed.
 - Per-crate line coverage (ADR-0005): `stonecrab-core` 2704/2704 lines (gate 100%),
-  `stonecrab-codec` 181/181 lines (gate 100%), `stonecrab-testkit` 549/551 lines (gate
-  90%), `stonecrab` n/a (no executable lines). Error paths are not excluded. Region
+  `stonecrab-codec` 181/181 lines (gate 100%), `stonecrab-modbus` 229/229 lines (gate
+  100%), `stonecrab-testkit` 549/551 lines (gate 90%), `stonecrab` n/a (no executable lines). Error paths are not excluded. Region
   coverage is reported in `target/coverage-summary.txt` and not gated; do not describe
   it as branch coverage.
 - Workspace tests and doctests passed on Rust 1.97.1.
@@ -265,8 +266,8 @@ not native subscriptions. No Rust Modbus implementation or parity claim exists y
 - Byte/raw/recursive/calendar `PlcValue` variants (deferred by ADR-0006); the byte and
   word order types exist as data only, with no decoder consuming them.
 - Complete write request/response batches, browse, discovery and subscriptions.
-- Transport crate, Modbus TCP/RTU, sensor profiles and board adapters (the codec crate
-  exists; nothing consumes it yet).
+- Transport crate, Modbus TCP/RTU parsing and I/O, sensor profiles and board adapters
+  (the codec crate and the Modbus address types exist; nothing consumes them yet).
 - OPC UA, EtherNet/IP/Logix, S7 and remaining upstream protocols.
 - Code generation or retained upstream fixture corpus.
 - Parser fuzzing (the `fuzz-smoke` job exists but has no targets), mutation testing,
