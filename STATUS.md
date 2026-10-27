@@ -109,6 +109,7 @@ gates named were run locally before that commit.
 | Slice | Date | Landed | Gates |
 | --- | --- | --- | --- |
 | S02 | 2026-10-27 | Repository hygiene and community files; docs.rs metadata; facade archive without tests; GitHub community-profile check deferred until the next push | check, coverage, dependencies, package |
+| S01 | 2026-10-27 | Modbus TCP parity record with stable row ids (77 alpha rows `planned`, 26 deferred, 21 divergence rows, UNVERIFIED list), `CORE-URI-GRAMMAR` row, manifest `[inventory.modbus_tcp]` and `[policy]`; docs only | check |
 
 ## Verified evidence and reproduction
 
@@ -190,13 +191,19 @@ interoperability or hardware gates from the source standards.
 - Peeled implementation commit: `ea229918f5d07700e04d7d69ab1645da679cb700`.
 - Tag/commit relation verified against Git and the GitHub ref API.
 
-**M0 is not complete.** Still required:
+**M0 is not complete.** The Modbus TCP subset is inventoried: `docs/parity/modbus.md`
+carries stable row ids with planned test ids per row, a divergence table with
+references, and an UNVERIFIED list; `upstream/manifest.toml` records the inventoried
+files and line ranges under `[inventory.modbus_tcp]`. Still required, none gating the
+alpha:
 
-- Full protocol × transport × operation inventory checked against source.
+- Protocol × transport × operation inventory beyond Modbus TCP.
 - Capabilities present in non-Java implementations.
 - Source-release signature verification.
-- Requirements-to-test traceability and operation-level parity records.
-- Reconciliation of address/configuration aliases before implementing parsers.
+- The open items in the manifest `[pending]` table (RTU/ASCII connections, generated
+  TIME/DATE behavior, test-suite step formats, Modbus V1.1b section-number check).
+- Every divergence row marked "upstream issue to be filed before S32" becomes a URL
+  or is dropped in S32.
 
 Verified Modbus pitfalls are recorded in `docs/parity/modbus.md`: numeric address
 groups are decimal; `x` in forms such as `4x00016` is an area marker, not hexadecimal.

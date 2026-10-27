@@ -29,4 +29,51 @@ items = [
   "Verify source-release signatures",
   "Map every required behavior to a planned test ID",
   "Review all configuration and address aliases before implementation",
+  "Inventory the Modbus RTU/ASCII connections (rtu/ and ascii/ packages were not read)",
+  "Inspect the generated DataItem behavior for the TIME/DATE family (generated code is not in the repository)",
+  "Confirm which XML the little-endian IT loads and the test transport internals",
+  "Compare the XML-serialized ModbusADU step format of the all-datatypes suites with DriverTestsuite.xml",
+  "Check the Modbus Application Protocol V1.1b section numbers cited in docs/parity/modbus.md against a retained copy",
 ]
+
+# Policy: this table records what has been inventoried, not what Stonecrab may assume.
+# [inventory.*] entries and the paths above change only through the process in
+# CONTRIBUTING.md, section "Changing the upstream baseline" (re-verify the tag and
+# commit, re-read every cited range, update docs/parity rows in the same change).
+# A line range is evidence only for the pinned commit below; never edit a range to
+# follow a newer upstream without moving the baseline. inventory_complete stays false
+# until the items in [pending] are closed.
+[policy]
+baseline_change_process = "CONTRIBUTING.md, 'Changing the upstream baseline'"
+inventory_gates_alpha = false
+
+[inventory.modbus_tcp]
+verified_against = "verbatim copies fetched from commit ea229918f5d07700e04d7d69ab1645da679cb700; line ranges are those read while preparing docs/parity/modbus.md; its citations are a subset"
+parity_record = "docs/parity/modbus.md"
+scope = "Modbus TCP driver at the pinned commit; non-Modbus, non-Java and source-signature inventory remain open"
+driver = { path = "plc4j/drivers/modbus/src/main/java/org/apache/plc4x/java/modbus/tcp/ModbusTcpDriver.java", lines = "34-129" }
+configuration = { path = "plc4j/drivers/modbus/src/main/java/org/apache/plc4x/java/modbus/tcp/config/ModbusTcpConfiguration.java", lines = "29-67" }
+transport_configurations = { path = "plc4j/drivers/modbus/src/main/java/org/apache/plc4x/java/modbus/tcp/config", lines = "default-port overrides only; not line-cited" }
+connection = { path = "plc4j/drivers/modbus/src/main/java/org/apache/plc4x/java/modbus/tcp/ModbusTcpConnection.java", lines = "64-640" }
+message_codec = { path = "plc4j/drivers/modbus/src/main/java/org/apache/plc4x/java/modbus/tcp/ModbusTcpMessageCodec.java", lines = "37-63" }
+discovery = { path = "plc4j/drivers/modbus/src/main/java/org/apache/plc4x/java/modbus/tcp/discovery/ModbusPlcDiscoverer.java", lines = "60-244" }
+tag_base = { path = "plc4j/drivers/modbus/src/main/java/org/apache/plc4x/java/modbus/base/tag/ModbusTag.java", lines = "40-348" }
+tag_coil = { path = "plc4j/drivers/modbus/src/main/java/org/apache/plc4x/java/modbus/base/tag/ModbusTagCoil.java", lines = "29-108" }
+tag_discrete_input = { path = "plc4j/drivers/modbus/src/main/java/org/apache/plc4x/java/modbus/base/tag/ModbusTagDiscreteInput.java", lines = "29-107" }
+tag_holding_register = { path = "plc4j/drivers/modbus/src/main/java/org/apache/plc4x/java/modbus/base/tag/ModbusTagHoldingRegister.java", lines = "29-112" }
+tag_input_register = { path = "plc4j/drivers/modbus/src/main/java/org/apache/plc4x/java/modbus/base/tag/ModbusTagInputRegister.java", lines = "29-111" }
+tag_extended_register = { path = "plc4j/drivers/modbus/src/main/java/org/apache/plc4x/java/modbus/base/tag/ModbusTagExtendedRegister.java", lines = "29-113" }
+tag_handler = { path = "plc4j/drivers/modbus/src/main/java/org/apache/plc4x/java/modbus/base/tag/ModbusTagHandler.java", lines = "26-49" }
+read_optimizer = { path = "plc4j/drivers/modbus/src/main/java/org/apache/plc4x/java/modbus/base/optimizer/ModbusReadOptimizer.java", lines = "62-360" }
+register_codec = { path = "plc4j/drivers/modbus/src/main/java/org/apache/plc4x/java/modbus/base/ModbusRegisterCodec.java", lines = "33-210" }
+byte_order = { path = "plc4j/drivers/modbus/src/main/java/org/apache/plc4x/java/modbus/types/ModbusByteOrder.java", lines = "21-34" }
+driver_base = { path = "plc4j/spi/drivers/src/main/java/org/apache/plc4x/java/spi/drivers/DriverBase.java", lines = "76-77, 117-139, 145-209, 258-304, 310-328" }
+connection_base = { path = "plc4j/spi/drivers/src/main/java/org/apache/plc4x/java/spi/drivers/ConnectionBase.java", lines = "108, 120-135, 169-180, 248-313, 437-470" }
+tag_config_parser = { path = "plc4j/spi/drivers/src/main/java/org/apache/plc4x/java/spi/drivers/tags/TagConfigParser.java", lines = "30-60" }
+array_notation_parser = { path = "plc4j/spi/drivers/src/main/java/org/apache/plc4x/java/spi/drivers/model/ArrayNotationParser.java", lines = "54-67, 125-138, 160-250" }
+polling_subscription = { path = "plc4j/utils/subscription-emulation/src/main/java/org/apache/plc4x/java/utils/subscriptionemulation/PollingSubscriptionConnectionBase.java", lines = "85-104, 336-387" }
+mspec = { path = "protocols/modbus/src/main/resources/protocols/modbus/modbus.mspec", lines = "20-439" }
+test_suites = { path = "protocols/modbus/src/test/resources/protocols/modbus/tcp", lines = "DriverTestsuite.xml 24-133; ParserSerializerTestsuite.xml 23-215; Modbus-all-datatypes-little-endian.xml 23-37; ManualFactoryModbusTCPDriverTest-testsuite.xml 21-49" }
+interop_server = { path = "plc4j/drivers/modbus/src/test/resources/modbus/modbus_server.py", lines = "20-327" }
+interop_dockerfile = { path = "plc4j/drivers/modbus/src/test/resources/modbus/Dockerfile", lines = "20-42" }
+interop_test = { path = "plc4j/drivers/modbus/src/test/java/org/apache/plc4x/java/modbus/ModbusDockerIT.java", lines = "70-750" }
