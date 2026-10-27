@@ -36,6 +36,10 @@ Calendar and structured values require a further design decision.
   never-inferred byte and word order as optional tag fields; additive `Ord` on
   `ErrorKind`, `Operation` and `PlcValueType`. See ADR-0006 and "Byte and word order".
 
+- `OpFuture`, `Clock`, `CancellationToken`, `StateCell`, `StateWatch`: time, cancellation
+  and state-observation primitives; see "Time, cancellation and state observation" and
+  ADR-0007. Nothing enforces them yet.
+
 Unit tests live beside each implementation; `crates/stonecrab/tests/public_contract.rs`
 checks the consumer boundary. README examples are executable doctests.
 `crates/stonecrab-core/tests/read_contract.rs` uses the unpublished shared testkit
@@ -54,6 +58,23 @@ rows in `docs/parity/modbus.md` (`MB-BYTEORDER-BE`, `MB-BYTEORDER-LE`,
 | CORE-VALUE-ORD | Not applicable (Java enums are comparable by ordinal). | Additive `PartialOrd, Ord` on `ErrorKind`, `Operation`, `PlcValueType` in declaration order; supports `BTreeSet<ErrorKind>`. | implemented | `error_kinds_sort_in_declaration_order_and_round_trip_through_a_set`, `operations_sort_in_declaration_order_and_round_trip_through_a_set`, `value_types_sort_in_declaration_order_stay_copy_and_round_trip_through_a_set` |
 
 `RawValue` and calendar, bytes and list values are deferred (ADR-0006).
+
+## Time, cancellation and state observation
+Status: implemented as primitives (ADR-0007, slice S06). Nothing enforces them yet: no
+request type has a cancel slot (S11a) and no connection applies the default-deadline rule
+(S11b-2). Upstream PLC4J cancels through `CompletableFuture` cancellation and has no
+state-watch API, so there is no upstream source file to cite; the design source is
+`docs/ARCHITECTURE.md` section 3.4, with the `SystemClock` placement changed by ADR-0007.
+
+| Row id | Upstream behavior | Stonecrab behavior | Status | Test ids |
+| --- | --- | --- | --- | --- |
+| CORE-OPFUTURE | `CompletableFuture<T>` returned by driver operations (ARCHITECTURE 3.4). | `OpFuture<'a, T>` = `Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>`; object-safe traits, no `async-trait`. | implemented | `op_future_is_send_and_clock_is_an_object_safe_send_sync_trait`, doctest `OpFuture` |
+| CORE-CLOCK | None (PLC4J reads the system clock directly). | `Clock: Send + Sync` with `now`, `wall_now`, `sleep_until`; core ships no implementation, `SystemClock` is in `stonecrab-transport`, `FakeClock` in the testkit, `RealtimeClock` in the simulator (ADR-0007). | implemented (trait only) | `clock_is_object_safe_shareable_and_send`, doctest `Clock` |
+| CORE-CANCEL-TOKEN | `CompletableFuture.cancel`; no hierarchy. | `CancellationToken`: idempotent `cancel`, each waiter woken once, `child` follows parent and never the reverse, `Weak` children, waker re-registration with `will_wake` deduplication. Not yet consumed by any operation. | implemented (primitive) | `cancel_wakes_each_waiter_exactly_once_and_a_second_cancel_wakes_nothing`, `cancelled_on_an_already_cancelled_token_is_ready_on_the_first_poll`, `child_follows_parent_but_parent_does_not_follow_child`, `parent_cancel_wakes_child_waiters_once_and_skips_independently_cancelled_children`, `dropped_child_is_not_retained_by_its_parent`, `polling_again_replaces_the_waker_and_the_same_waker_registers_one_entry`, `dropping_a_pending_future_removes_its_waker_without_cancelling`, `a_waker_woken_by_cancel_may_call_back_into_the_token_without_deadlock`, `deep_child_chains_cancel_without_recursion`, `a_panicking_waker_cannot_strand_descendants_or_other_waiters`, `cancelling_on_another_thread_never_loses_a_wake_up`, `clones_share_state_and_default_is_a_live_token`, `a_poisoned_lock_is_recovered`, `debug_shows_the_flag_and_child_count_but_no_wakers`, `facade_token_and_watch_can_be_polled_without_a_runtime` |
+| CORE-STATE-WATCH | None (no state-watch API upstream). | `StateCell::set` and `StateWatch::changed`: version counter, latest-value semantics, intermediate states coalesced, a same-state `set` still bumps the version, all watchers woken. | implemented (primitive) | `current_reflects_set_on_the_cell_and_every_watch`, `changed_is_pending_until_set_then_ready_once_per_version`, `two_sets_before_a_poll_coalesce_into_one_change_with_the_latest_value`, `setting_the_same_state_still_bumps_the_version`, `every_watcher_wakes_and_each_sees_the_change_independently`, `a_clone_starts_from_the_source_seen_version_and_then_tracks_its_own`, `repolling_replaces_the_waker_and_the_same_waker_registers_one_entry`, `a_dropped_future_loses_no_change_and_releases_its_waker`, `a_panicking_waker_does_not_stop_later_watchers_waking`, `setting_on_another_thread_never_loses_a_wake_up`, `changed_stays_pending_after_the_cell_is_dropped`, `a_poisoned_lock_is_recovered`, `debug_shows_state_and_versions_but_no_wakers` |
+
+Cancelling an operation on the wire, unknown-after-transmit handling and the
+default-deadline rule are not covered by these rows; they land with S11a, S11b-2 and S19.
 
 ## Connection string grammar
 Status: planned. No `ConnectionUri` exists yet; the slice that implements it is S08 in

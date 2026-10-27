@@ -16,7 +16,9 @@ post-transmit uncertainty without implementing a write or retry operation.
 Read builders require explicit `ResourceLimits`. Duplicate identifiers and over-budget
 requests fail before any transport exists. Response builders reject missing, duplicate
 or unexpected identities and invalid sampling intervals; per-item failures remain data.
-Cancellation tokens and relative-deadline clock ownership are not implemented yet.
+Cancellation tokens, the injectable `Clock`, `OpFuture` and connection-state observation
+exist as primitives; enforcement of cancellation and relative deadlines by connections
+lands in later slices (S11a, S11b-2).
 
 ```rust
 use stonecrab_core::{Deadline, PlcValue, TagId};

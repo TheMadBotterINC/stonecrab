@@ -5,9 +5,12 @@ Cargo.toml.orig
 LICENSE
 NOTICE
 README.md
+src/cancel.rs
 src/capability.rs
+src/clock.rs
 src/deadline.rs
 src/error.rs
+src/future.rs
 src/lib.rs
 src/limits.rs
 src/order.rs
@@ -15,5 +18,6 @@ src/read_response.rs
 src/request.rs
 src/response.rs
 src/secret.rs
+src/state.rs
 src/tag.rs
 src/value.rs

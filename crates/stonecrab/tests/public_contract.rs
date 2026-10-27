@@ -3,20 +3,23 @@
 
 #[cfg(test)]
 mod tests {
+    use std::task::{Context, Poll, Waker};
     use std::time::{Duration, Instant};
 
     use stonecrab::{
-        ByteOrder, Capabilities, ConnectionState, Deadline, Diagnostics, ErrorKind,
-        FailureCategory, ItemError, Operation, PlcError, PlcValue, PlcValueType, ProtocolAddress,
-        ProtocolStatus, ReadItem, ReadRequest, ReadRequestBuilder, ReadResponse,
-        ReadResponseBuilder, ResourceLimits, ResourceLimitsBuilder, Secret, SubscriptionMode, Tag,
-        TagId, UnknownReason, WordOrder, WriteOutcome,
+        ByteOrder, CancellationToken, Capabilities, Clock, ConnectionState, Deadline, Diagnostics,
+        ErrorKind, FailureCategory, ItemError, OpFuture, Operation, PlcError, PlcValue,
+        PlcValueType, ProtocolAddress, ProtocolStatus, ReadItem, ReadRequest, ReadRequestBuilder,
+        ReadResponse, ReadResponseBuilder, ResourceLimits, ResourceLimitsBuilder, Secret,
+        StateCell, StateWatch, SubscriptionMode, Tag, TagId, UnknownReason, WordOrder,
+        WriteOutcome,
     };
 
     #[test]
     fn public_foundation_types_are_send_sync_and_static() {
         fn assert_send_sync<T: Send + Sync + 'static>() {}
         assert_send_sync::<ByteOrder>();
+        assert_send_sync::<CancellationToken>();
         assert_send_sync::<Capabilities>();
         assert_send_sync::<ConnectionState>();
         assert_send_sync::<Deadline>();
@@ -30,6 +33,8 @@ mod tests {
         assert_send_sync::<ResourceLimits>();
         assert_send_sync::<ResourceLimitsBuilder>();
         assert_send_sync::<Secret<String>>();
+        assert_send_sync::<StateCell>();
+        assert_send_sync::<StateWatch>();
         assert_send_sync::<SubscriptionMode>();
         assert_send_sync::<TagId>();
         assert_send_sync::<Tag>();
@@ -44,6 +49,45 @@ mod tests {
         assert_send_sync::<UnknownReason>();
         assert_send_sync::<WordOrder>();
         assert_send_sync::<WriteOutcome>();
+    }
+
+    #[test]
+    fn op_future_is_send_and_clock_is_an_object_safe_send_sync_trait() {
+        fn assert_send<T: Send>() {}
+        fn assert_dyn_clock<T: Clock + ?Sized + Send + Sync>() {}
+        assert_send::<OpFuture<'static, ()>>();
+        assert_dyn_clock::<dyn Clock>();
+    }
+
+    // covers: SPEC mandatory-failure-cases / F4 cancellation (token semantics)
+    #[test]
+    fn facade_token_and_watch_can_be_polled_without_a_runtime() {
+        let mut cx = Context::from_waker(Waker::noop());
+
+        let token = CancellationToken::new();
+        let child = token.child();
+        let mut cancelled = child.cancelled();
+        assert!(
+            cancelled.as_mut().poll(&mut cx).is_pending(),
+            "live token pends"
+        );
+        token.cancel();
+        assert!(
+            matches!(cancelled.as_mut().poll(&mut cx), Poll::Ready(Ok(()))),
+            "child resolves after the parent is cancelled"
+        );
+
+        let (cell, watch) = StateCell::new(ConnectionState::Disconnected);
+        let mut changed = watch.changed();
+        assert!(changed.as_mut().poll(&mut cx).is_pending(), "no change yet");
+        cell.set(ConnectionState::Connected);
+        assert!(
+            matches!(
+                changed.as_mut().poll(&mut cx),
+                Poll::Ready(Ok(ConnectionState::Connected))
+            ),
+            "watch reports the new state"
+        );
     }
 
     #[test]

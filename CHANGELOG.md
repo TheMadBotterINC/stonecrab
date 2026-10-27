@@ -7,6 +7,8 @@
 - Add docs.rs metadata (`all-features`, `--cfg docsrs`) and stop shipping `tests/` in
   the crate archive.
 - Re-export `ByteOrder` and `WordOrder` from `stonecrab-core`.
+- Re-export `OpFuture`, `Clock`, `CancellationToken`, `StateCell` and `StateWatch` from
+  `stonecrab-core`.
 ### stonecrab-codec 0.1.0
 - Add the crate: `BoundedReader` and `BoundedWriter` with bounds-checked integer, float,
   byte-run and least-significant-bit-first coil reads and writes in an explicit
@@ -26,6 +28,9 @@
 - Add `ByteOrder` and `WordOrder`, optional `Tag::with_byte_order`/`with_word_order` with
   `byte_order()`/`word_order()` accessors, and additive `PartialOrd, Ord` on `ErrorKind`,
   `Operation` and `PlcValueType` (ADR-0006).
+- Add `OpFuture`, the `Clock` trait (no implementation in core), `CancellationToken` with
+  child tokens and `StateCell`/`StateWatch` latest-value connection-state observation,
+  all on `std` only (ADR-0007, proposed).
 - Add an unpublished deterministic address fixture testkit for contract tests.
 ## stonecrab 0.1.0
 - Publish the specification-stage package. No industrial protocol support.
