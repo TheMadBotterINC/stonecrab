@@ -2,7 +2,7 @@
 Runtime-independent foundation for Stonecrab. This crate has no executor or network dependency.
 Default features are empty. Public contracts are experimental; protocol behavior is not implemented.
 
-See the [foundation parity record](https://github.com/themadbotter/stonecrab/blob/main/docs/parity/core.md).
+See the [foundation parity record](https://github.com/TheMadBotterINC/stonecrab/blob/master/docs/parity/core.md).
 
 Build-tested contracts: exact-width scalar values, stable validated tag identifiers,
 capabilities, typed errors with diagnostic context, monotonic deadlines and redacted

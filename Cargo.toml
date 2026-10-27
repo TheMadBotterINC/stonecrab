@@ -7,8 +7,8 @@ edition = "2024"
 rust-version = "1.97"
 license = "Apache-2.0"
 authors = ["The Mad Botter INC"]
-repository = "https://github.com/themadbotter/stonecrab"
-homepage = "https://github.com/themadbotter/stonecrab"
+repository = "https://github.com/TheMadBotterINC/stonecrab"
+homepage = "https://github.com/TheMadBotterINC/stonecrab"
 keywords = ["plc", "industrial", "modbus", "opcua", "protocols"]
 categories = ["network-programming", "embedded"]
 

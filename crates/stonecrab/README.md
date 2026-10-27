@@ -4,7 +4,7 @@ This development version currently exposes only the runtime-independent foundati
 No protocol drivers, connections or hardware access are implemented.
 
 Default features are empty. Importing this crate performs no I/O.
-See the [foundation parity record](https://github.com/themadbotter/stonecrab/blob/main/docs/parity/core.md)
+See the [foundation parity record](https://github.com/TheMadBotterINC/stonecrab/blob/master/docs/parity/core.md)
 for current scope. No upstream compatibility or hardware support is claimed.
 
 Build-tested functionality includes scalar values, identifiers, capabilities, errors,

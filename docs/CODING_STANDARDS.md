@@ -573,6 +573,10 @@ and a `MANIFEST.toml` in the same directory records upstream tag, commit, genera
 
 ## 18. Version control and pull requests
 
+> Repository override: [ADR-0004](adr/0004-master-default-branch.md) replaces
+> `main` with `master` throughout branch naming and hardware-job references in
+> §18–19. The source policy below is otherwise retained.
+
 18.1. **Branching.** Trunk is `main` and is always releasable. Work happens on short-lived branches named `<type>/<scope>-<slug>` (`feat/modbus-rtu-framing`, `fix/core-deadline-overflow`, `gen/modbus-regen-1.0.1`). No long-lived feature branches; land behind a feature flag or an unexposed module instead.
 
 18.2. **Commits** follow [Conventional Commits 1.0](https://www.conventionalcommits.org/):
