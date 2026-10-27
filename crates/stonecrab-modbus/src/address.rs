@@ -1,13 +1,19 @@
 //! Modbus address types: unit identifier, data area, data type, convention and the
 //! validated address value.
 //!
-//! This module holds types only. The address text parser arrives in slice S20b; until
-//! then a [`ModbusAddress`] is assembled from its parts with [`ModbusAddressBuilder`].
+//! A [`ModbusAddress`] is assembled from its parts with [`ModbusAddressBuilder`] or parsed
+//! from text by [`ModbusAddress::parse`]; both paths end in the builder's validation, so
+//! the span and bit-area rules live in one place. The text grammar is a small hand-written
+//! scanner at the end of the file: it never indexes, slices with `[]`, casts or does
+//! unchecked arithmetic, and every rejection is an [`ErrorKind::InvalidAddress`] whose
+//! message names the reason and echoes at most a bounded, control-stripped excerpt of the
+//! input.
 
 use std::fmt;
 
 use stonecrab_core::{
-    ByteOrder, ErrorKind, PlcError, PlcValueType, ProtocolAddress, Result, WordOrder,
+    AddressOptions, ByteOrder, ErrorKind, PlcError, PlcValueType, ProtocolAddress, Result,
+    WordOrder,
 };
 
 /// Number of addresses in one Modbus data area: wire offsets run from 0 to 65535.
@@ -36,12 +42,14 @@ const NAME_ECHO_LIMIT: usize = 32;
 /// ```
 ///
 /// # Compatibility: docs/parity/modbus.md#MB-CFG-UNIT-ID
-/// Upstream reads the default with `default-unit-identifier` (default 1) and parses the
+/// The `unit-id` key of the address block is row `MB-ADDR-CONFIG-BLOCK`, and
+/// `MB-ADDR-LONG` gives the surrounding address grammar. Upstream reads the default with `default-unit-identifier` (default 1) and parses the
 /// address block key `unit-id` with `Short.parseShort`; the inventoried files show no
 /// range check. The 0..=255 bound here is a Stonecrab inference from the one-byte MBAP
-/// field and is recorded as a divergence row. The conventional meaning of 0 and 255 is
-/// listed as UNVERIFIED in the parity record because the implementation guide is not
-/// retained.
+/// field and is recorded as a divergence row: [`ModbusAddress::parse`] rejects a
+/// `unit-id` outside it (docs/parity/modbus.md#MB-ADDR-CONFIG-BLOCK). The conventional
+/// meaning of 0 and 255 is listed as UNVERIFIED in the parity record because the
+/// implementation guide is not retained.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct UnitId(u8);
 
@@ -248,10 +256,15 @@ impl ModbusArea {
 /// ```
 ///
 /// # Compatibility: docs/parity/modbus.md#MB-TYPE-BOOL
-/// Rows `MB-TYPE-BOOL` to `MB-TYPE-LREAL` give the register width of each accepted type
+/// The `:TYPE` part of the address text is row `MB-ADDR-LONG` (names, case and defaults)
+/// and `MB-ADDR-BIT-TYPES` (bit areas accept `BOOL` only). Rows `MB-TYPE-BOOL` to `MB-TYPE-LREAL` give the register width of each accepted type
 /// and `MB-TYPE-CHAR` to `MB-TYPE-LDATE-AND-TIME` the deferred ones. Upstream resolves
 /// the name with the case-sensitive `ModbusDataType.valueOf`, so lowercase names are
-/// unknown here too.
+/// unknown here too (docs/parity/modbus.md#MB-ADDR-LONG). The type is the optional last
+/// part of an address text; non-`BOOL` types on bit areas are refused by
+/// [`ModbusAddress::parse`] (docs/parity/modbus.md#MB-ADDR-BIT-TYPES) and the string and
+/// calendar names are typed rejections (docs/parity/modbus.md#MB-ADDR-STRING,
+/// docs/parity/modbus.md#MB-TYPE-TIME).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum ModbusDataType {
@@ -463,9 +476,11 @@ impl ModbusDataType {
 ///
 /// # Compatibility: docs/parity/modbus.md#MB-ADDR-BARE-40001
 /// `Plc4xCompatible` is the verified upstream grammar, in which a bare `40001` is
-/// holding register 1. Upstream accepts the bare forms unconditionally; Stonecrab will
-/// accept them only when the convention is supplied explicitly (divergence row of the
-/// same id, implemented with the parser in slice S20b).
+/// holding register 1. Upstream accepts the bare forms unconditionally; Stonecrab accepts
+/// them only when the convention is supplied explicitly (divergence row of the same id,
+/// implemented by [`ModbusAddress::parse`]). Every parsed address carries this variant,
+/// whether or not the caller named the convention: the name decides what text is
+/// accepted, not what an accepted address means.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[non_exhaustive]
 pub enum AddressConvention {
@@ -479,8 +494,9 @@ pub enum AddressConvention {
 /// The `offset` is the zero-based wire address, the number that goes into the PDU. The
 /// one-based logical address people write (`holding-register:16`, `4x00016`) is
 /// `offset + 1` and is available as [`ModbusAddress::logical_address`]. Fields are
-/// private and an address is created only through [`ModbusAddress::builder`], so every
-/// value in existence passed the checks of [`ModbusAddressBuilder::build`].
+/// private and an address is created only through [`ModbusAddress::builder`] or
+/// [`ModbusAddress::parse`] (which ends in the builder), so every value in existence
+/// passed the checks of [`ModbusAddressBuilder::build`].
 ///
 /// Equality, hashing and `Clone` cover every field, including the byte order: two
 /// addresses that differ only in `byte-order` are different values.
@@ -503,6 +519,9 @@ pub enum AddressConvention {
 /// | `LittleEndian` | `HighWordFirst` | `BIG_ENDIAN_BYTE_SWAP` |
 /// | `BigEndian` | `LowWordFirst` | `LITTLE_ENDIAN_BYTE_SWAP` |
 ///
+/// [`ModbusAddress::parse`] accepts this text with or without an address convention and
+/// returns an equal address, which `prop_canonical_round_trips` checks.
+///
 /// # Examples
 /// ```
 /// use stonecrab_core::ProtocolAddress;
@@ -518,11 +537,14 @@ pub enum AddressConvention {
 /// # Ok::<(), stonecrab_core::PlcError>(())
 /// ```
 ///
-/// # Compatibility: docs/parity/modbus.md#MB-BYTEORDER-PRECEDENCE
-/// The optional byte order is the address-block source of the upstream precedence: the
-/// tag field wins over it and it wins over the connection default. Byte order takes part
-/// in equality, which upstream's `equals` does not do
-/// (docs/parity/modbus.md#MB-QUIRK-L). The offset and span bounds are
+/// # Compatibility: docs/parity/modbus.md#MB-ADDR-LONG
+/// The text forms an address is parsed from are rows `MB-ADDR-LONG`, `MB-ADDR-SHORT-4X`,
+/// `MB-ADDR-BARE-40001` and `MB-ADDR-CONFIG-BLOCK` (see [`ModbusAddress::parse`]), and
+/// the digit-count limit is docs/parity/modbus.md#MB-LIMIT-DIGITS. The optional byte
+/// order is the address-block source of the upstream precedence
+/// (docs/parity/modbus.md#MB-BYTEORDER-PRECEDENCE): the tag field wins over it and it
+/// wins over the connection default. Byte order takes part in equality, which upstream's
+/// `equals` does not do (docs/parity/modbus.md#MB-QUIRK-L). The offset and span bounds are
 /// docs/parity/modbus.md#MB-LIMIT-ADDR and docs/parity/modbus.md#MB-LIMIT-SPAN.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ModbusAddress {
@@ -800,4 +822,574 @@ const fn byte_order_name(byte: ByteOrder, word: WordOrder) -> &'static str {
 
 fn invalid_address(message: String) -> PlcError {
     PlcError::new(ErrorKind::InvalidAddress, message)
+}
+
+// ---- text grammar: ModbusAddress::parse and its scanner ----
+
+/// The four areas the alpha reads, in prefix-digit order.
+const AREAS: [ModbusArea; 4] = [
+    ModbusArea::Coil,
+    ModbusArea::DiscreteInput,
+    ModbusArea::InputRegister,
+    ModbusArea::HoldingRegister,
+];
+
+/// The four (byte order, word order) pairs, each with its upstream mode name derived by
+/// the same function that renders `canonical()`.
+const BYTE_ORDERS: [(ByteOrder, WordOrder); 4] = [
+    (ByteOrder::BigEndian, WordOrder::HighWordFirst),
+    (ByteOrder::LittleEndian, WordOrder::LowWordFirst),
+    (ByteOrder::LittleEndian, WordOrder::HighWordFirst),
+    (ByteOrder::BigEndian, WordOrder::LowWordFirst),
+];
+
+/// The only convention name accepted at alpha.
+const PLC4X: &str = "plc4x";
+
+/// Most digits in the number of a long form (`\d{1,9}` upstream).
+const MAX_LONG_DIGITS: usize = 9;
+
+/// The last logical address: wire offset 65535 plus one.
+const LAST_LOGICAL: u32 = 65_536;
+
+/// The area, one-based logical address and unparsed remainder of the address head.
+type Located<'a> = (ModbusArea, u32, &'a str);
+
+impl ModbusAddress {
+    /// Longest address text `parse` looks at, in bytes. Longer input is rejected before
+    /// any scanning.
+    pub const MAX_TEXT_BYTES: usize = 256;
+
+    /// Parse address text under the PLC4X-compatible grammar.
+    ///
+    /// Accepted forms (everything is case-sensitive and the digits are decimal):
+    ///
+    /// | Form | Example | Needs `address-convention=plc4x` |
+    /// | --- | --- | --- |
+    /// | long, `AREA:N` or `AREA:N:TYPE` | `holding-register:16:INT` | no |
+    /// | prefixed short, `0x`, `1x`, `3x`, `4x` plus 4 or 5 digits | `4x00016:INT` | no |
+    /// | bare short, prefix digit `0`, `1`, `3`, `4` plus 4 or 5 digits | `40016:INT` | yes |
+    ///
+    /// `AREA` is `coil`, `discrete-input`, `holding-register` or `input-register`; the
+    /// long form takes 1 to 9 digits. The number is the one-based logical address: the
+    /// wire offset is the number minus one, so `holding-register:16` reads wire address
+    /// 15. When the type is omitted it is `BOOL` for the bit areas and `INT` for the
+    /// register areas. `TYPE` is one of the 15 upper-case names of
+    /// [`ModbusDataType`]. An address may end with a block
+    /// `{unit-id: N, byte-order: 'NAME'}` holding either key or both, in any order:
+    /// `unit-id` is a decimal integer from 0 to 255 and `byte-order` a quoted (single or
+    /// double quotes) `BIG_ENDIAN`, `LITTLE_ENDIAN`, `BIG_ENDIAN_BYTE_SWAP` or
+    /// `LITTLE_ENDIAN_BYTE_SWAP`. Spaces are allowed around the keys, colons, values and
+    /// commas inside the braces and nowhere else; the brace follows the type directly. An
+    /// empty block `{}` is accepted and sets nothing.
+    ///
+    /// The convention is read from `options`: `None` means none was supplied, `plc4x` is
+    /// the only name accepted and anything else is an error even for unambiguous
+    /// spellings, so a misspelt option never goes unnoticed. The returned address always
+    /// carries [`AddressConvention::Plc4xCompatible`], the only variant; the convention
+    /// affects what is accepted, not what a parsed address means. [`canonical`] renders
+    /// the long form, which this function accepts under every option, so
+    /// `parse(canonical(a))` equals `a`.
+    ///
+    /// [`canonical`]: stonecrab_core::ProtocolAddress::canonical
+    ///
+    /// # Errors
+    /// Returns [`ErrorKind::InvalidAddress`](stonecrab_core::ErrorKind::InvalidAddress)
+    /// with a message naming the reason, for: a convention name other than `plc4x`; empty
+    /// input, input over [`MAX_TEXT_BYTES`](Self::MAX_TEXT_BYTES) bytes or input with a
+    /// control character; an unrecognised area or prefix; a bare short form when no
+    /// convention was supplied (the message names the ambiguity and the two always
+    /// accepted spellings); a missing, overlong (more than 9 digits in the long form,
+    /// other than 4 or 5 in a short form) or hexadecimal number; logical address 0 or
+    /// above 65536 (wire offset above 65535); a lowercase or unknown type name; any type
+    /// other than `BOOL` on a coil or discrete input; a span that passes wire address
+    /// 65535 (`LREAL` at logical 65534); array selections `[n]` and `[a..b]`; `STRING`,
+    /// `WSTRING`, `CHAR`, `WCHAR`, a parenthesised length and the `TIME` and `DATE`
+    /// family; `extended-register`, `6x` and the bare `6` prefix; the legacy
+    /// `AREA:N:TYPE[n]` form (the message gives the replacement spelling); and a
+    /// malformed address block (unterminated, unknown or repeated key, `unit-id` that is
+    /// not an integer from 0 to 255, unquoted or unknown `byte-order`).
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab_core::{AddressOptions, ErrorKind, ProtocolAddress};
+    /// use stonecrab_modbus::{ModbusAddress, ModbusArea, ModbusDataType, UnitId};
+    ///
+    /// let none = AddressOptions::default();
+    /// let address = ModbusAddress::parse("holding-register:16:INT{unit-id: 10}", &none)?;
+    /// assert_eq!(address.area(), ModbusArea::HoldingRegister);
+    /// assert_eq!(address.offset(), 15);
+    /// assert_eq!(address.data_type(), ModbusDataType::Int);
+    /// assert_eq!(address.unit_id(), Some(UnitId::from(10)));
+    /// assert_eq!(address.canonical(), "holding-register:16:INT{unit-id: 10}");
+    ///
+    /// // The prefixed short form needs no convention.
+    /// let short = ModbusAddress::parse("4x00016", &none)?;
+    /// assert_eq!(short.offset(), 15);
+    ///
+    /// // The bare form is ambiguous and needs the convention to be explicit.
+    /// let refused = ModbusAddress::parse("40016", &none);
+    /// assert_eq!(refused.map_err(|e| e.kind()), Err(ErrorKind::InvalidAddress));
+    /// let plc4x = AddressOptions::builder().convention("plc4x").build()?;
+    /// assert_eq!(ModbusAddress::parse("40016", &plc4x)?, short);
+    /// # Ok::<(), stonecrab_core::PlcError>(())
+    /// ```
+    ///
+    /// # Compatibility: docs/parity/modbus.md#MB-ADDR-LONG
+    /// Grammar rows: `MB-ADDR-LONG`, `MB-ADDR-SHORT-4X`, `MB-ADDR-CONFIG-BLOCK` and
+    /// `MB-ADDR-BARE-40001`. Divergences: the bare forms need an explicit convention
+    /// (docs/parity/modbus.md#MB-ADDR-BARE-40001), non-`BOOL` types on bit areas fail
+    /// here rather than at read time (docs/parity/modbus.md#MB-ADDR-BIT-TYPES), a
+    /// `unit-id` outside 0..=255 is rejected (docs/parity/modbus.md#MB-CFG-UNIT-ID),
+    /// `4x:INT` is a typed error (docs/parity/modbus.md#MB-QUIRK-G) and the deferred
+    /// forms are typed rejections (docs/parity/modbus.md#MB-ADDR-SELECTION,
+    /// docs/parity/modbus.md#MB-ADDR-STRING, docs/parity/modbus.md#MB-ADDR-EXTENDED,
+    /// docs/parity/modbus.md#MB-ADDR-LEGACY-ARRAY, docs/parity/modbus.md#MB-TYPE-TIME).
+    /// Limits: docs/parity/modbus.md#MB-LIMIT-ADDR, docs/parity/modbus.md#MB-LIMIT-SPAN
+    /// and docs/parity/modbus.md#MB-LIMIT-DIGITS. Quoting of the enum value follows the
+    /// upstream value pattern and the whitespace rules inside the block are a Stonecrab
+    /// choice; both are recorded as inferences under `MB-ADDR-CONFIG-BLOCK`.
+    pub fn parse(text: &str, options: &AddressOptions) -> Result<Self> {
+        let explicit = check_convention(options)?;
+        check_text(text)?;
+        let (head, block) = match text.split_once('{') {
+            Some((head, after)) => match after.strip_suffix('}') {
+                Some(body) => (head, Some(body)),
+                None => {
+                    return Err(invalid_address(
+                        "address block is not terminated: expected a closing '}' at the end \
+                         (docs/parity/modbus.md#MB-ADDR-CONFIG-BLOCK)"
+                            .to_owned(),
+                    ));
+                }
+            },
+            None => (text, None),
+        };
+        if head.is_empty() {
+            return Err(invalid_address(
+                "address before the config block is empty: expected for example \
+                 'holding-register:1{unit-id: 1}'"
+                    .to_owned(),
+            ));
+        }
+        if block.is_some_and(|body| body.contains('}')) {
+            return Err(invalid_address(
+                "unexpected '}' inside the address block: text after the closing brace is \
+                 not accepted (docs/parity/modbus.md#MB-ADDR-CONFIG-BLOCK)"
+                    .to_owned(),
+            ));
+        }
+        let (area, logical, rest) = locate(head, explicit)?;
+        let data_type = parse_type(head, rest, area)?;
+        let offset = wire_offset(logical)?;
+        let mut builder = Self::builder(area, offset)
+            .data_type(data_type)
+            .convention(AddressConvention::Plc4xCompatible);
+        if let Some(body) = block {
+            let block = parse_block(body)?;
+            if let Some(unit_id) = block.unit_id {
+                builder = builder.unit_id(unit_id);
+            }
+            if let Some((byte, word)) = block.byte_order {
+                builder = builder.byte_order(byte, word);
+            }
+        }
+        builder.build()
+    }
+}
+
+/// `true` when the caller named the `plc4x` convention, `false` when none was supplied.
+fn check_convention(options: &AddressOptions) -> Result<bool> {
+    match options.convention() {
+        None => Ok(false),
+        Some(PLC4X) => Ok(true),
+        Some(other) => Err(invalid_address(format!(
+            "unknown address convention '{}': the only accepted name is '{PLC4X}' \
+             (docs/parity/modbus.md#MB-ADDR-BARE-40001)",
+            excerpt(other)
+        ))),
+    }
+}
+
+/// Reject empty, over-long and control-character input before any scanning.
+fn check_text(text: &str) -> Result<()> {
+    if text.is_empty() {
+        return Err(invalid_address(
+            "address text is empty: expected for example 'holding-register:1'".to_owned(),
+        ));
+    }
+    if text.len() > ModbusAddress::MAX_TEXT_BYTES {
+        return Err(invalid_address(format!(
+            "address text is {} bytes, over the {} byte limit",
+            text.len(),
+            ModbusAddress::MAX_TEXT_BYTES
+        )));
+    }
+    if text.chars().any(char::is_control) {
+        return Err(invalid_address(
+            "address text contains a control character".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+/// Find the area and one-based logical address at the start of `head`; the remainder is
+/// the (possibly empty) type part.
+fn locate(head: &str, explicit: bool) -> Result<Located<'_>> {
+    for area in AREAS {
+        if let Some(after) = head.strip_prefix(area.long_name()) {
+            return locate_long(area, after);
+        }
+    }
+    if head.starts_with("extended-register") {
+        return Err(extended_register());
+    }
+    let bytes = head.as_bytes();
+    match (bytes.first(), bytes.get(1)) {
+        (Some(prefix), Some(b'x')) if prefix.is_ascii_digit() => locate_short(
+            prefix.saturating_sub(b'0'),
+            head.get(2..).unwrap_or_default(),
+        ),
+        (Some(prefix), _) if prefix.is_ascii_digit() => {
+            locate_bare(prefix.saturating_sub(b'0'), head, explicit)
+        }
+        _ => Err(unrecognised(head)),
+    }
+}
+
+fn unrecognised(head: &str) -> PlcError {
+    invalid_address(format!(
+        "unrecognised address '{}': expected AREA:N[:TYPE] with AREA coil, discrete-input, \
+         holding-register or input-register, or a short form such as 4x00001 \
+         (docs/parity/modbus.md#MB-ADDR-LONG)",
+        excerpt(head)
+    ))
+}
+
+/// Long form: the text after `AREA` must be `:` and 1 to 9 digits.
+fn locate_long(area: ModbusArea, after: &str) -> Result<Located<'_>> {
+    let Some(numbers) = after.strip_prefix(':') else {
+        return Err(invalid_address(format!(
+            "expected ':' and an address number after '{}'",
+            area.long_name()
+        )));
+    };
+    let (digits, rest) = split_run(numbers, |c| c.is_ascii_digit());
+    if digits.is_empty() {
+        return Err(invalid_address(format!(
+            "missing address number after '{}:' (docs/parity/modbus.md#MB-ADDR-LONG)",
+            area.long_name()
+        )));
+    }
+    if digits.len() > MAX_LONG_DIGITS {
+        return Err(invalid_address(format!(
+            "address number has {} digits; the long form takes 1 to {MAX_LONG_DIGITS} \
+             (docs/parity/modbus.md#MB-LIMIT-DIGITS)",
+            digits.len()
+        )));
+    }
+    Ok((area, decimal_value(digits), rest))
+}
+
+/// Prefixed short form `Nx` plus 4 or 5 digits; `after` follows the `x`.
+fn locate_short(digit: u8, after: &str) -> Result<Located<'_>> {
+    let area = area_for_prefix(digit)?;
+    let (digits, rest) = split_run(after, |c| c.is_ascii_digit());
+    if digits.is_empty() {
+        return Err(invalid_address(format!(
+            "'{digit}x' needs 4 or 5 digits after the prefix, for example '{digit}x00001'; \
+             found none (docs/parity/modbus.md#MB-QUIRK-G)"
+        )));
+    }
+    short_digits(digits, digit)?;
+    Ok((area, decimal_value(digits), rest))
+}
+
+/// Bare short form: a prefix digit plus 4 or 5 digits, accepted only with the convention.
+fn locate_bare(digit: u8, head: &str, explicit: bool) -> Result<Located<'_>> {
+    let area = area_for_prefix(digit)?;
+    let (run, rest) = split_run(head, |c| c.is_ascii_digit());
+    let digits = run.get(1..).unwrap_or_default();
+    if !(4..=5).contains(&digits.len()) {
+        return Err(unrecognised(head));
+    }
+    if !explicit {
+        return Err(invalid_address(format!(
+            "bare address '{run}' is ambiguous: it reads as {name} number {number} under the \
+             PLC4X convention, but a bare number can equally be a zero-based wire address; \
+             write '{name}:N' or '{digit}xNNNNN' (for example '{name}:1' or '{digit}x00001'), \
+             or set address-convention=plc4x to accept the bare form \
+             (docs/parity/modbus.md#MB-ADDR-BARE-40001)",
+            name = area.long_name(),
+            number = decimal_value(digits)
+        )));
+    }
+    Ok((area, decimal_value(digits), rest))
+}
+
+/// The prefix digit of the deferred extended-register area.
+const EXTENDED_PREFIX: u8 = 6;
+
+/// The area whose prefix digit is `digit`; `6` (extended registers) and every other digit
+/// are typed rejections.
+fn area_for_prefix(digit: u8) -> Result<ModbusArea> {
+    if digit == EXTENDED_PREFIX {
+        return Err(extended_register());
+    }
+    AREAS
+        .into_iter()
+        .find(|area| area.prefix_digit() == digit)
+        .ok_or_else(|| unknown_prefix(digit))
+}
+
+fn unknown_prefix(digit: u8) -> PlcError {
+    invalid_address(format!(
+        "no area uses prefix digit {digit}: the prefixes are 0 (coil), 1 (discrete-input), \
+         3 (input-register) and 4 (holding-register) (docs/parity/modbus.md#MB-ADDR-SHORT-4X)"
+    ))
+}
+
+fn extended_register() -> PlcError {
+    invalid_address(
+        "extended registers (extended-register, 6x) are not supported in the alpha: they \
+         are deferred to a later milestone (docs/parity/modbus.md#MB-ADDR-EXTENDED)"
+            .to_owned(),
+    )
+}
+
+/// A short form must have exactly 4 or 5 digits.
+fn short_digits(digits: &str, prefix: u8) -> Result<()> {
+    if (4..=5).contains(&digits.len()) {
+        Ok(())
+    } else {
+        Err(invalid_address(format!(
+            "'{prefix}x' takes 4 or 5 digits after the prefix, found {} \
+             (docs/parity/modbus.md#MB-ADDR-SHORT-4X)",
+            digits.len()
+        )))
+    }
+}
+
+/// The zero-based wire offset for a one-based logical address.
+fn wire_offset(logical: u32) -> Result<u16> {
+    if logical == 0 {
+        return Err(invalid_address(
+            "logical address 0 does not exist: addresses are one-based, the first is 1 \
+             (docs/parity/modbus.md#MB-LIMIT-ADDR)"
+                .to_owned(),
+        ));
+    }
+    if logical > LAST_LOGICAL {
+        return Err(invalid_address(format!(
+            "logical address {logical} is above {LAST_LOGICAL}: wire offsets run from 0 to \
+             65535 (docs/parity/modbus.md#MB-LIMIT-ADDR)"
+        )));
+    }
+    Ok(u16::try_from(logical.saturating_sub(1)).unwrap_or(u16::MAX))
+}
+
+/// Parse what follows the number: nothing, or `:TYPE`.
+///
+/// `head` is the whole head, used to spell the legacy-form replacement; `rest` is its
+/// unparsed suffix.
+fn parse_type(head: &str, rest: &str, area: ModbusArea) -> Result<ModbusDataType> {
+    if rest.is_empty() {
+        return Ok(area.default_data_type());
+    }
+    if rest.starts_with('[') {
+        return Err(invalid_address(
+            "array selections ([n] and [a..b]) are not supported in the alpha: read one \
+             element per tag (docs/parity/modbus.md#MB-ADDR-SELECTION)"
+                .to_owned(),
+        ));
+    }
+    let Some(after) = rest.strip_prefix(':') else {
+        return Err(unexpected(rest));
+    };
+    let (token, tail) = split_run(after, |c| c.is_ascii_alphanumeric() || c == '_');
+    if token.is_empty() {
+        return Err(invalid_address(
+            "missing data type after ':' (docs/parity/modbus.md#MB-ADDR-LONG)".to_owned(),
+        ));
+    }
+    let data_type = ModbusDataType::from_upstream_name(token)?;
+    if tail.is_empty() {
+        Ok(data_type)
+    } else if tail.starts_with('(') {
+        Err(invalid_address(
+            "a parenthesised length is not supported: only STRING and WSTRING take one and \
+             both are deferred (docs/parity/modbus.md#MB-ADDR-STRING)"
+                .to_owned(),
+        ))
+    } else if tail.starts_with('[') || tail.strip_prefix(':').is_some_and(starts_with_digit) {
+        Err(legacy_array(head, rest, token, tail))
+    } else {
+        Err(unexpected(tail))
+    }
+}
+
+/// The legacy `AREA:N:TYPE[n]` or `AREA:N:TYPE:n` form, with the migration hint.
+fn legacy_array(head: &str, rest: &str, token: &str, tail: &str) -> PlcError {
+    let spelled = head.strip_suffix(rest).unwrap_or(head);
+    let count = tail.trim_start_matches(['[', ':']).trim_end_matches(']');
+    let last = if !count.is_empty()
+        && count.len() <= MAX_LONG_DIGITS
+        && count.bytes().all(|b| b.is_ascii_digit())
+        && decimal_value(count) > 0
+    {
+        decimal_value(count).saturating_sub(1).to_string()
+    } else {
+        "N-1".to_owned()
+    };
+    invalid_address(format!(
+        "legacy array form '{spelled}:{token}{}' is not supported; upstream replaced it with \
+         the selection notation, for example '{spelled}[0..{last}]:{token}', and the alpha \
+         defers array selections (docs/parity/modbus.md#MB-ADDR-LEGACY-ARRAY)",
+        excerpt(tail)
+    ))
+}
+
+/// Text that follows the address but is not a type, selection or block.
+fn unexpected(rest: &str) -> PlcError {
+    let hint = if rest.starts_with(|c: char| c.is_ascii_alphabetic()) {
+        "; addresses are decimal, hexadecimal digits are not accepted"
+    } else {
+        ""
+    };
+    let shown = if rest.trim().is_empty() {
+        format!("{rest:?} (whitespace)")
+    } else {
+        format!("'{}'", excerpt(rest))
+    };
+    invalid_address(format!(
+        "unexpected text {shown} after the address number{hint} \
+         (docs/parity/modbus.md#MB-ADDR-LONG)"
+    ))
+}
+
+/// What an address block sets.
+struct Block {
+    unit_id: Option<UnitId>,
+    byte_order: Option<(ByteOrder, WordOrder)>,
+}
+
+/// Parse the text between the braces: `key: value` pairs separated by commas.
+fn parse_block(body: &str) -> Result<Block> {
+    let mut block = Block {
+        unit_id: None,
+        byte_order: None,
+    };
+    if body.trim_matches(' ').is_empty() {
+        return Ok(block);
+    }
+    for entry in body.split(',') {
+        let Some((key, value)) = entry.split_once(':') else {
+            return Err(invalid_address(format!(
+                "address block entry '{}' is not 'key: value' \
+                 (docs/parity/modbus.md#MB-ADDR-CONFIG-BLOCK)",
+                excerpt(entry)
+            )));
+        };
+        let (key, value) = (key.trim_matches(' '), value.trim_matches(' '));
+        let duplicate = match key {
+            "unit-id" => block.unit_id.replace(parse_unit_id(value)?).is_some(),
+            "byte-order" => block.byte_order.replace(parse_byte_order(value)?).is_some(),
+            other => {
+                return Err(invalid_address(format!(
+                    "unknown address block key '{}': the keys are unit-id and byte-order \
+                     (docs/parity/modbus.md#MB-ADDR-CONFIG-BLOCK)",
+                    excerpt(other)
+                )));
+            }
+        };
+        if duplicate {
+            return Err(invalid_address(format!(
+                "address block key '{key}' appears more than once \
+                 (docs/parity/modbus.md#MB-ADDR-CONFIG-BLOCK)"
+            )));
+        }
+    }
+    Ok(block)
+}
+
+/// `unit-id` is a bare decimal integer from 0 to 255.
+fn parse_unit_id(value: &str) -> Result<UnitId> {
+    let reason = if value.starts_with('-') {
+        "is negative"
+    } else if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
+        "is not a decimal integer"
+    } else {
+        return u8::try_from(decimal_value(value))
+            .ok()
+            .map(UnitId::from)
+            .ok_or_else(|| unit_id_error("is above 255"));
+    };
+    Err(unit_id_error(reason))
+}
+
+fn unit_id_error(reason: &str) -> PlcError {
+    invalid_address(format!(
+        "unit-id {reason}: it must be a decimal integer from 0 to 255, the one-byte MBAP \
+         field (docs/parity/modbus.md#MB-CFG-UNIT-ID)"
+    ))
+}
+
+/// `byte-order` is one of the four upstream mode names in single or double quotes.
+fn parse_byte_order(value: &str) -> Result<(ByteOrder, WordOrder)> {
+    let name = value
+        .strip_prefix('\'')
+        .and_then(|rest| rest.strip_suffix('\''))
+        .or_else(|| {
+            value
+                .strip_prefix('"')
+                .and_then(|rest| rest.strip_suffix('"'))
+        });
+    let Some(name) = name else {
+        return Err(invalid_address(format!(
+            "byte-order value '{}' must be quoted, for example byte-order: 'LITTLE_ENDIAN' \
+             (docs/parity/modbus.md#MB-ADDR-CONFIG-BLOCK)",
+            excerpt(value)
+        )));
+    };
+    BYTE_ORDERS
+        .into_iter()
+        .find(|(byte, word)| byte_order_name(*byte, *word) == name)
+        .ok_or_else(|| {
+            invalid_address(format!(
+                "unknown byte-order '{}': the names are BIG_ENDIAN, LITTLE_ENDIAN, \
+                 BIG_ENDIAN_BYTE_SWAP and LITTLE_ENDIAN_BYTE_SWAP \
+                 (docs/parity/modbus.md#MB-CFG-BYTE-ORDER)",
+                excerpt(name)
+            ))
+        })
+}
+
+fn starts_with_digit(text: &str) -> bool {
+    text.starts_with(|c: char| c.is_ascii_digit())
+}
+
+/// Split `text` after its longest prefix whose characters satisfy `keep`.
+fn split_run(text: &str, keep: impl Fn(char) -> bool) -> (&str, &str) {
+    let end = text.find(|c: char| !keep(c)).unwrap_or(text.len());
+    text.split_at_checked(end).unwrap_or((text, ""))
+}
+
+/// The value of a run of ASCII digits, saturating; exact for the at most 9 digits the
+/// callers allow.
+fn decimal_value(digits: &str) -> u32 {
+    digits.bytes().fold(0_u32, |value, digit| {
+        value
+            .saturating_mul(10)
+            .saturating_add(u32::from(digit.saturating_sub(b'0')))
+    })
+}
+
+/// A bounded, control-stripped excerpt of `text` for an error message.
+fn excerpt(text: &str) -> String {
+    let mut chars = text.chars().filter(|c| !c.is_control());
+    let mut shown: String = chars.by_ref().take(NAME_ECHO_LIMIT).collect();
+    if chars.next().is_some() {
+        shown.push_str("...");
+    }
+    shown
 }

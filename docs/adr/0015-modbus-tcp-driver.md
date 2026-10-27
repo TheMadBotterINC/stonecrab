@@ -4,9 +4,9 @@ Proposed, drafted in slice S20a on 2026-10-27; accepted when S27's interoperabil
 green. It adds the new crate `stonecrab-modbus` (CODING_STANDARDS 12.6 requires an ADR for a
 new crate) and records decisions D3 (the Modbus part), D5, D6, D8, D16, D18 and D19 of
 docs/ALPHA_PLAN.md. It builds on ADR-0005 (coverage tiers), ADR-0006 (`ByteOrder` and
-`WordOrder`) and ADR-0013 (codec primitives). Only the address types exist when this draft
-is written; every later slice named below adds to this ADR's Compliance section rather
-than replacing it.
+`WordOrder`) and ADR-0013 (codec primitives). Only the address types and their text
+grammar exist when this draft is written (S20a, S20b); every later slice named below adds
+to this ADR's Compliance section rather than replacing it.
 
 ## Context
 The alpha ships one real protocol: a native Modbus TCP driver that reads coils, discrete
@@ -71,8 +71,34 @@ parses it with `Short.parseShort` and the inventoried files show no range check
    `MB-ADDR-BARE-40001`). Array selections, `STRING`, `WSTRING`, `CHAR`, `WCHAR`, the
    `TIME` and `DATE` family, `extended-register` and `6x` are typed parse-time rejections.
    A `Tag` whose `count()` is not 1 is rejected by the connection before I/O (S25),
-   because `count` is set after parsing. The parser is S20b; this slice supplies the types
-   it will build.
+   because `count` is set after parsing. S20a supplied the types and S20b the parser,
+   `ModbusAddress::parse(text, &AddressOptions)`, which builds through the S20a builder so
+   the span and bit-area rules stay in one place. S20b settled the following details,
+   none of which changes the decision above:
+   - A convention name other than `plc4x` is `InvalidAddress` for every spelling,
+     including the unambiguous ones, so a misspelt option is never ignored. Every parsed
+     address carries `Plc4xCompatible` whether or not a convention was named; the name
+     decides what text is accepted, not what an accepted address means.
+   - The bare short form is a prefix digit (`0`, `1`, `3`, `4`) plus 4 or 5 digits; the
+     rejection message names the ambiguity and the two always-accepted spellings
+     (`holding-register:N` and `4xNNNNN`) and the opt-in, `address-convention=plc4x`.
+   - The logical address runs from 1 to 65536: the wire offset is the logical address
+     minus one and wire address 65535 is reachable (`MB-LIMIT-SPAN`), so "above 65535"
+     means a wire offset above 65535. The long form takes at most 9 digits, a short form
+     exactly 4 or 5; the digit count is checked before any numeric conversion.
+   - The optional trailing block is `{unit-id: N, byte-order: 'NAME'}` directly after the
+     type. `unit-id` is a bare decimal integer from 0 to 255; `byte-order` is single- or
+     double-quoted (the quoting is an inference from the upstream value pattern, an
+     unquoted word being a silently dropped pair there but an error here). Spaces inside
+     the braces are ignored (a Stonecrab choice; the upstream whitespace rules were not
+     verified), keys are case-sensitive, unknown and repeated keys are errors and an empty
+     block is accepted.
+   - Input is at most 256 bytes (`ModbusAddress::MAX_TEXT_BYTES`), non-empty and free of
+     control characters, and an error message echoes at most 32 control-free characters
+     of it.
+   - The legacy `AREA:N:TYPE[n]` form is rejected with a replacement computed from the
+     text (`AREA:N[0..n-1]:TYPE`); the upstream wording of that hint is not retained, so
+     the text is Stonecrab's.
 6. **Exception mapping (D18).** The raw exception code and name are always kept in
    `ProtocolStatus`. The `ErrorKind` is: 1 ILLEGAL_FUNCTION to
    `Unsupported(Operation::Read)`, 2 ILLEGAL_DATA_ADDRESS to `InvalidAddress`, every other
@@ -91,8 +117,8 @@ parses it with `Short.parseShort` and the inventoried files show no range check
      the upstream `default-unit-identifier`. 0 (conventionally broadcast) and 255
      (conventionally "no unit" on TCP) are documented and carried unchanged, not rejected:
      Stonecrab attaches no behavior to either and a device behind a gateway may use
-     them. Values outside 0..=255 cannot be expressed in the type; the parser (S20b) and
-     configuration (S26) reject them as `InvalidAddress` and `InvalidConfig`, a
+     them. Values outside 0..=255 cannot be expressed in the type; the parser (S20b, in
+     place) and configuration (S26) reject them as `InvalidAddress` and `InvalidConfig`, a
      divergence recorded under `MB-CFG-UNIT-ID`. The conventional roles of 0 and 255 come
      from the Modbus Messaging on TCP/IP Implementation Guide and stay UNVERIFIED in the
      parity record.
@@ -117,9 +143,10 @@ parses it with `Short.parseShort` and the inventoried files show no range check
      the `4x00016` short form because it is unambiguous without a convention and never
      needs padding. `byte-order` is written with the upstream mode name derived from the
      (`ByteOrder`, `WordOrder`) pair (ADR-0006 table), and the pair participates in
-     equality and hashing, unlike upstream's `equals` (`MB-QUIRK-L`). S20b's
-     `prop_canonical_round_trips` is the check that this text parses back to an equal
-     address.
+     equality and hashing, unlike upstream's `equals` (`MB-QUIRK-L`).
+     `prop_canonical_round_trips` (S20b) checks that this text parses back to an equal
+     address under both an explicit and an absent convention, and the `fuzz_modbus_address`
+     target asserts the same on every accepted input.
    - Bit areas accept only `BOOL`, checked when the address is built. Upstream parses a
      typed coil and fails at read time with UNSUPPORTED (`MB-ADDR-BIT-TYPES`); failing at
      build time keeps an address that can never be read out of the system. This is a
@@ -219,7 +246,18 @@ parses it with `Short.parseShort` and the inventoried files show no range check
   Tests carry `// covers:` tags naming parity row ids.
 - `# Compatibility: docs/parity/modbus.md#<row-id>` sections cite `MB-ADDR-LONG`,
   `MB-TYPE-BOOL`, `MB-CFG-UNIT-ID`, `MB-BYTEORDER-PRECEDENCE`, `MB-LIMIT-ADDR` and
-  `MB-LIMIT-SPAN` (S20b adds the short-form row `MB-ADDR-SHORT-4X`); S31 verifies that every cited id resolves.
+  `MB-LIMIT-SPAN`; S20b adds `MB-ADDR-SHORT-4X`, `MB-ADDR-BARE-40001`,
+  `MB-ADDR-CONFIG-BLOCK`, `MB-ADDR-BIT-TYPES`, `MB-ADDR-SELECTION`, `MB-ADDR-STRING`,
+  `MB-ADDR-EXTENDED`, `MB-ADDR-LEGACY-ARRAY`, `MB-TYPE-TIME`, `MB-QUIRK-G` and
+  `MB-LIMIT-DIGITS`; S31 verifies that every cited id resolves.
+- S20b: `crates/stonecrab-modbus/tests/parse.rs` holds the grammar tables and every
+  rejection named in decision 5, each tagged with the parity row it verifies or
+  `// covers: SPEC mandatory-failure-cases / F3 invalid register`, plus the
+  CODING_STANDARDS 13.7 boundaries (empty, 255, 256 and 257 bytes, 3, 4, 5 and 6 digits,
+  nine and ten digits, every invalid area and prefix discriminator);
+  `tests/properties.rs` holds `prop_parse_never_panics` and `prop_canonical_round_trips`;
+  `fuzz/fuzz_targets/fuzz_modbus_address.rs` (six seed files) runs under both
+  conventions. `proptest` is a dev-dependency of the crate only.
 - `scripts/coverage-gate.sh` gains `crates/stonecrab-modbus|100` with a comment that the
   row becomes 95 when the session and connection modules land (decision 9). The
   `packaging/stonecrab-modbus.txt` list and the `package` task and job pin the archive to

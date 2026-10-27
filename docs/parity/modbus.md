@@ -2,15 +2,21 @@
 Baseline: `upstream/manifest.toml`, Apache PLC4X v1.0.0 (tag `v1.0.0`),
 commit `ea229918f5d07700e04d7d69ab1645da679cb700`.
 
-Rust implementation: none; every row below is still to be implemented. The default status
-marks a row the alpha implements. `deferred (<owner>)` marks a row recorded for
-completeness whose behavior the alpha rejects or omits, and `not reproduced` marks an
-upstream defect that is documented and deliberately not ported. No row is `implemented` or
-`automated-verified` yet; the slices named in `docs/ALPHA_PLAN.md` move rows forward and
-cite the evidence when they do. Row count, for the S01 exit check: the rows carrying the
-default status in the Status column (the alpha rows). Deferred, not reproduced and
-divergence rows are counted separately, and ids repeat between the behavior and divergence
-tables.
+Rust implementation: the address value types (S20a) and the address text grammar with
+its limits (S20b, `ModbusAddress::parse`); every other row below is still to be
+implemented. The default status, `planned`, marks a row the alpha implements and has not
+yet built. `implemented` marks a row whose Rust behavior exists and whose listed tests
+pass. `deferred (<owner>)` marks a row recorded for completeness whose behavior the alpha
+rejects or omits; `; rejection implemented` after it means the parser already refuses the
+form with a typed error and the listed test proves it. `not reproduced` marks an upstream
+defect that is documented and deliberately not ported; `; implemented` after it means the
+Stonecrab handling exists and is tested. No row is `automated-verified` yet: that needs
+the interop evidence of S27. The slices named in `docs/ALPHA_PLAN.md` move rows forward
+and cite the evidence when they do. In the "Test ids" column the names of an implemented
+row are real tests and the names of a planned row are tests still to be written. Row
+count, for the S01 exit check: the rows carrying the default status in the Status column
+(the alpha rows). Deferred, not reproduced and divergence rows are counted separately,
+and ids repeat between the behavior and divergence tables.
 
 How row ids are used: the first column of every table is a stable id. Rustdoc carries a
 `# Compatibility: docs/parity/modbus.md#<row-id>` section on each public item whose
@@ -59,13 +65,14 @@ repository; section numbers below are from the published table of contents and a
 listed under UNVERIFIED until a copy is checked in.
 
 ## Operations
-Planned test ids are Rust test function names. Where a plan decision fixes the behavior it
-is named (D3, D14, D16, D18, D19 in `docs/ALPHA_PLAN.md`). The three contract-suite
+Test ids are Rust test function names (planned ones are still to be written). Where a
+plan decision fixes the behavior it is named (D3, D14, D16, D18, D19 in
+`docs/ALPHA_PLAN.md`). The three contract-suite
 fixtures (FakeTransport responder S25b, loopback ScriptedPeer S26, pymodbus S27) and the
 `interop` job are the evidence the plan requires before a read row can be
 `automated-verified`.
 
-| Row id | Upstream behavior (file:line) | Stonecrab alpha behavior | Status | Planned test ids |
+| Row id | Upstream behavior (file:line) | Stonecrab alpha behavior | Status | Test ids |
 | --- | --- | --- | --- | --- |
 | MB-TCP-CONNECT | Protocol code `modbus-tcp`, default transport `tcp`, port 502 (Drv:44-46, 72-92). `connect()` runs `onConnect`: builds the message codec, starts the receive loop, fires CONNECTED (Conn:77-93, CB:120-123). `close()` stops receiving, fails pending requests with "Connection closed", fires DISCONNECTED (Conn:100-112). Transport loss fails pending requests with "Connection lost: <cause>" (or "Connection closed by remote" when there is no cause, Conn:120-121) and fires CONNECTION_LOST (Conn:115-128). No reconnect or retry logic exists in Conn, CB or DB (grep for reconnect and retry finds only the state-event names). | `registry.connect("modbus-tcp://host:502?default-unit-identifier=1")` returns a `dyn Connection`; connect is bounded by `Timeouts.connect`, close by `Timeouts.request` (D2). `ConnectionState` is observable through `StateWatch`. A transport failure sets `Reconnecting`; the next operation waits out the capped jittered backoff and reopens (D15). Request-driven reconnect has no upstream equivalent, so it is a Stonecrab extension recorded here, not a parity claim. Pending requests fail `Disconnected` and are never replayed. | planned | `connect_returns_connected_state`, `connect_refused_yields_disconnected_error`, `close_fails_pending_read_with_disconnected`, `read_after_peer_close_observes_reconnecting_then_connected_and_succeeds`, `pending_read_fails_disconnected_and_is_not_replayed_after_reconnect`, `close_during_backoff_yields_closed`, `interop_contract_suite_passes_against_pymodbus` |
 | MB-TCP-READ-COIL | FC01 `ModbusPDUReadCoilsRequest(address, quantity)` (Conn:405-406; Mspec:96-103). Response bits LSB-first per byte (Opt:149-155). Only BOOL accepted when splitting; any other type returns UNSUPPORTED (Opt:132-139). | `coil:N`, `0x`-prefixed short forms and bare `0`-prefixed short forms only with the explicit plc4x convention (MB-ADDR-BARE-40001) read one BOOL per tag through FC01. A merged chunk is one FC01 request; bits are unpacked LSB-first. `Tag::count()` other than 1 is rejected before I/O (S25). | planned | `read_coil_builds_fc01_request`, `fc01_bits_are_unpacked_lsb_first`, `interop_reads_coils_1_to_10`, `typed_coil_address_is_rejected_at_parse_time`, `read_with_count_above_one_is_rejected_without_io` |
@@ -81,7 +88,7 @@ fixtures (FakeTransport responder S25b, loopback ScriptedPeer S26, pymodbus S27)
 ## Capabilities
 Upstream reports capability through two independent signals that disagree for subscribe.
 
-| Row id | Upstream behavior (file:line) | Stonecrab alpha behavior | Status | Planned test ids |
+| Row id | Upstream behavior (file:line) | Stonecrab alpha behavior | Status | Test ids |
 | --- | --- | --- | --- | --- |
 | MB-TCP-CAPABILITIES | Signal 1, driver flags: `DriverBase` declares `canDiscover`, `canBrowse`, `canPing`, `canRead`, `canWrite`, `canSubscribe`, all false by default (DB:117-139); `ModbusTcpDriver` overrides discover, ping, read and write to true and leaves browse and subscribe false (Drv:99-117). Only `canDiscover` reaches `PlcDriverMetadata` (DB:299-302). Signal 2, connection metadata: `ConnectionBase.deriveMetadata` reports read, write, subscribe and browse true when the connection class or an intermediate base declares the matching `on*` hook (CB:263-296, 303-313; the base-class walk is documented at CB:252-254). `ModbusTcpConnection` overrides `onPing`, `onRead`, `onWrite` (Conn:199, 218, 315) and extends `PollingSubscriptionConnectionBase`, which declares `onSubscribe` (Poll:102), so the connection reports read true, write true, subscribe true (inference from the two verified mechanisms: no run of `getMetadata()` was observed), browse false, while the driver flag `canSubscribe` stays false. | One explicit `Capabilities` value, built from `Default` by field assignment: read true, write false, subscribe `SubscriptionMode::Unsupported`, browse false, discover false, `max_pdu_bytes = Some(253)`, concurrency 1 (S26). Differences from upstream: write false (D3, deferred), subscribe Unsupported where upstream connection metadata says true through polling emulation (deferred, M2), discover false (deferred), ping absent (deferred). Concurrency 1 matches `getMaxConcurrentRequests() == 1` (Conn:140-143). | planned | `capabilities_match_alpha_table`, `capabilities_readme_table_matches_value`, `capabilities_concurrency_is_one` |
 
@@ -90,12 +97,12 @@ Six parameters on `ModbusTcpConfiguration`. Stonecrab carries all six with the u
 defaults (S26). The pinned test suite `MF` passes `unit-identifier` (MF:30-33), which is not
 a declared parameter; the real key is `default-unit-identifier`. See quirk f.
 
-| Row id | Upstream name, type, default (file:line) | Stonecrab alpha behavior | Status | Planned test ids |
+| Row id | Upstream name, type, default (file:line) | Stonecrab alpha behavior | Status | Test ids |
 | --- | --- | --- | --- | --- |
 | MB-CFG-REQUEST-TIMEOUT | `request-timeout-ms`, int, 5000; "Default timeout for all types of requests." (Cfg:31-34). Applied as `orTimeout` on every pending request (Conn:183-189). | `request-timeout-ms` positive integer, default 5000, mapped onto `Timeouts.request` and the per-chunk deadline `min(request deadline, now + timeouts.request)` (S25, S26). Zero, negative, empty and non-numeric values are `InvalidConfig`. | planned | `config_request_timeout_default_is_5000`, `config_request_timeout_rejects_zero_negative_and_non_numeric`, `read_times_out_after_request_timeout_on_fake_clock` |
-| MB-CFG-UNIT-ID | `default-unit-identifier`, int, 1; "Unit-identifier or slave-id that identifies the target PLC" (Cfg:36-39). Cast to short at use (Conn:394-400). No range check is visible in the inventoried files. | `default-unit-identifier`, default 1, bounded 0..=255 (`UnitId`, one MBAP byte, Mspec:54); outside the range is `InvalidConfig` (divergence). Stonecrab decision: 0 and 255 are accepted and no special meaning is attached to either (their conventional roles are UNVERIFIED, see below). | planned | `config_unit_id_default_is_1`, `config_unit_id_rejects_256_and_negative`, `config_unit_id_accepts_0_and_255` |
+| MB-CFG-UNIT-ID | `default-unit-identifier`, int, 1; "Unit-identifier or slave-id that identifies the target PLC" (Cfg:36-39). Cast to short at use (Conn:394-400). No range check is visible in the inventoried files. | `default-unit-identifier`, default 1, bounded 0..=255 (`UnitId`, one MBAP byte, Mspec:54); outside the range is `InvalidConfig` (divergence). The address-block key `unit-id` is already bounded the same way by `ModbusAddress::parse` (S20b; `unit_id_256_is_rejected`, `negative_unit_id_is_rejected`, `unit_id_block_sets_unit`); the connection option arrives in S26. Stonecrab decision: 0 and 255 are accepted and no special meaning is attached to either (their conventional roles are UNVERIFIED, see below). | planned | `config_unit_id_default_is_1`, `config_unit_id_rejects_256_and_negative`, `config_unit_id_accepts_0_and_255` |
 | MB-CFG-PING-ADDRESS | `ping-address`, String, `4x00001:BOOL`; "Simple address, that the driver will use to check, if the connection to a given device is active" (Cfg:41-44). | Parsed with the address grammar under the plc4x convention, recorded, unused at alpha (ping is deferred). The default parses; an invalid address is `InvalidConfig`. | planned | `config_ping_address_default_parses`, `config_ping_address_invalid_is_rejected` |
-| MB-CFG-BYTE-ORDER | `default-payload-byte-order`, enum `ModbusByteOrder`, `BIG_ENDIAN`; allowed `BIG_ENDIAN`, `LITTLE_ENDIAN`, `BIG_ENDIAN_BYTE_SWAP`, `LITTLE_ENDIAN_BYTE_SWAP`; since 0.13.0 (Cfg:46-55; BO:21-34). | Same four names, default `BIG_ENDIAN`, mapped to `ByteOrder` x `WordOrder` (see Byte order). An unknown name is `InvalidConfig`. | planned | `config_byte_order_default_is_big_endian`, `config_byte_order_accepts_four_upstream_names`, `config_byte_order_unknown_name_is_rejected` |
+| MB-CFG-BYTE-ORDER | `default-payload-byte-order`, enum `ModbusByteOrder`, `BIG_ENDIAN`; allowed `BIG_ENDIAN`, `LITTLE_ENDIAN`, `BIG_ENDIAN_BYTE_SWAP`, `LITTLE_ENDIAN_BYTE_SWAP`; since 0.13.0 (Cfg:46-55; BO:21-34). | Same four names, default `BIG_ENDIAN`, mapped to `ByteOrder` x `WordOrder` (see Byte order). An unknown name is `InvalidConfig`. The address-block key `byte-order` already takes the same four names in `ModbusAddress::parse` (S20b; `byte_order_names_map_per_adr_0006`, `unknown_byte_order_name_is_rejected`); the connection option arrives in S26. | planned | `config_byte_order_default_is_big_endian`, `config_byte_order_accepts_four_upstream_names`, `config_byte_order_unknown_name_is_rejected` |
 | MB-CFG-MAX-COILS | `max-coils-per-request`, int, 2000; since 0.13.0 (Cfg:57-61). Bound for merged coil blocks (Opt:242, 259). | Default 2000, feeds `Batcher::plan`; positive; above 2000 is `InvalidConfig` because the PDU cannot carry more (V1.1b section 6.1). | planned | `config_max_coils_default_is_2000`, `config_max_coils_rejects_zero_and_above_2000`, `batcher_splits_at_max_coils` |
 | MB-CFG-MAX-REGISTERS | `max-registers-per-request`, int, 125; since 0.13.0 (Cfg:63-67). Bound for merged register blocks (Opt:295, 310). | Default 125, feeds `Batcher::plan`; positive; above 125 is `InvalidConfig` (V1.1b section 6.3). | planned | `config_max_registers_default_is_125`, `config_max_registers_rejects_zero_and_above_125`, `batcher_splits_63_dint_tags_into_two_chunks` |
 | MB-CFG-UNKNOWN | Unknown parameters are reported, not rejected: `warnAboutUnknownParameters` runs after the configuration factory, which ignores what it has no field for (DB:206-209, 315-319). The reporter class `UnknownParameterReporter` is not among the retained copies, so the reporter itself is UNVERIFIED; the Javadoc says it logs a warning (DB:306-308). `allow-unsupported-transport=true` bypasses only the supported-transport check (DB:177-190). | Unknown keys are rejected with `InvalidConfig` (D12, S26). `allow-unsupported-transport` is an unknown key and is rejected. Divergence row below. | planned | `config_unknown_key_is_rejected`, `config_misspelt_unit_identifier_is_rejected`, `config_duplicate_key_is_rejected` |
@@ -105,7 +112,7 @@ Upstream URI grammar is `DriverBase.URI_PATTERN` (DB:76-77); Stonecrab's parser 
 `CORE-URI-GRAMMAR` in `docs/parity/core.md`. Transport parameters upstream are prefixed
 with the transport code (DB:149-209).
 
-| Row id | Upstream behavior (file:line) | Stonecrab alpha behavior | Status | Planned test ids |
+| Row id | Upstream behavior (file:line) | Stonecrab alpha behavior | Status | Test ids |
 | --- | --- | --- | --- | --- |
 | MB-TCP-TRANSPORTS | Default transport `tcp`, supported `tcp`, `tls`, `tls-psk`, `udp`, `test` (Drv:72-80). Default ports from the mspec constants: tcp 502, tls and tls-psk 802, udp 502, other codes none (Drv:82-92; Mspec:24-28). A transport outside the supported list is refused unless `allow-unsupported-transport=true` (DB:172-190). | Scheme `modbus-tcp`, transport `tcp` only (implicit when omitted), host and port with default 502. Any other transport code is `InvalidConfig`. | planned | `driver_accepts_tcp_transport_and_defaults_port_502`, `driver_rejects_other_transport_codes`, `driver_rejects_port_zero_and_65536`, `fuzz_modbus_connection_string` |
 | MB-TCP-TRANSPORTS-TLS | `modbus-tcp:tls://host:port?tls.verify=false` form exercised at DockerIT:649-693; default port 802 (Drv:86-87). | Rejected with `InvalidConfig`. | deferred (M3 or the parity backlog) | `driver_rejects_other_transport_codes` |
@@ -137,57 +144,93 @@ logical address 0, so extended address 0 cannot be addressed upstream (Tag:195-1
 MTT:131 expects `extended-register:1` to give logical 1 and wire 1). The prefixes begin with
 distinct characters, so the area is unambiguous once a form matches.
 
-Slice S20a adds the address value types these rows describe in
+Slice S20a added the address value types these rows describe in
 `crates/stonecrab-modbus/src/address.rs` (`ModbusArea`, `ModbusDataType`, `UnitId`,
-`ModbusAddress` and its builder). The text parser lands in S20b, so no row below changes
-status. Notes for S20b and S31: the builder already refuses non-BOOL types on bit areas
-(`bit_areas_accept_bool_only`, `int_on_a_coil_is_rejected`; MB-ADDR-BIT-TYPES) and a span
-whose last register passes 65535 (`span_check_table_at_the_top_of_the_map`; MB-LIMIT-SPAN),
-and it accepts a single element at wire address 65535, so that open item of MB-LIMIT-SPAN
-is answered "reachable" at the type level. `canonical()` renders the long form
-`holding-register:16:INT`, not the upstream `4x00001:INT` rendering; no short rendering is
-offered (the long form is the spelling accepted without a convention). Unit identifiers 0 and 255 are carried
-unchanged (`unit_id_zero_and_255_are_documented_not_rejected`; MB-CFG-UNIT-ID), and byte
-order takes part in equality (`addresses_differing_only_in_byte_order_are_not_equal`;
-MB-QUIRK-L).
+`ModbusAddress` and its builder) and slice S20b adds the text parser
+`ModbusAddress::parse` (end of `crates/stonecrab-modbus/src/address.rs`; tests in
+`crates/stonecrab-modbus/tests/parse.rs` and `tests/properties.rs`, fuzz target
+`fuzz_modbus_address`). The parser builds every address through the S20a builder, so the
+bit-area type rule (`bit_areas_accept_bool_only`, `int_on_a_coil_is_rejected`;
+MB-ADDR-BIT-TYPES) and the span rule (`span_check_table_at_the_top_of_the_map`;
+MB-LIMIT-SPAN) stay in one place. The open items S20a left for S20b are answered:
 
-| Row id | Upstream behavior (file:line) | Stonecrab alpha behavior | Status | Planned test ids |
+- The single element at wire address 65535 is reachable through the parser
+  (`last_valid_register_is_accepted`: `holding-register:65536` is wire offset 65535), so
+  "address above 65535" means a logical address above 65536 (a wire offset above 65535;
+  `address_above_65535_is_rejected`). Upstream's inferred refusal of that element is a
+  documented deviation, still marked INFERENCE because it was not observed by a run.
+- `4x:INT` and the other empty-digit short forms are a typed `InvalidAddress`
+  (`four_x_without_digits_is_rejected`); the `NumberFormatException` consequence upstream
+  stays marked INFERENCE.
+- `canonical()` renders the long form `holding-register:16:INT`, not the upstream
+  `4x00001:INT` rendering; no short rendering is offered because the long form is the
+  spelling accepted under every option, and `prop_canonical_round_trips` checks that it
+  parses back to an equal address (`canonical_renders_the_long_form`).
+- Unit identifiers 0 and 255 are carried unchanged
+  (`unit_id_zero_and_255_are_documented_not_rejected`, `unit_id_block_sets_unit`) and
+  byte order takes part in equality (`addresses_differing_only_in_byte_order_are_not_equal`;
+  MB-QUIRK-L).
+
+Grammar decisions S20b records that the verified rows do not fix, each a Stonecrab
+choice or an inference rather than observed upstream behavior:
+
+- Inside the config block, spaces around the keys, colons, values and commas are
+  ignored; whitespace before the brace is rejected. The pattern text of `KEY_VALUE_PATTERN`
+  (TCP:34) is not reproduced in this record, so the whitespace tolerance of the upstream
+  regex was not verified; the canonical rendering never needs it.
+- `byte-order` takes single- or double-quoted text, the two quote styles the upstream value
+  pattern lists; a bare word is an error, where upstream (INFERENCE) silently drops the
+  pair. `unit-id` takes a bare decimal integer only; a quoted or fractional value is
+  rejected.
+- A repeated key and a trailing or leading comma are errors; an empty block `{}` is
+  accepted and sets nothing.
+- Leading zeros are accepted in digit groups (`coil:000000001` is logical 1), as the
+  upstream digit pattern allows.
+- Digits are ASCII only, the area and type names are exactly as written (no case
+  folding), and the whole text may be at most 256 bytes with no control characters.
+- A convention name other than `plc4x` is rejected for every spelling, including the
+  unambiguous ones, so a misspelt option cannot go unnoticed (MB-ADDR-BARE-40001).
+- An address parsed with no convention and one parsed with `plc4x` both carry
+  `AddressConvention::Plc4xCompatible`; the convention only decides what text is
+  accepted.
+
+| Row id | Upstream behavior (file:line) | Stonecrab alpha behavior | Status | Test ids |
 | --- | --- | --- | --- | --- |
-| MB-ADDR-LONG | `coil`, `discrete-input`, `holding-register`, `input-register` followed by `:` and 1 to 9 decimal digits (`\d{1,9}`, Tag:47), optional `:TYPE` with `[a-zA-Z_]+` resolved by case-sensitive `ModbusDataType.valueOf` (TagCoil:100). Digits are decimal; wire address is logical minus one. Default type BOOL for bit areas, INT for register areas (Tag:202). Example `holding-register:16:INT` (wire 15). | Accepted whether or not a convention was supplied. Same offset and defaults. Rejected with `InvalidAddress`: logical 0, hexadecimal digits, lowercase or unknown type names, more than 9 digits. | planned | `holding_register_16_int_is_wire_offset_15`, `holding_register_0x0010_is_rejected`, `lowercase_i16_is_rejected`, `logical_address_zero_is_rejected`, `default_types_are_bool_for_bits_and_int_for_registers`, `prop_parse_never_panics`, `prop_canonical_round_trips` |
-| MB-ADDR-SHORT-4X | Prefix forms `0x`, `1x`, `3x`, `4x` followed by 4 or 5 digits (the group is optional in the regex, see MB-QUIRK-G) (TagCoil:34, TagHR:34, TagIR:34, TagDI:34). `4x00016:INT` is logical 16. `0x0010` is decimal coil 10, not hexadecimal. Canonical rendering is prefix plus `%05d` (Tag:162). `6x` is the extended-register member of this family. | Accepted unconditionally for `0x`, `1x`, `3x`, `4x`; `6x` is rejected (see MB-ADDR-EXTENDED). `canonical()` renders the long form `holding-register:1:INT` (S20a); short forms are input only, a documented divergence from the upstream `%05d` rendering. | planned | `four_x_00016_is_logical_16`, `0x0010_is_a_decimal_coil_address_not_hex`, `short_forms_require_four_or_five_digits`, `canonical_renders_the_long_form` |
-| MB-ADDR-BARE-40001 | Bare forms: area digit plus 4 or 5 digits, e.g. `40001`, `400001`, `00001`, `000001`, `10001`, `30001`, `60001` (TagHR:33, TagCoil:33). Accepted unconditionally; the ambiguity between a bare number and a 1-based or 0-based register is not detected. | Accepted only when the connection or call supplied `address-convention=plc4x` (`AddressConvention::Plc4xCompatible`); otherwise `InvalidAddress` naming the ambiguity and the two accepted spellings (D16, S20b). Divergence row below. | planned | `bare_40001_is_rejected_unless_convention_is_explicit`, `bare_40001_with_plc4x_convention_is_logical_1`, `unknown_convention_name_is_rejected`, `interop_bare_40001_reads_with_explicit_convention` |
-| MB-ADDR-BIT-TYPES | Non-BOOL types on `coil` and `discrete-input` parse (TagCoil:100 resolves any type name) and fail at read time with UNSUPPORTED (Opt:132-139). | Rejected at parse time with `InvalidAddress` naming the area and type (D16). Divergence row below. | planned | `typed_coil_address_is_rejected_at_parse_time`, `typed_discrete_input_address_is_rejected_at_parse_time` |
-| MB-ADDR-CONFIG-BLOCK | Trailing `{key: value, ...}`; the regex is `(\{(?<config>.*?)})?$` (TCP:32), pairs by `KEY_VALUE_PATTERN` (TCP:34): `-?\d+.\d+`, `-?\d+`, double- or single-quoted text, `true`, `false`. `unit-id` is read with `Short.parseShort`, `byte-order` with `ModbusByteOrder.valueOf` (Tag:222-229). Example `holding-register:8[0..7]:SINT{unit-id: 10}` (MET:43). INFERENCE from the value regex: an enum value must be quoted (`{byte-order: 'LITTLE_ENDIAN'}`); a bare word matches no alternative and, because the parser uses `find()` (TCP:44), the pair is silently dropped (not observed by a run). `4x:INT` also matches: the digit group is optional (Tag:48), so INFERENCE: `Integer.parseInt(null)` throws `NumberFormatException` instead of a typed invalid-tag error (not observed by a run). | Accepts `{unit-id: N, byte-order: 'NAME'}` with the same four names. `unit-id` outside 0..=255, unknown keys, unquoted enum values and `4x:INT` are `InvalidAddress` (typed, never a panic). Unit id groups chunks (D19). | planned | `unit_id_block_sets_unit`, `unit_id_256_is_rejected`, `negative_unit_id_is_rejected`, `byte_order_block_requires_quoted_name`, `unknown_config_key_is_rejected`, `four_x_without_digits_is_rejected`, `prop_parse_never_panics` |
+| MB-ADDR-LONG | `coil`, `discrete-input`, `holding-register`, `input-register` followed by `:` and 1 to 9 decimal digits (`\d{1,9}`, Tag:47), optional `:TYPE` with `[a-zA-Z_]+` resolved by case-sensitive `ModbusDataType.valueOf` (TagCoil:100). Digits are decimal; wire address is logical minus one. Default type BOOL for bit areas, INT for register areas (Tag:202). Example `holding-register:16:INT` (wire 15). | Accepted whether or not a convention was supplied. Same offset and defaults. Rejected with `InvalidAddress`: logical 0, hexadecimal digits, lowercase or unknown type names, more than 9 digits, empty text, text over 256 bytes or with a control character (Stonecrab bounds), and any text no form matches. Messages echo at most 32 control-free characters of the input. | implemented | `holding_register_16_int_is_wire_offset_15`, `holding_register_0x0010_is_rejected`, `lowercase_i16_is_rejected`, `logical_address_zero_is_rejected`, `default_types_are_bool_for_bits_and_int_for_registers`, `every_accepted_type_name_parses_on_a_register_area`, `malformed_shapes_are_rejected`, `empty_input_is_rejected`, `text_length_boundary_is_exact`, `control_characters_are_rejected_and_never_echoed`, `echoed_input_is_bounded_and_control_stripped`, `every_invalid_area_discriminator_is_rejected`, `canonical_renders_the_long_form`, `prop_parse_never_panics`, `prop_canonical_round_trips` |
+| MB-ADDR-SHORT-4X | Prefix forms `0x`, `1x`, `3x`, `4x` followed by 4 or 5 digits (the group is optional in the regex, see MB-QUIRK-G) (TagCoil:34, TagHR:34, TagIR:34, TagDI:34). `4x00016:INT` is logical 16. `0x0010` is decimal coil 10, not hexadecimal. Canonical rendering is prefix plus `%05d` (Tag:162). `6x` is the extended-register member of this family. | Accepted unconditionally for `0x`, `1x`, `3x`, `4x`; `6x` is rejected (see MB-ADDR-EXTENDED). `canonical()` renders the long form `holding-register:1:INT` (S20a); short forms are input only, a documented divergence from the upstream `%05d` rendering. | implemented | `four_x_00016_is_logical_16`, `zero_x_0010_is_a_decimal_coil_address_not_hex`, `short_forms_require_four_or_five_digits`, `four_x_without_digits_is_rejected`, `six_x_prefix_is_rejected_at_parse_time`, `canonical_renders_the_long_form`, `prop_short_and_long_forms_agree` |
+| MB-ADDR-BARE-40001 | Bare forms: area digit plus 4 or 5 digits, e.g. `40001`, `400001`, `00001`, `000001`, `10001`, `30001`, `60001` (TagHR:33, TagCoil:33). Accepted unconditionally; the ambiguity between a bare number and a 1-based or 0-based register is not detected. | Accepted only when the connection or call supplied `address-convention=plc4x` (`AddressConvention::Plc4xCompatible`); otherwise `InvalidAddress` naming the ambiguity and the two accepted spellings (D16, S20b). Divergence row below. The interop read test with an explicit convention, `interop_bare_40001_reads_with_explicit_convention`, is planned for S27. | implemented | `bare_40001_is_rejected_unless_convention_is_explicit`, `bare_40001_with_plc4x_convention_is_logical_1`, `unknown_convention_name_is_rejected`, `prop_short_and_long_forms_agree` |
+| MB-ADDR-BIT-TYPES | Non-BOOL types on `coil` and `discrete-input` parse (TagCoil:100 resolves any type name) and fail at read time with UNSUPPORTED (Opt:132-139). | Rejected at parse time with `InvalidAddress` naming the area and type (D16). Divergence row below. | implemented | `typed_coil_address_is_rejected_at_parse_time`, `typed_discrete_input_address_is_rejected_at_parse_time`, `bit_areas_accept_bool_only`, `int_on_a_coil_is_rejected` |
+| MB-ADDR-CONFIG-BLOCK | Trailing `{key: value, ...}`; the regex is `(\{(?<config>.*?)})?$` (TCP:32), pairs by `KEY_VALUE_PATTERN` (TCP:34): `-?\d+.\d+`, `-?\d+`, double- or single-quoted text, `true`, `false`. `unit-id` is read with `Short.parseShort`, `byte-order` with `ModbusByteOrder.valueOf` (Tag:222-229). Example `holding-register:8[0..7]:SINT{unit-id: 10}` (MET:43). INFERENCE from the value regex: an enum value must be quoted (`{byte-order: 'LITTLE_ENDIAN'}`); a bare word matches no alternative and, because the parser uses `find()` (TCP:44), the pair is silently dropped (not observed by a run). `4x:INT` also matches: the digit group is optional (Tag:48), so INFERENCE: `Integer.parseInt(null)` throws `NumberFormatException` instead of a typed invalid-tag error (not observed by a run). | Accepts `{unit-id: N, byte-order: 'NAME'}` with the same four names (single or double quotes), keys in any order, optional spaces inside the braces (a Stonecrab choice) and an empty block. `unit-id` outside 0..=255, unknown keys, unquoted enum values and `4x:INT` are `InvalidAddress` (typed, never a panic). Unit id groups chunks (D19). | implemented | `unit_id_block_sets_unit`, `unit_id_256_is_rejected`, `negative_unit_id_is_rejected`, `byte_order_names_map_per_adr_0006`, `byte_order_block_requires_quoted_name`, `unknown_byte_order_name_is_rejected`, `unknown_config_key_is_rejected`, `malformed_config_block_is_rejected`, `both_keys_combine_in_any_order`, `four_x_without_digits_is_rejected`, `prop_parse_never_panics` |
 
 Deferred or rejected grammar, recorded so the rejection has an owner:
 
-| Row id | Upstream behavior (file:line) | Stonecrab alpha behavior | Status | Planned test ids |
+| Row id | Upstream behavior (file:line) | Stonecrab alpha behavior | Status | Test ids |
 | --- | --- | --- | --- | --- |
-| MB-ADDR-SELECTION | `[index]` selects one element and yields a scalar, `[lo..hi]` an inclusive range and a list, `;base` sets the lower bound (ANP:54-67, 181-226; Tag:56-89). Single dimension only (`AddressConstraints.SINGLE_DIMENSION`, AC:42-43). Offsets are element counts converted to register offsets, an odd byte offset is rejected (Tag:114-123). Example `holding-register:1[0..1]:REAL` (DTS:133). | Rejected with `InvalidAddress` naming the deferred feature; `PlcValue::List` does not exist at alpha. | deferred (M2) | `selection_range_is_rejected_at_parse_time`, `selection_index_is_rejected_at_parse_time` |
-| MB-ADDR-STRING | `STRING(n)` and `WSTRING(n)` carry the length of one string; the length is mandatory for those and forbidden for other types (Tag:206-221). Pattern `\((?<stringLength>\d{1,5})\)` (Tag:47). Example `holding-register:1[0..2]:STRING(20)`. | `STRING`, `WSTRING`, `CHAR`, `WCHAR` and any parenthesised length are rejected at parse time. | deferred (M2) | `string_type_is_rejected_at_parse_time`, `parenthesised_length_is_rejected` |
-| MB-ADDR-EXTENDED | `extended-register`, `6x`, bare `6`; logical equals wire address, but logical 0 is rejected (Tag:195-197); FC20 read, FC21 write split at 10000-register file boundaries (TagExt:54-58; Conn:411-432, 467-487). Limit 655359999 (TagExt:36). | Rejected at parse time. | deferred (M2) | `extended_register_is_rejected_at_parse_time`, `six_x_prefix_is_rejected_at_parse_time` |
-| MB-ADDR-LEGACY-ARRAY | Legacy `address:TYPE[n]` and `address:TYPE:n` are rejected; the error names the replacement, e.g. `holding-register:1:INT[4]` becomes `holding-register:1[0..3]:INT` (ANP:130-138; ModbusLegacyAddressTest). | Rejected with `InvalidAddress`; the message carries the same migration hint text. | planned | `legacy_array_form_is_rejected_with_hint` |
+| MB-ADDR-SELECTION | `[index]` selects one element and yields a scalar, `[lo..hi]` an inclusive range and a list, `;base` sets the lower bound (ANP:54-67, 181-226; Tag:56-89). Single dimension only (`AddressConstraints.SINGLE_DIMENSION`, AC:42-43). Offsets are element counts converted to register offsets, an odd byte offset is rejected (Tag:114-123). Example `holding-register:1[0..1]:REAL` (DTS:133). | Rejected with `InvalidAddress` naming the deferred feature; `PlcValue::List` does not exist at alpha. | deferred (M2); rejection implemented | `selection_range_is_rejected_at_parse_time`, `selection_index_is_rejected_at_parse_time` |
+| MB-ADDR-STRING | `STRING(n)` and `WSTRING(n)` carry the length of one string; the length is mandatory for those and forbidden for other types (Tag:206-221). Pattern `\((?<stringLength>\d{1,5})\)` (Tag:47). Example `holding-register:1[0..2]:STRING(20)`. | `STRING`, `WSTRING`, `CHAR`, `WCHAR` and any parenthesised length are rejected at parse time. | deferred (M2); rejection implemented | `string_type_is_rejected_at_parse_time`, `parenthesised_length_is_rejected`, `wstring_type_is_rejected_at_parse_time`, `char_type_is_rejected_at_parse_time`, `wchar_type_is_rejected_at_parse_time` |
+| MB-ADDR-EXTENDED | `extended-register`, `6x`, bare `6`; logical equals wire address, but logical 0 is rejected (Tag:195-197); FC20 read, FC21 write split at 10000-register file boundaries (TagExt:54-58; Conn:411-432, 467-487). Limit 655359999 (TagExt:36). | Rejected at parse time. | deferred (M2); rejection implemented | `extended_register_is_rejected_at_parse_time`, `six_x_prefix_is_rejected_at_parse_time` |
+| MB-ADDR-LEGACY-ARRAY | Legacy `address:TYPE[n]` and `address:TYPE:n` are rejected; the error names the replacement, e.g. `holding-register:1:INT[4]` becomes `holding-register:1[0..3]:INT` (ANP:130-138; ModbusLegacyAddressTest). | Rejected with `InvalidAddress`; the message carries a migration hint of the same shape, computed from the text (`holding-register:1:INT[4]` gives `holding-register:1[0..3]:INT`; a count it cannot compute gives `[0..N-1]`). The exact upstream wording (ANP:130-138) is not reproduced in this record, so the hint text is Stonecrab's. | implemented | `legacy_array_form_is_rejected_with_hint` |
 
 The original project brief's `holding:0x0010:i16` example is not upstream syntax: it fails
 both `MB-ADDR-LONG` (area name, hexadecimal digits, lowercase type) and is the reason the
 three tests `holding_register_0x0010_is_rejected`, `lowercase_i16_is_rejected` and
-`0x0010_is_a_decimal_coil_address_not_hex` are to be implemented.
+`zero_x_0010_is_a_decimal_coil_address_not_hex` are implemented in `tests/parse.rs`.
 
 ## Limits
 Parse-time limits upstream are enforced by `of()` in each area class. Stonecrab enforces the
 address bounds in `ModbusAddress::parse` (S20b) and the quantity bounds in `Batcher::plan` and
 S25 request validation (single-element addresses cannot reach them).
 
-| Row id | Upstream behavior (file:line) | Stonecrab alpha behavior | Status | Planned test ids |
+| Row id | Upstream behavior (file:line) | Stonecrab alpha behavior | Status | Test ids |
 | --- | --- | --- | --- | --- |
-| MB-LIMIT-ADDR | Wire address above 65535 is rejected (TagCoil:36, 85-87; TagDI:36, 85; TagHR:36, 84-86; TagIR:36, 84-85). | Logical address above the bound is `InvalidAddress`; address 0 is `InvalidAddress`. | planned | `address_above_65535_is_rejected`, `logical_address_zero_is_rejected` |
-| MB-LIMIT-SPAN | `address + quantity > 65535` rejected for bit areas (TagCoil:92-94, TagDI:92); `address + registers > 65535` for register areas (TagHR:100-102, TagIR:100-101). INFERENCE: because the test is `>` on the zero-based address plus the count, the single element at wire address 65535 is rejected upstream. Not observed by a run. | `InvalidAddress` when the span of the data type passes the end of the address map (reachable for a 4-register type near the top). S20a decision: the single element at wire address 65535 is reachable (span <= 65536), a documented deviation; S20b confirms it with the parser. | planned | `span_past_65535_is_rejected`, `lreal_at_top_of_map_is_rejected`, `last_valid_register_is_accepted` |
+| MB-LIMIT-ADDR | Wire address above 65535 is rejected (TagCoil:36, 85-87; TagDI:36, 85; TagHR:36, 84-86; TagIR:36, 84-85). | A logical address above 65536 (a wire offset above 65535) is `InvalidAddress`; address 0 is `InvalidAddress`. Short and bare forms can write up to 99999, so the check is in the parser as well as the `u16` offset. | implemented | `address_above_65535_is_rejected`, `logical_address_zero_is_rejected` |
+| MB-LIMIT-SPAN | `address + quantity > 65535` rejected for bit areas (TagCoil:92-94, TagDI:92); `address + registers > 65535` for register areas (TagHR:100-102, TagIR:100-101). INFERENCE: because the test is `>` on the zero-based address plus the count, the single element at wire address 65535 is rejected upstream. Not observed by a run. | `InvalidAddress` when the span of the data type passes the end of the address map (reachable for a 4-register type near the top). S20a decision, confirmed by the S20b parser (`holding-register:65536` is accepted): the single element at wire address 65535 is reachable (span <= 65536), a documented deviation. | implemented | `span_past_65535_is_rejected`, `lreal_at_top_of_map_is_rejected`, `last_valid_register_is_accepted`, `span_check_table_at_the_top_of_the_map` |
 | MB-LIMIT-COILS | Quantity above 2000 rejected at parse time (TagCoil:96-98, TagDI:96); configurable block bound 2000 (Cfg:57-61). V1.1b section 6.1: FC01 quantity 1..2000. | Enforced by the batcher and request validation against `max-coils-per-request`; a chunk never exceeds the bound. | planned | `batcher_splits_at_max_coils`, `interop_125_register_and_2000_coil_reads`, `read_request_above_coil_limit_is_rejected_before_io` |
 | MB-LIMIT-REGISTERS | Registers above 125 rejected, measured in register units: `registers = max(1, (quantity * bytesPerElement + 1) / 2)` (Tag:99-137; TagHR:99-106; TagIR:104). 63 DINT is 126 registers and is rejected (Tag:128-131). V1.1b section 6.3: FC03 quantity 1..125. | Enforced by the batcher in register units; the 63-DINT case is reproduced as a multi-tag chunk test. | planned | `batcher_splits_63_dint_tags_into_two_chunks`, `interop_125_register_and_2000_coil_reads` |
-| MB-LIMIT-DIGITS | Long-form digit group is 1 to 9 digits and `STRING(n)` length 1 to 5 digits, so overlong numbers there fail the regex as an invalid tag, not as `NumberFormatException` (Tag:47-48; MTT:139-157). Selection indices are not bounded by the regex (`\d+`, ANP:54); `ArrayNotationParser.parseIndex` catches the `NumberFormatException` from `Integer.parseInt` and throws `PlcInvalidTagException` (ANP:265-273; MTT:141-145). | More than 9 digits is `InvalidAddress`; never a panic or integer overflow. | planned | `overlong_digit_group_is_rejected`, `prop_parse_never_panics`, `fuzz_modbus_address` |
+| MB-LIMIT-DIGITS | Long-form digit group is 1 to 9 digits and `STRING(n)` length 1 to 5 digits, so overlong numbers there fail the regex as an invalid tag, not as `NumberFormatException` (Tag:47-48; MTT:139-157). Selection indices are not bounded by the regex (`\d+`, ANP:54); `ArrayNotationParser.parseIndex` catches the `NumberFormatException` from `Integer.parseInt` and throws `PlcInvalidTagException` (ANP:265-273; MTT:141-145). | More than 9 digits in the long form, and a number of digits other than 4 or 5 in a short form, is `InvalidAddress` (decided before any numeric conversion, so no overflow); never a panic. The message does not echo the digits. | implemented | `overlong_digit_group_is_rejected`, `short_forms_require_four_or_five_digits`, `prop_parse_never_panics`, `fuzz_modbus_address` |
 | MB-LIMIT-PDU | No explicit PDU size check found in the inventoried read path; sizes follow from the quantity limits. V1.1b section 4.1: PDU at most 253 bytes. | PDU at most 253 bytes (`Capabilities.max_pdu_bytes = Some(253)`, S21, S26). | planned | `pdu_above_253_bytes_is_rejected`, `request_quantity_bounds_1_to_125_and_2000` |
 | MB-LIMIT-ADU | `ModbusTcpMessageCodec` sizes a frame as 6 plus the big-endian length field with no upper bound seen (Codec:37-54; `MessageCodecBase` not retained, so a cap there is UNVERIFIED). The discoverer alone bounds a reply to 260 bytes (Disc:66, 77-85). | MBAP length field 2..=254, ADU at most 260, protocol id 0, header validated before the body is allocated (S22). Upstream's unbounded length is a divergence candidate; see Divergence. | planned | `mbap_length_255_is_rejected`, `mbap_length_1_is_rejected`, `mbap_protocol_id_1_is_rejected`, `mbap_truncated_header_waits`, `fuzz_modbus_mbap` |
-| MB-LIMIT-EXT | Extended-register address limit 655359999 (TagExt:36, 86-88, 102-104). | Not applicable; extended registers are rejected at parse time. | deferred (M2) | `extended_register_is_rejected_at_parse_time` |
+| MB-LIMIT-EXT | Extended-register address limit 655359999 (TagExt:36, 86-88, 102-104). | Not applicable; extended registers are rejected at parse time. | deferred (M2); rejection implemented | `extended_register_is_rejected_at_parse_time` |
 
 ## Data types
 `ModbusDataType` is generated from `Mspec:380-408` (name, numeric value, `dataTypeSize` in
@@ -203,7 +246,7 @@ from the mspec at build time), so sizes come from the mspec text only.
 Registers are 16-bit units. "Registers" below is the number of registers one element of
 the type occupies when read alone.
 
-| Row id | Type, mspec enum line, `dataTypeSize` | Registers and DataItem encoding (`Mspec` line) | Stonecrab alpha behavior | Status | Planned test ids |
+| Row id | Type, mspec enum line, `dataTypeSize` | Registers and DataItem encoding (`Mspec` line) | Stonecrab alpha behavior | Status | Test ids |
 | --- | --- | --- | --- | --- | --- |
 | MB-TYPE-BOOL | BOOL, 381, 2 | 1; `simple bit` (320-322); lone value padded by 15 bits | Accepted on all four areas (bit areas read one bit; register areas read one register). | planned | `decode_bool_register_value_1_is_true`, `decode_bool_coil_bit`, `interop_reads_all_fifteen_holding_register_types` |
 | MB-TYPE-BYTE | BYTE, 382, 2 | 1; `uint 8` (323-325); padded by 8 bits | Accepted on register areas; rejected on bit areas. | planned | `decode_byte_42_from_register`, `interop_reads_all_fifteen_holding_register_types` |
@@ -220,18 +263,18 @@ the type occupies when read alone.
 | MB-TYPE-ULINT | ULINT, 393, 8 | 4; `uint 64` (356-358) | As above; u64 maximum exact. | planned | `decode_ulint_u64_max_exact`, `interop_reads_all_fifteen_holding_register_types` |
 | MB-TYPE-REAL | REAL, 394, 4 | 2; `float 32` (359-361) | As above; NaN and infinity preserved as `F32`. | planned | `decode_real_3_141593_big_endian`, `decode_real_nan_and_infinity_preserved`, `interop_little_endian_region_decodes_real` |
 | MB-TYPE-LREAL | LREAL, 395, 8 | 4; `float 64` (362-364) | As above. | planned | `decode_lreal_2_71828182846`, `interop_reads_all_fifteen_holding_register_types` |
-| MB-TYPE-CHAR | CHAR, 404, 1 | a lone CHAR is unpadded (RegCodec:135-139); a packed run is padded to a whole register (RegCodec:196-205); `string 8` UTF8 (365-367) | Rejected at parse time. | deferred (M2) | `char_type_is_rejected_at_parse_time` |
-| MB-TYPE-WCHAR | WCHAR, 405, 2 | 1; `string 16` UTF16BE (368-370) | Rejected at parse time. | deferred (M2) | `wchar_type_is_rejected_at_parse_time` |
-| MB-TYPE-STRING | STRING, 406, 1 per character | `ceil(n/2)` registers for `STRING(n)`; `vstring stringLength * 8` UTF8 (371-373) | Rejected at parse time. | deferred (M2) | `string_type_is_rejected_at_parse_time` |
-| MB-TYPE-WSTRING | WSTRING, 407, 2 per character | `n` registers for `WSTRING(n)`; `vstring stringLength * 16` UTF16BE (374-376) | Rejected at parse time. | deferred (M2) | `wstring_type_is_rejected_at_parse_time` |
-| MB-TYPE-TIME | TIME, 396, 8 | No DataItem case (the `typeSwitch` at 319-377 ends at WSTRING). `widthBits` throws "Unsupported Modbus data type" (RegCodec:191-192). The name still resolves: `getPlcValueType` maps by `PlcValueType.valueOf` (Tag:279-282). | Rejected at parse time as an unsupported calendar type. | deferred (ADR before the first calendar-value consumer) | `time_family_names_are_rejected_at_parse_time` |
-| MB-TYPE-LTIME | LTIME, 397, 8 | As TIME. | As TIME. | deferred (ADR before the first calendar-value consumer) | `time_family_names_are_rejected_at_parse_time` |
-| MB-TYPE-DATE | DATE, 398, 8 | As TIME. | As TIME. | deferred (ADR before the first calendar-value consumer) | `time_family_names_are_rejected_at_parse_time` |
-| MB-TYPE-LDATE | LDATE, 399, 8 | As TIME. | As TIME. | deferred (ADR before the first calendar-value consumer) | `time_family_names_are_rejected_at_parse_time` |
-| MB-TYPE-TIME-OF-DAY | TIME_OF_DAY, 400, 8 | As TIME. | As TIME. | deferred (ADR before the first calendar-value consumer) | `time_family_names_are_rejected_at_parse_time` |
-| MB-TYPE-LTIME-OF-DAY | LTIME_OF_DAY, 401, 8 | As TIME. | As TIME. | deferred (ADR before the first calendar-value consumer) | `time_family_names_are_rejected_at_parse_time` |
-| MB-TYPE-DATE-AND-TIME | DATE_AND_TIME, 402, 8 | As TIME. | As TIME. | deferred (ADR before the first calendar-value consumer) | `time_family_names_are_rejected_at_parse_time` |
-| MB-TYPE-LDATE-AND-TIME | LDATE_AND_TIME, 403, 8 | As TIME. | As TIME. | deferred (ADR before the first calendar-value consumer) | `time_family_names_are_rejected_at_parse_time` |
+| MB-TYPE-CHAR | CHAR, 404, 1 | a lone CHAR is unpadded (RegCodec:135-139); a packed run is padded to a whole register (RegCodec:196-205); `string 8` UTF8 (365-367) | Rejected at parse time. | deferred (M2); rejection implemented | `char_type_is_rejected_at_parse_time` |
+| MB-TYPE-WCHAR | WCHAR, 405, 2 | 1; `string 16` UTF16BE (368-370) | Rejected at parse time. | deferred (M2); rejection implemented | `wchar_type_is_rejected_at_parse_time` |
+| MB-TYPE-STRING | STRING, 406, 1 per character | `ceil(n/2)` registers for `STRING(n)`; `vstring stringLength * 8` UTF8 (371-373) | Rejected at parse time. | deferred (M2); rejection implemented | `string_type_is_rejected_at_parse_time` |
+| MB-TYPE-WSTRING | WSTRING, 407, 2 per character | `n` registers for `WSTRING(n)`; `vstring stringLength * 16` UTF16BE (374-376) | Rejected at parse time. | deferred (M2); rejection implemented | `wstring_type_is_rejected_at_parse_time` |
+| MB-TYPE-TIME | TIME, 396, 8 | No DataItem case (the `typeSwitch` at 319-377 ends at WSTRING). `widthBits` throws "Unsupported Modbus data type" (RegCodec:191-192). The name still resolves: `getPlcValueType` maps by `PlcValueType.valueOf` (Tag:279-282). | Rejected at parse time as an unsupported calendar type. | deferred (ADR before the first calendar-value consumer); rejection implemented | `time_family_names_are_rejected_at_parse_time` |
+| MB-TYPE-LTIME | LTIME, 397, 8 | As TIME. | As TIME. | deferred (ADR before the first calendar-value consumer); rejection implemented | `time_family_names_are_rejected_at_parse_time` |
+| MB-TYPE-DATE | DATE, 398, 8 | As TIME. | As TIME. | deferred (ADR before the first calendar-value consumer); rejection implemented | `time_family_names_are_rejected_at_parse_time` |
+| MB-TYPE-LDATE | LDATE, 399, 8 | As TIME. | As TIME. | deferred (ADR before the first calendar-value consumer); rejection implemented | `time_family_names_are_rejected_at_parse_time` |
+| MB-TYPE-TIME-OF-DAY | TIME_OF_DAY, 400, 8 | As TIME. | As TIME. | deferred (ADR before the first calendar-value consumer); rejection implemented | `time_family_names_are_rejected_at_parse_time` |
+| MB-TYPE-LTIME-OF-DAY | LTIME_OF_DAY, 401, 8 | As TIME. | As TIME. | deferred (ADR before the first calendar-value consumer); rejection implemented | `time_family_names_are_rejected_at_parse_time` |
+| MB-TYPE-DATE-AND-TIME | DATE_AND_TIME, 402, 8 | As TIME. | As TIME. | deferred (ADR before the first calendar-value consumer); rejection implemented | `time_family_names_are_rejected_at_parse_time` |
+| MB-TYPE-LDATE-AND-TIME | LDATE_AND_TIME, 403, 8 | As TIME. | As TIME. | deferred (ADR before the first calendar-value consumer); rejection implemented | `time_family_names_are_rejected_at_parse_time` |
 
 What the generated `DataItem.staticParse` does for the TIME family at runtime is
 UNVERIFIED (the generated class is not retained); only the `widthBits` throw is observed.
@@ -253,7 +296,7 @@ documented layouts above. Precedence is the tag field (`Tag::with_byte_order` an
 `with_word_order`), then the address `{byte-order: 'NAME'}` block, then
 `default-payload-byte-order` (default BIG_ENDIAN); the order is never inferred.
 
-| Row id | Upstream behavior (file:line) | Stonecrab alpha behavior | Status | Planned test ids |
+| Row id | Upstream behavior (file:line) | Stonecrab alpha behavior | Status | Test ids |
 | --- | --- | --- | --- | --- |
 | MB-BYTEORDER-BE | `BIG_ENDIAN`, 4-byte layout `[1,2,3,4]` (BO:22-24); no swap, big-endian buffer (Opt:169; Conn:607-612). Lone narrow values are padded first (RegCodec:65-68). Vectors: REAL 3.141593 is registers `0x4049 0x0FDC`, DWORD 4242442424 is `0xFCDE 0x88B8` (Srv:95-97, 137-139). | (BigEndian, HighWordFirst). | planned | `byte_order_big_endian_maps_big_high`, `decode_real_3_141593_big_endian`, `decode_dword_4242442424_big_endian`, `adt_big_endian_vectors_decode` |
 | MB-BYTEORDER-LE | `LITTLE_ENDIAN`, `[4,3,2,1]` (BO:25-27); no swap, little-endian buffer (Opt:172-178; Conn:600-606). Lone narrow values: BOOL has 7 leading pad bits, the bit, then 8 trailing; BYTE value first (RegCodec:69-75, 158-160). | (LittleEndian, LowWordFirst). | planned | `byte_order_little_endian_maps_little_low`, `decode_real_little_endian_region`, `interop_little_endian_region_decodes_real`, `adtle_little_endian_vectors_decode` |
@@ -264,7 +307,11 @@ documented layouts above. Precedence is the tag field (`Tag::with_byte_order` an
 Status note: the four mode rows cannot become `automated-verified` before the upstream
 little-endian vectors (`ADTLE`) pass in S23. The BIG_ENDIAN row can be verified by the big-endian
 vectors and the pymodbus fixture, but the mapping rows move together. The D14 derivation is
-from documented layouts, not from a run against a device that swaps bytes.
+from documented layouts, not from a run against a device that swaps bytes. Since S20b the
+address parser maps the four names in an address block through the same table
+(`byte_order_names_map_per_adr_0006`, with the `canonical()` rendering checked by
+`prop_canonical_round_trips`), so the address-block half of MB-BYTEORDER-PRECEDENCE is
+in place; the rows stay planned until the decoder and the tag-field precedence exist.
 
 ## Exception codes
 Upstream enum `ModbusErrorCode` has ten values and no code 9 (Mspec:410-421). The mapping to
@@ -275,7 +322,7 @@ Two documented deviations: code 3 (upstream INVALID_DATA) and code 5 (upstream O
 V1.1b reference: section 7 (exception responses and the exception code table), see
 UNVERIFIED for the section-number caveat.
 
-| Row id | Code, name (Mspec line) | Upstream response-code mapping (Conn line) | Stonecrab ErrorKind (D18) | Status | Planned test ids |
+| Row id | Code, name (Mspec line) | Upstream response-code mapping (Conn line) | Stonecrab ErrorKind (D18) | Status | Test ids |
 | --- | --- | --- | --- | --- | --- |
 | MB-EXC-01 | 1 ILLEGAL_FUNCTION (411) | UNSUPPORTED (577) | `Unsupported(Operation::Read)` | planned | `exception_01_maps_to_unsupported_read` |
 | MB-EXC-02 | 2 ILLEGAL_DATA_ADDRESS (412) | INVALID_ADDRESS (578) | `InvalidAddress` | planned | `exception_02_maps_to_invalid_address`, `interop_read_beyond_map_yields_device_exception` |
@@ -293,7 +340,7 @@ UNVERIFIED for the section-number caveat.
 Upstream reads go through `ModbusReadOptimizer`; Stonecrab's counterpart is `Batcher::plan`
 (S24a) and the session (S24b).
 
-| Row id | Upstream behavior (file:line) | Stonecrab alpha behavior | Status | Planned test ids |
+| Row id | Upstream behavior (file:line) | Stonecrab alpha behavior | Status | Test ids |
 | --- | --- | --- | --- | --- |
 | MB-READ-MERGE | `onRead` keeps tags whose address failed to parse out of the wire request (Conn:221-233), then groups tags by area and by per-tag unit id, `null` meaning the connection default (Opt:71-105, 201-213), sorts each group by wire address (Opt:225-226, 278-279) and merges tags into one block while the tag end is within the first address plus the configured maximum (Opt:247, 300). A merged bit block is a coil or discrete-input tag of type BYTE (Opt:249-252); a merged register block is a tag of type WORD (Opt:302-304). The first tag of a group is accepted without a size check (Opt:239-245). Blocks run one after another (Conn:245-252). | Group by (unit id, area); merge adjacent or overlapping spans only; chunk limits 125 and 2000 from configuration; `Capabilities.max_items_per_request` honored; every `TagId` kept in its chunk (D19). Results come back correlated and in request order with `split_into` disclosure. Chunks run sequentially; a chunk exception fails only its members. | planned | `batcher_merges_adjacent_tags`, `batcher_merges_overlapping_tags`, `batcher_groups_by_unit_and_area`, `batcher_splits_63_dint_tags_into_two_chunks`, `prop_plan_never_exceeds_limits_and_loses_no_tag`, `interop_split_batch_discloses_chunks`, `read_response_is_in_request_order` |
 | MB-READ-GAP | Tags separated by a gap are merged and the gap is read too, because the test is only `tagEnd <= first + max` (Opt:247, 300). | No gap reads; a gapped pair is two requests. Divergence row below. | deferred (M2) | `batcher_does_not_bridge_gaps` |
@@ -314,7 +361,7 @@ reproduces only these fixture values. Addresses here are the logical tag address
 the upstream tags; the wire address is one less (`Srv:71-74`: pymodbus without `zero_mode`
 stores tag address T at index T).
 
-| Row id | Area and logical address | Type and value | Registers or bits (file:line) | Status | Planned test ids |
+| Row id | Area and logical address | Type and value | Registers or bits (file:line) | Status | Test ids |
 | --- | --- | --- | --- | --- | --- |
 | MB-INTEROP-HR-01 | holding-register 1 | BOOL true | 0x0001 (Srv:86-87) | planned | `interop_reads_all_fifteen_holding_register_types` |
 | MB-INTEROP-HR-02 | 2, 3 | BYTE 42, WORD 42424 | 0x002A, 0xA5B8 (Srv:89-93) | planned | `interop_reads_all_fifteen_holding_register_types` |
@@ -346,17 +393,17 @@ audit; `l` was added while reading `Tag.java` and is not in the audit.
 | Row id | Quirk | Upstream (file:line) | Status | Stonecrab handling and test id |
 | --- | --- | --- | --- | --- |
 | MB-QUIRK-A | (a) `ModbusTcpDriver` imports `org.bouncycastle.tls.UDPTransport` for its `instanceof` check; INFERENCE: the UDP branch cannot match a PLC4X transport (its class is not retained); consequence INFERRED: UDP falls through to the default transport configuration class | Drv:34, 66-67 | not reproduced | UDP is rejected with `InvalidConfig`: `driver_rejects_other_transport_codes` |
-| MB-QUIRK-B | (b) `extractResponseData` returns only the first file-record item, so a split extended-register read silently drops the second item | Conn:517-518 (split built at Conn:422-431) | not reproduced | Extended registers rejected at parse time: `extended_register_is_rejected_at_parse_time` |
+| MB-QUIRK-B | (b) `extractResponseData` returns only the first file-record item, so a split extended-register read silently drops the second item | Conn:517-518 (split built at Conn:422-431) | not reproduced; implemented | Extended registers rejected at parse time: `extended_register_is_rejected_at_parse_time` |
 | MB-QUIRK-C | (c) The FC05 echo check is dead code because writes always use FC15 | Conn:371-377 vs Conn:438-448 | not reproduced | Write is unsupported at alpha: `write_returns_unsupported_without_io` |
 | MB-QUIRK-D | (d) `onPing` reports OK for any reply, including an exception PDU | Conn:205-210 | not reproduced | Ping is deferred: `capabilities_have_no_ping_operation` |
 | MB-QUIRK-E | (e) Replies are matched on transaction id only | Conn:145-157 | not reproduced | `reply_with_wrong_unit_is_discarded`, see MB-READ-MATCH |
 | MB-QUIRK-F | (f) The manual test suite passes `unit-identifier`, which `ModbusTcpConfiguration` does not declare; it equals the default so the suite still passes | MF:30-33 vs Cfg:36-39 | not reproduced | The vector adapter maps the key to `default-unit-identifier`; `config_misspelt_unit_identifier_is_rejected` |
-| MB-QUIRK-G | (g) The fixed-digit address group is optional, so `4x:INT` matches the short pattern; consequence INFERRED: `NumberFormatException` instead of a typed invalid-tag error | Tag:48; TagHR:83 | not reproduced | Typed `InvalidAddress`: `four_x_without_digits_is_rejected` |
+| MB-QUIRK-G | (g) The fixed-digit address group is optional, so `4x:INT` matches the short pattern; consequence INFERRED: `NumberFormatException` instead of a typed invalid-tag error | Tag:48; TagHR:83 | not reproduced; implemented | Typed `InvalidAddress`: `four_x_without_digits_is_rejected` |
 | MB-QUIRK-H | (h) The simulated driver's Javadoc shows the pre-migration `STATE/bar:STRING[16]` form while the regex is the new form | `plc4j/drivers/simulated/src/main/java/org/apache/plc4x/java/simulated/SimulatedDriver.java:41-42` | not reproduced | Not a Modbus behavior; the simulator is Stonecrab-owned (`docs/parity/sim.md`, S11b): no Modbus test |
 | MB-QUIRK-I | (i) `ConnectionBase` polling receive loop calls `Thread.onSpinWait()` for non-async transports | CB:169-177 | not reproduced | Readiness-driven I/O, no polling loop (D15): `idle_connection_makes_no_polling_wakeups` |
-| MB-QUIRK-J | (j) Non-BOOL coil and discrete-input tags parse but fail at read time with UNSUPPORTED | TagCoil:100; Opt:132-139 | not reproduced | `typed_coil_address_is_rejected_at_parse_time`, see MB-ADDR-BIT-TYPES |
-| MB-QUIRK-K | (k) The TIME and DATE family parses as a data type but cannot be encoded | RegCodec:191-192; Tag:279-282 | not reproduced | `time_family_names_are_rejected_at_parse_time` |
-| MB-QUIRK-L | (l) `equals` and `hashCode` ignore the byte order, so two tags that differ only in `byte-order` compare equal | Tag:301-319 | not reproduced | Byte order is part of the parsed address value: `addresses_differing_only_in_byte_order_are_not_equal` |
+| MB-QUIRK-J | (j) Non-BOOL coil and discrete-input tags parse but fail at read time with UNSUPPORTED | TagCoil:100; Opt:132-139 | not reproduced; implemented | `typed_coil_address_is_rejected_at_parse_time`, see MB-ADDR-BIT-TYPES |
+| MB-QUIRK-K | (k) The TIME and DATE family parses as a data type but cannot be encoded | RegCodec:191-192; Tag:279-282 | not reproduced; implemented | `time_family_names_are_rejected_at_parse_time` |
+| MB-QUIRK-L | (l) `equals` and `hashCode` ignore the byte order, so two tags that differ only in `byte-order` compare equal | Tag:301-319 | not reproduced; implemented | Byte order is part of the parsed address value: `addresses_differing_only_in_byte_order_are_not_equal` |
 
 ## Divergences from upstream
 Every row has a reference; "none filed" is not allowed for a not-ported upstream defect.
@@ -428,6 +475,11 @@ suites (deferred, M2).
   unchanged (not read; post-alpha).
 - The log level of unknown-parameter reporting: `UnknownParameterReporter` is not retained
   (DB:315-319).
+- The whitespace tolerance of the upstream address-block regex (the text of
+  `KEY_VALUE_PATTERN`, TCP:34, is not reproduced here), whether upstream accepts
+  double-quoted enum values (the value pattern lists them; not run), and the wording of
+  the upstream legacy-array migration hint (ANP:130-138). The Stonecrab choices are in the
+  note under Address grammar.
 - Consequences marked INFERENCE: UDP configuration-class fallthrough (MB-QUIRK-A),
   `NumberFormatException` for `4x:INT` (MB-QUIRK-G, MB-ADDR-CONFIG-BLOCK), silent drop of
   an unquoted enum value (MB-ADDR-CONFIG-BLOCK), the connection metadata flags for

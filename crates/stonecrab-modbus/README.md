@@ -4,11 +4,12 @@ Native Modbus TCP driver for Stonecrab. The alpha scope is read-only: function c
 registers) over TCP with MBAP framing. RTU, ASCII, TLS, UDP, writes, extended registers
 and string types are out of scope for the alpha.
 
-Nothing is implemented beyond the address types. This crate currently offers `UnitId`,
-`ModbusArea`, `ModbusDataType`, `AddressConvention`, `ModbusAddress` and its builder, and
-`ModbusAddress` implements the core `ProtocolAddress` trait. There is no address text
-parser, PDU codec, framing, session, connection or driver yet, and no I/O of any kind. The
-crate depends only on `stonecrab-core`; default features are empty.
+Nothing is implemented beyond the address types and their text grammar. This crate
+currently offers `UnitId`, `ModbusArea`, `ModbusDataType`, `AddressConvention`,
+`ModbusAddress` (built with its builder or parsed from text with `ModbusAddress::parse`)
+and `ProtocolAddress` for it. There is no PDU codec, framing, session, connection or
+driver yet, and no I/O of any kind. The crate depends only on `stonecrab-core`; default
+features are empty.
 
 Upstream behavior is the Apache PLC4X Modbus TCP driver at the commit pinned in
 `upstream/manifest.toml`. Every claim about it, and every divergence, is recorded with a
@@ -18,7 +19,7 @@ stable row id in the
 | Capability | Support level |
 | --- | --- |
 | Address types: `UnitId`, `ModbusArea`, `ModbusDataType`, `ModbusAddress` | build-tested |
-| Address text grammar and parser | planned |
+| Address text grammar and parser (`ModbusAddress::parse`) | unit-tested; fuzzed |
 | PDU codec for function codes 01 to 04 and the exception PDU | planned |
 | MBAP framing and transaction correlation | planned |
 | Typed register decoding and byte order | planned |
@@ -28,9 +29,81 @@ stable row id in the
 | Hardware verification | planned |
 
 ## Address grammar
-The text grammar (`holding-register:16:INT`, `4x00016:INT{unit-id: 10}` and the other
-forms) lands in slice S20b. Until then an address is built from its parts with
-`ModbusAddress::builder`.
+`ModbusAddress::parse(text, &AddressOptions)` reads the grammar of the upstream PLC4X Modbus
+driver, with the divergences listed below. Everything is case-sensitive and decimal, and
+the number is the one-based logical address: the wire offset is the number minus one, so
+`holding-register:16` reads wire address 15 and the first register is `holding-register:1`.
+
+| Form | Examples | Accepted |
+| --- | --- | --- |
+| long: `AREA:N` or `AREA:N:TYPE`, N has 1 to 9 digits | `holding-register:16:INT`, `coil:1` | always |
+| prefixed short: `0x`, `1x`, `3x` or `4x` plus 4 or 5 digits | `4x00016:INT`, `0x0010` | always |
+| bare short: prefix digit `0`, `1`, `3` or `4` plus 4 or 5 digits | `40001`, `400001`, `10001` | only with `address-convention=plc4x` |
+
+`AREA` is `coil`, `discrete-input`, `holding-register` or `input-register`, and the prefixes
+are `0x` coil, `1x` discrete input, `3x` input register and `4x` holding register; there is
+no `2x`. `0x0010` is coil 10, a decimal number that happens to start with the coil prefix,
+not hexadecimal. When no type is written it is `BOOL` for the bit areas (coil, discrete
+input) and `INT` for the register areas. `TYPE` is one of the 15 upper-case names `BOOL`,
+`BYTE`, `WORD`, `DWORD`, `LWORD`, `SINT`, `USINT`, `INT`, `UINT`, `DINT`, `UDINT`, `LINT`,
+`ULINT`, `REAL`, `LREAL`; the bit areas accept `BOOL` only, and a type whose registers pass
+wire address 65535 is refused (`LREAL` at `holding-register:65534`). The last address is
+`holding-register:65536`, wire address 65535.
+
+The explicit-convention rule: a bare number such as `40001` could be holding register 1
+under the PLC4X convention or a zero-based wire address, so the parser accepts the bare
+forms only when the caller named the convention (`AddressOptions` with convention `plc4x`,
+from the connection option `address-convention=plc4x` or a profile's `address_convention`).
+Without it the error names the ambiguity and the two spellings that are always accepted:
+`holding-register:1` and `4x00001`. Any other convention name is an error, even for the
+unambiguous spellings. The text `canonical()` renders is always the long form, which parses
+back to an equal address under every option.
+
+An address may end with a config block, directly after the type with no space before the
+brace: `{unit-id: 10, byte-order: 'LITTLE_ENDIAN'}`. The two keys are `unit-id`, a decimal
+integer from 0 to 255 (the one-byte MBAP field; upstream has no range check, so this is a
+documented divergence), and `byte-order`, a quoted name (single or double quotes) from
+`BIG_ENDIAN`, `LITTLE_ENDIAN`, `BIG_ENDIAN_BYTE_SWAP` and `LITTLE_ENDIAN_BYTE_SWAP`. An
+unquoted name is rejected: the upstream value pattern only matches quoted text, and
+Stonecrab turns what would be a silently dropped pair into an error. Either key, both in
+any order, or an empty block `{}` are accepted; spaces around keys, colons, values and
+commas are ignored; unknown or repeated keys are errors.
+
+Rejected with `ErrorKind::InvalidAddress`, each message naming the reason:
+
+- empty input, input over 256 bytes, control characters, and any text no form matches;
+- a bare short form without the explicit convention, and an unknown convention name;
+- logical address 0, above 65536, hexadecimal digits (`holding-register:0x0010`), more
+  than 9 digits in the long form, other than 4 or 5 in a short form, `4x:INT` with no digits;
+- lowercase or unknown type names (`holding-register:16:i16`);
+- a type other than `BOOL` on a coil or discrete input (upstream fails these only at read
+  time);
+- a span past wire address 65535;
+- the features deferred past the alpha: array selections `[n]` and `[a..b]`, `STRING`,
+  `WSTRING`, `CHAR`, `WCHAR` and `STRING(n)`, the `TIME` and `DATE` family,
+  `extended-register`, `6x` and the bare `6` prefix, and the legacy `AREA:N:INT[4]` form
+  (the message gives the replacement `AREA:N[0..3]:INT`);
+- a malformed config block: unterminated, unknown or repeated key, `unit-id` outside
+  0..=255, unquoted or unknown `byte-order`.
+
+Error messages echo at most 32 control-free characters of the input. The row ids behind
+each rule are in the parity record, `MB-ADDR-*`, `MB-LIMIT-ADDR`, `MB-LIMIT-SPAN`,
+`MB-LIMIT-DIGITS` and `MB-CFG-UNIT-ID`.
+
+```rust
+use stonecrab_core::{AddressOptions, ProtocolAddress};
+use stonecrab_modbus::ModbusAddress;
+
+let options = AddressOptions::builder().convention("plc4x").build()?;
+let address = ModbusAddress::parse("40016:REAL{unit-id: 10}", &options)?;
+assert_eq!(address.offset(), 15);
+assert_eq!(address.canonical(), "holding-register:16:REAL{unit-id: 10}");
+
+// Without the convention the bare form is ambiguous and refused.
+assert!(ModbusAddress::parse("40016", &AddressOptions::default()).is_err());
+assert!(ModbusAddress::parse("4x00016", &AddressOptions::default()).is_ok());
+# Ok::<(), stonecrab_core::PlcError>(())
+```
 
 ## Configuration
 The six connection parameters (request timeout, default unit identifier, ping address,
@@ -38,6 +111,8 @@ default payload byte order, maximum coils and registers per request) land with t
 in slice S26.
 
 ## Building an address
+The builder offers the same checks without text (the parser ends in it):
+
 ```rust
 use stonecrab_core::{ByteOrder, ProtocolAddress, WordOrder};
 use stonecrab_modbus::{ModbusArea, ModbusDataType, ModbusAddress, UnitId};

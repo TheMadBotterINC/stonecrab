@@ -24,6 +24,7 @@ libfuzzer-sys = "0.4"
 arbitrary = "1.5"
 stonecrab-core = { path = "../crates/stonecrab-core" }
 stonecrab-codec = { path = "../crates/stonecrab-codec" }
+stonecrab-modbus = { path = "../crates/stonecrab-modbus" }
 # Later slices add path dependencies on the crate each new target exercises.
 
 # Fuzz targets are added as [[bin]] sections by the slice that adds each target, named
@@ -38,6 +39,13 @@ bench = false
 [[bin]]
 name = "fuzz_core_connection_string"
 path = "fuzz_targets/fuzz_core_connection_string.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_modbus_address"
+path = "fuzz_targets/fuzz_modbus_address.rs"
 test = false
 doc = false
 bench = false

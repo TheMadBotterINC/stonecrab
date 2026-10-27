@@ -10,8 +10,8 @@ its own commit; the slice log below records what each one landed.
 Stonecrab is an independent native Rust port of Apache PLC4X, prioritizing sensor
 acquisition. It is **not yet a functioning industrial protocol client**.
 The repository currently contains tested, runtime-independent core data contracts, a
-bounded codec crate and the Modbus address data model. There are no connections,
-device reads, protocol drivers or hardware integrations.
+bounded codec crate and the Modbus address model with its text parser. There are no
+connections, device reads, protocol drivers or hardware integrations.
 
 - Repository: https://github.com/TheMadBotterINC/stonecrab
 - Primary/default branch: **`master`**, locally and remotely.
@@ -67,7 +67,8 @@ ADR-0004 explicitly overrides the original `main` branch policy with `master`.
   fuzz-finding policies. `deny.toml` also bans `failure`, `error-chain`, `color-eyre`.
 - `fuzz/` is a separate Cargo workspace with its own lock, nightly pin and deny policy
   (ADR-0009); `scripts/fuzz-smoke.sh` runs cargo-deny on it and every target for 60 s.
-  Targets: `fuzz_codec_bounded_reader` (S15), `fuzz_core_connection_string` (S08).
+  Targets: `fuzz_codec_bounded_reader` (S15), `fuzz_core_connection_string` (S08),
+  `fuzz_modbus_address` (S20b).
 
 ### Core data contracts
 
@@ -146,6 +147,7 @@ gates named were run locally before that commit.
 | S20a | 2026-10-27 | New crate `stonecrab-modbus` 0.1.0 with address types only: `UnitId`, `ModbusArea`, `ModbusDataType` (15 alpha types; string and calendar names rejected as deferred), `AddressConvention`, `ModbusAddress` and builder (bit areas accept BOOL only; last register must fit in the address space; long-form `canonical()`); ADR-0015 draft; no parser, PDU or I/O | check, coverage, lint-attrs, features, machete, dependencies, fuzz, package |
 | S09 | 2026-10-27 | Core `WriteItem`, `WriteRequest` and builder, `WriteResult`, `WriteResponse` and builder (exact correlation, request order, unknown outcomes never collapsed); ADR-0010; parity rows `CORE-WRITE-REQUEST`, `CORE-WRITE-RESPONSE`; data only | check, coverage, lint-attrs, machete, package |
 | S08 | 2026-10-27 | Core `ConnectionUri::parse` for the upstream connection-string grammar (strict subset: 4096-byte bound, no percent-encoding, no credentials in the authority, unique keys); second fuzz target `fuzz_core_connection_string` (60 s clean); proptest adopted by core; parity row `CORE-URI-GRAMMAR` implemented | check, coverage, lint-attrs, machete, dependencies, fuzz, package |
+| S20b | 2026-10-27 | `ModbusAddress::parse` for the verified PLC4X grammar (long, prefixed short and convention-gated bare forms, config block, typed rejections for selections, strings, calendar types, extended registers, legacy arrays); third fuzz target `fuzz_modbus_address` (60 s clean); grammar and limit parity rows implemented with test ids | check, coverage, lint-attrs, machete, dependencies, fuzz, package |
 
 ## Verified evidence and reproduction
 
@@ -258,7 +260,8 @@ groups are decimal; `x` in forms such as `4x00016` is an area marker, not hexade
 Upstream uses `holding-register:16:INT`, IEC-style type names and
 `default-unit-identifier`, not the original brief's provisional syntax. The
 protocol-address offset is one. Modbus TCP's upstream subscriptions are polling,
-not native subscriptions. No Rust Modbus implementation or parity claim exists yet.
+not native subscriptions. The Rust address parser implements the grammar rows; no
+operation row is implemented yet.
 
 ## Not implemented or not yet evidenced
 
@@ -273,8 +276,8 @@ not native subscriptions. No Rust Modbus implementation or parity claim exists y
 - Byte/raw/recursive/calendar `PlcValue` variants (deferred by ADR-0006); the byte and
   word order types exist as data only, with no decoder consuming them.
 - Browse, discovery and subscriptions (write batches exist as data).
-- Transport crate, Modbus TCP/RTU parsing and I/O, sensor profiles and board adapters
-  (the codec crate and the Modbus address types exist; nothing consumes them yet).
+- Transport crate, Modbus PDU codec and I/O, sensor profiles and board adapters (the
+  codec crate and the Modbus address parser exist; nothing reads a device yet).
 - OPC UA, EtherNet/IP/Logix, S7 and remaining upstream protocols.
 - Code generation or retained upstream fixture corpus.
 - Parser fuzzing (the `fuzz-smoke` job exists but has no targets), mutation testing,

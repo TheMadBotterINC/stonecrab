@@ -25,8 +25,8 @@
   allocation or copy; no function panics on any input (ADR-0013).
 ### stonecrab-modbus 0.1.0
 - Add the crate scaffold: the native Modbus TCP driver crate, depending only on
-  `stonecrab-core`, with default features empty. Nothing but address types is
-  implemented; there is no parser, codec, framing, session, connection or driver yet.
+  `stonecrab-core`, with default features empty. Nothing but address types and their
+  text grammar is implemented; there is no codec, framing, session, connection or driver yet.
 - Add `UnitId` (one MBAP byte; default 1; 0 and 255 are carried, not rejected),
   `ModbusArea` (`Coil`, `DiscreteInput`, `HoldingRegister`, `InputRegister`),
   `ModbusDataType` (the 15 numeric and bit types, with `from_upstream_name` recognising
@@ -36,6 +36,11 @@
 - `ModbusAddress` implements `ProtocolAddress` with protocol `modbus` and a canonical
   long form such as `holding-register:16:INT{unit-id: 10, byte-order: 'LITTLE_ENDIAN'}`
   (ADR-0015, proposed).
+- Add `ModbusAddress::parse(text, &AddressOptions)`, the PLC4X address grammar: long
+  and `0x`/`1x`/`3x`/`4x` short forms always, bare `40001`-style forms only with
+  `address-convention=plc4x`, an optional `{unit-id: N, byte-order: 'NAME'}` block, and
+  typed `InvalidAddress` rejections for everything else; `ModbusAddress::MAX_TEXT_BYTES`
+  and the fuzz target `fuzz_modbus_address`.
 ### stonecrab-core 0.1.0
 - Add docs.rs metadata (`all-features`, `--cfg docsrs`) for feature-gated item docs.
 - Establish shared metadata, safety lints and foundation contracts.
