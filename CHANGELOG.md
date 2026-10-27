@@ -79,8 +79,8 @@
   per plan.
 ### stonecrab-sensors 0.1.0
 - Add the crate: declarative sensor profiles for Stonecrab, depending on `stonecrab-core`,
-  `serde` and, behind the default `toml` feature, `toml` (ADR-0016). Nothing is validated
-  semantically yet and no driver reads a profile; both arrive in later slices.
+  `serde` and, behind the default `toml` feature, `toml` (ADR-0016). No driver reads a
+  profile yet; that arrives in a later slice.
 - Add the schema (version 1): `SensorProfile`, `ProfileId`, `SchemaVersion`,
   `DeviceApplicability`, `ConnectionRequirements`, `MeasurementDef`, `ByteOrderName`,
   `WordOrderName`, `ScaleStep` (`Multiply`, `Divide`, `Offset`, `Clamp`, `BitField`),
@@ -93,6 +93,11 @@
   `From<ProfileError> for PlcError` (`InvalidConfig`).
 - Add the fuzz target `fuzz_sensors_profile_toml`. Adopt `serde` and `toml` (`display`
   off); the lock pins `toml_parser` 1.0.9 to keep a single `winnow`.
+- Add `SensorProfile::validate`, which returns every semantic error of a profile at once
+  (duplicate names, unknown or empty units, missing byte or word order for 32- and 64-bit
+  Modbus types, overlapping status bits, `count != 1`, unevaluable scaling steps, unknown
+  quality references, address convention rules), and the fixed unit table `Unit`. Add eleven
+  `ProfileError` variants for them; the enum was already `#[non_exhaustive]`.
 ### stonecrab-core 0.1.0
 - Add docs.rs metadata (`all-features`, `--cfg docsrs`) for feature-gated item docs.
 - Establish shared metadata, safety lints and foundation contracts.

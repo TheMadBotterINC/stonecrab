@@ -3,16 +3,19 @@ use std::fmt;
 
 use stonecrab_core::{ErrorKind, PlcError};
 
-/// Why a sensor profile could not be loaded.
+/// Why a sensor profile could not be loaded or is not valid.
 ///
-/// Every variant carries sizes, positions and fixed field labels only. None of them
-/// echoes any part of the document, because a profile may come from application
+/// Every variant carries sizes, positions, indices and fixed field labels only. None of
+/// them echoes any part of the document, because a profile may come from application
 /// configuration that the library must not repeat into logs.
 ///
-/// The loader checks the schema only (decision D17, slice S28a). Semantic validation of a
-/// parsed profile (the units table, duplicate names, a missing address convention for
-/// `modbus-tcp`) arrives with slice S28b and adds variants; the enum is
-/// `#[non_exhaustive]` for that reason.
+/// The first four variants come from the loader, which checks the schema only (decision
+/// D17, slice S28a). The rest come from [`SensorProfile::validate`](crate::SensorProfile::validate)
+/// (slice S28b), which checks the meaning of a loaded profile. Validation errors name
+/// the offending measurement by its 0-based index in
+/// [`SensorProfile::measurements`](crate::SensorProfile::measurements), not by its name,
+/// which keeps the type `Copy`; `profile.measurements[index].name` gives the name. The
+/// enum is `#[non_exhaustive]`, so later slices add variants without a breaking change.
 ///
 /// # Compatibility: docs/parity/sensors.md#SENSORS-SCHEMA-V1
 /// Upstream PLC4X has no sensor profile concept; this is a Stonecrab type with no
@@ -64,6 +67,66 @@ pub enum ProfileError {
         /// Which identifier was rejected, for example `"profile id"`.
         field: &'static str,
     },
+    /// Two measurements share a name (validation).
+    DuplicateMeasurementName {
+        /// Index of the later measurement, the one that repeats the name.
+        measurement: usize,
+        /// Index of the first measurement that has the name.
+        first: usize,
+    },
+    /// A measurement's unit is not in the fixed unit table ([`Unit`](crate::Unit)).
+    UnknownUnit {
+        /// Index of the measurement.
+        measurement: usize,
+    },
+    /// A measurement's unit is the empty string; the dimensionless unit is `"1"`.
+    EmptyUnit {
+        /// Index of the measurement.
+        measurement: usize,
+    },
+    /// A data type wider than 16 bits has no `byte_order`.
+    MissingByteOrder {
+        /// Index of the measurement.
+        measurement: usize,
+    },
+    /// A data type wider than 16 bits has no `word_order`.
+    MissingWordOrder {
+        /// Index of the measurement.
+        measurement: usize,
+    },
+    /// Two status fields of one measurement name the same address and bit.
+    OverlappingStatusBits {
+        /// Index of the measurement.
+        measurement: usize,
+        /// Index of the later status field, the one that repeats the address and bit.
+        status_field: usize,
+    },
+    /// A measurement's `count` is not 1; arrays are not supported at alpha.
+    UnsupportedCount {
+        /// Index of the measurement.
+        measurement: usize,
+        /// The declared count.
+        count: u32,
+    },
+    /// A scaling step cannot be evaluated: a zero divisor, a non-finite constant, a clamp
+    /// whose `min` exceeds its `max`, or a bit field of width 0 or beyond bit 63.
+    InvalidScaleStep {
+        /// Index of the measurement.
+        measurement: usize,
+        /// Index of the step in the measurement's scaling pipeline.
+        step: usize,
+    },
+    /// A quality mapping names a status field the measurement does not declare.
+    UnknownQualityReference {
+        /// Index of the measurement.
+        measurement: usize,
+        /// Position of the reference in `bad_when` followed by `uncertain_when`.
+        entry: usize,
+    },
+    /// The connection declares an address convention other than `plc4x`.
+    UnknownAddressConvention,
+    /// The scheme is `modbus-tcp` and the connection declares no address convention.
+    MissingAddressConvention,
 }
 
 impl fmt::Display for ProfileError {
@@ -89,6 +152,55 @@ impl fmt::Display for ProfileError {
                 f,
                 "invalid {field}: require 1..=64 bytes of snake_case ASCII starting with a letter"
             ),
+            Self::DuplicateMeasurementName { measurement, first } => write!(
+                f,
+                "measurement {measurement} repeats the name of measurement {first}"
+            ),
+            Self::UnknownUnit { measurement } => {
+                write!(
+                    f,
+                    "measurement {measurement} has a unit outside the unit table"
+                )
+            }
+            Self::EmptyUnit { measurement } => {
+                write!(
+                    f,
+                    "measurement {measurement} has an empty unit; use \"1\" for none"
+                )
+            }
+            Self::MissingByteOrder { measurement } => write!(
+                f,
+                "measurement {measurement} has a data type wider than 16 bits and no byte_order"
+            ),
+            Self::MissingWordOrder { measurement } => write!(
+                f,
+                "measurement {measurement} has a data type wider than 16 bits and no word_order"
+            ),
+            Self::OverlappingStatusBits {
+                measurement,
+                status_field,
+            } => write!(
+                f,
+                "status field {status_field} of measurement {measurement} repeats an address and bit"
+            ),
+            Self::UnsupportedCount { measurement, count } => write!(
+                f,
+                "measurement {measurement} has count {count}; only count 1 is supported"
+            ),
+            Self::InvalidScaleStep { measurement, step } => write!(
+                f,
+                "scaling step {step} of measurement {measurement} cannot be evaluated"
+            ),
+            Self::UnknownQualityReference { measurement, entry } => write!(
+                f,
+                "quality entry {entry} of measurement {measurement} names an undeclared status field"
+            ),
+            Self::UnknownAddressConvention => {
+                f.write_str("the address convention is not supported; the only convention is plc4x")
+            }
+            Self::MissingAddressConvention => {
+                f.write_str("a modbus-tcp profile must declare its address_convention")
+            }
         }
     }
 }
@@ -108,7 +220,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn display_names_sizes_and_positions_only() {
+    fn display_names_sizes_positions_and_indices_only() {
         let cases = [
             (
                 ProfileError::Oversized {
@@ -130,6 +242,65 @@ mod tests {
                     field: "profile id",
                 },
                 "invalid profile id: require 1..=64 bytes of snake_case ASCII starting with a letter",
+            ),
+            (
+                ProfileError::DuplicateMeasurementName {
+                    measurement: 3,
+                    first: 1,
+                },
+                "measurement 3 repeats the name of measurement 1",
+            ),
+            (
+                ProfileError::UnknownUnit { measurement: 2 },
+                "measurement 2 has a unit outside the unit table",
+            ),
+            (
+                ProfileError::EmptyUnit { measurement: 2 },
+                "measurement 2 has an empty unit; use \"1\" for none",
+            ),
+            (
+                ProfileError::MissingByteOrder { measurement: 4 },
+                "measurement 4 has a data type wider than 16 bits and no byte_order",
+            ),
+            (
+                ProfileError::MissingWordOrder { measurement: 4 },
+                "measurement 4 has a data type wider than 16 bits and no word_order",
+            ),
+            (
+                ProfileError::OverlappingStatusBits {
+                    measurement: 0,
+                    status_field: 2,
+                },
+                "status field 2 of measurement 0 repeats an address and bit",
+            ),
+            (
+                ProfileError::UnsupportedCount {
+                    measurement: 5,
+                    count: 8,
+                },
+                "measurement 5 has count 8; only count 1 is supported",
+            ),
+            (
+                ProfileError::InvalidScaleStep {
+                    measurement: 1,
+                    step: 2,
+                },
+                "scaling step 2 of measurement 1 cannot be evaluated",
+            ),
+            (
+                ProfileError::UnknownQualityReference {
+                    measurement: 1,
+                    entry: 3,
+                },
+                "quality entry 3 of measurement 1 names an undeclared status field",
+            ),
+            (
+                ProfileError::UnknownAddressConvention,
+                "the address convention is not supported; the only convention is plc4x",
+            ),
+            (
+                ProfileError::MissingAddressConvention,
+                "a modbus-tcp profile must declare its address_convention",
             ),
         ];
         for (error, text) in cases {

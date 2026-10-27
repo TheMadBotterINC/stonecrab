@@ -43,8 +43,8 @@ pub struct DeviceApplicability {
 /// addresses use (for example `modbus-tcp` or `sim`); a profile never mixes schemes
 /// (decision D17). `address_convention` is the explicit address convention (for example
 /// `plc4x`): a profile declares it instead of leaving a bare number such as `40001`
-/// ambiguous. Whether it is required for a scheme is checked by the validation of slice
-/// S28b, not by the loader.
+/// ambiguous. Whether it is required for a scheme is checked by
+/// [`SensorProfile::validate`], not by the loader.
 ///
 /// # Examples
 /// ```
@@ -147,9 +147,10 @@ pub enum ValidationStatus {
 /// code and is never written by this library, so the types implement `Deserialize` and
 /// not `Serialize`.
 ///
-/// This slice loads and shape-checks a profile. It does not validate the profile
-/// semantically: the units table, duplicate names, bit-field overlap and the rule that
-/// `modbus-tcp` profiles declare an address convention arrive with slice S28b.
+/// [`SensorProfile::from_toml`] loads and shape-checks a profile. It does not validate the
+/// profile semantically: call [`SensorProfile::validate`] for the unit table, duplicate
+/// names, status-bit overlap and the rule that `modbus-tcp` profiles declare an address
+/// convention.
 ///
 /// The TOML top level holds `id`, `schema_version` (which must be 1), `validation`, the
 /// tables `[device]`, `[connection]` and `[provenance]`, and an array of

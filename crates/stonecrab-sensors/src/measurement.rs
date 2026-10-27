@@ -106,8 +106,9 @@ impl From<WordOrderName> for WordOrder {
 /// `bit_field` (with `shift` and `width`, for example `{ bit_field = { shift = 4, width = 2 } }`).
 ///
 /// The loader checks the shape only. Whether a constant is finite, whether a divisor is
-/// zero and whether a step suits the data type are checked by the validation of slice
-/// S28b, not here.
+/// zero, whether a clamp is ordered and whether a bit field fits in 64 bits are checked
+/// by [`SensorProfile::validate`](crate::SensorProfile::validate), not by the loader.
+/// Whether a step suits the data type is left to the measurement pipeline.
 ///
 /// # Compatibility: docs/parity/sensors.md#SENSORS-MEASUREMENTS
 /// Upstream PLC4X has no scaling pipeline; this is a Stonecrab type with no upstream
@@ -224,7 +225,8 @@ pub struct StatusField {
 /// Which status fields degrade the quality of a measurement.
 ///
 /// Both lists hold [`StatusField::name`] values. Whether every name refers to a declared
-/// field is checked by the validation of slice S28b, not by the loader.
+/// field is checked by [`SensorProfile::validate`](crate::SensorProfile::validate), not by
+/// the loader.
 ///
 /// # Examples
 /// ```

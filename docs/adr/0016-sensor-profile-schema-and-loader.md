@@ -221,3 +221,58 @@ third party, so the loader is a parser of untrusted text (CODING_STANDARDS 21.1)
   `preserve_order` feature (not built). `fuzz/Cargo.lock` gains the same.
 - `docs/parity/sensors.md` holds the rows `SENSORS-SCHEMA-V1`, `SENSORS-VALIDATION`,
   `SENSORS-MEASUREMENTS` and `SENSORS-SYNTHETIC-PROFILES`.
+
+## Addendum: validation and the unit table (slice S28b, 2026-10-27)
+This addendum records the S28b decisions; it changes nothing above, and the S28a
+consequence "S28b adds `validate()` and the units table over these types without
+changing them" holds.
+
+1. **Unit table policy.** `Unit::{is_known, description, all}` is a fixed, closed list of
+   19 UCUM-style codes: `%`, `1`, `A`, `Cel`, `Hz`, `K`, `L`, `L/min`, `Pa`, `V`, `W`,
+   `bar`, `kPa`, `kWh`, `m`, `m3/h`, `mm`, `ms`, `s`. Matching is exact and
+   case-sensitive, `all()` is sorted in byte order, and every code has a description.
+   There is no unit arithmetic: no conversion, no dimension analysis and no compound
+   expression parsing, so `kPa` and `bar` are separate entries and a profile's scaling
+   does any conversion. A unit outside the list is `UnknownUnit`, the empty string is
+   `EmptyUnit`, and `1` is the dimensionless unit. Adding a unit is a minor-version
+   change to this crate, not a profile change. The list is a macro-built pair of
+   parallel arrays, so codes and descriptions come from one source.
+2. **The width rule.** A data type is wider than 16 bits when its name is one of the
+   Modbus driver's upstream names `DINT`, `UDINT`, `DWORD`, `LINT`, `ULINT`, `LWORD`,
+   `REAL` or `LREAL`, in upper case; such a measurement needs both `byte_order` and
+   `word_order` (`MissingByteOrder`, `MissingWordOrder`), consistent with "never infer".
+   Every other `data_type` is passed through with no requirement. The rule is
+   Modbus-name based and says so in the rustdoc: this crate does not depend on a driver,
+   and another driver's type names are that driver's to describe. When a second driver
+   with wide types arrives, its names join the list or the rule moves behind a driver
+   hook; that is a later decision.
+3. **The error-collection contract.** `SensorProfile::validate(&self) -> Result<(),
+   Vec<ProfileError>>` never stops at the first problem, and an `Err` is never empty.
+   The order is deterministic: the connection, then measurements in document order, and
+   within a measurement the `MeasurementDef` field order (name, count, byte and word
+   order, scaling steps, unit, status fields, quality mapping). Eleven variants are
+   added to the `#[non_exhaustive]` enum: `DuplicateMeasurementName`, `UnknownUnit`,
+   `EmptyUnit`, `MissingByteOrder`, `MissingWordOrder`, `OverlappingStatusBits`,
+   `UnsupportedCount`, `InvalidScaleStep`, `UnknownQualityReference`,
+   `UnknownAddressConvention` and `MissingAddressConvention`. They name a measurement by
+   its 0-based index (plus the step, status field or quality entry index where that
+   helps) and never carry document text, which keeps `ProfileError` `Copy` and keeps the
+   no-echo guarantee; the name is one lookup away in `profile.measurements`. Every
+   variant converts to `InvalidConfig`.
+4. **What validation does not do.** It is independent of any driver. Address text,
+   including status field addresses, is compared for equality only (two status fields on
+   one measurement with the same address text and bit overlap); whether it parses is the
+   driver's `parse_address`, called in S29. Two measurements may share a status word.
+   Status-field names within one measurement are not required to be unique; a quality
+   reference matches any field of that name.
+   Non-`snake_case` names are not a validator error because the loader already refuses
+   them. `ValueRange` and status-field bit positions are not checked at alpha.
+5. **Scaling steps.** A step is invalid when a constant is not finite, `Divide` has a
+   zero divisor (including `-0.0`), `Clamp` has `min > max`, or `BitField` has width 0 or
+   `shift + width > 64`. Whether a step suits a data type is the S29 pipeline's concern.
+6. **Tests.** `tests/validation.rs` has one test per variant, the multi-fault ordering
+   test and a clean profile; `src/units.rs` pins completeness and sorting; a property
+   test in `src/validate.rs` builds arbitrary schema instances with struct literals
+   (possible only inside the crate, because the types are `#[non_exhaustive]`), checks
+   that `validate` never panics and agrees with an independently written validity
+   predicate, and a second property checks that profiles built to be valid validate clean.

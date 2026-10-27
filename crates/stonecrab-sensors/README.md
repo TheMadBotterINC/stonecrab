@@ -4,16 +4,15 @@ addresses to named measurements, with a data type, byte and word order, a scalin
 pipeline, a unit, quality rules and the evidence behind it. A profile contains no
 executable code and is never written by this library.
 
-This crate currently offers the schema types and a bounded loader, nothing more:
-`SensorProfile::from_toml`, `ProfileId`, `SchemaVersion` (version 1 is the only schema
-version; any other value is `ProfileError::IncompatibleSchema`), `DeviceApplicability`,
-`ConnectionRequirements`, `MeasurementDef`, `ScaleStep`, `ValueRange`, `StatusField`,
-`QualityMapping`, `Provenance`, `ValidationStatus` and `ProfileError`. The loader checks
-the shape of a document. It does not yet validate its meaning (the units table,
-duplicate names, overlapping status bits, unsupported steps, the address convention
-rule); that is slice S28b. There is no driver integration yet either: nothing here
-builds a `Tag` or reads a device. The crate depends on `stonecrab-core`, `serde` and,
-behind the default `toml` feature, `toml`.
+This crate currently offers the schema types, a bounded loader and semantic validation:
+`SensorProfile::from_toml`, `SensorProfile::validate`, `Unit`, `ProfileId`,
+`SchemaVersion` (version 1 is the only schema version; any other value is
+`ProfileError::IncompatibleSchema`), `DeviceApplicability`, `ConnectionRequirements`,
+`MeasurementDef`, `ScaleStep`, `ValueRange`, `StatusField`, `QualityMapping`,
+`Provenance`, `ValidationStatus` and `ProfileError`. The loader checks the shape of a
+document and `validate` checks its meaning. There is no driver integration yet: nothing
+here builds a `Tag` or reads a device. The crate depends on `stonecrab-core`, `serde`
+and, behind the default `toml` feature, `toml`.
 
 Profiles declare their address convention. A bare Modbus number such as `40001` is
 ambiguous (holding register 1 under the PLC4X convention, wire address 40001 otherwise),
@@ -28,7 +27,7 @@ register map and its own fixtures.
 | Capability | Support level |
 | --- | --- |
 | Schema types and `SensorProfile::from_toml` (schema version 1) | build-tested; fuzzed |
-| Semantic validation and the units table | planned |
+| Semantic validation (`SensorProfile::validate`) and the fixed unit table | build-tested |
 | Scaling and quality evaluation | planned |
 | Driver integration (building tags from a profile) | planned |
 | Synthetic reference profiles | planned |
@@ -84,6 +83,44 @@ Optional measurement keys are `count` (default 1), `byte_order` (`big_endian` or
 (`bad_when` and `uncertain_when`, lists of status field names), `min_interval_ms`,
 `stale_after_ms` and `keep_raw`. Byte and word order are never inferred: an absent key
 stays absent.
+
+## Validation and units
+`SensorProfile::validate` returns `Ok(())` or every `ProfileError` it finds, never just the
+first, in a fixed order: the connection, then each measurement in document order. Errors
+name a measurement by its 0-based index and never repeat any text of the profile. It
+checks:
+
+- the address convention: when set it must be `plc4x`, and a `modbus-tcp` connection must
+  set it;
+- unique measurement names (names are already `snake_case`, which the loader enforces);
+- `count` is 1 (arrays are not supported at alpha);
+- both `byte_order` and `word_order` for a data type wider than 16 bits. The width is
+  decided from the data type name by the Modbus rule: `DINT`, `UDINT`, `DWORD`, `LINT`,
+  `ULINT`, `LWORD`, `REAL` and `LREAL` (upper case) are wide, and any other name is
+  passed through with no requirement, because another driver's types are that driver's
+  to describe;
+- scaling steps that can run: finite constants, a non-zero divisor, a clamp with
+  `min <= max`, and a bit field of width 1 or more that ends at or before bit 64;
+- a unit that is not empty and is in the fixed unit table;
+- no two status fields of one measurement on the same address text and bit;
+- quality mappings that name only the measurement's own status fields.
+
+Validation is independent of any driver: address text is compared for equality only, and
+the driver's `parse_address` validates it when tags are built in a later slice.
+
+The unit table is a fixed list of UCUM-style codes with a description each, and there
+is no unit arithmetic: nothing converts between units or parses compound expressions.
+`Unit::all()` lists the codes in byte order: `%`, `1` (dimensionless), `A`, `Cel`, `Hz`,
+`K`, `L`, `L/min`, `Pa`, `V`, `W`, `bar`, `kPa`, `kWh`, `m`, `m3/h`, `mm`, `ms` and `s`.
+Matching is exact and case-sensitive.
+
+```rust
+use stonecrab_sensors::Unit;
+
+assert!(Unit::is_known("Cel"));
+assert_eq!(Unit::description("m3/h"), Some("cubic metre per hour"));
+assert!(!Unit::is_known("celsius"));
+```
 
 The parity record is
 [docs/parity/sensors.md](https://github.com/TheMadBotterINC/stonecrab/blob/master/docs/parity/sensors.md);

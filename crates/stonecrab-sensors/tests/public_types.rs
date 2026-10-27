@@ -6,7 +6,7 @@ mod tests {
     use stonecrab_sensors::{
         ByteOrderName, ConnectionRequirements, DeviceApplicability, MeasurementDef, ProfileError,
         ProfileId, Provenance, QualityMapping, ScaleStep, SchemaVersion, SensorProfile,
-        StatusField, ValidationStatus, ValueRange, WordOrderName,
+        StatusField, Unit, ValidationStatus, ValueRange, WordOrderName,
     };
 
     #[test]
@@ -27,5 +27,6 @@ mod tests {
         assert_send_sync::<Provenance>();
         assert_send_sync::<ValidationStatus>();
         assert_send_sync::<ProfileError>();
+        assert_send_sync::<Unit>();
     }
 }

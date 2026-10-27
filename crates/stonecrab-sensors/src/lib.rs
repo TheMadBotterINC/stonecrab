@@ -7,6 +7,8 @@ mod error;
 mod ident;
 mod measurement;
 mod profile;
+mod units;
+mod validate;
 
 pub use error::ProfileError;
 pub use ident::{ProfileId, SchemaVersion};
@@ -17,3 +19,4 @@ pub use measurement::{
 pub use profile::{
     ConnectionRequirements, DeviceApplicability, Provenance, SensorProfile, ValidationStatus,
 };
+pub use units::Unit;
