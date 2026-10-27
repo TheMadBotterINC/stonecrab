@@ -19,6 +19,11 @@
 - Add the `sim` feature (off by default): `stonecrab::sim` re-exports the public items of
   `stonecrab-driver-sim`, pinned `=0.1.0`, and the `sim_read` example reads three tags from a
   simulated device through the driver registry.
+- Add the `modbus` feature (off by default): `stonecrab::modbus` re-exports the public items
+  of `stonecrab-modbus`, pinned `=0.1.0`, including `ModbusTcpDriver`, `ModbusOptions` and
+  `SystemClock`, and the `modbus_tcp_read` example reads one tag from a Modbus TCP server
+  through the driver registry. Each example now declares `required-features`.
+- Re-export `DriverOptions` from `stonecrab-core`.
 ### stonecrab-codec 0.1.0
 - Add the crate: `BoundedReader` and `BoundedWriter` with bounds-checked integer, float,
   byte-run and least-significant-bit-first coil reads and writes in an explicit
@@ -169,6 +174,22 @@
   interop register map); only the two write cases are skipped, by name. The unpublished
   testkit gains `Step::React` and `Reaction` (reply, stay silent, close, reply then close),
   so the responder can drop the link on demand and the two disconnect cases pass.
+- Complete the driver configuration: `parse_config` now accepts the six upstream
+  parameters with the upstream defaults (`request-timeout-ms` 5000,
+  `default-unit-identifier` 1, `ping-address` `4x00001:BOOL` validated and recorded but
+  unused, `default-payload-byte-order` `BIG_ENDIAN`, `max-coils-per-request` 2000,
+  `max-registers-per-request` 125) and `address-convention=plc4x`; every other key, the
+  misspelt `unit-identifier` included, is `InvalidConfig`, where upstream warns. The parsed
+  values are `ModbusOptions`, carried in the configuration's driver-options slot and read
+  back by `connect`. `ConnectionDefaults` gains `max_coils` and `max_registers`, and `open`
+  now refuses values above the protocol maxima. `with_defaults` is now the fallback for a
+  configuration that carries no options. The crate re-exports `SystemClock`. The fuzz target is
+  `fuzz_modbus_connection_string`.
+- A holding-register read runs over a real loopback socket against a scripted peer
+  (`tests/scripted_read.rs`), and the driver contract suite runs over loopback sockets
+  (`tests/contract_scripted_peer.rs`: 18 passed, 5 skipped by name). The README documents the
+  connection-string grammar, the parameter table, the byte-order names and the support levels,
+  and a test keeps its table equal to `ModbusTcpDriver::capabilities()`.
 ### stonecrab-sensors 0.1.0
 - Add the crate: declarative sensor profiles for Stonecrab, depending on `stonecrab-core`,
   `serde` and, behind the default `toml` feature, `toml` (ADR-0016). No driver reads a
@@ -246,5 +267,11 @@
   wait for maintainer prerequisite P4.
 - Add the unpublished testkit's driver contract suite (`ContractSuite`, `ContractFixture`,
   `ContractReport`): 23 named cases that every driver runs, green against `sim`.
+- Add `DriverOptions`, `ConnectionConfigBuilder::driver_options`,
+  `ConnectionConfig::driver_options` and `driver_options_as`: a slot for options only one
+  driver understands (ADR-0008 amendment). `Debug` and `redacted_display` print them, so
+  their `Debug` must hold no secrets.
+- Add the unpublished testkit's `ScriptedPeerFactory` (`net` feature): a `TransportFactory`
+  that starts a fresh `ScriptedPeer` per `open` and connects with the real `TcpFactory`.
 ## stonecrab 0.1.0
 - Publish the specification-stage package. No industrial protocol support.

@@ -1,0 +1,1 @@
+modbus-tcp://192.0.2.10?request-timeout-ms=800&default-unit-identifier=17

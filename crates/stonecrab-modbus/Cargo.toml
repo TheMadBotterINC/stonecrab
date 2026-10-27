@@ -34,3 +34,4 @@ tracing.workspace = true
 proptest.workspace = true
 serde_json.workspace = true
 stonecrab-testkit = { workspace = true, features = ["fixtures", "net"] }
+tokio = { workspace = true, features = ["rt", "macros", "sync"] }

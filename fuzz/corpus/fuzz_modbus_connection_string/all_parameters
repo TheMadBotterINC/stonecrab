@@ -1,0 +1,1 @@
+modbus-tcp://192.0.2.10?request-timeout-ms=800&default-unit-identifier=17&ping-address=3x00005:UINT&default-payload-byte-order=BIG_ENDIAN&max-coils-per-request=2000&max-registers-per-request=125&address-convention=plc4x

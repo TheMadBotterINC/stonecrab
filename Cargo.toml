@@ -18,6 +18,7 @@ categories = ["network-programming", "embedded"]
 stonecrab-core = { path = "crates/stonecrab-core", version = "0.1", default-features = false }
 stonecrab-codec = { path = "crates/stonecrab-codec", version = "0.1", default-features = false }
 stonecrab-driver-sim = { path = "crates/stonecrab-driver-sim", version = "=0.1.0", default-features = false }
+stonecrab-modbus = { path = "crates/stonecrab-modbus", version = "=0.1.0", default-features = false }
 stonecrab-transport = { path = "crates/stonecrab-transport", version = "0.1", default-features = false }
 thiserror = { version = "2.0", default-features = false, features = ["std"] }
 bytes = { version = "1.10", default-features = false, features = ["std"] }

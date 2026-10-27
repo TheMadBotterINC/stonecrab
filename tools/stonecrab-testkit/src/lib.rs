@@ -19,6 +19,8 @@ mod interop;
 #[cfg(feature = "net")]
 mod peer;
 #[cfg(feature = "net")]
+mod peer_factory;
+#[cfg(feature = "net")]
 mod script;
 
 pub use address::FixtureAddress;
@@ -43,5 +45,7 @@ pub use golden::{
 pub use interop::{BitRun, BlockSizes, InteropMap, RegisterEntry};
 #[cfg(feature = "net")]
 pub use peer::{MAX_PEER_DELAY, ScriptedPeer};
+#[cfg(feature = "net")]
+pub use peer_factory::ScriptedPeerFactory;
 #[cfg(feature = "net")]
 pub use script::{Mismatch, Reaction, Reactor, Responder, Script, ScriptReport, Step};

@@ -4,60 +4,155 @@ Native Modbus TCP driver for Stonecrab. The alpha scope is read-only: function c
 registers) over TCP with MBAP framing. RTU, ASCII, TLS, UDP, writes, extended registers
 and string types are out of scope for the alpha.
 
-Nothing is implemented beyond the address types, their text grammar, read batching, the
-PDU codec, MBAP framing, the typed decoder, the session, the connection and the first
-version of the driver. This crate currently offers `UnitId`, `ModbusArea`,
-`ModbusDataType`, `AddressConvention`, `ModbusAddress` (built with its builder or parsed
-from text with `ModbusAddress::parse`) and `ProtocolAddress` for it, plus `Batcher`,
-`BatchLimits`, `Chunk` and `Member`, the PDU types `FunctionCode`, `ExceptionCode` and
-`ModbusPdu` with `encode_request`, `decode_request`, `decode_response` and
-`encode_response`, the framing types `MbapHeader`, `TransactionId`, `ModbusAdu` and
-`MbapFramer`, `TypedDecoder`, which turns registers or coil bits into `PlcValue`s, and
+This crate offers `ModbusTcpDriver`, the `Driver` of the `modbus-tcp` scheme, with
+`ModbusOptions`, the parsed connection parameters; `ModbusConnection` with
+`ConnectionDefaults`, the `Connection` that reads tags in batches over a session;
 `ModbusSession` with `SessionStats` and `exception_item_error`, which send one read
-request over a connection and return the reply that answers it, `ModbusConnection` with
-`ConnectionDefaults`, the `Connection` that reads tags in batches over a session, and
-`ModbusTcpDriver`, the `Driver` of the `modbus-tcp` scheme.
+request over a connection and return the reply that answers it; and the layers
+underneath: `UnitId`, `ModbusArea`, `ModbusDataType`, `AddressConvention` and
+`ModbusAddress` (built with its builder or parsed from text with `ModbusAddress::parse`),
+`Batcher`, `BatchLimits`, `Chunk` and `Member`, the PDU types `FunctionCode`,
+`ExceptionCode` and `ModbusPdu` with `encode_request`, `decode_request`, `decode_response`
+and `encode_response`, the framing types `MbapHeader`, `TransactionId`, `ModbusAdu` and
+`MbapFramer`, and `TypedDecoder`, which turns registers or coil bits into `PlcValue`s.
+`SystemClock`, the Tokio-backed clock the driver uses by default, is re-exported from the
+transport crate. Through the facade the driver is `stonecrab::modbus` behind the `modbus`
+feature.
 
 ## Driver
 
-`ModbusTcpDriver::new()` uses the real TCP transport and the Tokio-backed clock;
+`ModbusTcpDriver::new()` uses the real TCP transport and the Tokio-backed clock, so
+connections must be driven inside a Tokio runtime with the time driver enabled;
 `with_clock` and `with_transport_factory` replace them, which is how the repository's
-tests run the driver over an in-memory transport. This first version of the driver is
-completed by the configuration slice (S26):
+tests run the driver over an in-memory transport and over loopback sockets.
 
-- `parse_config` reads `modbus-tcp://host[:port]` or `modbus-tcp:tcp://host[:port]` (port
-  502 by default, IPv6 addresses in brackets). It accepts no `?key=value` parameter yet;
-  the six upstream parameters and the `address-convention` key arrive with S26.
+- `parse_config` reads the connection string below into a `ConnectionConfig` that carries
+  the parsed `ModbusOptions` in its driver-options slot; `connect` reads them back.
 - `parse_address` is `ModbusAddress::parse` with the address convention of the options.
+  Take the options from the configuration with `config.address_options()` before
+  `connect` consumes it.
 - `capabilities` is the value every connection reports: read only, no subscriptions,
   browse or discovery, one operation at a time, PDUs up to 253 bytes.
 
+### Connection strings
+`modbus-tcp://host[:port]` or `modbus-tcp:tcp://host[:port]`, followed by an optional
+`?key=value&key=value`. The host is a name, an IPv4 address or an IPv6 address in brackets
+(`[::1]:502`); the port is 1 to 65535 and defaults to 502; `tcp` is the only transport code
+(`udp`, `tls` and the rest are `InvalidConfig`). The text may not contain whitespace,
+control characters or `%`, nor a `user:password@` part, and is at most 4096 bytes.
+
+The six upstream parameters and the shared `address-convention` key are the only keys. A
+key may appear once, a value may not be empty, and every other key is `InvalidConfig`
+(upstream warns and ignores it; `MB-CFG-UNKNOWN`). That includes the misspelt
+`unit-identifier` that the upstream manual test passes. An error about a parameter value
+or an unknown key names the key, and no error repeats the connection string.
+
+| Key | Default | Accepted | Row |
+| --- | --- | --- | --- |
+| `request-timeout-ms` | 5000 | whole number of milliseconds above 0; also the config's `Timeouts.request` | `MB-CFG-REQUEST-TIMEOUT` |
+| `default-unit-identifier` | 1 | 0 to 255 (upstream has no bound; divergence) | `MB-CFG-UNIT-ID` |
+| `ping-address` | `4x00001:BOOL` | an address of the grammar below, read under the `plc4x` convention; recorded, unused at alpha | `MB-CFG-PING-ADDRESS` |
+| `default-payload-byte-order` | `BIG_ENDIAN` | `BIG_ENDIAN`, `LITTLE_ENDIAN`, `BIG_ENDIAN_BYTE_SWAP`, `LITTLE_ENDIAN_BYTE_SWAP` | `MB-CFG-BYTE-ORDER` |
+| `max-coils-per-request` | 2000 | 1 to 2000 | `MB-CFG-MAX-COILS` |
+| `max-registers-per-request` | 125 | 1 to 125 | `MB-CFG-MAX-REGISTERS` |
+| `address-convention` | none | `plc4x` only | `MB-ADDR-BARE-40001` |
+
+Numbers are decimal digits only: no sign, no space, no `0x`. `address-convention=plc4x`
+is the explicit-convention rule of the address grammar below: the bare short forms such
+as `40001` parse only under it, and the driver hands it to every `parse_address` call
+through `ConnectionConfig::address_options()`. Without it only the long forms
+(`holding-register:1`) and the prefixed short forms (`4x00001`) parse.
+
+### Byte order names
+The four upstream names set the byte and word order a value uses when neither its tag nor
+its address says (ADR-0006). The tag's own order wins over the address's `byte-order`
+block, which wins over this parameter.
+
+| `default-payload-byte-order` | Byte order | Word order | 4-byte layout |
+| --- | --- | --- | --- |
+| `BIG_ENDIAN` | big | high word first | `[1,2,3,4]` |
+| `LITTLE_ENDIAN` | little | low word first | `[4,3,2,1]` |
+| `BIG_ENDIAN_BYTE_SWAP` | little | high word first | `[2,1,4,3]` |
+| `LITTLE_ENDIAN_BYTE_SWAP` | big | low word first | `[3,4,1,2]` |
+
+```rust
+use stonecrab_core::{ByteOrder, Driver, WordOrder};
+use stonecrab_modbus::{ModbusOptions, ModbusTcpDriver, UnitId};
+
+let driver = ModbusTcpDriver::new();
+let config = driver.parse_config(
+    "modbus-tcp://192.0.2.10:1502?default-unit-identifier=7&request-timeout-ms=800\
+     &default-payload-byte-order=LITTLE_ENDIAN&address-convention=plc4x",
+)?;
+let options = config.driver_options_as::<ModbusOptions>().expect("attached by parse_config");
+assert_eq!(options.unit_id, UnitId::from(7));
+assert_eq!(
+    (options.byte_order, options.word_order),
+    (ByteOrder::LittleEndian, WordOrder::LowWordFirst)
+);
+
+// The address options come from the configuration, before `connect` consumes it.
+let address = driver.parse_address("40001:UINT", &config.address_options())?;
+assert_eq!(stonecrab_core::ProtocolAddress::canonical(&*address), "holding-register:1:UINT");
+
+// A misspelt key is an error, not a silent default.
+assert!(driver.parse_config("modbus-tcp://192.0.2.10?unit-identifier=7").is_err());
+# Ok::<(), stonecrab_core::PlcError>(())
+```
+
+`parse_config` starts from the defaults given to `ModbusTcpDriver::with_defaults` (the
+upstream defaults on `ModbusTcpDriver::new()`) and the connection-string parameters
+override them; the full rule is driver defaults, then the connection string, then the
+address block, then the tag. A configuration built by hand with `ConnectionConfig::builder`
+carries no options, and `connect` then uses the driver's defaults.
+
 The session and the connection do I/O only through a transport factory the caller
 passes in, so the crate's tests run on the in-memory transport of the repository's
-unpublished testkit. The common driver contract suite passes against the driver over that
-transport, with the two write cases skipped by name. The crate
-depends on `stonecrab-core`, `stonecrab-codec`, `stonecrab-transport` (with its `tcp`
-feature, for `TcpFactory`, and the `Framer` trait, `ConnectionGuard` and
-`TransportFactory`), `bytes` and `tracing`; default features are empty.
+unpublished testkit and, for the driver, over loopback sockets to a scripted peer. The
+common driver contract suite passes against the driver over both: over the in-memory
+transport with the two write cases skipped by name, and over loopback sockets with those two
+and the three timing cases skipped by name (the loopback fixture cannot swallow a reply on a
+deterministic clock). The crate depends on `stonecrab-core`, `stonecrab-codec`,
+`stonecrab-transport` (with its `tcp` feature, for `TcpFactory`, and the `Framer` trait,
+`ConnectionGuard` and `TransportFactory`), `bytes` and `tracing`; default features are
+empty.
 
 Upstream behavior is the Apache PLC4X Modbus TCP driver at the commit pinned in
 `upstream/manifest.toml`. Every claim about it, and every divergence, is recorded with a
 stable row id in the
 [Modbus parity record](https://github.com/TheMadBotterINC/stonecrab/blob/master/docs/parity/modbus.md).
 
+## Support levels
+The labels are those of the project's hardware-evidence policy: `build-tested`,
+`simulator-tested`, `interoperability-tested` and `hardware-verified`, plus `planned` and
+`not supported`. `simulator-tested` covers the in-memory transport and the loopback
+scripted peer; the interoperability job against an independent server (pymodbus) is
+planned (slice S27), and no physical device has been tried.
+
 | Capability | Support level |
 | --- | --- |
-| Address types: `UnitId`, `ModbusArea`, `ModbusDataType`, `ModbusAddress` | build-tested |
-| Address text grammar and parser (`ModbusAddress::parse`) | unit-tested; fuzzed |
-| PDU codec for function codes 01 to 04 and the exception PDU | unit-tested; vector-tested; property-tested; fuzzed |
-| MBAP framing (`MbapFramer`, `MbapHeader`, `ModbusAdu`, `TransactionId`) | unit-tested; vector-tested; fuzzed |
-| Session: transaction ids, reply correlation by transaction id, unit id and function code, exception mapping (`ModbusSession`, `exception_item_error`) | unit-tested on the in-memory transport; not yet run against a socket |
-| Typed register decoding and byte order (`TypedDecoder`) | unit-tested; vector-tested; property-tested; the little-endian modes are derived from the documented layouts, not yet confirmed by upstream vectors |
-| Read batching (`Batcher`) | unit-tested; property-tested |
-| Connection: batched reads, retry, reconnect, one read in flight (`ModbusConnection`) | unit-tested on the in-memory transport; not yet run against a socket |
-| `modbus-tcp` driver: scheme, `parse_config` without parameters, `parse_address`, capabilities, `connect` (`ModbusTcpDriver`) | unit-tested; contract-suite-tested on the in-memory transport; not yet run against a socket; configuration parameters planned |
+| Read: coils, discrete inputs, holding registers and input registers (function codes 01 to 04) as the 15 numeric and bit types | simulator-tested |
+| Write | not supported |
+| Subscribe, browse and discover | not supported |
+| Connection string and parameters (`parse_config`) | simulator-tested |
+| Connect, close, request-driven reconnect and connection state | simulator-tested |
+| Batched reads with split disclosure | simulator-tested |
 | Interoperability against an independent server | planned |
 | Hardware verification | planned |
+
+The layers underneath, with their evidence:
+
+| Layer | Evidence |
+| --- | --- |
+| Address types: `UnitId`, `ModbusArea`, `ModbusDataType`, `ModbusAddress` | unit-tested; property-tested; fuzzed |
+| Address text grammar and parser (`ModbusAddress::parse`) | unit-tested; fuzzed |
+| Connection-string parser (`ModbusTcpDriver::parse_config`) | unit-tested; property-tested; fuzzed |
+| PDU codec for function codes 01 to 04 and the exception PDU | unit-tested; vector-tested; property-tested; fuzzed |
+| MBAP framing (`MbapFramer`, `MbapHeader`, `ModbusAdu`, `TransactionId`) | unit-tested; vector-tested; fuzzed |
+| Session: transaction ids, reply correlation by transaction id, unit id and function code, exception mapping (`ModbusSession`, `exception_item_error`) | unit-tested on the in-memory transport |
+| Typed register decoding and byte order (`TypedDecoder`) | unit-tested; vector-tested; property-tested; the little-endian modes are derived from the documented layouts, not yet confirmed by upstream vectors |
+| Read batching (`Batcher`) | unit-tested; property-tested |
+| Connection and driver (`ModbusConnection`, `ModbusTcpDriver`) | unit-tested on the in-memory transport; contract-suite-tested on the in-memory transport and over loopback sockets; one read run over loopback |
 
 ## Address grammar
 `ModbusAddress::parse(text, &AddressOptions)` reads the grammar of the upstream PLC4X Modbus
@@ -453,10 +548,10 @@ every mode, written by byte permutation of the documented layouts and kept apart
 decoder; they are repository fixtures, not part of the published crate.
 
 ## Configuration
-The six connection parameters (request timeout, default unit identifier, ping address,
-default payload byte order, maximum coils and registers per request) land with the driver
-in slice S26. The connection already takes the request timeout from `Timeouts.request`, and
-the default unit and byte order as `ConnectionDefaults`.
+The six connection parameters and the `address-convention` key are described under
+"Connection strings" above. The connection takes the request timeout from
+`Timeouts.request` and the default unit, byte order and request-size limits from
+`ConnectionDefaults`, which the driver fills from `ModbusOptions`.
 
 ## Building an address
 The builder offers the same checks without text (the parser ends in it):

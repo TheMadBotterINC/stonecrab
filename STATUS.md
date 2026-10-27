@@ -55,8 +55,9 @@ ADR-0004 explicitly overrides the original `main` branch policy with `master`.
 ### Workspace and development infrastructure
 
 - Resolver-3 Cargo workspace, Rust 2024, shared metadata and strict safety lints.
-- `crates/stonecrab`: public facade, re-exporting core and, behind the `sim` feature,
-  the simulator driver as `stonecrab::sim`; `examples/sim_read.rs`.
+- `crates/stonecrab`: public facade, re-exporting core and, behind the `sim` and `modbus`
+  features, the simulator driver as `stonecrab::sim` and the Modbus TCP driver as
+  `stonecrab::modbus`; `examples/sim_read.rs` and `examples/modbus_tcp_read.rs`.
 - `crates/stonecrab-core`: no Tokio, executor or network dependency.
 - `crates/stonecrab-transport`: the only crate with Tokio (scoped features, no spawned
   tasks); TCP transport, framing layer with resync, the reconnecting `ConnectionGuard`,
@@ -80,7 +81,7 @@ ADR-0004 explicitly overrides the original `main` branch policy with `master`.
   (ADR-0009); `scripts/fuzz-smoke.sh` runs cargo-deny on it and every target for 60 s.
   Targets: `fuzz_codec_bounded_reader` (S15), `fuzz_core_connection_string` (S08),
   `fuzz_modbus_address` (S20b), `fuzz_sensors_profile_toml` (S28a), `fuzz_modbus_pdu`
-  (S21), `fuzz_modbus_mbap` (S22). `fuzz/deny.toml`
+  (S21), `fuzz_modbus_mbap` (S22), `fuzz_modbus_connection_string` (S26). `fuzz/deny.toml`
   must mirror every root `deny.toml` change; the smoke script refuses to run otherwise.
 
 ### Core data contracts
@@ -184,6 +185,7 @@ gates named were run locally before that commit.
 | S25 | 2026-10-27 | Modbus `ModbusConnection` implementing core `Connection` over `ModbusSession`, with `ConnectionDefaults` (unit id, byte and word order; S26's parser fills them): `open(config, factory, clock, defaults)` validates the scheme and frame budget before any transport opens; `read` checks terminal state, cancelled token, Modbus addresses, `count == 1` and the batch plan (item bound, 125/2000 chunk limits) before any I/O, holds one in-flight slot (`Backpressure` otherwise), runs chunks sequentially with a per-attempt deadline `min(request deadline, now + timeouts.request)`, retries a failed chunk per `RetryPolicy` with a fresh transaction id, lets a device exception fail only its chunk's members, decodes members through `TypedDecoder` with tag over block over default order, and builds the `ReadResponse` with `split_into = chunks`, `sampled_at` per chunk and `source_time` None; `write` is `Unsupported` with no I/O; reconnect is the guard's request-driven one; retry, reconnect, merge and capability parity rows implemented. Larger than its size class (about 990 library lines, mostly rustdoc, and 2560 test lines); the modbus coverage row stays 100 (2070/2070) | check, coverage, lint-attrs, features, machete, dependencies, package |
 | S25b | 2026-10-27 | Modbus `ModbusTcpDriver` skeleton (public from this slice, not crate-private as the plan said, because the contract test is an integration test): `new()` over `TcpFactory` and `SystemClock`, `with_clock`, `with_transport_factory` (the sanctioned injection point for the testkit fake), `with_defaults`; scheme `modbus-tcp`; `parse_config` accepts `modbus-tcp[:tcp]://host[:port]` with default port 502, bracketed IPv6 and strict port rules and rejects every query parameter until S26 adds the six upstream parameters; `parse_address` delegates to the S20b parser; `connect` opens `ModbusConnection`; the transport dependency gains its `tcp` feature. The S13 contract suite runs through `dyn Driver` over `FakeTransportFactory` with a first-party MBAP responder on the interop register map (tests/support): 19 passed, 0 failed, 4 named skips (two write cases per D3, and two disconnect cases because a `Step::Respond` closure could not close the fake transport on demand; S25c added the hook and the two cases pass since); modbus coverage 100% (2412/2412); ADR-0015 decision 14; parity row `MB-CONTRACT-SUITE` | check, coverage, lint-attrs, features, machete, dependencies, package |
 | S25c | 2026-10-27 | Testkit `Reaction` (`Reply`, `Silence`, `Close`, `ReplyThenClose`), `Reactor` and `Step::React`/`Step::react`: a scripted responder decides per request whether to answer, stay silent, close the peer or answer then close; `Step::respond` is unchanged and shares the code path; both `FakeTransport` and `ScriptedPeer` honour a reaction close exactly like `CloseAt` (end of stream then `Disconnected`; half-close on loopback). The modbus contract test wires `inject_disconnect` to it: 21 passed, 0 failed, 2 named skips (the write cases, D3); ADR-0009 addendum; ADR-0015 decision 14 and `MB-CONTRACT-SUITE` updated | check, coverage, lint-attrs, features, machete, dependencies, package |
+| S26 | 2026-10-27 | Modbus TCP driver completed: core gains the driver-owned options slot (`DriverOptions` trait, `ConnectionConfigBuilder::driver_options`, `ConnectionConfig::driver_options_as::<T>()`; ADR-0008 amendment; `CORE-DRIVER-OPTIONS`) because a TCP endpoint cannot carry query text; `ModbusOptions` parsed from the six upstream parameters with upstream defaults and bounds (`request-timeout-ms` also sets `Timeouts.request`; `default-unit-identifier` 0..=255; `ping-address` validated under plc4x and unused; the four byte-order names through one shared table; `max-coils-per-request` 1..=2000 and `max-registers-per-request` 1..=125 fed into the batch plan; `address-convention=plc4x`; unknown keys rejected, divergence `MB-CFG-UNKNOWN`; driver defaults seed the parse and the string overrides them); seventh fuzz target `fuzz_modbus_connection_string` with a seed corpus; facade `modbus` feature (`stonecrab::modbus`, sibling pinned `=0.1.0`, `[[example]] required-features`) and `examples/modbus_tcp_read.rs` (`STONECRAB_URL`, `STONECRAB_ADDRESS`, ADR-0011 output rule; built in CI, run only by the S27 interop job); loopback evidence over `ScriptedPeer`: a strict-script holding-register read through `registry.connect("modbus-tcp://127.0.0.1:<port>")` and the S13 suite over the new testkit `ScriptedPeerFactory` (one peer per open): 18 passed, 0 failed, 5 named skips (three timing cases, which need the fake clock, and the two write cases); README completed (grammar, explicit-convention rule, parameter table, byte-order mapping, support levels) with the README-vs-`Capabilities` test; `MB-CFG-*`, `MB-QUIRK-A`, `MB-QUIRK-F` and `MB-TCP-CONNECT` (loopback) rows implemented; ADR-0015 decision 15, ADR-0009 addendum. `MB-TCP-CONNECT` and the four reads reach automated-verified only with S27 | check, coverage, lint-attrs, features, machete, dependencies, fuzz, examples, package |
 
 ## Verified evidence and reproduction
 
@@ -213,12 +215,12 @@ Most recent local results for the implementation baseline:
 - Formatting, strict Clippy, nextest, `cargo test` with doctests, documentation with
   warnings denied, no-default-features, lint-attrs, feature powerset and unused-
   dependency checks passed.
-- Per-crate line coverage (ADR-0005): `stonecrab-core` 3514/3514 lines (gate 100%),
-  `stonecrab-codec` 181/181 (gate 100%), `stonecrab-modbus` 2412/2412 (gate 100%),
+- Per-crate line coverage (ADR-0005): `stonecrab-core` 3577/3577 lines (gate 100%),
+  `stonecrab-codec` 181/181 (gate 100%), `stonecrab-modbus` 2758/2758 (gate 100%),
   `stonecrab-driver-sim` 2051/2051 (gate 100%), `stonecrab-sensors` 1398/1398 (gate
   100%), `stonecrab-transport` 1216/1220 (gate 95%; the uncovered lines are the
   real-socket deadline-expiry and resolver-failure arms named in ADR-0014),
-  `stonecrab-testkit` 4358/4428 (gate 90%), `stonecrab` n/a (no executable lines).
+  `stonecrab-testkit` 4438/4512 (gate 90%), `stonecrab` n/a (no executable lines).
   Error paths are not excluded. Region coverage is reported in
   `target/coverage-summary.txt` and not gated; do not describe it as branch coverage.
 - Workspace tests and doctests passed on Rust 1.97.1.

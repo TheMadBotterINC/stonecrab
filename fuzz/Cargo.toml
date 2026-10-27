@@ -54,6 +54,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "fuzz_modbus_connection_string"
+path = "fuzz_targets/fuzz_modbus_connection_string.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "fuzz_modbus_mbap"
 path = "fuzz_targets/fuzz_modbus_mbap.rs"
 test = false

@@ -586,6 +586,91 @@ parses it with `Short.parseShort` and the inventoried files show no range check
       S25c; S25b had skipped them (`fixture cannot inject disconnect`). `an unsupported
       write performs no I/O` runs and passes because the fixture names a writable
       address. The suite runs on `FakeClock`; nothing sleeps.
+15. **Configuration, the options slot, the facade and the loopback evidence (S26,
+    amendment 2026-10-27).** Slice S26 completes the driver of decision 14.
+    - **Parameters.** `parse_config` accepts the six upstream keys with the upstream
+      defaults: `request-timeout-ms` (whole number above 0, default 5000, also the
+      configuration's `Timeouts.request`), `default-unit-identifier` (0 to 255, default 1;
+      the bound is a divergence), `ping-address` (default `4x00001:BOOL`, parsed under the
+      `plc4x` convention whatever the connection's own, recorded, unused at alpha because
+      ping is deferred), `default-payload-byte-order` (the four upstream names mapped to
+      `ByteOrder` x `WordOrder` as ADR-0006 says, through the table the address block
+      already uses), `max-coils-per-request` (1 to 2000, default 2000) and
+      `max-registers-per-request` (1 to 125, default 125). The shared `address-convention`
+      key accepts `plc4x` only and is mapped into
+      `ConnectionConfigBuilder::address_convention`. Every other key is `InvalidConfig`
+      (`MB-CFG-UNKNOWN`), the misspelt `unit-identifier` of the upstream manual suite
+      included (`MB-QUIRK-F`, with a hint naming the real key). Numbers are decimal digits
+      only: no sign, no space, no radix prefix; an empty value is rejected. Duplicate keys
+      are refused earlier by the core grammar. An error names its key, shortened to 32
+      characters, and never repeats the connection string or the authority. The transport
+      code stays `tcp` only (`MB-QUIRK-A`).
+    - **The options slot.** A TCP driver has no text endpoint to carry parameters in, so
+      the parsed values travel in the driver-options slot added to core by this slice
+      (ADR-0008 amendment, `DriverOptions`). `ModbusOptions` (`#[non_exhaustive]`, public
+      fields `request_timeout`, `unit_id`, `ping_address`, `byte_order`, `word_order`,
+      `max_coils`, `max_registers`; `Default` is the upstream defaults) implements it.
+      `parse_config` stores an `Arc<ModbusOptions>`; `connect` reads it back with
+      `driver_options_as::<ModbusOptions>()` and turns it into `ConnectionDefaults`. A
+      configuration built by hand carries none, and `connect` then uses the defaults given
+      to `with_defaults`, so such a configuration still connects. `parse_config` seeds the
+      options from those same driver defaults (`ModbusOptions::from_defaults`) and the
+      connection-string parameters override them. The rule is: driver defaults,
+      overridden by the connection string, overridden by the address block, overridden by
+      the tag.
+    - **Request-size limits.** `ConnectionDefaults` gains `max_coils` and `max_registers`
+      (`NonZeroU16`, additive; the struct is `#[non_exhaustive]`), and the connection feeds
+      them into `BatchLimits::new`. The connection used to pass the protocol maxima and
+      discard a constructor error; it now returns the error, so hand-built defaults above
+      125 registers or 2000 coils make `open` fail with `InvalidConfig` before any I/O.
+    - **`SystemClock`.** The crate re-exports the transport crate's `SystemClock`, so the
+      facade's `stonecrab::modbus` reaches the default clock without a transport
+      dependency. The example builds its deadline from `Instant::now()`, which agrees with
+      the driver's clock because `SystemClock::now()` is Tokio's clock, the ordinary
+      `Instant::now()` outside paused test time.
+    - **Facade.** Feature `modbus = ["dep:stonecrab-modbus"]` adds `pub mod modbus`
+      (`pub use stonecrab_modbus::*`, with `cfg` and `doc(cfg)` as the `sim` module);
+      the workspace entry `stonecrab-modbus` pins `version = "=0.1.0"` as the simulator's
+      does; default features stay empty (`cargo tree -p stonecrab -e normal` shows core
+      only). Each example declares `required-features`, so a build without the matching
+      feature skips it. `examples/modbus_tcp_read.rs` follows the ADR-0011 output rule:
+      `STONECRAB_URL` (default `modbus-tcp://127.0.0.1:5020`) and `STONECRAB_ADDRESS`
+      (default `holding-register:13:UINT`); it parses the configuration through the
+      registry first, takes `config.address_options()` before `connect` consumes the
+      configuration, reads one tag with a 2 s deadline, logs name, value, outcome and
+      `sampled_at` through `tracing::info!` on a fmt layer it installs, closes and returns
+      an `ExitCode`. The CI `examples` job already builds every example with
+      `--all-features`; the example is not run in CI until the interoperability job (S27)
+      provides a server. The D23 check (`cargo tree -e normal,dev -i once_cell`, then
+      `-i lazy_static`, `-i log`, `-i time`, `-i chrono`, one name at a time) adds no
+      path: `once_cell` only through `tracing-core`, `lazy_static` only through
+      `sharded-slab` under the facade's `tracing-subscriber` dev-dependency, the other
+      three absent. The slice adds no external dependency; `stonecrab-modbus` gains the
+      workspace's `tokio` (`rt`, `macros`, `sync`) as a dev-dependency for its loopback
+      tests.
+    - **Loopback evidence.** `tests/scripted_read.rs` registers `ModbusTcpDriver::new()` in
+      a `DriverRegistry`, connects with `registry.connect("modbus-tcp://127.0.0.1:<port>")`
+      to a `ScriptedPeer` with a strict script (the request and the reply bytes of the
+      V1.1b section 6.3 example, written out by hand) and reads three adjacent holding
+      registers (555, 0, 100) in one request; further tests cover connect, refused
+      connect, an exception reply and a close that fails a pending read.
+      `tests/contract_scripted_peer.rs` runs the S13 suite over real sockets. A
+      `ScriptedPeer` accepts one connection and the suite connects once per case, so the
+      test passes `with_transport_factory` the testkit's `ScriptedPeerFactory`, which spawns
+      a fresh peer (one `Step::React` over the first-party responder and the interop map)
+      for every open and connects to it with the real `TcpFactory`; it redirects the
+      endpoint and touches no byte, and as a double of our transport trait it lives in the
+      testkit (CODING_STANDARDS 13.5). The fixture's
+      clock is the real `SystemClock`, so it supplies no `inject_timeout` hook and the
+      three timing cases are skipped by name (`fixture cannot inject timeout`): `an absent
+      deadline uses the connection timeout`, `a timeout carries diagnostics naming
+      operation, state and category` and `read retry stops after the configured maximum
+      attempts`. With the two write skips the report is 18 passed, 5 skipped, 0 failed.
+      Timing stays on the fake clock (D21). The ADR remains proposed: loopback evidence is
+      not an independent peer.
+    - **Fuzz.** `fuzz_modbus_connection_string` feeds arbitrary bytes (the longest valid
+      UTF-8 prefix of input that is not UTF-8) to `parse_config` and asserts the bounds of
+      every success and the shape of every rejection; twelve seed files.
 
 ## Consequences
 - The rest of the crate builds on a small, fully tested vocabulary. The parser has
@@ -781,3 +866,17 @@ parses it with `Short.parseShort` and the inventoried files show no range check
   `MB-BYTEORDER-PRECEDENCE` and `MB-TCP-CAPABILITIES`. The D23 check
   (`cargo tree -e normal,dev -i <name>`, one name at a time) is unchanged: the slice adds no
   dependency, edge or feature. The coverage row stays 100 (decision 9).
+- S26: `crates/stonecrab-modbus/tests/config.rs` holds the CODING_STANDARDS 13.7 list for
+  `parse_config` (empty authority, missing host, port 0, 65536 and non-numeric, IPv6
+  bracket forms, each parameter at min-1, max+1, non-numeric and empty, unknown
+  byte-order and convention names, duplicate keys, the misspelt `unit-identifier`), the
+  per-row `config_*` tests of `MB-CFG-*`, the tests that the parsed unit, byte order and
+  request-size limits reach the wire, `prop_parse_config_never_panics` (arbitrary text and
+  well-formed strings with random parameters) and the check that no error repeats the
+  connection string; `src/options.rs` holds the unit tests of the parameter parser;
+  `tests/scripted_read.rs`, `tests/contract_scripted_peer.rs` and `tests/readme_matrix.rs`
+  (`capabilities_readme_table_matches_value`) hold the loopback and README evidence;
+  `crates/stonecrab/tests/modbus_feature.rs` proves the facade re-export without a
+  socket. `scripts/fuzz-smoke.sh 10` ran every target including
+  `fuzz_modbus_connection_string`. `# Compatibility` sections cite `MB-CFG-*`,
+  `MB-QUIRK-A` and `MB-QUIRK-F`.

@@ -1,8 +1,9 @@
 # Stonecrab
 Public facade for the independent native Rust industrial protocol library.
 This development version currently exposes only the runtime-independent foundation.
-No protocol drivers, connections or hardware access are implemented, except the in-process
-simulator behind the optional `sim` feature.
+No hardware access is implemented. The only drivers are the in-process simulator behind the
+optional `sim` feature and the read-only Modbus TCP driver behind the optional `modbus`
+feature.
 
 Default features are empty. Importing this crate performs no I/O.
 See the [foundation parity record](https://github.com/TheMadBotterINC/stonecrab/blob/master/docs/parity/core.md)
@@ -13,6 +14,29 @@ for current scope. No upstream compatibility or hardware support is claimed.
   so an application or test can register a `SimDriver` with named `SimDevice`s and connect
   to `sim://<device>` without any hardware or network. It adds `stonecrab-driver-sim` and
   `tracing`; `cargo add stonecrab` alone pulls `stonecrab-core` only.
+- `modbus` (off by default): re-exports the native Modbus TCP driver as `stonecrab::modbus`
+  (`ModbusTcpDriver`, `ModbusOptions`, the address types and `SystemClock`). The alpha scope
+  is read-only (function codes 01 to 04). It adds `stonecrab-modbus` and, through it,
+  `stonecrab-transport` with its Tokio-based TCP transport, so connections must run inside a
+  Tokio runtime with the time driver enabled. Parsing a connection string or an address opens
+  no socket. See the `stonecrab-modbus` README for the connection-string grammar.
+
+## Quick start with a Modbus TCP server
+The `modbus_tcp_read` example registers `ModbusTcpDriver`, parses the connection string
+first so that it can take the configuration's address options before `connect` consumes it,
+reads one tag within 2 seconds and logs name, value, outcome and `sampled_at` through
+`tracing`. `STONECRAB_URL` is the connection string (default `modbus-tcp://127.0.0.1:5020`;
+add `?address-convention=plc4x` to use bare addresses such as `40001`) and
+`STONECRAB_ADDRESS` the address (default `holding-register:13:UINT`):
+
+```sh
+STONECRAB_URL=modbus-tcp://192.0.2.10:502 \
+  cargo run -p stonecrab --example modbus_tcp_read --features modbus
+```
+
+It needs a reachable Modbus TCP server and exits with status 1, after logging an error event,
+when the connection or the read fails. The repository's CI builds it but does not run it until
+the interoperability job exists.
 
 ## Quick start with the simulator
 The `sim_read` example builds a registry with a simulated device `bench`, connects with

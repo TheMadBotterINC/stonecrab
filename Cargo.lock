@@ -290,6 +290,7 @@ version = "0.2.0"
 dependencies = [
  "stonecrab-core",
  "stonecrab-driver-sim",
+ "stonecrab-modbus",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -334,6 +335,7 @@ dependencies = [
  "stonecrab-core",
  "stonecrab-testkit",
  "stonecrab-transport",
+ "tokio",
  "tracing",
 ]
 

@@ -1,0 +1,1 @@
+modbus-tcp://192.0.2.10?default-payload-byte-order=LITTLE_ENDIAN_BYTE_SWAP

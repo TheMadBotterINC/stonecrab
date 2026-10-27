@@ -6,8 +6,9 @@ mod tests {
     use stonecrab_modbus::{
         AddressConvention, BatchLimits, Batcher, Chunk, ConnectionDefaults, ExceptionCode,
         FunctionCode, MbapFramer, MbapHeader, Member, ModbusAddress, ModbusAddressBuilder,
-        ModbusAdu, ModbusArea, ModbusConnection, ModbusDataType, ModbusPdu, ModbusSession,
-        ModbusTcpDriver, SessionStats, TransactionId, TypedDecoder, UnitId,
+        ModbusAdu, ModbusArea, ModbusConnection, ModbusDataType, ModbusOptions, ModbusPdu,
+        ModbusSession, ModbusTcpDriver, SessionStats, SystemClock, TransactionId, TypedDecoder,
+        UnitId,
     };
 
     #[test]
@@ -36,5 +37,7 @@ mod tests {
         assert_send_sync::<ConnectionDefaults>();
         assert_send_sync::<ModbusConnection>();
         assert_send_sync::<ModbusTcpDriver>();
+        assert_send_sync::<ModbusOptions>();
+        assert_send_sync::<SystemClock>();
     }
 }

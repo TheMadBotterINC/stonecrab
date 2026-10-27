@@ -1,0 +1,1 @@
+modbus-tcp://192.0.2.10?max-coils-per-request=64&max-registers-per-request=20

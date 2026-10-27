@@ -265,3 +265,16 @@ the modifiers and the counters; `fake_transport.rs` covers the close and
 on loopback. `crates/stonecrab-modbus/tests/contract.rs` wires `inject_disconnect` to
 `Reaction::Close` and the two disconnect cases pass; the run now reports only the two
 write skips.
+
+## Addendum (S26): `ScriptedPeerFactory` and the `net` feature
+Slice S26 runs the driver contract suite over real loopback sockets, which needs a
+`TransportFactory` that hands each connection to a `ScriptedPeer`. CODING_STANDARDS 13.5
+allows a double of our trait only in the testkit or the simulator, so the testkit gains
+`ScriptedPeerFactory` (`src/peer_factory.rs`) behind the `net` feature, and `net` now also
+enables `stonecrab-transport/tcp`, because the factory opens the real TCP transport to the
+peer's loopback address. The factory is unpublished with the rest of the testkit and does
+not change the testkit's default features, so core's dev-dependency stays Tokio-free.
+
+**Tests.** `peer_factory.rs` carries its own unit tests; its one unexercised line is the
+`Internal` error for a peer task that panicked, which a `ScriptedPeer` cannot be made to
+do. `crates/stonecrab-modbus/tests/contract_scripted_peer.rs` is the consumer.

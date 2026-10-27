@@ -24,10 +24,23 @@ workspace = true
 default = []
 # The in-process simulator driver, re-exported as `stonecrab::sim` (ARCHITECTURE.md section 10).
 sim = ["dep:stonecrab-driver-sim"]
+# The native Modbus TCP driver, re-exported as `stonecrab::modbus` (ARCHITECTURE.md section 10).
+modbus = ["dep:stonecrab-modbus"]
+
+# Each example needs the driver it exercises, so a build without that feature skips it
+# instead of failing; CI builds them all with --all-features.
+[[example]]
+name = "sim_read"
+required-features = ["sim"]
+
+[[example]]
+name = "modbus_tcp_read"
+required-features = ["modbus"]
 
 [dependencies]
 stonecrab-core.workspace = true
 stonecrab-driver-sim = { workspace = true, optional = true }
+stonecrab-modbus = { workspace = true, optional = true }
 
 # Example and test tooling only (ADR-0014 addendum); never part of the packaged runtime graph.
 [dev-dependencies]

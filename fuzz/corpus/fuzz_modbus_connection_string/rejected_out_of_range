@@ -1,0 +1,1 @@
+modbus-tcp://192.0.2.10?default-unit-identifier=256&max-registers-per-request=126

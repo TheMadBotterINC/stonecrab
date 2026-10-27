@@ -130,6 +130,10 @@ the first mismatch).
 - `FakeTransportFactory` implements `TransportFactory` from a queue of scripts, a
   scripted connect timeout (parks until the fake clock passes the deadline, then fails
   with `Timeout` and `Operation::Connect`) or a refusal, and records every `open` call.
+- `ScriptedPeerFactory` implements `TransportFactory` by starting a fresh `ScriptedPeer`
+  (script built by a closure) for every `open` and connecting to it with the real
+  `TcpFactory`, so a driver keeps real sockets across reconnects; `finish` collects the
+  peers' reports.
 
 ```rust
 # #[cfg(feature = "net")]

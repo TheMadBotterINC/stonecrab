@@ -13,6 +13,7 @@ src/driver.rs
 src/framing/mbap.rs
 src/framing.rs
 src/lib.rs
+src/options.rs
 src/pdu/code.rs
 src/pdu/codec.rs
 src/pdu/model.rs

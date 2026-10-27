@@ -559,6 +559,18 @@ pub struct ModbusAddress {
 }
 
 impl ModbusAddress {
+    /// The upstream default `ping-address`, `4x00001:BOOL`: holding register 1 (wire
+    /// offset 0) as a `BOOL`, with no unit and no byte order. Built as a constant because
+    /// the parsing and building entry points are fallible and a `Default` cannot be.
+    pub(crate) const DEFAULT_PING: Self = Self {
+        unit_id: None,
+        area: ModbusArea::HoldingRegister,
+        offset: 0,
+        data_type: ModbusDataType::Bool,
+        byte_order: None,
+        convention: AddressConvention::Plc4xCompatible,
+    };
+
     /// Start building an address at a zero-based wire `offset` of `area`.
     ///
     /// Defaults, documented on [`ModbusAddressBuilder`]: the area's default data type, no
@@ -1353,17 +1365,27 @@ fn parse_byte_order(value: &str) -> Result<(ByteOrder, WordOrder)> {
             excerpt(value)
         )));
     };
+    byte_order_by_name(name).ok_or_else(|| {
+        invalid_address(format!(
+            "unknown byte-order '{}': the names are BIG_ENDIAN, LITTLE_ENDIAN, \
+             BIG_ENDIAN_BYTE_SWAP and LITTLE_ENDIAN_BYTE_SWAP \
+             (docs/parity/modbus.md#MB-CFG-BYTE-ORDER)",
+            excerpt(name)
+        ))
+    })
+}
+
+/// The pair the upstream `ModbusByteOrder` mode `name` maps to (ADR-0006), or `None` for
+/// a name outside the four. Shared by the address block and the connection parameter
+/// `default-payload-byte-order`, so both read the same table.
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "unreachable_pub forbids plain pub in a private module"
+)]
+pub(crate) fn byte_order_by_name(name: &str) -> Option<(ByteOrder, WordOrder)> {
     BYTE_ORDERS
         .into_iter()
         .find(|(byte, word)| byte_order_name(*byte, *word) == name)
-        .ok_or_else(|| {
-            invalid_address(format!(
-                "unknown byte-order '{}': the names are BIG_ENDIAN, LITTLE_ENDIAN, \
-                 BIG_ENDIAN_BYTE_SWAP and LITTLE_ENDIAN_BYTE_SWAP \
-                 (docs/parity/modbus.md#MB-CFG-BYTE-ORDER)",
-                excerpt(name)
-            ))
-        })
 }
 
 fn starts_with_digit(text: &str) -> bool {

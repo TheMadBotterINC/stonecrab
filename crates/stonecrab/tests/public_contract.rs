@@ -10,13 +10,13 @@ mod tests {
     use stonecrab::{
         AccessPolicy, AddressOptions, AddressOptionsBuilder, ByteOrder, CancellationToken,
         Capabilities, Clock, Connection, ConnectionConfig, ConnectionConfigBuilder,
-        ConnectionState, ConnectionUri, Credentials, Deadline, Diagnostics, Driver, DriverRegistry,
-        Endpoint, ErrorKind, FailureCategory, ItemError, OpFuture, Operation, PlcError, PlcValue,
-        PlcValueType, ProtocolAddress, ProtocolStatus, ReadItem, ReadRequest, ReadRequestBuilder,
-        ReadResponse, ReadResponseBuilder, ReconnectPolicy, ResourceLimits, ResourceLimitsBuilder,
-        RetryPolicy, Secret, StateCell, StateWatch, SubscriptionMode, Tag, TagId, Timeouts,
-        UnknownReason, WordOrder, WriteItem, WriteOutcome, WriteRequest, WriteRequestBuilder,
-        WriteResponse, WriteResponseBuilder, WriteResult,
+        ConnectionState, ConnectionUri, Credentials, Deadline, Diagnostics, Driver, DriverOptions,
+        DriverRegistry, Endpoint, ErrorKind, FailureCategory, ItemError, OpFuture, Operation,
+        PlcError, PlcValue, PlcValueType, ProtocolAddress, ProtocolStatus, ReadItem, ReadRequest,
+        ReadRequestBuilder, ReadResponse, ReadResponseBuilder, ReconnectPolicy, ResourceLimits,
+        ResourceLimitsBuilder, RetryPolicy, Secret, StateCell, StateWatch, SubscriptionMode, Tag,
+        TagId, Timeouts, UnknownReason, WordOrder, WriteItem, WriteOutcome, WriteRequest,
+        WriteRequestBuilder, WriteResponse, WriteResponseBuilder, WriteResult,
     };
 
     #[test]
@@ -55,6 +55,7 @@ mod tests {
         assert_send_sync::<Timeouts>();
         assert_send_sync::<Tag>();
         assert_send_sync::<Box<dyn ProtocolAddress>>();
+        assert_send_sync::<Box<dyn DriverOptions>>();
         assert_send_sync::<ProtocolStatus>();
         assert_send_sync::<ItemError>();
         assert_send_sync::<ReadItem>();

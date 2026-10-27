@@ -5,12 +5,12 @@ use std::sync::Arc;
 
 use stonecrab_core::{
     AddressOptions, Capabilities, Clock, Connection, ConnectionConfig, ConnectionUri, Driver,
-    Endpoint, ErrorKind, OpFuture, PlcError, ProtocolAddress, Result,
+    Endpoint, ErrorKind, OpFuture, PlcError, ProtocolAddress, Result, Timeouts,
 };
 use stonecrab_transport::{SystemClock, TcpFactory, TransportFactory};
 
 use crate::connection::alpha_capabilities;
-use crate::{ConnectionDefaults, ModbusAddress, ModbusConnection};
+use crate::{ConnectionDefaults, ModbusAddress, ModbusConnection, ModbusOptions};
 
 /// The connection-string scheme of this driver.
 const SCHEME: &str = "modbus-tcp";
@@ -36,15 +36,18 @@ const DEFAULT_PORT: u16 = 502;
 /// IPv4 address or an IPv6 address in brackets (`[::1]:502`), and the port 1 to 65535,
 /// default 502. Any other transport code is [`ErrorKind::InvalidConfig`].
 ///
-/// **Parameters.** This first version accepts none: any `?key=value` is
-/// [`ErrorKind::InvalidConfig`]. Slice S26 completes the driver with the six upstream
-/// parameters (`request-timeout-ms` as `MB-CFG-REQUEST-TIMEOUT`, `default-unit-identifier`
-/// as `MB-CFG-UNIT-ID`, `ping-address` as `MB-CFG-PING-ADDRESS`, `default-payload-byte-order`
-/// as `MB-CFG-BYTE-ORDER`, `max-coils-per-request` as `MB-CFG-MAX-COILS` and
-/// `max-registers-per-request` as `MB-CFG-MAX-REGISTERS`), the shared `address-convention`
-/// key, and the rejection of unknown keys (`MB-CFG-UNKNOWN`). Until then
-/// [`with_defaults`](Self::with_defaults) is the only way to change the unit or the byte
-/// order of a connection.
+/// **Parameters.** After `?`, `key=value` pairs joined by `&`. The six upstream
+/// parameters are `request-timeout-ms` (positive integer, default 5000),
+/// `default-unit-identifier` (0 to 255, default 1), `ping-address` (default
+/// `4x00001:BOOL`, validated and recorded, unused), `default-payload-byte-order`
+/// (`BIG_ENDIAN` by default, `LITTLE_ENDIAN`, `BIG_ENDIAN_BYTE_SWAP`,
+/// `LITTLE_ENDIAN_BYTE_SWAP`), `max-coils-per-request` (1 to 2000, default 2000) and
+/// `max-registers-per-request` (1 to 125, default 125). The shared `address-convention`
+/// key accepts only `plc4x`. Every other key is [`ErrorKind::InvalidConfig`], where
+/// upstream warns (`MB-CFG-UNKNOWN`). The parsed values travel in the configuration as
+/// [`ModbusOptions`], seeded from the driver's defaults ([`with_defaults`](Self::with_defaults))
+/// and overridden by the connection string; a configuration built by hand carries none and
+/// gets the driver's defaults.
 ///
 /// # Compatibility: docs/parity/modbus.md#MB-TCP-CONNECT
 /// Protocol code `modbus-tcp`, transport `tcp`, port 502 as upstream
@@ -160,10 +163,15 @@ impl ModbusTcpDriver {
         self
     }
 
-    /// Replace the connection-wide unit and byte order every connection starts from.
+    /// Replace the connection-wide defaults of this driver: the unit, the byte and word
+    /// order and the two request-size limits.
     ///
-    /// Until S26 parses `default-unit-identifier` and `default-payload-byte-order` from the
-    /// connection string, this is the only way to set them.
+    /// [`parse_config`](Driver::parse_config) seeds the [`ModbusOptions`] it attaches from
+    /// these defaults and lets the connection-string parameters override them, so a
+    /// parameter the string does not name takes the value given here. A configuration built
+    /// by hand with [`ConnectionConfig::builder`] carries no options, and `connect` uses
+    /// these defaults for it. The full rule is: driver defaults, overridden by the
+    /// connection string, overridden by the address block, overridden by the tag.
     ///
     /// # Examples
     /// ```
@@ -211,25 +219,43 @@ impl Driver for ModbusTcpDriver {
         alpha_capabilities()
     }
 
-    /// Read `modbus-tcp[:tcp]://host[:port]` into a validated configuration.
+    /// Read `modbus-tcp[:tcp]://host[:port][?parameters]` into a validated configuration.
     ///
-    /// The text is parsed with [`ConnectionUri::parse`]. The configuration has an
-    /// [`Endpoint::Tcp`] and the core defaults for timeouts, reconnect, retry, limits and
-    /// the access policy. No parameter is accepted in this version; S26 adds the six
-    /// upstream parameters, `MB-CFG-REQUEST-TIMEOUT`, `MB-CFG-UNIT-ID`,
-    /// `MB-CFG-PING-ADDRESS`, `MB-CFG-BYTE-ORDER`, `MB-CFG-MAX-COILS` and
-    /// `MB-CFG-MAX-REGISTERS`, and `MB-CFG-UNKNOWN` (unknown keys stay rejected).
+    /// The text is parsed with [`ConnectionUri::parse`], which already refuses duplicate
+    /// and empty keys. The configuration has an [`Endpoint::Tcp`], the core defaults for
+    /// reconnect, retry, limits and the access policy, and:
+    ///
+    /// - `request-timeout-ms` as `Timeouts.request` (5000 ms by default);
+    /// - `address-convention=plc4x` as the configuration's address convention, which
+    ///   [`ConnectionConfig::address_options`] hands to
+    ///   [`parse_address`](Driver::parse_address);
+    /// - the six upstream parameters as a [`ModbusOptions`] in the configuration's driver
+    ///   options slot, where `connect` reads them back. The options start from this
+    ///   driver's defaults ([`with_defaults`](ModbusTcpDriver::with_defaults)) and the
+    ///   parameters the string names override them.
     ///
     /// # Errors
     /// Returns [`ErrorKind::InvalidConfig`] for text that is not a valid connection string,
     /// another scheme, a transport code other than `tcp`, an authority that is not
     /// `host[:port]` (an empty host, a port that is empty, not decimal digits, zero or above
-    /// 65535, an IPv6 address without brackets, a path), and any query parameter. The
-    /// messages never repeat the authority.
+    /// 65535, an IPv6 address without brackets, a path), and a parameter that is unknown,
+    /// empty, not a whole number where one is required, outside its bounds, an unknown
+    /// byte-order name, an invalid `ping-address` or an `address-convention` other than
+    /// `plc4x`. The messages never repeat the authority or the connection string; a
+    /// parameter error names its key.
     ///
-    /// # Compatibility: docs/parity/modbus.md#MB-TCP-CONNECT
-    /// Protocol code, transport code and default port 502 as upstream; the rejection of
-    /// every parameter is a placeholder that S26 replaces with the parameter rows.
+    /// # Compatibility: docs/parity/modbus.md#MB-CFG-UNKNOWN
+    /// Protocol code, transport code and default port 502 as upstream
+    /// (docs/parity/modbus.md#MB-TCP-CONNECT). The six parameters are the rows
+    /// `MB-CFG-REQUEST-TIMEOUT` (docs/parity/modbus.md#MB-CFG-REQUEST-TIMEOUT),
+    /// `MB-CFG-UNIT-ID` (docs/parity/modbus.md#MB-CFG-UNIT-ID), `MB-CFG-PING-ADDRESS`
+    /// (docs/parity/modbus.md#MB-CFG-PING-ADDRESS), `MB-CFG-BYTE-ORDER`
+    /// (docs/parity/modbus.md#MB-CFG-BYTE-ORDER), `MB-CFG-MAX-COILS`
+    /// (docs/parity/modbus.md#MB-CFG-MAX-COILS) and `MB-CFG-MAX-REGISTERS`
+    /// (docs/parity/modbus.md#MB-CFG-MAX-REGISTERS). Unknown keys are an error where
+    /// upstream warns (`MB-CFG-UNKNOWN`), which includes the misspelt `unit-identifier` of
+    /// the upstream test suite (docs/parity/modbus.md#MB-QUIRK-F); a transport other than
+    /// `tcp`, UDP included, is refused (docs/parity/modbus.md#MB-QUIRK-A).
     fn parse_config(&self, uri: &str) -> Result<ConnectionConfig> {
         let parsed = ConnectionUri::parse(uri)?;
         if parsed.scheme() != SCHEME {
@@ -238,13 +264,20 @@ impl Driver for ModbusTcpDriver {
         if parsed.transport().is_some_and(|code| code != TRANSPORT) {
             return Err(invalid("the transport code of modbus-tcp is tcp"));
         }
-        if !parsed.options().is_empty() {
-            return Err(invalid(
-                "connection parameters are not accepted yet; they arrive with the \
-                 configuration slice",
-            ));
+        let endpoint = endpoint(parsed.authority())?;
+        let (options, plc4x) = ModbusOptions::from_parameters(
+            ModbusOptions::from_defaults(self.defaults),
+            parsed.options(),
+        )?;
+        let mut timeouts = Timeouts::default();
+        timeouts.request = options.request_timeout;
+        let mut builder = ConnectionConfig::builder(SCHEME, endpoint)
+            .timeouts(timeouts)
+            .driver_options(Arc::new(options));
+        if plc4x {
+            builder = builder.address_convention("plc4x");
         }
-        ConnectionConfig::builder(SCHEME, endpoint(parsed.authority())?).build()
+        builder.build()
     }
 
     /// Parse Modbus address text; see [`ModbusAddress::parse`] for the grammar.
@@ -267,12 +300,15 @@ impl Driver for ModbusTcpDriver {
 
     /// Open a [`ModbusConnection`] to the configured endpoint.
     ///
-    /// This is [`ModbusConnection::open`] with the driver's factory, clock and defaults,
-    /// boxed: the whole attempt is bounded by `config.timeouts().connect`.
+    /// This is [`ModbusConnection::open`] with the driver's factory and clock, boxed: the
+    /// whole attempt is bounded by `config.timeouts().connect`. The unit, byte order and
+    /// request-size limits come from the [`ModbusOptions`] of the configuration, else from
+    /// the driver's own [`ConnectionDefaults`].
     ///
     /// # Errors
     /// As [`ModbusConnection::open`]: [`ErrorKind::InvalidConfig`] for a configuration of
-    /// another scheme or with a frame limit below 260 bytes, [`ErrorKind::Timeout`] when
+    /// another scheme, with a frame limit below 260 bytes or with request-size limits above
+    /// the protocol maxima, [`ErrorKind::Timeout`] when
     /// the open does not finish in time and [`ErrorKind::Disconnected`] when the peer
     /// refuses.
     ///
@@ -287,11 +323,16 @@ impl Driver for ModbusTcpDriver {
     /// The counterpart of upstream `connect()` (`onConnect`); the reconnect behavior of
     /// the connection is a Stonecrab extension recorded in the same row.
     fn connect(&self, config: ConnectionConfig) -> OpFuture<'_, Box<dyn Connection>> {
+        // The options `parse_config` attached; a configuration built by hand has none and
+        // gets the driver's own defaults.
+        let defaults = config
+            .driver_options_as::<ModbusOptions>()
+            .map_or(self.defaults, ModbusOptions::connection_defaults);
         let opening = ModbusConnection::open(
             config,
             Arc::clone(&self.factory),
             Arc::clone(&self.clock),
-            self.defaults,
+            defaults,
         );
         Box::pin(async move {
             let connection: Box<dyn Connection> = Box::new(opening.await?);
@@ -363,6 +404,8 @@ fn invalid(message: &'static str) -> PlcError {
 #[cfg(test)]
 mod tests {
     use stonecrab_testkit::{FakeClock, FakeTransportFactory, Script, block_on_with};
+
+    use stonecrab_core::{ByteOrder, WordOrder};
 
     use super::*;
 
@@ -499,23 +542,42 @@ mod tests {
         }
     }
 
-    // covers: ALPHA_PLAN S25b / no query parameter is accepted before the configuration slice
-    // Transitional: S26 replaces this test with the per-parameter rows.
+    // covers: ALPHA_PLAN S26 / parameters reach the timeouts, the options and the convention
     #[test]
-    fn parse_config_refuses_every_parameter_and_names_the_slice() {
+    fn parse_config_applies_the_parameters_to_the_configuration() {
+        let config = driver()
+            .parse_config(
+                "modbus-tcp://host:502?request-timeout-ms=750&default-unit-identifier=4\
+                 &address-convention=plc4x",
+            )
+            .expect("config");
+        assert_eq!(
+            config.timeouts().request,
+            std::time::Duration::from_millis(750)
+        );
+        assert_eq!(config.address_options().convention(), Some("plc4x"));
+        let options = config
+            .driver_options_as::<ModbusOptions>()
+            .expect("the options are attached");
+        assert_eq!(options.unit_id, crate::UnitId::from(4));
+        let plain = driver().parse_config("modbus-tcp://host").expect("config");
+        assert_eq!(plain.address_options().convention(), None);
+        assert_eq!(
+            plain.driver_options_as::<ModbusOptions>(),
+            Some(&ModbusOptions::default()),
+            "no parameter, every upstream default"
+        );
+    }
+
+    #[test]
+    fn parse_config_refuses_unknown_keys_and_bad_values() {
         for uri in [
-            "modbus-tcp://host?request-timeout-ms=500",
-            "modbus-tcp://host:502?default-unit-identifier=1",
-            "modbus-tcp://host?address-convention=plc4x",
             "modbus-tcp://host?surprise=1",
             "modbus-tcp://host?x=",
+            "modbus-tcp://host?address-convention=other",
+            "modbus-tcp://host?request-timeout-ms=0",
         ] {
-            let error = driver().parse_config(uri).expect_err("a parameter");
-            assert_eq!(error.kind(), ErrorKind::InvalidConfig, "{uri}");
-            assert!(
-                error.to_string().contains("configuration slice"),
-                "the message says when parameters arrive: {error}"
-            );
+            assert_eq!(refused(uri), ErrorKind::InvalidConfig, "{uri}");
         }
     }
 
@@ -625,6 +687,35 @@ mod tests {
             opens.first().map(|call| call.endpoint.clone()),
             Some(tcp("192.0.2.10", 1502))
         );
+    }
+
+    // covers: S26 / the driver defaults seed the parsed options; the connection string wins
+    #[test]
+    fn driver_defaults_seed_the_parsed_options_and_the_string_overrides_them() {
+        let defaults = ConnectionDefaults {
+            unit_id: crate::UnitId::from(9),
+            byte_order: ByteOrder::LittleEndian,
+            word_order: WordOrder::LowWordFirst,
+            ..ConnectionDefaults::default()
+        };
+        let driver = ModbusTcpDriver::new().with_defaults(defaults);
+        let config = driver.parse_config("modbus-tcp://host").expect("config");
+        let options = config
+            .driver_options_as::<ModbusOptions>()
+            .expect("options");
+        assert_eq!(options.connection_defaults(), defaults);
+        assert_eq!(
+            options.request_timeout,
+            std::time::Duration::from_millis(5000)
+        );
+        let config = driver
+            .parse_config("modbus-tcp://host?default-unit-identifier=3")
+            .expect("config");
+        let options = config
+            .driver_options_as::<ModbusOptions>()
+            .expect("options");
+        assert_eq!(options.unit_id, crate::UnitId::from(3));
+        assert_eq!(options.byte_order, ByteOrder::LittleEndian);
     }
 
     #[test]

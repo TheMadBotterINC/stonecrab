@@ -137,6 +137,46 @@ the plan fixes the shape in D12. Three constraints shaped the details.
 - A NaN sample being neutral hides a broken random source rather than failing. This is
   acceptable because the delay stays inside its documented bounds either way.
 
+## Amendment (S26): driver-owned options on the configuration
+Slice S26 adds one slot to `ConnectionConfig` for options that only one driver
+understands. The change is additive to `stonecrab-core` and the facade.
+
+- **`DriverOptions`.** `pub trait DriverOptions: Any + fmt::Debug + Send + Sync {}` has
+  the shape of `ProtocolAddress` (object-safe, no methods, implemented by drivers, not
+  sealed): trait upcasting to `Any` lets a driver downcast to its own concrete type and
+  to nothing else. Its `Debug` output must contain no secrets; that is a contract of the
+  trait, because the next point prints it.
+- **Accessors.** `ConnectionConfigBuilder::driver_options(Arc<dyn DriverOptions>)`
+  stores the options (a second call replaces the first); `ConnectionConfig::
+  driver_options() -> Option<&Arc<dyn DriverOptions>>` and `driver_options_as::<T>() ->
+  Option<&T>` read them. A configuration without options, or with options of another
+  type, yields `None`, and a driver then uses its own defaults, so a configuration built
+  by hand still connects. The `Arc` keeps `ConnectionConfig` as cheap to move as before;
+  it stays not `Clone` because of the credentials (decision 2).
+- **`Debug` and `redacted_display`.** The derived `Debug` shows the options through
+  their own `Debug`. `redacted_display` appends ` options=<Debug text>` only when options
+  are present, so the fixed shape of a configuration without options is unchanged.
+  Neither hides the options, which is why the trait forbids secrets in them; credentials
+  stay in `Credentials`.
+- **Why not `Endpoint::Custom`.** The simulator passes its own URI options by
+  re-encoding them into the text of `Endpoint::Custom` (`sim://bench?...`), which its
+  `connect` parses again. A TCP driver cannot do that: its endpoint is the structured
+  `Endpoint::Tcp { host, port }` the transport reads, and folding `?key=value` text into
+  the host would corrupt the one field the transport resolves. Parsed values would also
+  be re-parsed at `connect`, where an error has nowhere good to go. The slot carries the
+  already validated values instead, and `connect` cannot fail on them.
+- **Ownership of the meaning.** Core does not validate or interpret the options. The
+  shared key `address-convention` stays a core field (decision 11) because every driver
+  maps it the same way; a key only one driver knows belongs in that driver's options.
+  `modbus-tcp` is the first user (`ModbusOptions`, ADR-0015 decision 15).
+
+Tests in `crates/stonecrab-core/src/config.rs`: `driver_options_are_absent_by_default`,
+`driver_options_round_trip_through_the_builder_and_downcast_to_their_own_type` and
+`driver_options_appear_in_debug_and_redacted_display_without_credentials`;
+`crates/stonecrab/tests/public_contract.rs` asserts `Box<dyn DriverOptions>` is
+`Send + Sync + 'static`. The parity row is `CORE-DRIVER-OPTIONS` in
+`docs/parity/core.md`.
+
 ## Alternatives considered
 - **Omit credentials and `idle` so the configuration stays `Clone`.** Rejected: the full
   diagram is the contract (R-ARCH-3.1-04), and cloning a configuration that holds a
@@ -159,6 +199,11 @@ the plan fixes the shape in D12. Three constraints shaped the details.
 - **Reject only the empty convention.** Rejected: an unbounded name with spaces would
   turn into an untidy error message and a surprising comparison in every driver.
 - **Warn on unknown options like upstream.** Rejected for the reason in decision 7.
+- **Re-encode driver options into `Endpoint::Custom` for TCP drivers.** Rejected for the
+  reason in the S26 amendment: the structured endpoint cannot carry them.
+- **An `Any`-typed map of options in core.** Rejected: untyped keys would make every
+  driver re-validate strings, and core would own a second parser. A typed value built by
+  the driver's own `parse_config` keeps validation in one place.
 
 ## Compliance
 Unit tests in `crates/stonecrab-core/src/address_options.rs`:

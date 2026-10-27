@@ -12,6 +12,7 @@ mod connection;
 mod decode;
 mod driver;
 mod framing;
+mod options;
 mod pdu;
 mod session;
 
@@ -23,8 +24,10 @@ pub use connection::{ConnectionDefaults, ModbusConnection};
 pub use decode::TypedDecoder;
 pub use driver::ModbusTcpDriver;
 pub use framing::{MbapFramer, MbapHeader, ModbusAdu, TransactionId};
+pub use options::ModbusOptions;
 pub use pdu::{
     ExceptionCode, FunctionCode, MAX_PDU_BYTES, MAX_READ_BITS, MAX_READ_REGISTERS, ModbusPdu,
     decode_request, decode_response, encode_request, encode_response,
 };
 pub use session::{ModbusSession, SessionStats, exception_item_error};
+pub use stonecrab_transport::SystemClock;

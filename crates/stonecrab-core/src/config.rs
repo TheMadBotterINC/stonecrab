@@ -4,9 +4,11 @@
 //! Nothing in this module performs I/O or enforces a policy. The types record what the
 //! caller asked for; a driver or transport consumes them (ADR-0008).
 
+use std::any::Any;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::num::NonZeroU32;
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::{AddressOptions, ErrorKind, PlcError, ResourceLimits, Result, Secret};
@@ -393,6 +395,55 @@ impl Credentials {
     }
 }
 
+/// Driver-owned, validated connection options that have no place in the shared
+/// [`ConnectionConfig`] fields.
+///
+/// A driver whose connection string carries parameters of its own (the Modbus
+/// `default-unit-identifier`, say) parses them into a type of its own, implements this
+/// trait for it and hands it to [`ConnectionConfigBuilder::driver_options`]. The
+/// configuration carries it as an `Arc<dyn DriverOptions>`; the same driver reads it back
+/// in `connect` with [`ConnectionConfig::driver_options_as`]. The shape is that of
+/// [`ProtocolAddress`](crate::ProtocolAddress): trait upcasting to [`Any`] lets a driver
+/// downcast only to its own concrete type, and the trait has no methods because the core
+/// has nothing to ask of the options.
+///
+/// The `Debug` output **must not contain secrets**. [`ConnectionConfig`]'s `Debug` and
+/// [`ConnectionConfig::redacted_display`] print it verbatim. Credentials belong in
+/// [`Credentials`], which is redacted; never put a password, a token or a key in a driver
+/// options type.
+///
+/// Implementors are immutable after construction (they sit behind an [`Arc`] shared by
+/// every holder of the configuration) and `Send + Sync`.
+///
+/// # Compatibility: docs/parity/core.md#CORE-DRIVER-OPTIONS
+/// Upstream keeps a driver-specific configuration object beside the transport
+/// configuration (`docs/parity/modbus.md`, rows `MB-CFG-*`); this trait is the
+/// driver-independent slot for it. The simulator keeps its own options in the text of an
+/// [`Endpoint::Custom`]; a TCP driver has a structured endpoint and so uses this slot
+/// (ADR-0008 amendment).
+///
+/// # Examples
+/// ```
+/// use std::sync::Arc;
+/// use stonecrab_core::{ConnectionConfig, DriverOptions, Endpoint};
+///
+/// #[derive(Debug, PartialEq)]
+/// struct PollOptions {
+///     every_ms: u32,
+/// }
+/// impl DriverOptions for PollOptions {}
+///
+/// let config = ConnectionConfig::builder("demo", Endpoint::Custom("bench".to_owned()))
+///     .driver_options(Arc::new(PollOptions { every_ms: 250 }))
+///     .build()?;
+/// assert_eq!(
+///     config.driver_options_as::<PollOptions>(),
+///     Some(&PollOptions { every_ms: 250 })
+/// );
+/// # Ok::<(), stonecrab_core::PlcError>(())
+/// ```
+pub trait DriverOptions: Any + fmt::Debug + Send + Sync {}
+
 /// A validated connection request: scheme, endpoint and every policy a driver needs.
 ///
 /// Fields are private; read them through the accessors. Construct one with
@@ -442,6 +493,7 @@ pub struct ConnectionConfig {
     credentials: Option<Secret<Credentials>>,
     limits: ResourceLimits,
     address_options: AddressOptions,
+    driver_options: Option<Arc<dyn DriverOptions>>,
 }
 
 impl ConnectionConfig {
@@ -469,6 +521,7 @@ impl ConnectionConfig {
             credentials: None,
             limits: None,
             address_convention: None,
+            driver_options: None,
         }
     }
 
@@ -529,12 +582,65 @@ impl ConnectionConfig {
         self.address_options.clone()
     }
 
+    /// The driver-owned options set with
+    /// [`ConnectionConfigBuilder::driver_options`], if any.
+    ///
+    /// The options are shared (`Arc`), so a caller can keep a handle past `connect`. Prefer
+    /// [`driver_options_as`](Self::driver_options_as), which downcasts to the driver's own
+    /// type.
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab_core::{ConnectionConfig, Endpoint};
+    /// let config = ConnectionConfig::builder("sim", Endpoint::Custom("bench".to_owned()))
+    ///     .build()?;
+    /// assert!(config.driver_options().is_none());
+    /// # Ok::<(), stonecrab_core::PlcError>(())
+    /// ```
+    #[must_use]
+    pub const fn driver_options(&self) -> Option<&Arc<dyn DriverOptions>> {
+        self.driver_options.as_ref()
+    }
+
+    /// The driver-owned options as the concrete type `T`, or `None` when the configuration
+    /// carries no options or carries options of another type.
+    ///
+    /// A driver calls this with its own options type in `connect` and falls back to its
+    /// defaults on `None`, so a configuration built by hand still connects.
+    ///
+    /// # Examples
+    /// ```
+    /// use std::sync::Arc;
+    /// use stonecrab_core::{ConnectionConfig, DriverOptions, Endpoint};
+    ///
+    /// #[derive(Debug)]
+    /// struct Mine(u8);
+    /// impl DriverOptions for Mine {}
+    /// #[derive(Debug)]
+    /// struct Other;
+    /// impl DriverOptions for Other {}
+    ///
+    /// let config = ConnectionConfig::builder("demo", Endpoint::Custom("bench".to_owned()))
+    ///     .driver_options(Arc::new(Mine(7)))
+    ///     .build()?;
+    /// assert_eq!(config.driver_options_as::<Mine>().map(|mine| mine.0), Some(7));
+    /// assert!(config.driver_options_as::<Other>().is_none());
+    /// # Ok::<(), stonecrab_core::PlcError>(())
+    /// ```
+    #[must_use]
+    pub fn driver_options_as<T: DriverOptions>(&self) -> Option<&T> {
+        let options: &dyn Any = self.driver_options.as_deref()?;
+        options.downcast_ref::<T>()
+    }
+
     /// A single-line description safe for logs and tracing fields.
     ///
     /// It names the scheme, the endpoint, the access policy and whether credentials are
     /// present. It never contains the user name or the password, however they are
     /// spelled. The [`Endpoint::Custom`] text is included verbatim, so it must not
-    /// embed credentials.
+    /// embed credentials. When the configuration carries [`DriverOptions`], their `Debug`
+    /// text follows as ` options=...`; the trait requires that text to be free of
+    /// secrets.
     ///
     /// # Examples
     /// ```
@@ -554,8 +660,12 @@ impl ConnectionConfig {
         } else {
             "none"
         };
+        let options = self
+            .driver_options
+            .as_ref()
+            .map_or_else(String::new, |options| format!(" options={options:?}"));
         format!(
-            "scheme={} endpoint={} access={} credentials={credentials}",
+            "scheme={} endpoint={} access={} credentials={credentials}{options}",
             self.scheme, self.endpoint, self.access
         )
     }
@@ -565,7 +675,8 @@ impl ConnectionConfig {
 ///
 /// Setters record values; [`build`](Self::build) validates them together. Defaults are
 /// those of [`Timeouts`], [`ReconnectPolicy`], [`RetryPolicy`], [`AccessPolicy`] and
-/// [`ResourceLimits::builder`], no credentials and no address convention. Not
+/// [`ResourceLimits::builder`], no credentials, no address convention and no driver
+/// options. Not
 /// [`Clone`], because it may hold [`Credentials`].
 #[derive(Debug)]
 #[non_exhaustive]
@@ -580,6 +691,7 @@ pub struct ConnectionConfigBuilder {
     credentials: Option<Credentials>,
     limits: Option<ResourceLimits>,
     address_convention: Option<String>,
+    driver_options: Option<Arc<dyn DriverOptions>>,
 }
 
 impl ConnectionConfigBuilder {
@@ -637,6 +749,33 @@ impl ConnectionConfigBuilder {
         self
     }
 
+    /// Attach driver-owned options; see [`DriverOptions`].
+    ///
+    /// The driver that built the options reads them back from the configuration with
+    /// [`ConnectionConfig::driver_options_as`]. Core neither validates nor interprets
+    /// them, and a second call replaces the first.
+    ///
+    /// # Examples
+    /// ```
+    /// use std::sync::Arc;
+    /// use stonecrab_core::{ConnectionConfig, DriverOptions, Endpoint};
+    ///
+    /// #[derive(Debug)]
+    /// struct Options;
+    /// impl DriverOptions for Options {}
+    ///
+    /// let config = ConnectionConfig::builder("demo", Endpoint::Custom("bench".to_owned()))
+    ///     .driver_options(Arc::new(Options))
+    ///     .build()?;
+    /// assert!(config.driver_options().is_some());
+    /// # Ok::<(), stonecrab_core::PlcError>(())
+    /// ```
+    #[must_use = "builder changes must be retained"]
+    pub fn driver_options(mut self, options: Arc<dyn DriverOptions>) -> Self {
+        self.driver_options = Some(options);
+        self
+    }
+
     /// Validate every field together and produce the configuration.
     ///
     /// # Errors
@@ -687,6 +826,7 @@ impl ConnectionConfigBuilder {
             credentials: self.credentials.map(Secret::new),
             limits,
             address_options,
+            driver_options: self.driver_options,
         })
     }
 }
@@ -1343,5 +1483,88 @@ mod tests {
             "scheme=sim endpoint=bench access=read-write credentials=present",
             "credentials marked present only"
         );
+    }
+
+    #[derive(Debug, PartialEq)]
+    struct Options {
+        every_ms: u32,
+    }
+    impl DriverOptions for Options {}
+
+    #[derive(Debug)]
+    struct Unrelated;
+    impl DriverOptions for Unrelated {}
+
+    #[test]
+    fn driver_options_are_absent_by_default() {
+        let config = builder().build().expect("valid");
+        assert!(config.driver_options().is_none(), "no slot content");
+        assert!(
+            config.driver_options_as::<Options>().is_none(),
+            "no downcast"
+        );
+        assert!(
+            format!("{config:?}").contains("driver_options: None"),
+            "debug shows the empty slot"
+        );
+        assert!(
+            !config.redacted_display().contains("options="),
+            "display names none"
+        );
+    }
+
+    #[test]
+    fn driver_options_round_trip_through_the_builder_and_downcast_to_their_own_type() {
+        let config = builder()
+            .driver_options(Arc::new(Options { every_ms: 250 }))
+            .build()
+            .expect("valid");
+        assert!(config.driver_options().is_some(), "slot filled");
+        assert_eq!(
+            config.driver_options_as::<Options>(),
+            Some(&Options { every_ms: 250 }),
+            "own type"
+        );
+        assert!(
+            config.driver_options_as::<Unrelated>().is_none(),
+            "another type does not downcast"
+        );
+        let replaced = builder()
+            .driver_options(Arc::new(Unrelated))
+            .driver_options(Arc::new(Options { every_ms: 5 }))
+            .build()
+            .expect("valid");
+        assert_eq!(
+            replaced.driver_options_as::<Options>(),
+            Some(&Options { every_ms: 5 }),
+            "the second call replaces the first"
+        );
+    }
+
+    #[test]
+    fn driver_options_appear_in_debug_and_redacted_display_without_credentials() {
+        let config = builder()
+            .driver_options(Arc::new(Options { every_ms: 250 }))
+            .credentials(Credentials::new("operator7", "hunter2"))
+            .build()
+            .expect("valid");
+        let debug = format!("{config:?}");
+        assert!(
+            debug.contains("Options { every_ms: 250 }"),
+            "debug: {debug}"
+        );
+        assert!(!debug.contains("hunter2"), "credentials stay hidden");
+        let text = config.redacted_display();
+        assert_eq!(
+            text,
+            "scheme=modbus-tcp endpoint=192.0.2.10:502 access=read-only credentials=present \
+             options=Options { every_ms: 250 }"
+        );
+        assert!(!text.contains("hunter2") && !text.contains("operator7"));
+        let pending = format!(
+            "{:?}",
+            builder().driver_options(Arc::new(Options { every_ms: 1 }))
+        );
+        assert!(pending.contains("every_ms: 1"), "builder debug: {pending}");
     }
 }

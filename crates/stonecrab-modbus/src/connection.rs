@@ -2,7 +2,7 @@
 
 use std::any::Any;
 use std::fmt;
-use std::num::{NonZeroU32, NonZeroUsize};
+use std::num::{NonZeroU16, NonZeroU32, NonZeroUsize};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -46,24 +46,31 @@ pub(crate) fn alpha_capabilities() -> Capabilities {
     capabilities
 }
 
-/// The connection-wide defaults a tag or an address may override: which unit answers when an
-/// address names none, and how multi-byte values are laid out when neither the tag nor its
-/// address says.
+/// The connection-wide defaults a tag or an address may override, and the request-size
+/// limits of the batcher: which unit answers when an address names none, how multi-byte
+/// values are laid out when neither the tag nor its address says, and how many registers
+/// or coils one wire request may carry.
 ///
-/// The three fields are the connection parameters `default-unit-identifier` and
-/// `default-payload-byte-order` of the upstream driver. The byte order is the pair
-/// ([`ByteOrder`], [`WordOrder`]) that the four upstream names map to (ADR-0006), applied
-/// field by field: a tag's own `byte_order` or `word_order` wins over the address block's,
-/// which wins over the value here. The `Default` is the upstream default: unit 1 and
-/// `BIG_ENDIAN` (big-endian bytes, high word first).
+/// The fields are the connection parameters `default-unit-identifier`,
+/// `default-payload-byte-order`, `max-registers-per-request` and `max-coils-per-request`
+/// of the upstream driver. The byte order is the pair ([`ByteOrder`], [`WordOrder`]) that
+/// the four upstream names map to (ADR-0006), applied field by field: a tag's own
+/// `byte_order` or `word_order` wins over the address block's, which wins over the value
+/// here. The limits feed [`BatchLimits`] (the chunk bounds of the batcher); a value above
+/// the protocol maximum of 125 registers or 2000 coils is refused when the connection
+/// opens. The `Default` is the upstream default: unit 1, `BIG_ENDIAN` (big-endian bytes,
+/// high word first), 125 registers and 2000 coils.
 ///
 /// The struct is `#[non_exhaustive]`; start from [`Default`] and assign the fields. The
-/// `modbus-tcp` driver fills it from the connection string (slice S26).
+/// `modbus-tcp` driver fills it from the connection string through
+/// [`ModbusOptions`](crate::ModbusOptions).
 ///
 /// # Compatibility: docs/parity/modbus.md#MB-BYTEORDER-PRECEDENCE
 /// Tag field over address block over `default-payload-byte-order`
 /// (docs/parity/modbus.md#MB-CFG-BYTE-ORDER); the unit follows
-/// docs/parity/modbus.md#MB-CFG-UNIT-ID.
+/// docs/parity/modbus.md#MB-CFG-UNIT-ID and the limits follow
+/// docs/parity/modbus.md#MB-CFG-MAX-REGISTERS and
+/// docs/parity/modbus.md#MB-CFG-MAX-COILS.
 ///
 /// # Examples
 /// ```
@@ -76,6 +83,7 @@ pub(crate) fn alpha_capabilities() -> Capabilities {
 ///     (defaults.byte_order, defaults.word_order),
 ///     (ByteOrder::BigEndian, WordOrder::HighWordFirst)
 /// );
+/// assert_eq!((defaults.max_registers.get(), defaults.max_coils.get()), (125, 2000));
 ///
 /// // LITTLE_ENDIAN, upstream's second mode.
 /// defaults.byte_order = ByteOrder::LittleEndian;
@@ -90,14 +98,21 @@ pub struct ConnectionDefaults {
     pub byte_order: ByteOrder,
     /// The word order of a value whose tag and address name none.
     pub word_order: WordOrder,
+    /// The most coils or discrete inputs one wire request carries (at most 2000).
+    pub max_coils: NonZeroU16,
+    /// The most registers one wire request carries (at most 125).
+    pub max_registers: NonZeroU16,
 }
 
 impl Default for ConnectionDefaults {
     fn default() -> Self {
+        let wire = BatchLimits::default();
         Self {
             unit_id: UnitId::DEFAULT,
             byte_order: ByteOrder::BigEndian,
             word_order: WordOrder::HighWordFirst,
+            max_coils: wire.max_coils(),
+            max_registers: wire.max_registers(),
         }
     }
 }
@@ -227,7 +242,8 @@ impl ModbusConnection {
     /// not (Modbus TCP has no authentication, and a write is refused whatever the policy).
     /// `factory` opens the transports: the real TCP factory in production, the testkit's
     /// `FakeTransportFactory` in tests. `clock` is the one source of time. `defaults`
-    /// carries the connection-wide unit and byte order (see [`ConnectionDefaults`]).
+    /// carries the connection-wide unit, byte order and request-size limits (see
+    /// [`ConnectionDefaults`]).
     ///
     /// The deadline source is `timeouts.connect`, applied by the guard to the open.
     ///
@@ -236,8 +252,9 @@ impl ModbusConnection {
     ///
     /// # Errors
     /// - [`ErrorKind::InvalidConfig`] if the scheme is not `modbus-tcp`, or
-    ///   `limits.max_frame_bytes` is below the 260 bytes of the largest Modbus TCP frame;
-    ///   nothing is opened.
+    ///   `limits.max_frame_bytes` is below the 260 bytes of the largest Modbus TCP frame, or
+    ///   `defaults` names more than 125 registers or 2000 coils per request; nothing is
+    ///   opened.
     /// - [`ErrorKind::Timeout`] if the open did not finish within `timeouts.connect`.
     /// - [`ErrorKind::Disconnected`] if the peer refused the connection.
     /// - Any other kind the transport factory reports.
@@ -328,12 +345,11 @@ impl ModbusConnection {
                 "max_frame_bytes must be at least 260, the largest Modbus TCP frame",
             ));
         }
-        let wire = BatchLimits::default();
-        let (registers, coils) = (wire.max_registers(), wire.max_coils());
-        // The protocol maxima are valid bounds, so the constructor cannot refuse them; the
-        // default stands in for the impossible refusal.
-        let batch =
-            BatchLimits::new(registers, coils, limits.max_items_per_request()).unwrap_or(wire);
+        let batch = BatchLimits::new(
+            defaults.max_registers,
+            defaults.max_coils,
+            limits.max_items_per_request(),
+        )?;
         let session = ModbusSession::new(GuardConfig::from(config), factory, Arc::clone(&clock));
         Ok(Self {
             session,
