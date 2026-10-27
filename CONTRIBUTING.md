@@ -42,8 +42,10 @@ normative and are not duplicated here. Per ADR-0004 the trunk is `master`.
 - Bug fixes (18.9): carry a regression test named after the issue, or a documented
   reason it can only be shown on hardware, with the hardware record linked.
 
-The `interop` and `fuzz` mise tasks arrive in later slices of `docs/ALPHA_PLAN.md`;
-until then the PR template items for them are marked n/a.
+`mise run fuzz` runs the fuzz smoke check (see `fuzz/README.md`); it passes with zero
+targets until the first one lands. The `interop` task arrives in a later slice of
+`docs/ALPHA_PLAN.md`; until then its PR template item is marked n/a. Commit any
+`proptest-regressions/` directories that property tests create.
 
 ## Changing the upstream baseline
 

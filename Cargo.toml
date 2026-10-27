@@ -2,6 +2,7 @@
 resolver = "3"
 members = ["crates/stonecrab", "crates/stonecrab-core", "tools/stonecrab-testkit"]
 default-members = ["crates/stonecrab", "crates/stonecrab-core"]
+exclude = ["fuzz"]
 
 [workspace.package]
 edition = "2024"

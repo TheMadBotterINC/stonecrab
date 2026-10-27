@@ -1,0 +1,30 @@
+# Own Cargo workspace (ADR-0009): the root workspace lists `exclude = ["fuzz"]`, so the
+# nightly-only, native-code fuzz dependencies never enter the root Cargo.lock or its
+# cargo-deny, machete and package runs. Dependencies are declared here, not in the root
+# [workspace.dependencies]; versions are minor-level caret ranges (section 15.4).
+[package]
+name = "stonecrab-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "Apache-2.0"
+description = "Fuzz targets for Stonecrab parsers (not published)"
+
+[package.metadata]
+cargo-fuzz = true
+
+# No target uses these yet; the first target (S08) removes the entry. cargo-machete
+# scans this manifest too.
+[package.metadata.cargo-machete]
+ignored = ["libfuzzer-sys", "arbitrary", "stonecrab-core"]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = "1.5"
+stonecrab-core = { path = "../crates/stonecrab-core" }
+# Later slices add path dependencies on the crate each new target exercises.
+
+# Fuzz targets are added as [[bin]] sections by the slice that adds each target, named
+# fuzz_<crate>_<parser> (see README.md). None exist yet.
+
+[workspace]
