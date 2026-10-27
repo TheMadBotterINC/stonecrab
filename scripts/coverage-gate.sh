@@ -27,10 +27,11 @@ EXCLUDE='(^|/)(examples|benches|fuzz|generated)/'
 # skipped with a message. The row is listed on purpose: `cargo llvm-cov report
 # --fail-under-lines` exits 1 on an empty file set, so n/a crates are never passed to
 # it, and the gate fails loudly the day a listed n/a crate gains an executable line.
-# A crate directory with no row also fails. Later slices add rows here (codec,
-# driver-sim, sensors 100; transport 95; modbus 95 with the pure modules at 100).
+# A crate directory with no row also fails. Later slices add rows here (driver-sim,
+# sensors 100; transport 95; modbus 95 with the pure modules at 100); codec landed in S15.
 THRESHOLDS="
 crates/stonecrab-core|100
+crates/stonecrab-codec|100
 crates/stonecrab|na
 tools/stonecrab-testkit|90
 "

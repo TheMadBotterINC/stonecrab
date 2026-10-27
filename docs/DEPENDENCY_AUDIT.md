@@ -55,3 +55,32 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
 - No native code. The crate is dependency-free in this configuration.
 - Alternatives: hand-parsing `&[u8]` in each target; rejected for structured inputs.
 - Review date: 2026-10-27.
+
+## proptest 1.12.0 (dev-dependency of stonecrab-codec)
+- Purpose: property tests of the codec (`prop_round_trip_exact_integers`,
+  `prop_length_checked_before_allocation`), with shrinking and the tracked
+  `proptest-regressions/` files of CODING_STANDARDS 13.3.
+- License: MIT OR Apache-2.0.
+- Features: `std` only; default features are disabled in `[workspace.dependencies]`
+  (ADR-0009). The `fork` and `timeout` features stay off: they pull `rusty-fork` and
+  `tempfile`, and through them `once_cell`. In 1.12.0 the `std` feature enables only
+  `rand/std`, `rand/sys_rng`, `regex-syntax` and `num-traits/std`; it does not enable
+  `lazy_static`. The D23 check (`cargo tree -e normal,dev -i once_cell -i lazy_static -i log
+  -i time -i chrono`) matches no package, so no `deny.toml` wrapper is needed (ADR-0013).
+- Reaches only dev builds of `stonecrab-codec`: it is not in the codec's `[dependencies]`,
+  not in the packaged manifest's runtime graph, and absent from the fuzz workspace lock.
+- Resolved transitive crates in `Cargo.lock`, all MIT OR Apache-2.0: `rand` 0.10.3,
+  `rand_core` 0.10.1, `rand_xorshift` 0.5.0, `chacha20` 0.10.2, `getrandom` 0.4.3,
+  `cfg-if`, `cpufeatures` and `core_detect` (CPU feature probes), `libc` and `r-efi`
+  (platform bindings), `num-traits`, `regex-syntax`, `bitflags`, `unarray` and `autocfg`
+  (build script).
+- Unsafe: `proptest` itself has no `forbid(unsafe_code)` and contains a handful of
+  `unsafe` uses (9 occurrences of the keyword in its sources on 2026-10-27). `unarray`,
+  `chacha20`, `getrandom` and `libc`-level code carry the larger share, as expected for
+  array initialization, SIMD and OS entropy. This is test-only code; first-party code
+  stays `forbid(unsafe_code)`. No native code beyond `libc` bindings is built.
+- Alternatives: `quickcheck` (smaller, weaker shrinking and no regression files),
+  hand-written exhaustive loops (kept in addition for boundaries), and `cargo fuzz` (used
+  for the parser, but it does not shrink or run in `cargo test`).
+- Review date: 2026-10-27. `cargo-deny` passes advisory, license, ban and source checks;
+  this records the trust boundary, not a memory-safety certification.

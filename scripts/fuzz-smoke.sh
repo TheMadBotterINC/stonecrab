@@ -42,7 +42,10 @@ fi
 
 # Run inside fuzz/ so rustup picks the nightly from fuzz/rust-toolchain.toml for both
 # cargo-deny's metadata call and cargo-fuzz (CI installs only that toolchain here).
+# mise exports RUSTUP_TOOLCHAIN for the pinned stable compiler, which would override
+# the file; drop it for the fuzz workspace only.
 cd fuzz
+unset RUSTUP_TOOLCHAIN
 cargo deny --locked check
 
 targets="$(cargo fuzz list)"
@@ -50,7 +53,12 @@ if [ -z "$targets" ]; then
   echo "no fuzz targets yet; nothing to run"
   exit 0
 fi
+# libFuzzer writes every new input into the FIRST corpus directory it is given. Keep
+# the committed seeds in corpus/<target>/ read-only by passing a scratch directory
+# under target/ first and the seed directory second.
 while IFS= read -r target; do
   echo "fuzzing $target for ${seconds}s"
-  cargo fuzz run "$target" -- "-max_total_time=$seconds"
+  scratch="target/smoke-corpus/$target"
+  mkdir -p "$scratch"
+  cargo fuzz run "$target" "$scratch" "corpus/$target" -- "-max_total_time=$seconds"
 done <<< "$targets"

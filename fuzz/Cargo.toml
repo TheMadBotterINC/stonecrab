@@ -13,18 +13,26 @@ description = "Fuzz targets for Stonecrab parsers (not published)"
 [package.metadata]
 cargo-fuzz = true
 
-# No target uses these yet; the first target (S08) removes the entry. cargo-machete
+# No target derives structured input with `arbitrary` yet (fuzz_codec_bounded_reader reads
+# its operation script from raw bytes), so it stays ignored until one does. cargo-machete
 # scans this manifest too.
 [package.metadata.cargo-machete]
-ignored = ["libfuzzer-sys", "arbitrary", "stonecrab-core"]
+ignored = ["arbitrary"]
 
 [dependencies]
 libfuzzer-sys = "0.4"
 arbitrary = "1.5"
 stonecrab-core = { path = "../crates/stonecrab-core" }
+stonecrab-codec = { path = "../crates/stonecrab-codec" }
 # Later slices add path dependencies on the crate each new target exercises.
 
 # Fuzz targets are added as [[bin]] sections by the slice that adds each target, named
-# fuzz_<crate>_<parser> (see README.md). None exist yet.
+# fuzz_<crate>_<parser> (see README.md).
+[[bin]]
+name = "fuzz_codec_bounded_reader"
+path = "fuzz_targets/fuzz_codec_bounded_reader.rs"
+test = false
+doc = false
+bench = false
 
 [workspace]
