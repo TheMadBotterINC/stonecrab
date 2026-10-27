@@ -145,6 +145,17 @@
   and name. A reply PDU that does not decode or fit the request is `MalformedData`. Each
   request has a `debug` span with `scheme`, `endpoint`, `op` and `txn`. The crate now
   depends on `tracing`.
+- Add `ModbusConnection` and `ConnectionDefaults` (ADR-0015): the `Connection` of the
+  `modbus-tcp` scheme over a `ModbusSession`, opened with `ModbusConnection::open(config,
+  factory, clock, defaults)`. A read is planned by `Batcher::plan` and runs chunk by chunk
+  (function codes 01 to 04, at most 125 registers or 2000 bits), each chunk under
+  `min(request deadline, now + timeouts.request)`; `ReadResponse::split_into` discloses the
+  chunk count, `sampled_at` is the instant each chunk was answered and `source_time` is
+  `None`. A device exception fails only its chunk's members; a failed exchange fails the
+  read, after retries under the configuration's `RetryPolicy` for retryable kinds only.
+  One read is in flight at a time (`Backpressure` before any I/O). `write` is
+  `Unsupported(Operation::Write)` with no I/O. `ConnectionDefaults` carries the default unit
+  and the byte and word order that a tag or address without its own falls back to.
 ### stonecrab-sensors 0.1.0
 - Add the crate: declarative sensor profiles for Stonecrab, depending on `stonecrab-core`,
   `serde` and, behind the default `toml` feature, `toml` (ADR-0016). No driver reads a

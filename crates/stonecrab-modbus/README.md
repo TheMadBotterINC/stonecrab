@@ -5,21 +5,22 @@ registers) over TCP with MBAP framing. RTU, ASCII, TLS, UDP, writes, extended re
 and string types are out of scope for the alpha.
 
 Nothing is implemented beyond the address types, their text grammar, read batching, the
-PDU codec, MBAP framing, the typed decoder and the session. This crate currently offers
-`UnitId`, `ModbusArea`, `ModbusDataType`, `AddressConvention`, `ModbusAddress` (built with
-its builder or parsed from text with `ModbusAddress::parse`) and `ProtocolAddress` for it,
-plus `Batcher`, `BatchLimits`, `Chunk` and `Member`, the PDU types `FunctionCode`,
-`ExceptionCode` and `ModbusPdu` with `encode_request`, `decode_request`, `decode_response`
-and `encode_response`, the framing types `MbapHeader`, `TransactionId`, `ModbusAdu` and
-`MbapFramer`, `TypedDecoder`, which turns registers or coil bits into `PlcValue`s, and
-`ModbusSession` with `SessionStats` and `exception_item_error`, which send one read
-request over a connection and return the reply that answers it. There is no connection
-or driver yet. The session does I/O only through a transport factory the caller passes
-in, so the crate's tests run on the in-memory transport of the repository's
-unpublished testkit. The crate depends on `stonecrab-core`, `stonecrab-codec`,
-`stonecrab-transport` (without its `tcp` feature, for the `Framer` trait,
-`ConnectionGuard` and `TransportFactory`), `bytes` and `tracing`; default features are
-empty.
+PDU codec, MBAP framing, the typed decoder, the session and the connection. This crate
+currently offers `UnitId`, `ModbusArea`, `ModbusDataType`, `AddressConvention`,
+`ModbusAddress` (built with its builder or parsed from text with `ModbusAddress::parse`)
+and `ProtocolAddress` for it, plus `Batcher`, `BatchLimits`, `Chunk` and `Member`, the PDU
+types `FunctionCode`, `ExceptionCode` and `ModbusPdu` with `encode_request`,
+`decode_request`, `decode_response` and `encode_response`, the framing types `MbapHeader`,
+`TransactionId`, `ModbusAdu` and `MbapFramer`, `TypedDecoder`, which turns registers or
+coil bits into `PlcValue`s, and `ModbusSession` with `SessionStats` and
+`exception_item_error`, which send one read request over a connection and return the reply
+that answers it, and `ModbusConnection` with `ConnectionDefaults`, the `Connection` that
+reads tags in batches over a session. There is no driver yet. The session and the
+connection do I/O only through a transport factory the caller passes in, so the crate's
+tests run on the in-memory transport of the repository's unpublished testkit. The crate
+depends on `stonecrab-core`, `stonecrab-codec`, `stonecrab-transport` (without its `tcp`
+feature, for the `Framer` trait, `ConnectionGuard` and `TransportFactory`), `bytes` and
+`tracing`; default features are empty.
 
 Upstream behavior is the Apache PLC4X Modbus TCP driver at the commit pinned in
 `upstream/manifest.toml`. Every claim about it, and every divergence, is recorded with a
@@ -35,7 +36,8 @@ stable row id in the
 | Session: transaction ids, reply correlation by transaction id, unit id and function code, exception mapping (`ModbusSession`, `exception_item_error`) | unit-tested on the in-memory transport; not yet run against a socket |
 | Typed register decoding and byte order (`TypedDecoder`) | unit-tested; vector-tested; property-tested; the little-endian modes are derived from the documented layouts, not yet confirmed by upstream vectors |
 | Read batching (`Batcher`) | unit-tested; property-tested |
-| Connection and `modbus-tcp` driver | planned |
+| Connection: batched reads, retry, reconnect, one read in flight (`ModbusConnection`) | unit-tested on the in-memory transport; not yet run against a socket |
+| `modbus-tcp` driver | planned |
 | Interoperability against an independent server | planned |
 | Hardware verification | planned |
 
@@ -287,6 +289,77 @@ assert_eq!(session.stats().mismatched_replies, 1);
 # Ok::<(), stonecrab_core::PlcError>(())
 ```
 
+## Connection
+`ModbusConnection::open(config, factory, clock, defaults)` builds the connection from a
+`ConnectionConfig` for the scheme `modbus-tcp` (any other scheme is `InvalidConfig` before
+a transport is opened), opens it and returns it `Connected`. It implements
+`stonecrab_core::Connection`; the capabilities are read only, no subscription, no browse,
+no discovery, 253-byte PDUs and one operation at a time.
+
+`read` checks the request before any I/O, in this order: the connection is not `Closing`,
+`Closed` or `Failed` (`Disconnected`), the token is not cancelled (`Cancelled`), every
+tag's address is a `ModbusAddress` (`InvalidAddress`, naming the tag and never the
+address), no tag has an element count above one (`InvalidConfig`: array selections are
+deferred) and the request fits `max_items_per_request` (`ResourceLimit`). Then one read runs
+at a time (a concurrent one is `Backpressure`) and an expired request deadline is
+`Timeout`. The tags are planned into chunks by `Batcher::plan` and the chunks run one
+after another:
+
+- each chunk is one read request (function code 01 to 04) to the unit of its addresses, or
+  the default unit, under the deadline `min(request deadline, now + timeouts.request)`
+  taken when the attempt starts;
+- a device exception fails every member of that chunk with `exception_item_error` and the
+  next chunk still runs; a reply that does not decode fails the member alone;
+- a chunk whose exchange fails is retried under the `RetryPolicy` of the configuration
+  (one attempt by default), only for kinds in its retry set and only while the request
+  deadline has not passed; when the policy gives up, the whole read fails with that error,
+  whose `Diagnostics` name the operation, the state, the latency and the retries performed;
+- the response has one item per tag in request order, `split_into` is the number of chunks,
+  each item's `sampled_at` is the instant its chunk was answered and `source_time` is
+  `None`.
+
+A tag's own byte and word order beat its address's, which beat `ConnectionDefaults`
+(unit 1 and `BIG_ENDIAN` unless set). A lost peer shows as `Reconnecting` in
+`watch_state`; the next read waits out the backoff and reopens, and the request that was in
+flight when the peer closed fails with `Disconnected` and is never replayed. `close` ends
+in `Closed`, also during the backoff. `write` is `Unsupported(Operation::Write)` and sends
+nothing. A debug span `read` carries `scheme`, `endpoint`, `op`, `items` and `chunks`.
+
+```rust
+use std::sync::Arc;
+use stonecrab_core::{
+    AddressOptions, Connection, ConnectionConfig, Endpoint, PlcValue, ReadRequest, Tag, TagId,
+};
+use stonecrab_modbus::{ConnectionDefaults, ModbusAddress, ModbusConnection};
+use stonecrab_testkit::{FakeClock, FakeTransportFactory, Script, Step, block_on_with};
+
+// Registers 108 and 109 of the V1.1b section 6.3 exchange, on the in-memory test transport.
+let clock = FakeClock::default();
+let factory = FakeTransportFactory::new(clock.clone());
+factory.push_script(Script::strict(vec![
+    Step::Expect(vec![0, 1, 0, 0, 0, 6, 1, 3, 0x00, 0x6B, 0x00, 0x02]),
+    Step::Reply(vec![0, 1, 0, 0, 0, 7, 1, 3, 4, 0x02, 0x2B, 0x00, 0x00]),
+]));
+let config = ConnectionConfig::builder("modbus-tcp", Endpoint::Custom("fake://plc".to_owned()))
+    .build()?;
+let connection = block_on_with(
+    &clock,
+    ModbusConnection::open(config, Arc::new(factory), Arc::new(clock.clone()), ConnectionDefaults::default()),
+)?;
+
+let options = AddressOptions::default();
+let mut request = ReadRequest::builder(connection.limits());
+for (id, address) in [("a", "holding-register:108"), ("b", "holding-register:109")] {
+    let address = ModbusAddress::parse(address, &options)?;
+    request = request.tag(Tag::new(TagId::new(id)?, Arc::new(address)));
+}
+let response = block_on_with(&clock, connection.read(request.build()?))?;
+assert_eq!(response.split_into().get(), 1);
+assert_eq!(response.items()[0].outcome().as_ref().ok(), Some(&PlcValue::I16(555)));
+assert_eq!(response.items()[1].outcome().as_ref().ok(), Some(&PlcValue::I16(0)));
+# Ok::<(), stonecrab_core::PlcError>(())
+```
+
 ## Decoding values
 `TypedDecoder` turns the registers of a holding or input register read into a typed
 `PlcValue`, and one bit of a coil or discrete-input read into a `Bool`. The layout is two
@@ -364,7 +437,8 @@ decoder; they are repository fixtures, not part of the published crate.
 ## Configuration
 The six connection parameters (request timeout, default unit identifier, ping address,
 default payload byte order, maximum coils and registers per request) land with the driver
-in slice S26.
+in slice S26. The connection already takes the request timeout from `Timeouts.request`, and
+the default unit and byte order as `ConnectionDefaults`.
 
 ## Building an address
 The builder offers the same checks without text (the parser ends in it):

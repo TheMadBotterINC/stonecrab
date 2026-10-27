@@ -223,7 +223,17 @@ parses it with `Short.parseShort` and the inventoried files show no range check
    in that PR. S24b amendment: the session module has no OS-dependent
    arm (every I/O path runs on the in-memory transport), the crate measures 100% and the
    row stays 100; the 95 tier is reconsidered only if a later slice adds a line that a
-   deterministic test cannot reach, with that line named.
+   deterministic test cannot reach, with that line named. S25 amendment: the connection
+   module has no OS-dependent arm either (every path runs on the in-memory transport and the
+   fake clock), the crate measures 100% of lines and the row stays 100. Two error arms that
+   no wire exchange can reach (the response builder refusing a response the connection
+   assembled, and the batcher refusing a request the connection already checked) are written
+   so that a test reaches them: the first by a unit test of `ModbusConnection::respond` with
+   an incomplete item list, the second because the item bound is left to `Batcher::plan` and
+   the over-limit request test takes it. llvm-cov credits a function with the lines of its
+   best instantiation, and the library is instantiated once under the integration tests and
+   once under the in-crate unit tests, so the unit tests also run `respond` and
+   `decode_member` through every arm. No line is excluded.
 10. **Transport injection point (S26).** `ModbusTcpDriver::new()` uses the real TCP
     factory. `ModbusTcpDriver::with_transport_factory(Arc<dyn TransportFactory>)` is the
     sanctioned way to run the testkit `FakeTransportFactory` under the driver. S25b lands
@@ -412,6 +422,105 @@ parses it with `Short.parseShort` and the inventoried files show no range check
       because a scoped subscriber races the callsite interest cache across parallel
       tests.
 
+13. **Connection (S25, amendment 2026-10-27).** `src/connection.rs` holds
+    `ModbusConnection` and `ConnectionDefaults`. The crate gains no dependency. Nothing here
+    changes decisions 1 to 12 except the coverage note appended to decision 9.
+    - **Shape.** `ModbusConnection::open(config: ConnectionConfig, factory: Arc<dyn
+      TransportFactory>, clock: Arc<dyn Clock>, defaults: ConnectionDefaults) ->
+      OpFuture<'static, Self>` builds the `GuardConfig` from the configuration's endpoint,
+      timeouts, reconnect policy and limits (`GuardConfig::from(&config)`), creates the
+      `ModbusSession`, connects it within `timeouts.connect` and returns the connection
+      `Connected`; a failed open returns the error and no connection. The scheme must be
+      `modbus-tcp` and `limits.max_frame_bytes` at least `ModbusAdu::MAX_BYTES` (260), else
+      `InvalidConfig` before any transport is opened. The access policy and credentials are
+      not used: Modbus TCP has no authentication and `write` is refused whatever the policy.
+      The `Connection` methods `state`, `watch_state`, `capabilities` and `limits` read the
+      session and the configuration; the connection keeps no state cell of its own, so the
+      guard's `Reconnecting` is what `watch_state` shows. `capabilities()` is read true,
+      write false, subscribe `Unsupported`, browse and discover false, `max_pdu_bytes`
+      `Some(253)`, concurrency 1, and `max_items_per_request` `None`: the item bound is in
+      `limits()`, which `ReadRequest::builder` takes, and `MB-TCP-CAPABILITIES` lists no
+      item bound.
+    - **Connection defaults.** `ConnectionDefaults { unit_id, byte_order, word_order }`
+      (`#[non_exhaustive]`, public fields, `Default` unit 1 and `BIG_ENDIAN`: big-endian
+      bytes, high word first) carries the connection parameters `default-unit-identifier`
+      and `default-payload-byte-order`, which S26's configuration parser fills. The unit is
+      here as well as the byte order because `Chunk::unit_id` is `None` for addresses that
+      name none and the connection must send something. Resolution is field by field, tag
+      over address block (done by `Batcher::plan`) over the defaults (done here), never
+      inferred (`MB-BYTEORDER-PRECEDENCE`). The chunk limits stay at 125 registers and 2000
+      coils; `max-registers-per-request` and `max-coils-per-request` are S26's to add as
+      fields when the configuration parser exists.
+    - **Validation order.** `read` checks, before any I/O and each with the error kind the
+      simulator uses for the same case: the connection is not `Closing`, `Closed` or
+      `Failed` (`Disconnected`, `Transport` category); the token is not cancelled
+      (`Cancelled`); every tag's address is a `ModbusAddress` (`InvalidAddress`, the
+      message names the tag id and never the address text); no tag has `count()` above one
+      (`InvalidConfig`, because `parse_address` cannot see `count`); the plan is made by
+      `Batcher::plan`, whose first check is the item count against the connection's own
+      `max_items_per_request` (`ResourceLimit`) and which enforces the 125 and 2000 chunk
+      limits. Then the single in-flight slot is taken (`Backpressure`) and an elapsed request
+      deadline is `Timeout`. The rejections are `Validation` except the terminal state and
+      the elapsed deadline (`Transport`).
+    - **One read in flight.** An `AtomicBool` slot is held for the whole read, chunks
+      included, and released by `Drop`, so a dropped read frees it. A concurrent read fails
+      with `Backpressure` before any I/O, as the simulator's does, and the session's own
+      guard is never asked for two exchanges. The bounded wait queue of D15 is the guard's
+      and stays unused by the connection: `Capabilities.concurrency` is 1 and a fail-fast
+      refusal is the documented behavior; a queue in front of the connection is a later
+      change to this decision, not a hidden one.
+    - **Chunks and failure scope.** Chunks run sequentially in plan order. A device
+      exception answers a whole chunk: every member gets `exception_item_error` (stamped
+      with the connection state, the latency to the answer and the retries) and the next
+      chunk still runs. A member whose registers or bit do not decode (`TypedDecoder`) fails
+      alone. A chunk whose exchange fails after the retry policy has had its say fails the
+      whole read with that error: items of the other chunks are dropped rather than
+      returned as a snapshot the caller did not ask for, and a chunk that was not answered
+      has no status to attach to its members.
+    - **Deadlines.** Each attempt of each chunk gets `min(request deadline, now +
+      timeouts.request)`, computed when the attempt starts (a `Deadline::after` that
+      overflows the clock is `InvalidConfig`). A request without a deadline therefore gets
+      `timeouts.request` per chunk, a long batch cannot starve its last chunk, and a
+      retry has time to run; a request deadline still bounds every chunk (a later chunk
+      of a batch can time out at it).
+    - **Retry.** After a failed attempt the chunk is sent again, with a new transaction id
+      and a new deadline, when `RetryPolicy::should_retry(kind, attempts)` holds and the
+      request's own deadline has not passed. There is no extra backoff: a `Disconnected`
+      retry rides the guard's reconnect backoff, a `Timeout` retry is immediate. Only the
+      failed chunk is repeated. A device exception is an answer and is never retried;
+      `write` does no I/O and is never retried. `Diagnostics.retries` is the number of
+      retries performed (attempts minus one), as in the simulator and the core
+      documentation; the error message names the chunk (`chunk 2 of 3: ...`) and keeps the
+      session's error as its source. The state in the diagnostics is the state when the read
+      reports the failure (`Reconnecting` after a peer close), the latency is the whole
+      read's.
+    - **Reconnect.** The connection adds nothing to the guard's request-driven reconnect
+      (D15): after a peer close the read in flight fails `Disconnected` and is never
+      replayed on the new transport, the next read waits out the backoff and reopens within
+      its deadline, the transaction counter continues, `close` during the backoff ends
+      `Closed`, and an exhausted budget is `Failed(Disconnected)`. The session issues a
+      transaction id before the guard can refuse the request, so a read that times out in
+      the backoff spends an id; ids are labels, so nothing depends on their being dense.
+    - **Response.** `ReadResponse::builder(&request, started, finished)` with every item,
+      `split_into` the number of chunks, each item's `sampled_at` the clock reading when its
+      chunk's answer was returned by the session (so a later chunk samples later) and
+      `source_time` `None` (F6: Modbus has no device timestamp).
+    - **Writes.** `write` returns `Unsupported(Operation::Write)` with `Diagnostics`
+      `operation = Write` and no I/O (D3). `close` is the session's, under an `info` span.
+    - **Tracing.** `read` opens a `debug` span with `scheme = "modbus-tcp"`, `endpoint` (the
+      `Endpoint` display: host and port, never credentials), `op = "read"`, `items` and
+      `chunks` (recorded once the plan exists); the session's `request` span nests inside it
+      with the `txn` of the chunk in flight. `open`, `write` and `close` have spans of the
+      same shape. A retry is a `debug` event with `chunk`, `attempts` and `kind`.
+    - **Tests.** `tests/read_batches.rs` (split disclosure, mixed success, the 63-DINT and
+      125/126-register and 2000/2001-coil boundaries, exceptions per member, byte order
+      precedence, units, function codes, `source_time` and `sampled_at`, the checks before
+      I/O, write), `tests/retry.rs` (the retry bounds and the per-chunk deadline rule),
+      `tests/reconnect.rs` (the lifecycle across a lost peer) and `tests/connection.rs`
+      (one read in flight, cancellation, deadlines, the terminal states, `open` validation,
+      tracing) run on `FakeTransportFactory`, `FakeTransport` and `FakeClock`; two unit
+      tests in `connection.rs` reach the arms no wire exchange can.
+
 ## Consequences
 - The rest of the crate builds on a small, fully tested vocabulary. The parser has
   nothing to decide about types, areas, bounds or rendering; it maps text to builder
@@ -594,3 +703,15 @@ parses it with `Short.parseShort` and the inventoried files show no range check
   finds `lazy_static`, `log`, `time` and `chrono` absent and `once_cell` only through
   `tracing-core` and `stonecrab-driver-sim`: the only new edge is `stonecrab-modbus` to
   `tracing`, which was already in the graph. The coverage row stays 100 (decision 9).
+- S25: `crates/stonecrab-modbus/tests/read_batches.rs`, `retry.rs`, `reconnect.rs` and
+  `connection.rs` run `ModbusConnection` on `FakeTransportFactory`, `FakeTransport` and
+  `FakeClock` with the wire bytes written out from the MBAP layout and the V1.1b examples
+  (section 6.3: registers 108 to 110 read 555, 0 and 100). They carry `// covers: SPEC
+  mandatory-failure-cases / F3 mixed success, unsupported capability`, `F6 timestamp
+  absence`, `F5` (device restart, network outage, recovery, explicit shutdown during
+  reconnect) and `SPEC connection-and-resource-behavior / read retry bounded`, and the parity
+  row ids. `tests/public_types.rs` gains `ModbusConnection` and `ConnectionDefaults`. The
+  `# Compatibility` sections cite `MB-READ-MERGE`, `MB-CFG-REQUEST-TIMEOUT`,
+  `MB-BYTEORDER-PRECEDENCE` and `MB-TCP-CAPABILITIES`. The D23 check
+  (`cargo tree -e normal,dev -i <name>`, one name at a time) is unchanged: the slice adds no
+  dependency, edge or feature. The coverage row stays 100 (decision 9).

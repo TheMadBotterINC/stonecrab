@@ -30,8 +30,9 @@ EXCLUDE='(^|/)(examples|benches|fuzz|generated)/'
 # A crate directory with no row also fails. Later slices add rows here (driver-sim);
 # codec landed in S15, transport in S16, modbus in S20a and sensors in S28a. The modbus row is 100
 # while the crate is pure (address types only); ADR-0005 sets the whole-crate tier at 95
-# with the pure modules at 100, so the row becomes 95 in the slice that adds the session
-# and connection modules (S24b/S25), which carry the OS-dependent error arms.
+# with the pure modules at 100. The session (S24b) and connection (S25) modules run
+# entirely on the in-memory transport and the fake clock, so they have no OS-dependent
+# arm and the row stays 100 (ADR-0015 decision 9).
 #
 # The transport row is 95 (ADR-0005, ADR-0014): the real-socket connect-timeout arm (the
 # deadline passing while a connect is pending) cannot be induced on loopback, because a

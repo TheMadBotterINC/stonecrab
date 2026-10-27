@@ -181,6 +181,7 @@ gates named were run locally before that commit.
 | S24b | 2026-10-27 | Modbus `ModbusSession` over the transport `ConnectionGuard`: one exchange in flight (a second concurrent request gets `Backpressure` before any I/O; the connection slice serialises chunks), a transaction counter that continues across reconnects and wraps at 0xFFFE, a reply accepted only when transaction id, unit id and function code (exception bit cleared) all match (divergence `MB-READ-MATCH`; upstream matches the transaction id only), mismatches discarded, counted in `SessionStats` as late or mismatched and logged at `warn`, a device exception returned as `Ok(ModbusPdu::Exception)` with `exception_item_error` mapping per D18, a reply that does not decode or fit `MalformedData`; `tracing` adopted by the modbus crate (fuzz lock updated); `MB-READ-MATCH`, `MB-READ-INFLIGHT`, `MB-READ-TIMEOUT` and `MB-EXC-*` rows implemented | check, coverage, lint-attrs, features, machete, dependencies, fuzz, package |
 | S29 | 2026-10-27 | Sensors measurement pipeline: `SensorProfile::tags(&dyn Driver)` (validation first, scheme check, the declared convention passed as `AddressOptions` to every `parse_address`, one tag per measurement and one `<measurement>.<status>` tag per status field), `SensorProfile::measurements(&ReadResponse, wall_now)` with `Measurement` and `Quality` (`Good`, `Uncertain`, `Bad`, `Stale`, `Unknown`; precedence Bad over Stale over Uncertain over Unknown over Good), checked scaling (integers stay integers while every step is integral and in range; Divide or a fractional constant promotes to f64; NaN, infinity and overflow are Bad; `BitField` rolls counters over; integer `Clamp` compares as integers), status bits with inversion, range checks, `source_time` never substituted; testkit `ConventionDriver` double; `SENSORS-TAGS` and `SENSORS-MEASUREMENTS` rows implemented | check, coverage, lint-attrs, features, machete, dependencies, package |
 | S14 | 2026-10-27 | Facade `sim` feature (off by default): `stonecrab::sim` re-exports `stonecrab-driver-sim`, pinned `=0.1.0` per CODING_STANDARDS 20.1 (core, codec and transport keep `0.1`; recorded in the ADR-0014 addendum); `examples/sim_read.rs` reads three tags from `sim://bench` and reports through `tracing` events on a `tracing-subscriber` fmt layer with `ExitCode` (ADR-0011); `tokio`, `tracing` and `tracing-subscriber` 0.3 (`fmt`, `std` only) as facade dev-dependencies; D23 check finds `lazy_static` under `sharded-slab`, wrapped in `deny.toml` and mirrored in `fuzz/deny.toml`, with audit entries for `tracing-subscriber`, `sharded-slab`, `lazy_static` and `thread_local`; `examples` CI job and `mise run examples`; facade test proves the re-export | check, coverage, lint-attrs, features, machete, dependencies, fuzz, examples, package |
+| S25 | 2026-10-27 | Modbus `ModbusConnection` implementing core `Connection` over `ModbusSession`, with `ConnectionDefaults` (unit id, byte and word order; S26's parser fills them): `open(config, factory, clock, defaults)` validates the scheme and frame budget before any transport opens; `read` checks terminal state, cancelled token, Modbus addresses, `count == 1` and the batch plan (item bound, 125/2000 chunk limits) before any I/O, holds one in-flight slot (`Backpressure` otherwise), runs chunks sequentially with a per-attempt deadline `min(request deadline, now + timeouts.request)`, retries a failed chunk per `RetryPolicy` with a fresh transaction id, lets a device exception fail only its chunk's members, decodes members through `TypedDecoder` with tag over block over default order, and builds the `ReadResponse` with `split_into = chunks`, `sampled_at` per chunk and `source_time` None; `write` is `Unsupported` with no I/O; reconnect is the guard's request-driven one; retry, reconnect, merge and capability parity rows implemented. Larger than its size class (about 990 library lines, mostly rustdoc, and 2560 test lines); the modbus coverage row stays 100 (2070/2070) | check, coverage, lint-attrs, features, machete, dependencies, package |
 
 ## Verified evidence and reproduction
 
@@ -211,11 +212,11 @@ Most recent local results for the implementation baseline:
   warnings denied, no-default-features, lint-attrs, feature powerset and unused-
   dependency checks passed.
 - Per-crate line coverage (ADR-0005): `stonecrab-core` 3514/3514 lines (gate 100%),
-  `stonecrab-codec` 181/181 (gate 100%), `stonecrab-modbus` 1582/1582 (gate 100%),
+  `stonecrab-codec` 181/181 (gate 100%), `stonecrab-modbus` 2070/2070 (gate 100%),
   `stonecrab-driver-sim` 2051/2051 (gate 100%), `stonecrab-sensors` 1398/1398 (gate
   100%), `stonecrab-transport` 1216/1220 (gate 95%; the uncovered lines are the
   real-socket deadline-expiry and resolver-failure arms named in ADR-0014),
-  `stonecrab-testkit` 4056/4133 (gate 90%), `stonecrab` n/a (no executable lines).
+  `stonecrab-testkit` 4057/4133 (gate 90%), `stonecrab` n/a (no executable lines).
   Error paths are not excluded. Region coverage is reported in
   `target/coverage-summary.txt` and not gated; do not describe it as branch coverage.
 - Workspace tests and doctests passed on Rust 1.97.1.
@@ -233,17 +234,19 @@ mise exec -- cargo check --locked --workspace --all-features --target aarch64-un
 mise exec -- cargo check --locked --workspace --all-features --target armv7-unknown-linux-gnueabihf
 ```
 
-Hosted CI for `35102e3` (S14) **completed successfully** with the full workflow:
-https://github.com/TheMadBotterINC/stonecrab/actions/runs/40512348443
+Hosted CI for `b71a1c0` **completed successfully** with the full workflow:
+https://github.com/TheMadBotterINC/stonecrab/actions/runs/40514993557
 Green jobs: the six test cells (ubuntu, macOS, Windows on 1.97.1 and 1.99.1), quality
 with the per-crate coverage gate, cross, dependencies, package, dco, features, machete,
 lint-attrs, beta, geiger, fuzz-smoke (six targets) and examples (the `sim_read` example
 runs on the hosted runner). The report-only `semver` job fails until the sibling crates
-exist on crates.io (no baseline) and does not fail the run. Two platform fixes were
-needed on the first hosted runs: the prebuilt cargo-fuzz binary defaults to a musl
-target, so the smoke script passes the host triple; and the drop-mid-write transport
-test is ignored on Windows, where loopback accepts a 32 MiB write at once. Nothing
-establishes the interop, mutation, soak or hardware gates yet.
+exist on crates.io (no baseline) and does not fail the run. Three platform fixes were
+needed on hosted runs: the prebuilt cargo-fuzz binary defaults to a musl target, so the
+smoke script passes the host triple; the drop-mid-write transport test is ignored on
+Windows, where loopback accepts a 32 MiB write at once; and a sensors test that scanned
+a whole `Measurement` Debug string for status bytes was scoped to the protocol status,
+because the real monotonic clock's digits matched a byte once (run 40513557067).
+Nothing establishes the interop, mutation, soak or hardware gates yet.
 
 ## Important implementation and tooling details
 

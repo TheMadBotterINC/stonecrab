@@ -8,6 +8,7 @@
 
 mod address;
 mod batch;
+mod connection;
 mod decode;
 mod framing;
 mod pdu;
@@ -17,6 +18,7 @@ pub use address::{
     AddressConvention, ModbusAddress, ModbusAddressBuilder, ModbusArea, ModbusDataType, UnitId,
 };
 pub use batch::{BatchLimits, Batcher, Chunk, Member};
+pub use connection::{ConnectionDefaults, ModbusConnection};
 pub use decode::TypedDecoder;
 pub use framing::{MbapFramer, MbapHeader, ModbusAdu, TransactionId};
 pub use pdu::{
