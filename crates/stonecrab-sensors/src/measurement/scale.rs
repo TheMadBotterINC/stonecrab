@@ -402,6 +402,32 @@ mod tests {
     }
 
     #[test]
+    fn a_thirty_two_bit_integer_keeps_its_own_type_through_integral_steps() {
+        assert_eq!(
+            run(&PlcValue::I32(7), &[ScaleStep::Multiply(2.0)]),
+            Some(PlcValue::I32(14)),
+            "I32 stays I32 when the result fits"
+        );
+        assert_eq!(
+            run(&PlcValue::I32(i32::MAX), &[ScaleStep::Offset(1.0)]),
+            Some(PlcValue::I64(i64::from(i32::MAX) + 1)),
+            "I32 widens to I64 only when it must"
+        );
+    }
+
+    #[test]
+    fn an_integer_zero_divided_is_positive_zero() {
+        for zero in [PlcValue::U16(0), PlcValue::I16(0), PlcValue::I64(0)] {
+            let quotient = float(run(&zero, &[ScaleStep::Divide(10.0)]));
+            assert_eq!(
+                quotient.to_bits(),
+                0_u64,
+                "{zero:?} / 10 is +0.0, got {quotient:?}"
+            );
+        }
+    }
+
+    #[test]
     fn an_integer_result_widens_when_it_does_not_fit_its_own_type() {
         assert_eq!(
             run(&PlcValue::I16(30_000), &[ScaleStep::Offset(10_000.0)]),

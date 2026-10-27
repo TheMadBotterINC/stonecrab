@@ -46,8 +46,9 @@ dependency order (core, codec, transport, driver-sim, modbus, sensors, facade). 
 rule of `docs/CODING_STANDARDS.md` section 20.5. Yanking does not remove a version from a
 lock file that already holds it, so the advisory states the affected and the fixed
 versions. The mechanics (the `cargo yank` command, the advisory pull request, the order of
-the patch releases) belong to the release process ADR, which is slice S32 of the alpha plan
-and is not written yet.
+the patch releases) are written down in
+[`docs/adr/0017-release-process-and-evidence.md`](docs/adr/0017-release-process-and-evidence.md),
+decision 5.
 
 Because nothing beyond the 0.1.0 placeholder is published, no version has been yanked and
 no advisory has been filed.

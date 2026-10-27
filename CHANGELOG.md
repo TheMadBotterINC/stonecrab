@@ -5,7 +5,9 @@ published: the only published version is `stonecrab` 0.1.0, and publication of t
 needs a separate maintainer approval.
 
 ## Unreleased
-No changes since the alpha sections below.
+- Release process and evidence (no crate changes): ADR-0017, `release.toml`,
+  `mutants.toml`, the `release-evidence` workflow, `docs/evidence/` with the recorded
+  fuzz, mutation and coverage figures, and drafted (not filed) upstream issues.
 
 ## Alpha (unreleased)
 The first pre-release: `stonecrab` 0.2.0 and the 0.1.0 releases of `stonecrab-core`,
@@ -26,9 +28,9 @@ measured substitutes are recorded by the release-evidence slice S32.
 ### stonecrab 0.2.0 (unreleased)
 - **Upstream baseline:** Apache PLC4X v1.0.0 (commit
   `ea229918f5d07700e04d7d69ab1645da679cb700`, pinned in `upstream/manifest.toml`; the
-  inventory covers the Modbus TCP subset only and the source-release signature is not
-  verified). The facade makes no upstream claim of its own; claims are per parity row in
-  `docs/parity/`.
+  inventory covers the Modbus TCP subset only and the source-release signature was
+  verified in S32, see `docs/evidence/alpha.md`). The facade makes no upstream claim of
+  its own; claims are per parity row in `docs/parity/`.
 - **Supported operations:** the facade has no driver. `stonecrab::sim` (feature `sim`)
   re-exports the simulator: connect, read, write, close, scripted failures,
   `simulator-tested`. `stonecrab::modbus` (feature `modbus`) re-exports the Modbus TCP
@@ -181,9 +183,9 @@ Changes:
 ### stonecrab-modbus 0.1.0 (unreleased)
 - **Upstream baseline:** Apache PLC4X v1.0.0 (commit
   `ea229918f5d07700e04d7d69ab1645da679cb700`, pinned in `upstream/manifest.toml`; the
-  inventory covers the Modbus TCP subset only and the source-release signature is not
-  verified). Divergences are rows in `docs/parity/modbus.md` and are listed in
-  `docs/COMPATIBILITY.md`.
+  inventory covers the Modbus TCP subset only and the source-release signature was
+  verified in S32, see `docs/evidence/alpha.md`). Divergences are rows in
+  `docs/parity/modbus.md` and are listed in `docs/COMPATIBILITY.md`.
 - **Supported operations:** Modbus TCP connect, close and reads of coils, discrete inputs,
   holding registers and input registers (function codes 01 to 04) as the 15 numeric and
   bit types, with batching and `split_into` disclosure, request-driven reconnect, retry,

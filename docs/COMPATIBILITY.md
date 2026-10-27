@@ -8,8 +8,10 @@ Upstream baseline: Apache PLC4X v1.0.0, tag object
 `32a524591841ab56d26b032914ce06918148fbb6`, commit
 `ea229918f5d07700e04d7d69ab1645da679cb700`, pinned in
 [`upstream/manifest.toml`](../upstream/manifest.toml). The manifest's inventory is
-incomplete (`inventory_complete = false`) and the source-release signature is not verified
-(`signature_verified = false`); only the Modbus TCP subset is inventoried, in
+incomplete (`inventory_complete = false`); the source-release signature was verified in S32
+(`signature_verified = true`: good signature, key not certified by a trust path; the archive
+contents were not inventoried against the pinned commit, see
+[`evidence/alpha.md`](evidence/alpha.md)); only the Modbus TCP subset is inventoried, in
 [`parity/modbus.md`](parity/modbus.md). Stonecrab is an independent port: it is not
 affiliated with the Apache Software Foundation or Apache PLC4X, and no Apache PLC4X source
 file is copied into this repository.
@@ -198,8 +200,10 @@ The RTU, OPC UA and direct-sensor cases of SPEC.md are out of scope for the alph
 
 Every divergence has a row, an upstream reference at `file:line` of the pinned commit, a
 protocol-standard section or an upstream-issue note, and a regression test, in the
-"Divergences from upstream" table of [`parity/modbus.md`](parity/modbus.md). The rows whose
-reference says "upstream issue to be filed before S32" become a URL or are dropped in S32.
+"Divergences from upstream" table of [`parity/modbus.md`](parity/modbus.md). Upstream
+issues for quirks a, b, c, e, f and g are drafted in `docs/evidence/upstream-issues/` and
+not filed (the cell says "drafted, not filed"); the other rows say that no issue was drafted
+and why.
 
 | Row | Stonecrab differs from upstream by |
 | --- | --- |

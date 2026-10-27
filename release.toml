@@ -1,0 +1,46 @@
+# cargo-release 1.1.7 configuration (ADR-0017, docs/ALPHA_PLAN.md D20).
+#
+# cargo-release is used for exactly three things here: bump the versions (`version`),
+# rewrite the changelog placeholders (`replace`, none yet) and run the pre-release check
+# (`hook`). It creates no tag, publishes nothing and pushes nothing: `publish`, `tag` and
+# `push` are all false, so even `cargo release <level> --execute` could not do those three
+# steps. Do not run the all-in-one command, because cargo-release's own commit step cannot
+# add the Signed-off-by trailer the `dco` job requires. The maintainer runs the steps one
+# by one, commits with `git commit -s -S`, then tags and publishes by hand in the order
+# and with the commands of docs/adr/0017-release-process-and-evidence.md.
+#
+# Every command is a dry run until `--execute` is given, so
+#   cargo release version patch --workspace --exclude stonecrab-testkit
+# prints the planned version changes and modifies nothing.
+
+# Nothing leaves the machine and nothing is tagged or published by cargo-release.
+publish = false
+push = false
+tag = false
+
+# Defense in depth for a maintainer who runs a step by hand: signed commits and tags.
+sign-commit = true
+sign-tag = true
+
+# Releases are cut from master only.
+allow-branch = ["master"]
+
+# One release per crate, versioned independently (CODING_STANDARDS 20.1), never one
+# commit for the whole workspace.
+consolidate-commits = false
+
+# The tag scheme of the ADR: <crate>-v<version>, for example stonecrab-core-v0.1.0 and
+# stonecrab-v0.2.0. It is configured so that a hand-run `cargo release tag` and the ADR
+# agree; with tag = false the step does nothing.
+tag-name = "{{crate_name}}-v{{version}}"
+tag-message = "{{crate_name}} {{version}}"
+pre-release-commit-message = "chore(release): {{crate_name}} {{version}}"
+
+# A sibling's version requirement is rewritten only when it no longer matches. The facade
+# pins its optional siblings with `=` ranges (CODING_STANDARDS 20.1); never loosen them.
+dependent-version = "fix"
+
+# Pre-release check, run after the version bump and before the commit: the archive list of
+# the crate (manifest, include list, license files) must still be buildable. The full
+# `cargo package` build of every archive is `mise run package`.
+pre-release-hook = ["cargo", "package", "--locked", "--allow-dirty", "--list", "--package", "{{crate_name}}"]

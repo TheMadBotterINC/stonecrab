@@ -214,6 +214,9 @@ mod tests {
         }
         // Uppercase X is not the prefix.
         assert_rejected_naming("4X00016", "unrecognised address");
+        // A non-digit before the lowercase x is not a prefix either (not "prefix digit N").
+        assert_rejected_naming("ax00016", "unrecognised address");
+        assert_rejected_naming("xx00016", "unrecognised address");
         assert_rejected_naming("4x00016 ", "unexpected text");
     }
 

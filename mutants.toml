@@ -1,0 +1,68 @@
+# cargo-mutants 27.1.0 configuration (ADR-0017, CODING_STANDARDS 13.9, docs/ALPHA_PLAN.md
+# S32). Use it with `mise run mutants` or `cargo mutants --config mutants.toml`.
+#
+# Scope: the pure parsing, framing, decoding and scaling modules the plan names, where a
+# surviving mutant means a missing assertion on wire or value behavior. I/O, session and
+# connection code is out of scope (those modules run on FakeTransport and FakeClock, and
+# mutating them mostly produces timeouts, not information).
+examine_globs = [
+  # stonecrab-core: typed values and the connection-string grammar.
+  "crates/stonecrab-core/src/value.rs",
+  "crates/stonecrab-core/src/uri.rs",
+  # stonecrab-driver-sim: the simulator address grammar and its configuration parser.
+  "crates/stonecrab-driver-sim/src/address.rs",
+  "crates/stonecrab-driver-sim/src/driver.rs",
+  # stonecrab-modbus: addresses, the PDU codec, MBAP framing, the typed decoder, the read
+  # batcher and the configuration parser (driver.rs parse_config and options.rs).
+  "crates/stonecrab-modbus/src/address.rs",
+  "crates/stonecrab-modbus/src/pdu.rs",
+  "crates/stonecrab-modbus/src/pdu/*.rs",
+  "crates/stonecrab-modbus/src/framing.rs",
+  "crates/stonecrab-modbus/src/framing/*.rs",
+  "crates/stonecrab-modbus/src/decode.rs",
+  "crates/stonecrab-modbus/src/batch.rs",
+  "crates/stonecrab-modbus/src/driver.rs",
+  "crates/stonecrab-modbus/src/options.rs",
+  # stonecrab-sensors: the measurement scaling module.
+  "crates/stonecrab-sensors/src/measurement/scale.rs",
+]
+
+# Run the tests with nextest, as `mise run check` does (.config/nextest.toml). Doctests
+# are not run by nextest, so a mutant only a doctest could kill is reported as a survivor.
+test_tool = "nextest"
+
+# Only the tests of the mutated package run (cargo-mutants default). Every in-scope
+# module has its unit, property and golden tests in its own crate.
+test_workspace = false
+
+# Same feature set as `mise run check`, and the lock file is never rewritten.
+additional_cargo_args = ["--locked", "--all-features"]
+
+# Stop a mutant's test run at its first failing test. The nextest profile keeps going after
+# a failure (fail-fast = false), so one test that hangs on a mutated framer would otherwise
+# turn a mutant already caught by a failing assertion into a timeout.
+additional_cargo_test_args = ["--fail-fast"]
+
+# Mutants that loop forever are cut off by cargo-mutants after a multiple of the baseline
+# test time; the floor keeps a loaded machine from reporting false timeouts.
+minimum_test_timeout = 60.0
+
+# Survivors that no test can kill are listed here, one regular expression per entry, each
+# with the reason a reviewer can check. The expressions match the names printed by
+# `cargo mutants --list` (line numbers are not part of the match, so they survive
+# edits). This list is the equivalent of an `[exclusions]` table: cargo-mutants 27.1.0
+# has no such table. Every entry is an equivalent mutant; the reasons are repeated in
+# docs/evidence/mutants/README.md.
+exclude_re = [
+  # Equivalent mutant. `own_type` maps an I64 input to a rebuilder that returns I64 when
+  # the integer fits an i64. `Num::into_value` already falls back to `PlcValue::I64`
+  # (then `U64`) for any integer the rebuilder rejects, so with the arm deleted the
+  # wildcard rebuilder `|_| None` produces the same value for every input.
+  'scale\.rs:\d+:\d+: delete match arm PlcValue::I64\(_\) in own_type',
+  # Equivalent mutant. In `integral` the mantissa is the low 52 bits of an f64 and bit 52
+  # is always clear, so `mantissa | (1 << 52)` and `mantissa ^ (1 << 52)` are equal.
+  'scale\.rs:\d+:\d+: replace \| with \^ in integral',
+  # Equivalent mutant. In `bits_of` the value 0 takes the negative branch under `<=`, and
+  # `i64::try_from(0)` then yields the same pattern (0) as `u64::try_from(0)` does.
+  'scale\.rs:\d+:\d+: replace < with <= in bits_of',
+]

@@ -9,8 +9,28 @@ commit = "ea229918f5d07700e04d7d69ab1645da679cb700"
 verified_on = "2026-10-27"
 verification = "git ls-remote refs/tags/v1.0.0* and GitHub git-ref API; annotated tag peeled to commit"
 release_url = "https://github.com/apache/plc4x/releases/tag/v1.0.0"
-signature_verified = false
+signature_verified = true
 inventory_complete = false
+
+# Source-release signature check (slice S32). The archive, its detached signature and the
+# project KEYS file were downloaded from downloads.apache.org into a scratch directory,
+# the KEYS file was imported into a temporary GnuPG home (never a personal keyring) and
+# `gpg --verify` was run. Only the result and the identifiers below are recorded here;
+# nothing downloaded is stored in the repository. The archive was verified, not
+# inventoried: its contents were not compared with the pinned commit above.
+[signature]
+verified_on = "2026-10-27"
+archive = "apache-plc4x-1.0.0-source-release.zip"
+archive_url = "https://downloads.apache.org/plc4x/1.0.0/apache-plc4x-1.0.0-source-release.zip"
+signature_file = "apache-plc4x-1.0.0-source-release.zip.asc"
+keys_url = "https://downloads.apache.org/plc4x/KEYS"
+tool = "gpg (GnuPG) 2.5.22"
+result = "Good signature (gpg --verify exit status 0, VALIDSIG)"
+signature_made = "2026-09-03"
+signing_key_fingerprint = "F156813FF315007E36BA6C13089127C15C60D6B9"
+sha512_published = "f654ef368d494bc2c344ff010f5d0db78ff9d1eee9a0588f3fef4ce16597920852f8bd424808f5c2ed02e76b951929fe1736fed34d4c210ad2f4a27b18303cc0"
+sha512_computed = "f654ef368d494bc2c344ff010f5d0db78ff9d1eee9a0588f3fef4ce16597920852f8bd424808f5c2ed02e76b951929fe1736fed34d4c210ad2f4a27b18303cc0"
+trust = "The signing key is listed in the project KEYS file served by downloads.apache.org. gpg reported it as not certified (no trust path in the temporary keyring), so this proves the archive matches a key the project publishes, not the identity of its holder."
 
 [paths]
 api = "plc4j/api/src/main/java/org/apache/plc4x/java/api"
@@ -26,7 +46,6 @@ subscription_emulation = "plc4j/utils/subscription-emulation"
 items = [
   "Complete protocol-by-transport-by-operation source inventory",
   "Inventory capabilities in non-Java implementations",
-  "Verify source-release signatures",
   "Map every required behavior to a planned test ID",
   "Review all configuration and address aliases before implementation",
   "Inventory the Modbus RTU/ASCII connections (rtu/ and ascii/ packages were not read)",

@@ -53,8 +53,9 @@ verify. Ids are never renumbered; a retired row keeps its id and says so.
 Scope of the inventory: this record covers the Modbus TCP driver at the pinned commit
 (`modbus-tcp`, its read path, address grammar, configuration, data types, byte order,
 exceptions and the interop server). Non-Modbus protocols, non-Java implementations and
-the source-release signature inventory remain open (`inventory_complete = false` in the
-manifest) and do not gate the alpha.
+the inventory of the source-release archive contents against the pinned commit remain open
+(`inventory_complete = false` in the manifest; the archive signature itself was verified
+in S32) and do not gate the alpha.
 
 ## File key
 Citations use `Key:line` against the verbatim copies of the pinned files. Paths are
@@ -467,10 +468,14 @@ audit; `l` was added while reading `Tag.java` and is not in the audit.
 | MB-QUIRK-L | (l) `equals` and `hashCode` ignore the byte order, so two tags that differ only in `byte-order` compare equal | Tag:301-319 | not reproduced; implemented | Byte order is part of the parsed address value: `addresses_differing_only_in_byte_order_are_not_equal` |
 
 ## Divergences from upstream
-Every row has a reference; "none filed" is not allowed for a not-ported upstream defect.
-"Upstream issue to be filed before S32" marks a not-ported
-upstream defect (or behavioral difference) whose issue has not been opened; S32 turns each
-into a URL or removes the row.
+Every row has a reference: a protocol section, an upstream issue URL, or the stated state
+of its issue.
+S32 (ADR-0017) drafted the issues for quirks a, b, c, e, f and g under
+`docs/evidence/upstream-issues/` and did not file them: filing on the upstream tracker
+needs the maintainer's approval, so those rows say "drafted, not filed". Rows outside
+those six say that no issue was drafted and why. Quirks d, i and l keep their divergence
+rows with "no issue drafted" and the reason in the cell. When the maintainer files a draft,
+the cell becomes the issue URL.
 A divergence row reuses the id of the row it qualifies, so a citation of that id resolves to
 both the behavior row and its divergence.
 
@@ -478,26 +483,26 @@ both the behavior row and its divergence.
 | --- | --- | --- | --- | --- |
 | MB-ADDR-BARE-40001 | Bare short forms (`40001`, `400001`, `00001`, `10001`, `30001`) are accepted unconditionally (TagHR:33, 74-78; TagCoil:33) | Accepted only with `address-convention=plc4x`; otherwise `InvalidAddress` naming the ambiguity | V1.1b section 4.4 (PDU addresses are 0..65535; the one-based 4x numbering is a convention, not a protocol rule) | `bare_40001_is_rejected_unless_convention_is_explicit` |
 | MB-ADDR-BIT-TYPES | Non-BOOL types parse on coil and discrete-input, fail at read with UNSUPPORTED (TagCoil:100; Opt:132-139) | `InvalidAddress` at parse time | V1.1b sections 6.1 and 6.2 (coil and discrete-input values are single bits) | `typed_coil_address_is_rejected_at_parse_time` |
-| MB-CFG-UNIT-ID | `unit-id` parsed with `Short.parseShort`, no 0..=255 check in the inventoried files (Tag:222-224); default cast to short (Conn:394-400) | Bounded 0..=255 (`UnitId`); outside is `InvalidAddress` or `InvalidConfig`; the bound is Stonecrab inference, not observed upstream behavior | upstream issue to be filed before S32 (the MBAP unit identifier is one byte, Mspec:54) | `unit_id_256_is_rejected`, `config_unit_id_rejects_256_and_negative` |
-| MB-READ-MATCH | Reply matched on transaction id only (Conn:145-157) | Reply validated on transaction id, unit id and function code; mismatches discarded, counted (`late_replies`, `mismatched_replies`) and logged at warn | V1.1b section 7 (an exception response echoes the function code with the high bit set); the unit identifier echo is the MBAP rule of the Modbus Messaging on TCP/IP Implementation Guide V1.0b (not retained, see UNVERIFIED); upstream issue to be filed before S32 | `reply_with_wrong_txn_is_discarded`, `reply_with_wrong_unit_is_discarded`, `reply_with_wrong_function_code_is_discarded`, `late_reply_after_timeout_is_discarded_and_the_next_correlation_succeeds` |
-| MB-CFG-UNKNOWN | Unknown parameters are reported, not rejected (DB:206-209, 315-319) | Rejected with `InvalidConfig` | upstream issue to be filed before S32 (behavioral difference, not a protocol rule; a misspelt key silently leaves the default) | `config_unknown_key_is_rejected` |
+| MB-CFG-UNIT-ID | `unit-id` parsed with `Short.parseShort`, no 0..=255 check in the inventoried files (Tag:222-224); default cast to short (Conn:394-400) | Bounded 0..=255 (`UnitId`); outside is `InvalidAddress` or `InvalidConfig`; the bound is Stonecrab inference, not observed upstream behavior | no upstream issue drafted in S32: the bound is a Stonecrab inference, not an observed upstream defect (the MBAP unit identifier is one byte, Mspec:54) | `unit_id_256_is_rejected`, `config_unit_id_rejects_256_and_negative` |
+| MB-READ-MATCH | Reply matched on transaction id only (Conn:145-157) | Reply validated on transaction id, unit id and function code; mismatches discarded, counted (`late_replies`, `mismatched_replies`) and logged at warn | V1.1b section 7 (an exception response echoes the function code with the high bit set); the unit identifier echo is the MBAP rule of the Modbus Messaging on TCP/IP Implementation Guide V1.0b (not retained, see UNVERIFIED); upstream issue drafted, not filed: needs maintainer approval (`docs/evidence/upstream-issues/quirk-e.md`) | `reply_with_wrong_txn_is_discarded`, `reply_with_wrong_unit_is_discarded`, `reply_with_wrong_function_code_is_discarded`, `late_reply_after_timeout_is_discarded_and_the_next_correlation_succeeds` |
+| MB-CFG-UNKNOWN | Unknown parameters are reported, not rejected (DB:206-209, 315-319) | Rejected with `InvalidConfig` | upstream issue drafted as a question inside the quirk f draft, not filed: needs maintainer approval (`docs/evidence/upstream-issues/quirk-f.md`); behavioral difference, not a protocol rule; a misspelt key silently leaves the default | `config_unknown_key_is_rejected` |
 | MB-EXC-03 | Code 3 maps to INVALID_DATA (Conn:579) | `DeviceException` with the raw code retained | V1.1b section 7 (code 03 ILLEGAL DATA VALUE) | `exception_03_maps_to_device_exception_with_raw_code` |
-| MB-EXC-05 | Code 5 maps to OK (Conn:581); on a read the consequence is INFERRED to be a failed whole read future (NullPointerException via `allOf`, Conn:255-258), not per-tag results (see MB-EXC-05) | `DeviceException`; never success | V1.1b section 7 (code 05 ACKNOWLEDGE: request accepted and processing, no data returned); upstream issue to be filed before S32 | `exception_05_maps_to_device_exception_not_success` |
+| MB-EXC-05 | Code 5 maps to OK (Conn:581); on a read the consequence is INFERRED to be a failed whole read future (NullPointerException via `allOf`, Conn:255-258), not per-tag results (see MB-EXC-05) | `DeviceException`; never success | V1.1b section 7 (code 05 ACKNOWLEDGE: request accepted and processing, no data returned); no upstream issue drafted in S32 (not among quirks a, b, c, e, f, g): the consequence is INFERRED and was not reproduced; left to maintainer triage | `exception_05_maps_to_device_exception_not_success` |
 | MB-EXC-UNKNOWN | A code outside the enum (Mspec:410-421, no code 9): what the generated parser does is UNVERIFIED | `decode_response` refuses an exception response whose code is not one of the ten defined ones (`InvalidDiscriminator`, field `exception code`); `encode_response` refuses to write one; the session reports such a reply as `MalformedData`, and `exception_item_error` keeps a constructed `Unknown` code as `DeviceException` with the raw number | V1.1b section 7 (the defined exception codes) | `exception_response_with_an_undefined_code_is_refused`, vectors `tcp/response-exception-code-09` and `tcp/response-exception-code-0c` |
 | MB-ADDR-SELECTION | `[n]` and `[a..b]` selections accepted (ANP:181-226; Tag:80-89) | `InvalidAddress` at parse time, typed | V1.1b section 4.4 (addressing model); scope deferral D16, M2 | `selection_range_is_rejected_at_parse_time` |
 | MB-ADDR-STRING | `STRING(n)`, `WSTRING(n)`, CHAR, WCHAR accepted (Tag:206-221; RegCodec:163-194) | Typed `InvalidAddress` at parse time | V1.1b section 4.2 (data encoding); scope deferral D16, M2 | `string_type_is_rejected_at_parse_time` |
-| MB-TYPE-TIME | TIME and DATE names parse, cannot be encoded (RegCodec:191-192; Tag:279-282) | Typed `InvalidAddress` at parse time | V1.1b section 4.2 (no calendar types in the protocol); upstream issue to be filed before S32 | `time_family_names_are_rejected_at_parse_time` |
+| MB-TYPE-TIME | TIME and DATE names parse, cannot be encoded (RegCodec:191-192; Tag:279-282) | Typed `InvalidAddress` at parse time | V1.1b section 4.2 (no calendar types in the protocol); no upstream issue drafted in S32 (not among quirks a, b, c, e, f, g): the generated `DataItem` code is not in the repository (manifest pending item), so the behavior cannot be cited in full | `time_family_names_are_rejected_at_parse_time` |
 | MB-ADDR-EXTENDED | `extended-register`/`6x` accepted, FC20 read (TagExt:54-112; Conn:411-432) | Typed `InvalidAddress` at parse time | V1.1b section 6.14 (FC20 Read File Record); scope deferral D16, M2 | `extended_register_is_rejected_at_parse_time` |
 | MB-READ-GAP | Gap between non-adjacent tags is read as part of the block (Opt:247, 300) | No gap reads (D19); adjacent or overlapping merge only | V1.1b section 7 (exception 02 when any address in the span is not mapped, so a gap read can fail neighbors) | `batcher_does_not_bridge_gaps` |
-| MB-LIMIT-ADU | MBAP length field accepted without an upper bound when sizing a frame (Codec:49-54; `MessageCodecBase` not retained; UNVERIFIED) | Length 2..=254, ADU at most 260 before the body is allocated | V1.1b section 4.1 (PDU at most 253 bytes); upstream issue to be filed before S32 | `mbap_length_255_is_rejected` |
-| MB-QUIRK-A | UDP configuration-class check uses a BouncyCastle `UDPTransport` import (Drv:34, 66-67) | Not ported; UDP rejected | upstream issue to be filed before S32 | `driver_rejects_other_transport_codes` |
-| MB-QUIRK-B | Split FC20 read drops the second item (Conn:517-518) | Not ported; extended registers rejected | upstream issue to be filed before S32 | `extended_register_is_rejected_at_parse_time` |
-| MB-QUIRK-C | Dead FC05 echo branch (Conn:371-377) | Not ported; write unsupported at alpha | upstream issue to be filed before S32 | `write_is_unsupported_with_nothing_sent_and_the_capabilities_say_so` |
-| MB-QUIRK-D | Ping reports OK on any reply (Conn:205-210) | Not ported; ping deferred | upstream issue to be filed before S32 | `ping_address_is_validated_but_unused` (no ping operation exists to test) |
-| MB-QUIRK-F | Test suite passes undeclared `unit-identifier` (MF:30-33) | Not ported; unknown keys rejected | upstream issue to be filed before S32 | `config_misspelt_unit_identifier_is_rejected` |
-| MB-QUIRK-G | `4x:INT` reaches `Integer.parseInt(null)` (Tag:48; TagHR:83; consequence INFERRED) | Typed `InvalidAddress` | upstream issue to be filed before S32 | `four_x_without_digits_is_rejected` |
-| MB-QUIRK-I | Polling receive loop with `onSpinWait` for non-async transports (CB:169-177); whether the tcp transport is async is UNVERIFIED | Not ported; no polling loop | upstream issue to be filed before S32 | none: structural, see the quirk row above |
-| MB-QUIRK-L | `equals` and `hashCode` ignore byte order (Tag:301-319) | Byte order participates in address equality | upstream issue to be filed before S32 | `addresses_differing_only_in_byte_order_are_not_equal` |
+| MB-LIMIT-ADU | MBAP length field accepted without an upper bound when sizing a frame (Codec:49-54; `MessageCodecBase` not retained; UNVERIFIED) | Length 2..=254, ADU at most 260 before the body is allocated | V1.1b section 4.1 (PDU at most 253 bytes); no upstream issue drafted in S32 (not among quirks a, b, c, e, f, g): `MessageCodecBase` is not retained and the behavior is UNVERIFIED | `mbap_length_255_is_rejected` |
+| MB-QUIRK-A | UDP configuration-class check uses a BouncyCastle `UDPTransport` import (Drv:34, 66-67) | Not ported; UDP rejected | upstream issue drafted, not filed: needs maintainer approval (`docs/evidence/upstream-issues/quirk-a.md`) | `driver_rejects_other_transport_codes` |
+| MB-QUIRK-B | Split FC20 read drops the second item (Conn:517-518) | Not ported; extended registers rejected | upstream issue drafted, not filed: needs maintainer approval (`docs/evidence/upstream-issues/quirk-b.md`) | `extended_register_is_rejected_at_parse_time` |
+| MB-QUIRK-C | Dead FC05 echo branch (Conn:371-377) | Not ported; write unsupported at alpha | upstream issue drafted, not filed: needs maintainer approval (`docs/evidence/upstream-issues/quirk-c.md`) | `write_is_unsupported_with_nothing_sent_and_the_capabilities_say_so` |
+| MB-QUIRK-D | Ping reports OK on any reply (Conn:205-210) | Not ported; ping deferred | no issue drafted: Stonecrab has no ping operation (`MB-TCP-PING`), so the behavior is absent rather than different, and the upstream report would be speculative | `ping_address_is_validated_but_unused` (no ping operation exists to test) |
+| MB-QUIRK-F | Test suite passes undeclared `unit-identifier` (MF:30-33) | Not ported; unknown keys rejected | upstream issue drafted, not filed: needs maintainer approval (`docs/evidence/upstream-issues/quirk-f.md`) | `config_misspelt_unit_identifier_is_rejected` |
+| MB-QUIRK-G | `4x:INT` reaches `Integer.parseInt(null)` (Tag:48; TagHR:83; consequence INFERRED) | Typed `InvalidAddress` | upstream issue drafted, not filed: needs maintainer approval (`docs/evidence/upstream-issues/quirk-g.md`) | `four_x_without_digits_is_rejected` |
+| MB-QUIRK-I | Polling receive loop with `onSpinWait` for non-async transports (CB:169-177); whether the tcp transport is async is UNVERIFIED | Not ported; no polling loop | no issue drafted: a design difference (readiness-driven I/O, D15) and the upstream transport behavior is UNVERIFIED | none: structural, see the quirk row above |
+| MB-QUIRK-L | `equals` and `hashCode` ignore byte order (Tag:301-319) | Byte order participates in address equality | no issue drafted: the upstream behavior may be intended, and it is a behavioral difference that a reviewer should weigh before it is reported | `addresses_differing_only_in_byte_order_are_not_equal` |
 
 ## MSpec feature matrix
 Nothing generated; PDUs hand-written from modbus.mspec (decision D6) under
@@ -565,7 +570,7 @@ with `protocol_spec` or `adversarial` as its source. The upstream FC04 request a
   comes from the Modbus Messaging on TCP/IP Implementation Guide, which is not retained.
 - Modbus Application Protocol V1.1b section numbers (4.1, 4.2, 4.4, 6.1 to 6.4, 6.14 and 7):
   the PDF is not retained here and the numbers are from its published table of contents;
-  confirm against a checked-in copy before S32.
+  confirm against a copy of the specification when one is available.
 - The example bytes of the S21 spec vectors (`fixtures/modbus/tcp/`, sections 6.1 to 6.4,
   6.5, 6.12, 6.14 and 7) and the section 7 exception names (the variants use the
   "SERVER DEVICE" wording, the older edition of the specification says "SLAVE DEVICE"):

@@ -9,8 +9,10 @@ its own commit; the slice log below records what each one landed.
 
 Stonecrab is an independent native Rust port of Apache PLC4X, prioritizing sensor
 acquisition. The repository is at the **alpha baseline**: the alpha defined in
-[`docs/ALPHA_PLAN.md`](docs/ALPHA_PLAN.md) is built and its definition of done is met, and
-the release work (slice S32) is next. Nothing of the alpha is published.
+[`docs/ALPHA_PLAN.md`](docs/ALPHA_PLAN.md) is built, its definition of done is met, and
+the release evidence and process (slice S32, ADR-0017, `docs/evidence/alpha.md`) are
+recorded. Nothing of the alpha is published, tagged or posted upstream: those steps need
+the maintainer's separate approval (see "Recommended continuation").
 
 - Repository: https://github.com/TheMadBotterINC/stonecrab
 - Primary/default branch: **`master`**, locally and remotely.
@@ -282,6 +284,7 @@ gates named were run locally before that commit.
 | S27 | 2026-10-27 | Interoperability against pymodbus 3.8.6: `interop/pymodbus/` holds a first-party server (`server.py`, read with `tomllib` from the interop register map, `pymodbus` 3.8.6 pinned, `python:3.12-slim` pinned by index digest, non-root) and `interop.sh` (build, start, a readiness probe that performs a real FC03 read, nextest over the ten `interop_` tests with a count guard, the `modbus_tcp_read` example, evidence, stop); `crates/stonecrab-modbus/tests/interop_pymodbus.rs` (ten tests, ignored unless `STONECRAB_INTEROP_MODBUS` is set; a mutated server made four of them fail, so they are not vacuous); testkit `CountingFactory` (opens, frames and bytes through any transport factory) gives the contract suite an exact `io_probe` over a real socket; the suite against pymodbus: 14 passed, 0 failed, 9 named skips (timing, on-demand disconnect and device exception, writes); CI job `interop` (ubuntu, every push and PR, `interop-evidence` artifact with image id, `pip freeze`, server log, contract report, nextest and example output) and `mise run interop`; finding: pymodbus 3.8.6 does not validate FC01/FC02 spans, so the server's bit blocks cover the whole address space; `MB-TCP-CONNECT` and the four read rows automated-verified; `MB-INTEROP-*` rows implemented; ADR-0015 accepted (decision 16); the modbus README support table moves read and interoperability to interoperability-tested. Verified locally through Docker and green on the hosted runner (run 40543567845) | check, coverage, lint-attrs, features, machete, dependencies, interop, package |
 | S30 | 2026-10-27 | Synthetic profiles and the definition-of-done example: `profiles/synthetic/modbus-tcp/{temperature_transmitter,pressure_flow_level,discrete_state}.toml` addressed to the pymodbus map under `address_convention = "plc4x"` (REAL temperature at holding register 26 with a coil status field plus a little-endian twin at 300, INT scaled by 0.1 to kPa, UDINT L/min, UINT mm with an inverted status, eight coils with inversion and discrete-input status fields), `profiles/synthetic/sim/` twins on `STATE/` addresses with the same names, units, ranges and quality maps (a test compares them), `profiles/README.md` (schema, the synthetic level, one section per file, no named device profile, repository data not shipped); facade features `sensors` (with the loader) and `full`, `stonecrab::sensors`, sibling pinned `=0.1.0`; `examples/profile_read.rs` (`STONECRAB_URL`, `STONECRAB_PROFILE`, `--expect-good` fails on any non-Good quality; ADR-0011 output rule) runs green with every measurement Good against `sim://bench` (examples job and `mise run examples`) and against pymodbus (interop job `profiles` step, `profiles.txt` evidence); `SENSORS-SYNTHETIC-PROFILES` implemented; ADR-0016 addendum. The sensors crate README's support rows are updated in S31 | check, coverage, lint-attrs, features, machete, dependencies, examples, interop, package |
 | S31 | 2026-10-27 | Documentation reconciled to the shipped alpha: ARCHITECTURE.md "shipped at alpha" notes for the crate graph (D22), the core contracts, the transport layer, the Modbus crate, the lifecycle state machine and the feature matrix; README.md with the alpha statement, the capability matrix (support levels per `docs/SPEC.md`), the `profile_read` quick start and the full gate list; the seven crate READMEs and the testkit README at final support levels; `docs/COMPATIBILITY.md` (new); parity records at final statuses with real test ids; `scripts/parity-check.sh` as the `parity` CI job and `mise run parity` (every `# Compatibility` id resolves, every implemented row is referenced; eleven uncited rows were cited from rustdoc and test comments); SECURITY.md status, supported versions and the yanking rule; CHANGELOG per-crate alpha sections opening with the four SPEC.md release-note items; this file rewritten to the alpha baseline with the slice table kept | check, coverage, lint-attrs, parity, package |
+| S32 | 2026-10-27 | Release evidence and process: ADR-0017 (publish order, signed per-crate tags prepared as commands, the yank procedure of CODING_STANDARDS 20.5, the evidence policy; references the ADR-0005 waiver); `release.toml` for cargo-release 1.1.7 with publish, push and tag off; `mutants.toml` and `mise run mutants` with one recorded run over fourteen scoped files (569 mutants: 462 caught, 0 missed, 107 unviable, three equivalent mutants excluded with reasons; the first run's seven survivors were killed by four added tests, test code only) stored as `docs/evidence/mutants/outcomes.json`; seven concurrent 30-minute fuzz runs with no artifact (`scripts/fuzz-evidence.sh`); the `release-evidence` dispatch workflow and `mise run sbom` (CycloneDX 1.5 per crate, package lists, absolute paths scrubbed); `docs/evidence/alpha.md` with the checklist; the upstream 1.0.0 source-release signature verified in a temporary keyring (`signature_verified = true`, nine pending items left); six upstream issues drafted under `docs/evidence/upstream-issues/`, not filed; the weekly `scheduled` job now runs the mutation scope and an advisory dry run; pinned tools cargo-mutants 27.1.0, cargo-cyclonedx 0.5.9, cargo-release 1.1.7 | check, coverage, lint-attrs, parity, machete, dependencies, sbom, package |
 
 ## Verified evidence and reproduction
 
@@ -317,7 +320,7 @@ documentation, one script and comments in Rust sources only):
   dependency checks passed.
 - Per-crate line coverage (ADR-0005): `stonecrab-core` 3577/3577 lines (gate 100%),
   `stonecrab-codec` 181/181 (gate 100%), `stonecrab-modbus` 2758/2758 (gate 100%),
-  `stonecrab-driver-sim` 2051/2051 (gate 100%), `stonecrab-sensors` 1398/1398 (gate
+  `stonecrab-driver-sim` 2051/2051 (gate 100%), `stonecrab-sensors` 1411/1411 (gate
   100%), `stonecrab-transport` 1216/1220 (gate 95%; the uncovered lines are the
   real-socket deadline-expiry and resolver-failure arms named in ADR-0014),
   `stonecrab-testkit` 4606/4679 (gate 90%), `stonecrab` n/a (no executable lines).
@@ -347,9 +350,11 @@ mise exec -- cargo check --locked --workspace --all-features --target armv7-unkn
 
 ### Hosted CI and the per-OS matrix
 
-The latest hosted run recorded for this baseline is the one for `f19be4c` (S30), which
+The latest hosted run recorded for this baseline is the one for `8f5c3d0` (S31), which
 **completed successfully** (every job green except the report-only `semver`; `scheduled`
 is skipped on push):
+https://github.com/TheMadBotterINC/stonecrab/actions/runs/40557968227
+The run for `f19be4c` (S30, the definition of done on the hosted runner):
 https://github.com/TheMadBotterINC/stonecrab/actions/runs/40548582722
 The earlier run, for `0429da3` (S27):
 https://github.com/TheMadBotterINC/stonecrab/actions/runs/40543567845
@@ -362,12 +367,14 @@ https://github.com/TheMadBotterINC/stonecrab/actions/runs/40543567845
 | `dependencies`, `package`, `dco`, `features`, `machete`, `lint-attrs` | green |
 | `geiger` (no first-party `unsafe` outside `forbid(unsafe_code)`), `beta` (report only) | green |
 | `fuzz-smoke` (seven targets) | green |
+| `parity` (`scripts/parity-check.sh` and its self-test) | green |
 | `examples` (`sim_read` and the three `profile_read --expect-good` runs on the hosted runner) | green |
 | `interop` (pymodbus 3.8.6 on the amd64 runner: ten interop tests, the `modbus_tcp_read` example, the `profiles` step, the `interop-evidence` artifact) | green |
 | `semver` (report only) | fails until the sibling crates exist on crates.io (no baseline); does not fail the run |
 
-Not yet recorded: the hosted run for the S31 commit, which adds the `parity` job. Check it
-after the push and record its URL here.
+Not yet recorded: the hosted run for the S32 commit (release evidence; it adds the
+`release-evidence` workflow, which runs on dispatch only). Check it after the push and
+record its URL here.
 
 Platform fixes that hosted runs needed, for the next maintainer: the prebuilt cargo-fuzz
 binary defaults to a musl target, so the smoke script passes the host triple; the
@@ -379,7 +386,9 @@ non-ASCII authority and value text that no key contains (its echo invariant had 
 unsound), with the three crash inputs kept as corpus seeds and named regression tests
 (CONTRIBUTING, fuzz findings).
 
-Nothing establishes the mutation, soak, benchmark or hardware gates yet.
+Mutation testing is established (`mise run mutants`, one recorded run in
+`docs/evidence/mutants/`, weekly in the `scheduled` job); nothing establishes the soak,
+benchmark or hardware gates yet.
 
 ## Review policy and the single-maintainer waiver
 
@@ -443,29 +452,31 @@ per-crate coverage tiers, the CI gates and, in its S31 addendum, the parity gate
 - Annotated tag object: `32a524591841ab56d26b032914ce06918148fbb6`.
 - Peeled implementation commit: `ea229918f5d07700e04d7d69ab1645da679cb700`.
 - Tag/commit relation verified against Git and the GitHub ref API.
-- `signature_verified = false`: the source-release signature has not been verified.
-  S32 verifies it or records why it cannot.
+- `signature_verified = true` (S32): the 1.0.0 source-release archive carries a good
+  signature from a key listed in the project KEYS file, verified in a temporary keyring
+  (fingerprint, SHA-512 and the trust caveat are in the manifest's `[signature]` table);
+  the archive contents were not inventoried against the pinned commit.
 - `inventory_complete = false`: the open items in the manifest `[pending]` table are:
   1. Complete protocol-by-transport-by-operation source inventory.
   2. Inventory capabilities in non-Java implementations.
-  3. Verify source-release signatures.
-  4. Map every required behavior to a planned test ID.
-  5. Review all configuration and address aliases before implementation.
-  6. Inventory the Modbus RTU/ASCII connections (the `rtu/` and `ascii/` packages were
+  3. Map every required behavior to a planned test ID.
+  4. Review all configuration and address aliases before implementation.
+  5. Inventory the Modbus RTU/ASCII connections (the `rtu/` and `ascii/` packages were
      not read).
-  7. Inspect the generated `DataItem` behavior for the TIME/DATE family (generated code
+  6. Inspect the generated `DataItem` behavior for the TIME/DATE family (generated code
      is not in the repository).
-  8. Confirm which XML the little-endian IT loads and the test transport internals.
-  9. Compare the XML-serialized `ModbusADU` step format of the all-datatypes suites with
+  7. Confirm which XML the little-endian IT loads and the test transport internals.
+  8. Compare the XML-serialized `ModbusADU` step format of the all-datatypes suites with
      `DriverTestsuite.xml`.
-  10. Check the Modbus Application Protocol V1.1b section numbers cited in
-      `docs/parity/modbus.md` against a retained copy.
+  9. Check the Modbus Application Protocol V1.1b section numbers cited in
+     `docs/parity/modbus.md` against a retained copy.
 
 **M0 is not complete.** The Modbus TCP subset is inventoried: `docs/parity/modbus.md`
 carries stable row ids with test ids, a divergence table with references and an UNVERIFIED
 list; the manifest records the inventoried files and line ranges under
 `[inventory.modbus_tcp]`. None of the open items gates the alpha. Every divergence row
-marked "upstream issue to be filed before S32" becomes a URL or is dropped in S32.
+now cites a protocol section, a drafted upstream issue (`docs/evidence/upstream-issues/`,
+not filed: filing needs the maintainer's approval) or the reason none was drafted.
 
 Verified Modbus pitfalls are recorded in `docs/parity/modbus.md`: numeric address
 groups are decimal; `x` in forms such as `4x00016` is an area marker, not hexadecimal.
@@ -493,16 +504,17 @@ Deferred features, each a deferred row in `docs/parity/modbus.md` or an item of 
   the parity backlog); board adapters (M2S); OPC UA (M3); EtherNet/IP and S7 (M4);
   code generation and the remaining baseline protocols (M5).
 - **Hardware**: no physical device has been tried and no hardware record exists.
-- **Gates not run**: mutation testing (one recorded run is S32), the 8-hour release fuzz
-  run and 24-hour soak, benchmarks, differential tests against PLC4J, branch coverage
-  (region coverage is reported), and a blocking `semver` job (no published baseline).
+- **Gates not run**: the 8-hour release fuzz run and 24-hour soak (the recorded runs are
+  30 minutes per target), benchmarks, differential tests against PLC4J, branch coverage
+  (region coverage is reported), `cargo publish --dry-run` and a blocking `semver` job
+  (no published baseline).
 - **Upstream vectors**: the Apache-2.0 PLC4X test vectors are not redistributed (P4), so
   every test vector in the repository is first-party. This keeps the four byte-order mode
   rows at `implemented` instead of `automated-verified`.
 - **Not verified by the interop run**: timing over a real clock, dropped links and device
   exceptions on demand (a stock pymodbus has no fault hooks), unit-id correlation, and any
   server other than pymodbus 3.8.6.
-- **Hosted CI** for the S31 commit is not yet recorded (see "Hosted CI").
+- **Hosted CI** for the S32 commit is not yet recorded (see "Hosted CI").
 - A queued-cancellation case is exercised on `ConnectionGuard` only, not on the simulator
   (which has no wait queue); the real-socket connect-timeout arm of the transport is
   uncovered and named in ADR-0014.
@@ -523,34 +535,28 @@ These are actions outside the code (plan P1 to P5):
 
 ## Recommended continuation
 
-The next slice is **S32, release evidence and process** (plan: `docs/ALPHA_PLAN.md`, "S32
-build: release evidence and process" and "Alpha release checklist"). Nothing is published
-and no tag is pushed without separate maintainer approval.
+The alpha plan is executed (S01 to S32; S04a and S04b wait for P4). What remains is the
+maintainer's: nothing below is done by an automated run, and nothing is published,
+tagged or posted without separate approval.
 
-1. Push the S31 commit, check the hosted run (including the new `parity` job) and record
-   its URL and the per-OS results in "Hosted CI" above; if it is red, fix before S32.
-2. Write ADR-0017 (versioning D1, release tooling and review D20; reference the ADR-0005
-   waiver): `release.toml` for cargo-release with `publish = false` and `push = false`, the
-   manual publish order (core, codec, transport, driver-sim, modbus, sensors, facade) and
-   the yank procedure of SECURITY.md (`cargo yank --vers`, the advisory pull request, patch
-   releases in dependency order).
-3. Add `mutants.toml` and record one run in which every survivor is killed or listed in
-   `[exclusions]` with a reason; add the `release-evidence` `workflow_dispatch` job with
-   the SBOM step; record one fuzz run of at least 30 minutes per target (seven targets).
-4. Write `docs/evidence/alpha.md` (interop log pointer, image digest, fuzz durations,
-   mutation kill rates, per-crate line and region coverage, matrix results, upstream
-   baseline, gates not run, divergence references with upstream issues filed for the rows
-   marked "to be filed before S32" or the reason none was filed).
-5. Verify the upstream source-release signature and flip `signature_verified`, or record
-   why it cannot be done.
-6. Check the facade's dependency ranges against CODING_STANDARDS 20.1: the three optional
-   siblings are pinned `=0.1.0`, but the facade depends on `stonecrab-core` with the caret
-   range `0.1`.
-7. Run the alpha release checklist of the plan, prepare signed tags `<crate>-v<version>`
-   without pushing them, review `cargo package --list` per crate and run `cargo publish
-   --dry-run` in dependency order with a fresh `CARGO_HOME`.
-8. Keep P1 to P4 visible to the maintainer; P4 unblocks S04a and S04b and the
+1. Record the hosted run of the S32 commit in "Hosted CI" above and run the
+   `release-evidence` workflow once (`workflow_dispatch`); attach its artifact to the
+   draft pre-release when one exists.
+2. Close the maintainer prerequisites P1 to P3 (repository settings) and decide P4 (the
+   upstream vector redistribution), which unblocks S04a and S04b and the
    `automated-verified` status of the byte-order rows.
+3. Decide whether to file the six drafted upstream issues under
+   `docs/evidence/upstream-issues/` on the Apache PLC4X tracker and record the URLs in
+   the divergence table of `docs/parity/modbus.md`.
+4. Release per ADR-0017: run the alpha release checklist in `docs/evidence/alpha.md`,
+   `cargo publish --dry-run` per crate in dependency order with a fresh `CARGO_HOME`,
+   create and push the signed tags `<crate>-v<version>`, then publish core, codec,
+   transport, driver-sim, modbus, sensors and the facade in that order. Harmonise the
+   facade's `stonecrab-core` range to `=0.1.0` first if CODING_STANDARDS 20.1 is to be
+   read strictly (recorded in ADR-0017).
+5. After publication: make `semver` blocking, re-run `scheduled` (30-minute fuzz,
+   mutation scope, advisory dry run) and plan M2 (writes, Modbus RTU and ASCII, board
+   adapters) from `docs/ALPHA_PLAN.md`'s deferred items.
 
 Keep changes reviewable, commit tested slices one signed commit per green slice, and
 maintain the per-crate coverage gates. No first-party unsafe, panics on input, unbounded

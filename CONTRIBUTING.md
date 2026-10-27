@@ -65,6 +65,12 @@ its own PR and contains:
 3. A full regression run, including interop and fuzz-smoke.
 4. A migration note in `CHANGELOG.md` under `Unreleased`.
 
+## Releases
+
+Releases, signed tags, the yank procedure and the release evidence are described in
+`docs/adr/0017-release-process-and-evidence.md`. Only the maintainer publishes crates or
+pushes tags, each with a separate approval.
+
 ## Fuzz findings
 
 A crash or hang found by fuzzing is handled per `docs/CODING_STANDARDS.md` section

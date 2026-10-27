@@ -1,0 +1,35 @@
+name: Release evidence
+# Manual only. Builds the release evidence of ADR-0017 that CI does not keep: one
+# CycloneDX SBOM per published crate and the archive file lists. Nothing here publishes,
+# tags or pushes, and the job needs read access to the repository only. `mise run sbom`
+# runs the same script (scripts/sbom.sh) locally into target/release-evidence/.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+# Pins follow ci.yml: dtolnay/rust-toolchain is pinned to the commit behind its v1 tag and
+# always gets an explicit `toolchain:`; actions/checkout and actions/upload-artifact float
+# on a major tag (ADR-0005 decision 9). cargo-cyclonedx 0.5.9 is the version pinned in
+# mise.toml and is installed with --locked.
+jobs:
+  release-evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
+        with:
+          toolchain: "1.99.1"
+      - name: Install cargo-cyclonedx 0.5.9
+        run: cargo install --locked --version 0.5.9 cargo-cyclonedx
+      - name: SBOMs and archive file lists
+        # cargo cyclonedx --format json --all-features --spec-version 1.5, then
+        # cargo package --locked --workspace --exclude stonecrab-testkit --list
+        run: scripts/sbom.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-evidence
+          path: target/release-evidence/
+          if-no-files-found: error

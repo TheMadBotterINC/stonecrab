@@ -449,6 +449,30 @@ mod tests {
         }
     }
 
+    // covers: ALPHA_PLAN S26 / section 13.7 a refused value names the rule it broke
+    #[test]
+    fn text_that_is_not_digits_names_the_digits_rule_and_a_huge_number_the_bounds() {
+        for key in [
+            "default-unit-identifier",
+            "max-coils-per-request",
+            "max-registers-per-request",
+        ] {
+            for value in ["", "abc", "+1", "-1", "1.5", "12a"] {
+                let text = refusal(&format!("{HOST}?{key}={value}")).to_string();
+                assert!(
+                    text.contains("whole number in decimal digits"),
+                    "{key}={value:?} should name the digits rule: {text}"
+                );
+            }
+            // Only digits, but too large even for u64: the bounds message applies.
+            let text = refusal(&format!("{HOST}?{key}=99999999999999999999999")).to_string();
+            assert!(
+                text.contains("must be a whole number from"),
+                "{key} huge value should name the bounds: {text}"
+            );
+        }
+    }
+
     // covers: ALPHA_PLAN S26 / address-convention mapped into the AddressOptions
     #[test]
     fn address_convention_plc4x_reaches_the_address_options() {
