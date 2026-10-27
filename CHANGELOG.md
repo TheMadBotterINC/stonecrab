@@ -133,5 +133,10 @@
 - Add an unpublished deterministic address fixture testkit for contract tests.
 - Add `FakeClock`, `block_on`, `block_on_with`, `poll_once` and a counting waker to the
   unpublished testkit for deterministic, sleep-free async tests.
+- Add the unpublished testkit's `fixtures` feature: the golden-vector loader (`load_dir`,
+  `load_hex`, `GoldenVector`, `VectorSource`, `Provenance`, `GoldenError`) that enforces
+  "every vector is listed in `PROVENANCE.toml`", and `InteropMap`, the reader of the
+  first-party `fixtures/modbus/interop/register-map.toml`. The upstream vectors themselves
+  wait for maintainer prerequisite P4.
 ## stonecrab 0.1.0
 - Publish the specification-stage package. No industrial protocol support.

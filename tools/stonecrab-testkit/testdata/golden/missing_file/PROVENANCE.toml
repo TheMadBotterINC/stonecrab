@@ -1,0 +1,4 @@
+[[file]]
+path = "absent.toml"
+origin = "self-test, authored by hand"
+license = "Apache-2.0"

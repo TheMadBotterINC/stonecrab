@@ -120,3 +120,47 @@ assert_eq!(factory.probes()[0].sent(), vec![Bytes::from_static(b"ping")]);
 # #[cfg(not(feature = "net"))]
 # fn main() {}
 ```
+
+## Golden vectors and the interop map (feature `fixtures`)
+
+The `fixtures` feature is off by default so that core's dev-dependency on this crate stays
+free of `serde`, `serde_json` and `toml`. It adds the loader for the repository's golden
+vectors (section 13.6 of the coding standards) and the reader of the first-party interop register map.
+
+- `load_dir(dir)` reads `dir/PROVENANCE.toml`, then, for every `[[vector]]` it lists,
+  `<name>.hex` and the optional `<name>.expected.json`, and returns `GoldenVector`
+  (`name`, `source`, `bytes`, `expected`, `must_fail`, `note`). It enforces "every vector
+  is listed": a `.hex` or `.expected.json` that the provenance file does not name, a
+  listed vector without a `.hex` and a missing `[[file]]` are errors, and every
+  `GoldenError` names the file. `load_hex(text)` decodes one `.hex` text: one line of hex
+  digits, whitespace allowed, `#` comments and blank lines skipped, odd length or a
+  non-hex character is an error.
+- `VectorSource` is `upstream_fixture`, `protocol_spec`, `captured` or `adversarial`. The
+  `expected.json` is authored from the specification or a capture, never by running a
+  decoder; the loader only parses it.
+- `PROVENANCE.toml` has two optional arrays of tables, unknown keys rejected.
+  `[[vector]]`: `name` (relative path, no extension, `/` separated), `source`, `origin`
+  (upstream file and revision, or the specification section), `license` (SPDX),
+  `must_fail` (optional, default false), `note` (optional). `[[file]]`: `path`
+  (relative; must exist), `origin`, `license`, `note` (optional), for first-party
+  fixtures that are not wire vectors.
+- `InteropMap::load` reads `fixtures/modbus/interop/register-map.toml`: block `sizes`,
+  holding registers, the little-endian `holding_extension`, `coils`, `discrete_inputs`
+  and `input_registers`, each labeled with its `MB-INTEROP-*` row id, register words as
+  hexadecimal integers. Addresses are logical; the wire address is one less.
+
+```rust
+# #[cfg(feature = "fixtures")]
+# fn main() -> Result<(), Box<dyn std::error::Error>> {
+use std::path::Path;
+use stonecrab_testkit::{InteropMap, load_dir};
+
+let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/modbus");
+assert!(load_dir(&dir)?.is_empty(), "upstream vectors arrive with maintainer approval P4");
+let map = InteropMap::load(&dir.join("interop/register-map.toml"))?;
+assert_eq!(map.holding_extension[0].words, [0xDC0F, 0x4940]);
+# Ok(())
+# }
+# #[cfg(not(feature = "fixtures"))]
+# fn main() {}
+```

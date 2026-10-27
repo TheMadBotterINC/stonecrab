@@ -10,6 +10,10 @@ mod fake_factory;
 mod fake_transport;
 #[cfg(feature = "net")]
 mod framer;
+#[cfg(feature = "fixtures")]
+mod golden;
+#[cfg(feature = "fixtures")]
+mod interop;
 #[cfg(feature = "net")]
 mod peer;
 #[cfg(feature = "net")]
@@ -24,6 +28,13 @@ pub use fake_factory::{FakeTransportFactory, OpenCall};
 pub use fake_transport::{FakeTransport, FakeTransportProbe};
 #[cfg(feature = "net")]
 pub use framer::LengthPrefixedFramer;
+#[cfg(feature = "fixtures")]
+pub use golden::{
+    FileEntry, GoldenError, GoldenVector, HexProblem, Provenance, VectorEntry, VectorSource,
+    load_dir, load_hex, load_provenance,
+};
+#[cfg(feature = "fixtures")]
+pub use interop::{BitRun, BlockSizes, InteropMap, RegisterEntry};
 #[cfg(feature = "net")]
 pub use peer::{MAX_PEER_DELAY, ScriptedPeer};
 #[cfg(feature = "net")]

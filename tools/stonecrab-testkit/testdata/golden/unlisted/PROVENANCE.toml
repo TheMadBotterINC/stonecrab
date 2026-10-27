@@ -1,0 +1,5 @@
+[[vector]]
+name = "listed"
+source = "protocol_spec"
+origin = "self-test, authored by hand"
+license = "Apache-2.0"

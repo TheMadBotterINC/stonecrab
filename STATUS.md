@@ -59,9 +59,11 @@ ADR-0004 explicitly overrides the original `main` branch policy with `master`.
   tasks); TCP transport, framing layer with resync, `SystemClock` and the reconnect
   jitter source (ADR-0014).
 - `tools/stonecrab-testkit`: unpublished deterministic fixtures, development-only:
-  `FixtureAddress`, `FakeClock`, `block_on`, `block_on_with`, `poll_once`, `CountingWaker`,
-  and behind its `net` feature `Script`, `ScriptedPeer`, `FakeTransport` and
-  `FakeTransportFactory` (the sanctioned transport doubles of CODING_STANDARDS 13.5).
+  `FixtureAddress`, `FakeClock`, `block_on`, `block_on_with`, `poll_once`, `CountingWaker`;
+  behind its `net` feature `Script`, `ScriptedPeer`, `FakeTransport`,
+  `FakeTransportFactory` and `LengthPrefixedFramer` (the sanctioned doubles of
+  CODING_STANDARDS 13.5); behind its `fixtures` feature the golden-vector loader and
+  `InteropMap`.
 - Empty default feature sets in the publishable crates; no protocol feature flags yet.
 - Apache license/notices, contribution/security policy, changelog and ADRs.
 - Local mise tasks, CI workflow, package allow-lists and VS Code test debugging.
@@ -162,6 +164,7 @@ gates named were run locally before that commit.
 | S28a | 2026-10-27 | New crate `stonecrab-sensors` 0.1.0 with the profile schema (version 1, unknown fields rejected) and the `toml` feature loader with a size bound; `serde` 1 and `toml` 0.9 adopted (D23 check clean; `toml_parser` pinned in the lock to keep one `winnow`); fourth fuzz target `fuzz_sensors_profile_toml` (60 s clean); ADR-0016; `docs/parity/sensors.md`; validation and the measurement pipeline are S28b/S29 | check, coverage, lint-attrs, features, machete, dependencies, fuzz, package |
 | S28b | 2026-10-27 | Sensors `SensorProfile::validate` collecting every error (duplicate names, unknown or empty unit, missing byte or word order for wide Modbus types, overlapping status bits, count above one, invalid scale steps, unknown quality references, unknown or missing address convention) and a fixed 19-entry UCUM-style unit table; eleven new `ProfileError` variants; parity row `SENSORS-VALIDATION` implemented | check, coverage, lint-attrs, machete, package |
 | S18 | 2026-10-27 | Transport `Framer` trait and `FramedTransport` (bounded receive buffer, `next_frame`, `send_frame`, `resync` that discards until a boundary and fails `Disconnected` at its deadline); testkit `LengthPrefixedFramer`; parity rows `TRANSPORT-FRAMING`, `TRANSPORT-RESYNC` implemented | check, coverage, lint-attrs, machete, package |
+| S04a (part) | 2026-10-27 | Testkit `fixtures` feature: golden-vector loader (`load_dir`, `load_hex`, `PROVENANCE.toml` schema enforced: every `.hex` listed, every listed vector present), `InteropMap` over the first-party `fixtures/modbus/interop/register-map.toml` authored from the `MB-INTEROP-*` rows; `serde_json` adopted (D23 clean). The upstream vector copies and the NOTICE update wait for prerequisite P4 | check, coverage, lint-attrs, machete, dependencies, package |
 
 ## Verified evidence and reproduction
 
@@ -302,7 +305,9 @@ operation row is implemented yet.
   address parser, the read batcher and the validated profile loader exist; nothing reads
   a device yet).
 - OPC UA, EtherNet/IP/Logix, S7 and remaining upstream protocols.
-- Code generation or retained upstream fixture corpus.
+- Code generation; the retained upstream fixture corpus (blocked on maintainer
+  prerequisite P4, approval to redistribute the Apache-2.0 PLC4X vectors). The
+  first-party interop register map and the loader exist under `fixtures/modbus/`.
 - Parser fuzzing (the `fuzz-smoke` job exists but has no targets), mutation testing,
   soak/load/benchmark evidence, branch-coverage gates, and the `interop`, `regen` and
   blocking `semver` jobs from the source standards.

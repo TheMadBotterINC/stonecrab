@@ -1,0 +1,197 @@
+# Interop register map for the Stonecrab pymodbus peer (decision D8, S27).
+#
+# First-party, Apache-2.0. Authored from docs/parity/modbus.md, section "Interop register
+# map" (rows MB-INTEROP-*); every entry carries its row id in `row`. Nothing here is
+# copied from upstream's modbus_server.py. Parsed by stonecrab_testkit::InteropMap
+# (testkit feature `fixtures`), which rejects unknown keys, overlapping entries, a word
+# count that does not match `type`, and entries outside the block sizes.
+#
+# Conventions
+#   address  the logical tag address used in the upstream tags. The wire address is one
+#            less (pymodbus without zero_mode stores tag address T at index T).
+#   words    the register words as TOML hexadecimal integers, in register order. Each word
+#            is one 16-bit register; a word's two bytes are sent high byte first. `value`
+#            is the human-readable meaning and is documentation, but the testkit tests
+#            check that `words` encode `value` for `type`.
+#   Unless `byte_order` says otherwise, multi-register values are BIG_ENDIAN (high word
+#   first, high byte first).
+#
+# Not listed: the holding-register write area 100-200 (starts at zero) and the coil write
+# area 100-120 (initially false). Writes are deferred (D3), so alpha never reads them;
+# every position not listed below holds zero or false.
+
+# Block sizes from the prose of the parity section (Srv:84, 160, 183, 205).
+[sizes]
+holding_registers = 201
+coils = 2000
+discrete_inputs = 2000
+input_registers = 21
+
+# ---- Holding registers 1 to 31 -------------------------------------------------------
+
+[[holding_registers]]
+row = "MB-INTEROP-HR-01"
+address = 1
+type = "BOOL"
+value = "true"
+words = [0x0001]
+
+[[holding_registers]]
+row = "MB-INTEROP-HR-02"
+address = 2
+type = "BYTE"
+value = "42"
+words = [0x002A]
+
+[[holding_registers]]
+row = "MB-INTEROP-HR-02"
+address = 3
+type = "WORD"
+value = "42424"
+words = [0xA5B8]
+
+[[holding_registers]]
+row = "MB-INTEROP-HR-03"
+address = 4
+type = "DWORD"
+value = "4242442424"
+words = [0xFCDE, 0x88B8]
+
+[[holding_registers]]
+row = "MB-INTEROP-HR-03"
+address = 6
+type = "LWORD"
+value = "4242442424242424242"
+words = [0x3AE0, 0x2EE8, 0x4D04, 0x49B2]
+
+[[holding_registers]]
+row = "MB-INTEROP-HR-04"
+address = 10
+type = "SINT"
+value = "-42"
+words = [0xFFD6]
+
+[[holding_registers]]
+row = "MB-INTEROP-HR-04"
+address = 11
+type = "USINT"
+value = "42"
+words = [0x002A]
+
+[[holding_registers]]
+row = "MB-INTEROP-HR-04"
+address = 12
+type = "INT"
+value = "-2424"
+words = [0xF688]
+
+[[holding_registers]]
+row = "MB-INTEROP-HR-04"
+address = 13
+type = "UINT"
+value = "42424"
+words = [0xA5B8]
+
+[[holding_registers]]
+row = "MB-INTEROP-HR-05"
+address = 14
+type = "DINT"
+value = "-242442424"
+words = [0xF18C, 0x9F48]
+
+[[holding_registers]]
+row = "MB-INTEROP-HR-05"
+address = 16
+type = "UDINT"
+value = "4242442424"
+words = [0xFCDE, 0x88B8]
+
+[[holding_registers]]
+row = "MB-INTEROP-HR-06"
+address = 18
+type = "LINT"
+value = "-4242442424242424242"
+words = [0xC51F, 0xD117, 0xB2FB, 0xB64E]
+
+[[holding_registers]]
+row = "MB-INTEROP-HR-06"
+address = 22
+type = "ULINT"
+value = "4242442424242424242"
+words = [0x3AE0, 0x2EE8, 0x4D04, 0x49B2]
+
+[[holding_registers]]
+row = "MB-INTEROP-HR-07"
+address = 26
+type = "REAL"
+value = "3.141593"
+words = [0x4049, 0x0FDC]
+
+[[holding_registers]]
+row = "MB-INTEROP-HR-07"
+address = 28
+type = "LREAL"
+value = "2.71828182846"
+words = [0x4005, 0xBF0A, 0x8B14, 0x5FCF]
+
+# ---- Stonecrab-only little-endian region (D8) ----------------------------------------
+# Outside the upstream block of 201 registers, so a server must size its holding block to
+# cover it. REAL 3.141593 under LITTLE_ENDIAN: the four bytes are DC 0F 49 40 and each
+# register carries two consecutive bytes high first.
+
+[[holding_extension]]
+row = "MB-INTEROP-LE"
+address = 300
+type = "REAL"
+value = "3.141593"
+byte_order = "LITTLE_ENDIAN"
+words = [0xDC0F, 0x4940]
+
+# ---- Coils 1 to 10 and discrete inputs 1 to 10 ---------------------------------------
+
+[coils]
+row = "MB-INTEROP-COIL"
+address = 1
+values = [true, false, true, true, false, true, false, false, true, false]
+
+[discrete_inputs]
+row = "MB-INTEROP-DI"
+address = 1
+values = [false, true, false, true, true, false, true, true, false, true]
+
+# ---- Input registers 1 to 7 ----------------------------------------------------------
+
+[[input_registers]]
+row = "MB-INTEROP-IR"
+address = 1
+type = "BOOL"
+value = "true"
+words = [0x0001]
+
+[[input_registers]]
+row = "MB-INTEROP-IR"
+address = 2
+type = "INT"
+value = "-2424"
+words = [0xF688]
+
+[[input_registers]]
+row = "MB-INTEROP-IR"
+address = 3
+type = "UINT"
+value = "42424"
+words = [0xA5B8]
+
+[[input_registers]]
+row = "MB-INTEROP-IR"
+address = 4
+type = "DINT"
+value = "-242442424"
+words = [0xF18C, 0x9F48]
+
+[[input_registers]]
+row = "MB-INTEROP-IR"
+address = 6
+type = "REAL"
+value = "3.141593"
+words = [0x4049, 0x0FDC]

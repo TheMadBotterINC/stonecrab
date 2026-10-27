@@ -1,0 +1,7 @@
+[[vector]]
+name = "short-frame"
+source = "adversarial"
+origin = "self-test, authored by hand"
+license = "Apache-2.0"
+must_fail = true
+note = "MBAP header cut after four bytes; has no expected.json on purpose"

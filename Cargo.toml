@@ -22,6 +22,7 @@ proptest = { version = "1.12", default-features = false, features = ["std"] }
 tokio = { version = "1.54", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 serde = { version = "1.0", default-features = false, features = ["std"] }
+serde_json = { version = "1.0", default-features = false, features = ["std"] }
 toml = { version = "0.9", default-features = false, features = ["parse", "serde", "std"] }
 stonecrab-testkit = { path = "tools/stonecrab-testkit" }
 

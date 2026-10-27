@@ -1,0 +1,33 @@
+# Provenance of every fixture under fixtures/modbus (CODING_STANDARDS 13.6).
+#
+# Schema, enforced by stonecrab_testkit::load_dir (testkit feature `fixtures`):
+#
+#   [[vector]]  one per wire vector; the loader reads <name>.hex and the optional
+#               <name>.expected.json next to this file, and fails when a .hex or
+#               .expected.json file exists that no [[vector]] lists, or when a listed
+#               vector has no .hex.
+#     name      path of the vector relative to this file, no extension, "/" separated
+#               (for example "tcp/read-input-registers-request")
+#     source    "upstream_fixture" | "protocol_spec" | "captured" | "adversarial"
+#     origin    upstream file path and revision, or the specification section
+#     license   SPDX expression of the vector's own license
+#     must_fail optional, default false; true when a decoder must reject the bytes
+#     note      optional free text
+#
+#   [[file]]    one per non-vector first-party fixture
+#     path      path relative to this file; must exist
+#     origin    where the content was authored from
+#     license   SPDX expression
+#     note      optional free text
+#
+# No upstream vector is listed yet. The Apache-2.0 PLC4X vectors (the six <raw> frames of
+# ParserSerializerTestsuite.xml and the verbatim XML copies under upstream/) are added
+# under maintainer prerequisite P4 (written approval to redistribute them with NOTICE
+# attribution), with one [[vector]] entry each whose source is "upstream_fixture". Until
+# then this directory holds first-party files only.
+
+[[file]]
+path = "interop/register-map.toml"
+origin = "docs/parity/modbus.md, section \"Interop register map\" (rows MB-INTEROP-*) and decision D8"
+license = "Apache-2.0"
+note = "First-party. Read by the S25 contract fixture and the S27 pymodbus server generator through stonecrab_testkit::InteropMap. Nothing is copied from upstream's modbus_server.py."

@@ -253,3 +253,38 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
   not need, and is larger), and a hand-written reader (rejected above).
 - Review date: 2026-10-27. `cargo-deny` passes advisory, license, ban and source checks;
   this records the trust boundary, not a memory-safety certification.
+
+## serde_json 1.0.154 (stonecrab-testkit, feature `fixtures`)
+- Purpose: parse the `<name>.expected.json` files of the golden-vector loader into
+  `serde_json::Value` (CODING_STANDARDS 13.6, ADR-0009). The files are authored by hand
+  from the protocol specification or a capture, and the loader only parses them. The
+  crate is declared in `[workspace.dependencies]` and used only by the unpublished
+  testkit behind the off-by-default feature `fixtures`; no published crate depends on it
+  (ADR-0009 decision 2).
+- License: MIT OR Apache-2.0.
+- Features: `[workspace.dependencies]` has `serde_json = { version = "1.0",
+  default-features = false, features = ["std"] }`. `std` enables `memchr/std` and
+  `serde_core/std`. `preserve_order` (`indexmap`, `foldhash`), `arbitrary_precision`,
+  `float_roundtrip`, `raw_value` and `alloc` stay off. The testkit reads JSON only, so
+  nothing serializes through `serde_json`.
+- Transitive crates in this configuration: `itoa` 1.0.18 (MIT OR Apache-2.0), `memchr`
+  2.8.3 (Unlicense OR MIT), `zmij` 1.0.23 (MIT; the float formatter that replaced `ryu`)
+  and `serde_core` 1.0.229 (already audited under `serde`).
+- Unsafe: `serde_json` is not `forbid(unsafe_code)`; its sources mention the keyword 16
+  times (UTF-8 and slice shortcuts in the reader and number formatting), `itoa` 13, `zmij`
+  70 (SIMD and `transmute` helpers) and `memchr` 340 (vectorized search). `serde_json` and
+  `zmij` have a `build.rs` that only emits `cargo:rustc-cfg` lines (limb width, compiler
+  version and `opt_level` probes); neither compiles native code or touches the network.
+  First-party code stays `forbid(unsafe_code)`.
+- Banned crates: `cargo tree -e normal,dev -i once_cell` finds the one existing path,
+  `once_cell` through `tracing-core` (wrapped in `deny.toml`, ADR-0012), and
+  the same result holds with `--workspace --all-features -e normal,dev,build`, so
+  `serde_json`, `itoa`, `memchr`, `zmij` and the `fixtures` feature add no path to it.
+  `lazy_static`, `log`, `time` and `chrono` match no package (ADR-0009 addendum).
+- Alternatives: `toml` for the expected files (rejected: the expected values are
+  structured trees that other tools produce as JSON, and the plan names JSON), `miniserde`
+  and `json` (smaller, but no `deny_unknown_fields`-style strictness and not the format
+  crate ADR-0009 sanctions), and a hand-written JSON reader (rejected: it would be a
+  parser written only to avoid a dependency that never reaches a published crate).
+- Review date: 2026-10-27. `cargo-deny` passes advisory, license, ban and source checks;
+  this records the trust boundary, not a memory-safety certification.

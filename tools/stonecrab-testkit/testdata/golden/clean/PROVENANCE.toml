@@ -1,0 +1,18 @@
+# Self-test tree: a clean directory with two vectors and one non-vector file.
+[[vector]]
+name = "read-request"
+source = "protocol_spec"
+origin = "self-test, authored by hand"
+license = "Apache-2.0"
+note = "FC03 read of two holding registers, unit 1"
+
+[[vector]]
+name = "tcp/read-response"
+source = "captured"
+origin = "self-test, authored by hand"
+license = "Apache-2.0"
+
+[[file]]
+path = "notes.toml"
+origin = "self-test, authored by hand"
+license = "Apache-2.0"
