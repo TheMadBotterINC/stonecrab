@@ -177,5 +177,7 @@
   "every vector is listed in `PROVENANCE.toml`", and `InteropMap`, the reader of the
   first-party `fixtures/modbus/interop/register-map.toml`. The upstream vectors themselves
   wait for maintainer prerequisite P4.
+- Add the unpublished testkit's driver contract suite (`ContractSuite`, `ContractFixture`,
+  `ContractReport`): 23 named cases that every driver runs, green against `sim`.
 ## stonecrab 0.1.0
 - Publish the specification-stage package. No industrial protocol support.

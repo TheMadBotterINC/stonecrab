@@ -54,6 +54,39 @@ assert_eq!(clock.now(), deadline);
 # Ok::<(), stonecrab_core::PlcError>(())
 ```
 
+## Driver contract suite
+
+`ContractSuite::run(driver, uri, fixture)` runs one set of 23 cases, named as sentences,
+against any `Driver` and returns a `ContractReport`. It needs no feature. A
+`ContractFixture` is the suite's window into the device: a `readable` address, a
+`rejected` one (parseable, refused by the device), a `foreign` one, an `io_probe` counter
+that must not move when the suite says "no I/O", a `device_reads` counter, the `clock`
+the driver uses (a `FakeClock`), an optional `writable` address with a value, and the
+optional hooks `inject_disconnect`, `inject_timeout`, `inject_device_exception` and
+`inject_unknown_after_transmit`, each of which arms one failure for the next operation.
+
+Each case is `Passed`, `Failed(reason)` or `Skipped(reason)`; the suite never panics on a
+driver failure, and a case the driver or the fixture cannot exercise is skipped with a
+reason (`driver reports read unsupported`, `fixture cannot inject timeout`), never
+omitted. `ContractReport` counts the outcomes, `is_green` means no failure and at least
+one pass, and `Display` lists every case with its outcome, its reason and the
+mandatory case it covers. The retry and read-only cases rebuild the parsed configuration
+through `ConnectionConfig::builder`, so the fixture needs no knob for them. The
+queued-cancellation case is not part of the suite (it needs a wait queue; see
+`ConnectionGuard`). The full run against the simulator is
+`crates/stonecrab-driver-sim/tests/contract.rs`; ADR-0009's S13 addendum has the details.
+
+```rust,no_run
+use stonecrab_core::Driver;
+use stonecrab_testkit::{ContractFixture, ContractSuite, FakeClock, block_on_with};
+
+fn check(driver: &dyn Driver, fixture: &ContractFixture, clock: &FakeClock) {
+    let report = block_on_with(clock, ContractSuite::run(driver, "sim://bench", fixture));
+    let report = report.expect("the run always resolves");
+    assert!(report.is_green(), "{report}");
+}
+```
+
 ## Network doubles (feature `net`)
 
 The `net` feature is off by default so that core's dev-dependency on this crate stays

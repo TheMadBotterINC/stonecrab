@@ -151,3 +151,70 @@ are absent, so each name was queried alone, with the `fixtures` feature on (`--w
   `stonecrab-driver-sim`, already wrapped in `deny.toml` (ADR-0012). `serde_json` (with
   `itoa`, `memchr`, `zmij`), `serde` and `toml` add none.
 - `lazy_static`, `log`, `time`, `chrono`: no package matches. No `deny.toml` change.
+
+## Addendum (S13): the driver contract suite
+Slice S13 adds `contract` to `tools/stonecrab-testkit` (SPEC.md 'Test layers', contract
+suite). It needs no feature, no dependency and no root-manifest change: it uses only
+`stonecrab-core`, so core's dev-dependency on the testkit stays free of Tokio and serde.
+
+**What it is.** `ContractSuite::run(driver, uri, fixture)` returns an `OpFuture` that always
+resolves to a `ContractReport`; the caller drives it with `block_on_with` on the fixture's
+`FakeClock`. The suite parses `uri` with `driver.parse_config`, connects once per case so
+that a case that wrecks a connection (disconnect, close) never poisons the next, and runs
+23 cases named as sentences in a fixed order. Each case carries the mandatory case it
+covers (`ContractCase.covers`) and what it needs (`ContractCase.requires`); the report
+prints both. An assertion never panics: it ends the case with `Failed(reason)` naming the
+observed value, and a driver that fails to parse or connect fails every case that needs
+the connection instead of aborting the run.
+
+**Skip policy.** A case is `Skipped(reason)` and never omitted when the driver or the
+fixture cannot exercise it: `driver reports read unsupported`, `driver reports write
+unsupported`, `fixture cannot inject <fault>`, `fixture has no writable address`, and, for
+the one case that needs an unsupported write, `driver reports write supported; the case
+needs it unsupported`. `ContractReport::is_green` is "no failure and at least one pass",
+so a run that skips everything is not green. A skip is a statement about the fixture, so
+each driver crate's test asserts the skips it expects by name; the simulator expects
+exactly one.
+
+**Fixture knobs.** `ContractFixture` is the suite's only view of the device:
+- required: `clock` (the clock the driver's connections use; it must be deterministic,
+  because the suite builds deadlines from it and checks that a lost reply fails after
+  exactly `timeouts.request`), a `readable` address text, a `rejected` address text
+  (parses, but the device refuses it), a `foreign` address (an `Arc<dyn ProtocolAddress>`
+  that is not the driver's), an `io_probe` counter that must not move when the suite says
+  "no I/O" (for the simulator, device reads plus `sink_writes`) and a `device_reads`
+  counter;
+- optional: `writable` (an address text and a value of its type, for the write cases),
+  `declares_device_time` (so `source_time` is expected instead of forbidden), and the arming
+  hooks `inject_disconnect`, `inject_timeout`, `inject_device_exception` and
+  `inject_unknown_after_transmit`, each arming one failure for the next operation that
+  reaches the device.
+
+Two knobs that the plan considered were not needed. The retry policy and the access policy
+are rebuilt from the parsed `ConnectionConfig` through `ConnectionConfig::builder` (every
+field has an accessor), with `max_attempts` 3 and `AccessPolicy::ReadOnly`, so there is no
+`retry_max_attempts` or `read_only_uri`; a configuration that carries credentials cannot
+be copied (`Secret` is not `Clone`) and those cases skip. The `uri` must not itself raise
+the read retry above one attempt. The fixture hooks arm faults on a device shared by all
+connections, so after every case that armed a fault the suite reads until a read succeeds
+(a leftover step is drained) and fails the case if it cannot.
+
+**Not a suite case.** The queued-cancellation case (F4 queued) needs a wait queue. The
+simulator has none, so `ConnectionGuard` covers it (S19) and the suite does not.
+
+**Plan wording that changed.** "Every failure carries diagnostics" is four cases (rejected
+before I/O, timeout, disconnect, device exception) so that one missing hook skips one
+assertion by name. The device-exception retry case asserts at most one device read, not
+exactly one: the simulator's `DeviceException` leaves the device untouched, and what the
+case proves is that the refusal is surfaced and not retried. `Connecting` cannot be
+observed from outside a driver (a connection exists only after `connect` returns), so the
+lifecycle case checks `Connected` on the returned connection and then `Closing` (when the
+close does not finish on its first poll) and `Closed` by value through `StateWatch`.
+
+**Where it runs.** The testkit's own tests cover the report, the assertion helpers and the
+skip logic with an in-crate driver that supports nothing (CODING_STANDARDS 13.5 makes the
+testkit a home for doubles). The full run is `crates/stonecrab-driver-sim/tests/contract.rs`,
+which also breaks the fixture on purpose (a probe that moves, a counter that never moves,
+a rejected address that reads, a device time the simulator lacks, a hook that arms
+nothing) and asserts that the named case fails, so a suite that cannot fail would be
+noticed. Later drivers (S25, S31) add a run of their own.

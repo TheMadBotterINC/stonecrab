@@ -88,7 +88,18 @@ in the connection's `Capabilities` and enforced: the simulator never splits a ba
 | Subscribe, browse and discover | not supported |
 | Scripted acquisition failures (delay, timeout, disconnect, device exception) | simulator-tested |
 | Bounded read retry | simulator-tested |
-| Common driver contract suite | planned |
+| Common driver contract suite | simulator-tested |
+
+The read and write rows rest on two kinds of evidence: this crate's own tests, and the
+common driver contract suite of the unpublished testkit (`ContractSuite`), which
+`tests/contract.rs` runs against a simulated device under `block_on_with` on a
+`FakeClock`. The run is green with one named skip: "an unsupported write performs no
+I/O" is skipped because the simulator supports write. The fixture wires the suite's fault
+hooks to `SimDevice::push_failure` (`Disconnect`, `Timeout`, `DeviceException`,
+`UnknownAfterTransmit`), its I/O probe to the device read counter plus `sink_writes`, and
+its item budget to `SimDevice::with_max_items`; the suite rebuilds the parsed
+configuration for the retry and read-only cases. The queued-cancellation case is not a
+suite case, because the simulator has no wait queue.
 
 ## Failure script
 A `SimDevice` owns a `FailureScript`, a first-in first-out queue of at most 1024

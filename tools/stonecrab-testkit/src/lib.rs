@@ -3,6 +3,7 @@
 
 mod address;
 mod clock;
+mod contract;
 mod executor;
 #[cfg(feature = "net")]
 mod fake_factory;
@@ -21,6 +22,9 @@ mod script;
 
 pub use address::FixtureAddress;
 pub use clock::FakeClock;
+pub use contract::{
+    CaseOutcome, ContractCase, ContractFixture, ContractReport, ContractSuite, Fault, Requires,
+};
 pub use executor::{CountingWaker, block_on, block_on_with, poll_once, poll_once_with};
 #[cfg(feature = "net")]
 pub use fake_factory::{FakeTransportFactory, OpenCall};

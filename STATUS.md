@@ -65,7 +65,7 @@ ADR-0004 explicitly overrides the original `main` branch policy with `master`.
   behind its `net` feature `Script`, `ScriptedPeer`, `FakeTransport`,
   `FakeTransportFactory` and `LengthPrefixedFramer` (the sanctioned doubles of
   CODING_STANDARDS 13.5); behind its `fixtures` feature the golden-vector loader and
-  `InteropMap`.
+  `InteropMap`; and the `ContractSuite` every driver runs.
 - Empty default feature sets in the publishable crates; no protocol feature flags yet.
 - Apache license/notices, contribution/security policy, changelog and ADRs.
 - Local mise tasks, CI workflow, package allow-lists and VS Code test debugging.
@@ -174,6 +174,7 @@ gates named were run locally before that commit.
 | S12 | 2026-10-27 | Simulator `FailureStep` and `FailureScript` on the shared device (delay, timeout after transmit, disconnect into `Failed`, device exception, malformed, partial failure, backpressure, unknown after transmit); one step per operation after every pre-I/O check; each retry attempt pops its own step and a read without an explicit deadline gets a fresh default deadline per attempt; parity row `SIM-FAILURE-SCRIPT` implemented | check, coverage, lint-attrs, machete, package |
 | S19 | 2026-10-27 | Transport `ConnectionGuard` over `FramedTransport`: lifecycle through core `ConnectionState` with private idle, in-flight and resyncing phases, request-driven reconnect with capped jittered backoff and `Failed` on exhaustion, one in-flight slot plus an admission queue bounded by `max_pending_requests` (`Backpressure` beyond it), every wait raced against close, token and deadline, a timeout after flush resyncs before the next send, `GuardConfig`, `GuardStats`; parity rows `TRANSPORT-GUARD-LIFECYCLE`, `TRANSPORT-RECONNECT`, `TRANSPORT-QUEUE` implemented | check, coverage, lint-attrs, machete, package |
 | S21 | 2026-10-27 | Modbus PDU codec: `FunctionCode`, `ExceptionCode`, `ModbusPdu` (read requests FC01-04, bit and register responses, exceptions), `encode_request`, `decode_request`, `decode_response` with quantity, byte-count and size bounds checked before allocation, `encode_response`; 59 golden vectors under `fixtures/modbus/tcp` authored from the Modbus Application Protocol V1.1b or adversarial, loaded through the testkit with independently written expected files; fifth fuzz target `fuzz_modbus_pdu`; `MB-EXC-*` rows implemented. The upstream vectors wait for prerequisite P4 | check, coverage, lint-attrs, features, machete, dependencies, fuzz, package |
+| S13 | 2026-10-27 | Testkit `ContractSuite` (23 cases named as sentences with their SPEC coverage; skips are named, never silent; driver failures become report entries) with `ContractFixture` hooks and `ContractReport`; run against the simulator: 22 passed, 0 failed, 1 named skip (the unsupported-write case, covered by the testkit's always-unsupported double); parity row `SIM-CONTRACT-SUITE` | check, coverage, lint-attrs, machete |
 
 ## Verified evidence and reproduction
 
@@ -307,8 +308,8 @@ operation row is implemented yet.
   serves in-process reads and writes).
 - A Modbus session using the guard's cancellation and deadline enforcement (the guard
   and the simulator connection both enforce them).
-- The common driver contract suite (S13); the simulator driver and its failure script
-  exist.
+- A protocol driver that passes the contract suite over a real transport (the
+  simulator passes it).
 - Byte/raw/recursive/calendar `PlcValue` variants (deferred by ADR-0006); the byte and
   word order types exist as data only, with no decoder consuming them.
 - Browse, discovery and subscriptions (write batches exist as data).
