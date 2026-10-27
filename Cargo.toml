@@ -1,0 +1,13 @@
+[package]
+name = "stonecrab"
+version = "0.1.0"
+edition = "2024"
+authors = ["The Mad Botter INC"]
+license = "Apache-2.0"
+description = "Apache PLC4X, carcinized. An independent, native Rust port of Apache PLC4X: one API for industrial protocols, built for sensor acquisition first."
+repository = "https://github.com/themadbotter/stonecrab"
+homepage = "https://github.com/themadbotter/stonecrab"
+keywords = ["plc", "industrial", "modbus", "opcua", "protocols"]
+categories = ["network-programming", "embedded"]
+
+[dependencies]
