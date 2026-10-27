@@ -77,6 +77,22 @@
   and area, sorted by wire offset and merged into reads only when adjacent or overlapping
   (no gap reads), never above 125 registers or 2000 bits per chunk or `max_items` tags
   per plan.
+### stonecrab-sensors 0.1.0
+- Add the crate: declarative sensor profiles for Stonecrab, depending on `stonecrab-core`,
+  `serde` and, behind the default `toml` feature, `toml` (ADR-0016). Nothing is validated
+  semantically yet and no driver reads a profile; both arrive in later slices.
+- Add the schema (version 1): `SensorProfile`, `ProfileId`, `SchemaVersion`,
+  `DeviceApplicability`, `ConnectionRequirements`, `MeasurementDef`, `ByteOrderName`,
+  `WordOrderName`, `ScaleStep` (`Multiply`, `Divide`, `Offset`, `Clamp`, `BitField`),
+  `ValueRange`, `StatusField`, `QualityMapping`, `Provenance` and `ValidationStatus`. All
+  derive `Deserialize` with unknown keys denied; none derives `Serialize`.
+- Add `SensorProfile::from_toml` (feature `toml`): 64 KiB size bound checked before
+  parsing, schema versions other than 1 refused as `ProfileError::IncompatibleSchema`, and
+  errors that carry a line and column but never part of the document. Add `ProfileError`
+  (`Oversized`, `Syntax`, `IncompatibleSchema`, `InvalidIdentifier`) with
+  `From<ProfileError> for PlcError` (`InvalidConfig`).
+- Add the fuzz target `fuzz_sensors_profile_toml`. Adopt `serde` and `toml` (`display`
+  off); the lock pins `toml_parser` 1.0.9 to keep a single `winnow`.
 ### stonecrab-core 0.1.0
 - Add docs.rs metadata (`all-features`, `--cfg docsrs`) for feature-gated item docs.
 - Establish shared metadata, safety lints and foundation contracts.

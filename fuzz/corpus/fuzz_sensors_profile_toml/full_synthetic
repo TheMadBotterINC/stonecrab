@@ -1,0 +1,59 @@
+# Every key of schema version 1 at least once. Synthetic: describes no real device.
+id = "synthetic_full"
+schema_version = 1
+validation = "synthetic"
+
+[device]
+manufacturer = "Synthetic Manufacturer"
+model = "Synthetic Model"
+firmware = "1.0"
+
+[connection]
+scheme = "modbus-tcp"
+address_convention = "plc4x"
+
+[connection.options]
+default-unit-identifier = "1"
+request-timeout = "500"
+
+[provenance]
+source = "Synthetic reference profile; invented for tests"
+fixtures = ["synthetic_full_read_01", "synthetic_full_read_02"]
+
+[[measurements]]
+name = "boiler_temperature"
+address = "holding-register:1:INT"
+data_type = "INT"
+count = 1
+byte_order = "big_endian"
+unit = "Cel"
+scaling = [
+    { divide = 10.0 },
+    { offset = -40.0 },
+    { clamp = { min = -40.0, max = 215.0 } },
+]
+range = { min = -40.0, max = 215.0 }
+min_interval_ms = 1000
+stale_after_ms = 5000
+keep_raw = true
+status_fields = [
+    { name = "open_circuit", address = "holding-register:20:WORD", bit = 3, invert = true },
+    { name = "out_of_range", address = "holding-register:20:WORD", bit = 4 },
+]
+quality_map = { bad_when = ["open_circuit"], uncertain_when = ["out_of_range"] }
+
+[[measurements]]
+name = "line_pressure"
+address = "holding-register:101:REAL"
+data_type = "REAL"
+byte_order = "little_endian"
+word_order = "low_word_first"
+unit = "kPa"
+scaling = [{ multiply = 2 }]
+
+[[measurements]]
+name = "pump_running"
+address = "holding-register:30:WORD"
+data_type = "WORD"
+unit = "1"
+scaling = [{ bit_field = { shift = 4, width = 1 } }]

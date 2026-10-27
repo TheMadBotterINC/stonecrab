@@ -19,7 +19,8 @@ connections, device reads, protocol drivers or hardware integrations.
 - License: **Apache-2.0**.
 - Published on crates.io: **`stonecrab` 0.1.0**, a specification-stage placeholder.
 - Current development versions: facade **0.2.0**, core **0.1.0**, codec **0.1.0**,
-  modbus **0.1.0**, transport **0.1.0**, driver-sim **0.1.0**, all unreleased.
+  modbus **0.1.0**, transport **0.1.0**, driver-sim **0.1.0**, sensors **0.1.0**, all
+  unreleased.
 - The facade's minor bump records removal of the published `placeholder::status`
   API. Do not restore a compatibility shim without a real consumer requirement.
 - Review policy: ADR-0005 waives the two-approval rule of CODING_STANDARDS 18.6
@@ -72,7 +73,8 @@ ADR-0004 explicitly overrides the original `main` branch policy with `master`.
 - `fuzz/` is a separate Cargo workspace with its own lock, nightly pin and deny policy
   (ADR-0009); `scripts/fuzz-smoke.sh` runs cargo-deny on it and every target for 60 s.
   Targets: `fuzz_codec_bounded_reader` (S15), `fuzz_core_connection_string` (S08),
-  `fuzz_modbus_address` (S20b).
+  `fuzz_modbus_address` (S20b), `fuzz_sensors_profile_toml` (S28a). `fuzz/deny.toml`
+  must mirror every root `deny.toml` change; the smoke script refuses to run otherwise.
 
 ### Core data contracts
 
@@ -156,6 +158,7 @@ gates named were run locally before that commit.
 | S24a | 2026-10-27 | Modbus `Batcher::plan` with `BatchLimits`, `Chunk` and `Member`: groups by unit id and area, merges adjacent or overlapping spans only (no gap reads), splits at 125 registers or 2000 coils, keeps every `TagId` in exactly one member; property test; parity rows `MB-LIMIT-COILS`, `MB-LIMIT-REGISTERS` and the optimizer rows implemented | check, coverage, lint-attrs, machete, package |
 | S17 | 2026-10-27 | Testkit `net` feature: `Script` and `Step` (expect, reply, fragmented, coalesced, delay, close-at, truncate, corrupt, wrong transaction id, late reply, responder), `ScriptedPeer` (the one sanctioned `tokio::spawn`, joined on close and aborted on drop), `FakeTransport` and `FakeTransportFactory` on `FakeClock` with connect-timeout and refusal plans; S16 loopback tests moved onto the peer where a step expresses them | check, coverage, lint-attrs, machete, dependencies |
 | S11b-1 | 2026-10-27 | New crate `stonecrab-driver-sim` 0.1.0 with the simulator data model only: `RealtimeClock`, `SimAddress` grammar (`STATE|RANDOM|SINK/name:type`), `SimDevice` and `SimTag` with ramps, read counters and a seeded RANDOM source; `tracing` 0.1 adopted workspace-wide (std only; `attributes` deferred, see ADR-0012) with the `once_cell` wrapper via `tracing-core` in deny.toml; ADR-0012 proposed; ADR-0005 addendum on wildcard arms; `docs/parity/sim.md`; no `Driver` yet | check, coverage, lint-attrs, machete, dependencies |
+| S28a | 2026-10-27 | New crate `stonecrab-sensors` 0.1.0 with the profile schema (version 1, unknown fields rejected) and the `toml` feature loader with a size bound; `serde` 1 and `toml` 0.9 adopted (D23 check clean; `toml_parser` pinned in the lock to keep one `winnow`); fourth fuzz target `fuzz_sensors_profile_toml` (60 s clean); ADR-0016; `docs/parity/sensors.md`; validation and the measurement pipeline are S28b/S29 | check, coverage, lint-attrs, features, machete, dependencies, fuzz, package |
 
 ## Verified evidence and reproduction
 
@@ -189,8 +192,8 @@ Most recent local results for the implementation baseline:
   `stonecrab-codec` 181/181 lines (gate 100%), `stonecrab-modbus` 585/585 lines (gate
   100%), `stonecrab-transport` 457/459 lines (gate 95%; the uncovered lines are the
   real-socket deadline-expiry and resolver-failure arms named in ADR-0014),
-  `stonecrab-driver-sim` 1046/1046 lines (gate 100%), `stonecrab-testkit` 2137/2147
-  lines (gate 90%), `stonecrab` n/a (no executable lines). Error paths are not excluded. Region
+  `stonecrab-driver-sim` 1046/1046 lines (gate 100%), `stonecrab-sensors` 198/198 lines
+  (gate 100%), `stonecrab-testkit` 2137/2147 lines (gate 90%), `stonecrab` n/a (no executable lines). Error paths are not excluded. Region
   coverage is reported in `target/coverage-summary.txt` and not gated; do not describe
   it as branch coverage.
 - Workspace tests and doctests passed on Rust 1.97.1.
@@ -243,8 +246,11 @@ hardware gates yet.
   files change, and review the resulting archive contents.
 - New dependencies require a rationale and the applicable audit/ADR entry.
   Runtime dependencies are `thiserror`, `bytes`, `tracing` (std only; `once_cell`
-  reaches the graph through `tracing-core` under a recorded deny.toml wrapper) and, in
-  the transport crate only, `tokio` with scoped features; dev-only `proptest`.
+  reaches the graph through `tracing-core` under a recorded deny.toml wrapper), `serde`
+  and `toml` in the sensors crate, and `tokio` with scoped features in the transport
+  crate only; dev-only `proptest`. `toml_parser` is pinned in `Cargo.lock` so that only
+  one `winnow` resolves; a plain `cargo update` must keep that pin or allow the
+  duplicate.
 
 ## Baseline and incomplete M0 work
 
@@ -288,9 +294,10 @@ operation row is implemented yet.
 - Byte/raw/recursive/calendar `PlcValue` variants (deferred by ADR-0006); the byte and
   word order types exist as data only, with no decoder consuming them.
 - Browse, discovery and subscriptions (write batches exist as data).
-- Modbus PDU codec, framing and connection, sensor profiles and board adapters (the
-  TCP transport, the codec crate, the Modbus address parser and the read batcher exist;
-  nothing reads a device yet).
+- Modbus PDU codec, framing and connection, sensor profile validation and the
+  measurement pipeline, board adapters (the TCP transport, the codec crate, the Modbus
+  address parser, the read batcher and the profile schema loader exist; nothing reads a
+  device yet).
 - OPC UA, EtherNet/IP/Logix, S7 and remaining upstream protocols.
 - Code generation or retained upstream fixture corpus.
 - Parser fuzzing (the `fuzz-smoke` job exists but has no targets), mutation testing,

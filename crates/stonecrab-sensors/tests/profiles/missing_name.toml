@@ -1,0 +1,14 @@
+id = "missing_name"
+schema_version = 1
+validation = "synthetic"
+
+[connection]
+scheme = "sim"
+
+[provenance]
+source = "Synthetic test fixture; no real device"
+
+[[measurements]]
+address = "holding-register:1:INT"
+data_type = "INT"
+unit = "m"

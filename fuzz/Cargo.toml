@@ -25,6 +25,7 @@ arbitrary = "1.5"
 stonecrab-core = { path = "../crates/stonecrab-core" }
 stonecrab-codec = { path = "../crates/stonecrab-codec" }
 stonecrab-modbus = { path = "../crates/stonecrab-modbus" }
+stonecrab-sensors = { path = "../crates/stonecrab-sensors" }
 # Later slices add path dependencies on the crate each new target exercises.
 
 # Fuzz targets are added as [[bin]] sections by the slice that adds each target, named
@@ -46,6 +47,13 @@ bench = false
 [[bin]]
 name = "fuzz_modbus_address"
 path = "fuzz_targets/fuzz_modbus_address.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sensors_profile_toml"
+path = "fuzz_targets/fuzz_sensors_profile_toml.rs"
 test = false
 doc = false
 bench = false

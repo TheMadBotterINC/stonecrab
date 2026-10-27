@@ -1,0 +1,10 @@
+# The smallest document the loader accepts: only the required keys.
+id = "minimal"
+schema_version = 1
+validation = "synthetic"
+
+[connection]
+scheme = "sim"
+
+[provenance]
+source = "Synthetic test fixture; no real device"

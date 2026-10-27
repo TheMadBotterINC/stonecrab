@@ -1,0 +1,11 @@
+# Written for a later schema: the version is reported even though "flavour" is unknown.
+id = "from_the_future"
+schema_version = 2
+validation = "synthetic"
+flavour = "new"
+
+[connection]
+scheme = "sim"
+
+[provenance]
+source = "Synthetic test fixture; no real device"

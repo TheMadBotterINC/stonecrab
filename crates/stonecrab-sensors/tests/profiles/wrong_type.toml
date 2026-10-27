@@ -1,0 +1,16 @@
+id = "wrong_type"
+schema_version = 1
+validation = "synthetic"
+
+[connection]
+scheme = "sim"
+
+[provenance]
+source = "Synthetic test fixture; no real device"
+
+[[measurements]]
+name = "level"
+address = "holding-register:1:INT"
+data_type = "INT"
+count = "two"
+unit = "m"

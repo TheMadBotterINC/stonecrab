@@ -77,6 +77,8 @@ run = [
   "diff -u packaging/stonecrab-driver-sim.txt target/driver-sim-package-files.txt",
   "cargo package --locked -p stonecrab-modbus --list > target/modbus-package-files.txt",
   "diff -u packaging/stonecrab-modbus.txt target/modbus-package-files.txt",
+  "cargo package --locked -p stonecrab-sensors --list > target/sensors-package-files.txt",
+  "diff -u packaging/stonecrab-sensors.txt target/sensors-package-files.txt",
   "cargo package --locked -p stonecrab-transport --list > target/transport-package-files.txt",
   "diff -u packaging/stonecrab-transport.txt target/transport-package-files.txt",
   "cargo package --locked -p stonecrab --list > target/facade-package-files.txt",

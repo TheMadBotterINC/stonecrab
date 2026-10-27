@@ -1,0 +1,10 @@
+id = "unknown_field"
+schema_version = 1
+validation = "synthetic"
+gain = 2.0
+
+[connection]
+scheme = "sim"
+
+[provenance]
+source = "Synthetic test fixture; no real device"
