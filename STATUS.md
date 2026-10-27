@@ -233,17 +233,17 @@ mise exec -- cargo check --locked --workspace --all-features --target aarch64-un
 mise exec -- cargo check --locked --workspace --all-features --target armv7-unknown-linux-gnueabihf
 ```
 
-Hosted CI for `2430ab6` (S23) **completed successfully** with the full workflow:
-https://github.com/TheMadBotterINC/stonecrab/actions/runs/40503951470
+Hosted CI for `35102e3` (S14) **completed successfully** with the full workflow:
+https://github.com/TheMadBotterINC/stonecrab/actions/runs/40512348443
 Green jobs: the six test cells (ubuntu, macOS, Windows on 1.97.1 and 1.99.1), quality
 with the per-crate coverage gate, cross, dependencies, package, dco, features, machete,
-lint-attrs, beta, geiger and fuzz-smoke (six targets). The report-only `semver` job
-fails until the sibling crates exist on crates.io (no baseline) and does not fail the
-run. Two platform fixes were needed on the first hosted runs: the prebuilt cargo-fuzz
-binary defaults to a musl target, so the smoke script passes the host triple; and the
-drop-mid-write transport test is ignored on Windows, where loopback accepts a 32 MiB
-write at once. The `examples` job added by S14 is unexercised on hosted runners until
-the next push. Nothing establishes the interop, mutation, soak or hardware gates yet.
+lint-attrs, beta, geiger, fuzz-smoke (six targets) and examples (the `sim_read` example
+runs on the hosted runner). The report-only `semver` job fails until the sibling crates
+exist on crates.io (no baseline) and does not fail the run. Two platform fixes were
+needed on the first hosted runs: the prebuilt cargo-fuzz binary defaults to a musl
+target, so the smoke script passes the host triple; and the drop-mid-write transport
+test is ignored on Windows, where loopback accepts a 32 MiB write at once. Nothing
+establishes the interop, mutation, soak or hardware gates yet.
 
 ## Important implementation and tooling details
 
