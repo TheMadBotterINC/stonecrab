@@ -333,6 +333,7 @@ commit; gates named were run locally before that commit.
 | S40 | 2026-10-28 | Ping in the core API (finding G07, ping part): `Operation::Ping` appended last, `Capabilities.ping` (default false) read by `supports`, and a provided `Connection::ping(&self) -> OpFuture<'_, ()>` modeled on `close` (no request type, like PLC4J's `ping()`) that does no I/O and returns `Unsupported(Ping)` with diagnostics; neither driver overrides it (Modbus in S47). The contract suite has 24 cases: the new one asserts the error, its diagnostics, no device access and no state change, and runs for the simulator and every Modbus fixture. ADR-0011 addendum; core, sim and Modbus parity rows updated; additive for semver by construction (both types are `#[non_exhaustive]`) | check, coverage, lint-attrs, parity, examples |
 | S04a | 2026-10-28 | Upstream Modbus vectors with provenance (P4 approved 2026-10-28, decision E2): `ParserSerializerTestsuite.xml`, `DriverTestsuite.xml`, `Modbus-all-datatypes.xml` and `Modbus-all-datatypes-little-endian.xml` retained byte for byte from commit ea229918 under `fixtures/modbus/upstream/tcp/` (git blob and sha256 in PROVENANCE.toml; identical to an independent checkout); the six `<raw>` frames of the parser suite as `tcp/adu_upstream-*` ADU vectors (FC04 request and 99-register response accepted; the four FC20/FC21 file-record frames cut by the framer and refused by the PDU codec as `must_fail`); `adapter_rederives_each_parser_suite_hex_from_raw_text` (string scan, no XML parser) and framing and PDU tests over the new vectors; NOTICE carries the PLC4X attribution and its NOTICE text; the crate ships nothing from `fixtures/` (package list unchanged); docs that said the vectors wait for P4 now say the exchanges wait for S04b | check, coverage, lint-attrs, parity, dependencies, package (with --allow-dirty before the commit) |
 | S35 | 2026-10-28 | The `semver` job is blocking against the published `stonecrab` 0.2.0: `continue-on-error` removed and cargo-semver-checks pinned to 0.51.0 (it floated on the latest release); with an unchanged `version` the tool checks a minor release, so additive changes pass and a breaking change fails until its version bump (CODING_STANDARDS 9.10). Round 1's run 40787826005 reported 202 checks passing with "no semver update required". ADR-0005 addendum; STATUS "Known gaps" updated | workflow YAML parse (no code change; the job itself runs in CI) |
+| S41 | 2026-10-28 | M0 source inventory of PLC4J v1.0.0 (commit ea229918) from a local sparse checkout: `upstream/manifest.toml` gains 61 `[inventory.*]` entries beside `modbus_tcp` (the API and SPI, 22 driver modules plus DF1 as a spec only, 12 transport modules, four tools, the utilities, and pointers to `apache/plc4x-extras` v1.0.0, `apache/camel` and `apache/streampipes`), each with operations, transports, notes and file and line evidence; pending items 1 and 5 closed (seven remain). The plan's PLC4X leads are resolved in `docs/POST_ALPHA_PLAN.md` section 4: confirmed where the source agrees, corrected otherwise (KNXnet/IP has a Java driver, UMAS handles DATE and TIME_OF_DAY, CAN alone is not a transport, the OPC UA and PLC4X servers, PCAP analyzer, browser and most integrations live outside `apache/plc4x`, Ditto has no module); Go, C, C# and Python claims are left to S42; docs only | TOML parse, ASCII check, citation bounds check against the checkout, 92 spot checks (three citations corrected) |
 
 ## Verified evidence and reproduction
 
@@ -547,25 +548,27 @@ in its S31 addendum, the parity gate.
   signature from a key listed in the project KEYS file, verified in a temporary keyring
   (fingerprint, SHA-512 and the trust caveat are in the manifest's `[signature]` table);
   the archive contents were not inventoried against the pinned commit.
-- `inventory_complete = false`: the open items in the manifest `[pending]` table are:
-  1. Complete protocol-by-transport-by-operation source inventory.
-  2. Inventory capabilities in non-Java implementations.
-  3. Map every required behavior to a planned test ID.
-  4. Review all configuration and address aliases before implementation.
-  5. Inventory the Modbus RTU/ASCII connections (the `rtu/` and `ascii/` packages were
-     not read).
-  6. Inspect the generated `DataItem` behavior for the TIME/DATE family (generated code
+- `inventory_complete = false`: S41 (2026-10-28) closed the source inventory and the
+  Modbus RTU/ASCII item; the open items in the manifest `[pending]` table are:
+  1. Inventory capabilities in non-Java implementations (S42).
+  2. Map every required behavior to a planned test ID (S43).
+  3. Review all configuration and address aliases before implementation.
+  4. Inspect the generated `DataItem` behavior for the TIME/DATE family (generated code
      is not in the repository).
-  7. Confirm which XML the little-endian IT loads and the test transport internals.
-  8. Compare the XML-serialized `ModbusADU` step format of the all-datatypes suites with
+  5. Confirm which XML the little-endian IT loads and the test transport internals.
+  6. Compare the XML-serialized `ModbusADU` step format of the all-datatypes suites with
      `DriverTestsuite.xml`.
-  9. Check the Modbus Application Protocol V1.1b section numbers cited in
+  7. Check the Modbus Application Protocol V1.1b section numbers cited in
      `docs/parity/modbus.md` against a retained copy.
 
-**M0 is not complete.** The Modbus TCP subset is inventoried: `docs/parity/modbus.md`
-carries stable row ids with test ids, a divergence table with references and an UNVERIFIED
-list; the manifest records the inventoried files and line ranges under
-`[inventory.modbus_tcp]`. None of the open items gates the alpha. Every divergence row
+**M0 is not complete.** The manifest holds 62 `[inventory.*]` entries with file and line
+evidence at the pinned commit (S41): the API and SPI, every PLC4J driver module (22, plus
+DF1 as a spec only), the 12 transport modules, the four tools and the utilities, and
+pointers to the tools and integrations that live outside `apache/plc4x`
+(`apache/plc4x-extras` v1.0.0, `apache/camel`, `apache/streampipes`). Only the Modbus TCP
+subset has a parity record: `docs/parity/modbus.md` carries stable row ids with test ids,
+a divergence table with references and an UNVERIFIED list (S43 adds the other records).
+None of the open items gates the alpha. Every divergence row
 now cites a protocol section, a drafted upstream issue (`docs/evidence/upstream-issues/`,
 not filed: filing needs the maintainer's approval) or the reason none was drafted.
 
