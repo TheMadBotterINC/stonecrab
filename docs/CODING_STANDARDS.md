@@ -139,11 +139,11 @@ The standards exist for one reason: this library parses bytes from industrial ne
 | --- | --- |
 | `#![deny(missing_docs)]` | the crate (inner attribute in `lib.rs`) |
 | `#![deny(clippy::as_conversions)]` | the crate (inner attribute in `lib.rs`), which covers the core and every module |
-| `#[deny(clippy::indexing_slicing)]` | the module declarations of `codec`, `transport`, and every driver module (`sim`, `modbus`) |
+| `#[deny(clippy::indexing_slicing)]` | the module declarations of `codec`, `transport`, `sensors` (it parses untrusted TOML), and every driver module (`sim`, `modbus`) |
 | `#[deny(clippy::arithmetic_side_effects)]` | the module declarations of `codec` and every driver module |
 | `#[deny(clippy::as_conversions)]` | also stated on the module declarations of `codec`, `transport` and every driver module |
 
-The modules `sensors` and `testkit` carry no module-level promotion. A promotion may only *raise* a level; lowering one in source is prohibited. A new module that parses wire bytes or does arithmetic on them takes the promotions of `codec` in the pull request that adds it. **CI** (`scripts/lint-attrs.sh`, the `lint-attrs` job, checks `lib.rs` against its table of permitted crate-level and per-module promotions, and fails on any other lint attribute in `lib.rs` or in a module root file)
+The module `testkit` carries no module-level promotion, and `sensors` carries only `indexing_slicing`. A promotion may only *raise* a level; lowering one in source is prohibited. A new module that parses wire bytes or does arithmetic on them takes the promotions of `codec` in the pull request that adds it. **CI** (`scripts/lint-attrs.sh`, the `lint-attrs` job, checks `lib.rs` against its table of permitted crate-level and per-module promotions, and fails on any other lint attribute in `lib.rs` or in a module root file)
 
 5.2. **Levels and promotion.** Locally, lints surface as **warnings** so a developer can iterate. In CI, `cargo clippy --workspace --all-targets --all-features -- -D warnings` promotes every warning to an error. A small set of lints is `deny` even locally because the code they flag is never acceptable to run (§6). — **CI**
 
@@ -166,7 +166,7 @@ The modules `sensors` and `testkit` carry no module-level promotion. A promotion
 | --- | --- | --- |
 | `unwrap_used`, `expect_used` | **deny** | §6.2. Allowed in tests via `clippy.toml` |
 | `panic`, `unimplemented`, `todo`, `unreachable` | **deny** | §6.1 |
-| `indexing_slicing` | warn; **promoted to deny** in the `codec`, `transport` and driver modules (§5.1) | Index panics are the classic parser bug |
+| `indexing_slicing` | warn; **promoted to deny** in the `codec`, `transport`, `sensors` and driver modules (§5.1) | Index panics are the classic parser bug |
 | `string_slice` | **deny** | Byte-index slicing of `str` panics on a char boundary |
 | `arithmetic_side_effects` | warn; **promoted to deny** in the `codec` and driver modules (§5.1) | §7.1 |
 | `as_conversions` | warn; **promoted to deny** crate-wide (§5.1) | §7.2 |

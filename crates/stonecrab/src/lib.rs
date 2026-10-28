@@ -50,6 +50,7 @@ pub mod codec;
 #[cfg_attr(docsrs, doc(cfg(feature = "modbus")))]
 pub mod modbus;
 #[cfg(feature = "sensors")]
+#[deny(clippy::indexing_slicing)]
 #[cfg_attr(docsrs, doc(cfg(feature = "sensors")))]
 pub mod sensors;
 #[cfg(feature = "sim")]

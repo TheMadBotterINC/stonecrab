@@ -328,6 +328,7 @@ commit; gates named were run locally before that commit.
 | Slice | Date | Landed | Gates |
 | --- | --- | --- | --- |
 | S34 | 2026-10-28 | Documents reconciled with the 0.2.0 publication (H02 to H06): README and SECURITY say 0.2.0 is published and show the crates.io dependency; STATUS.md start, maintainer prerequisites (P1 to P3 open, the "Basic" ruleset targets no branch, P4 approved) and continuation point at `docs/POST_ALPHA_PLAN.md` with the E1 to E7 outcomes; `docs/PROJECT_BRIEF.md` marked historical with corrected badges; CODING_STANDARDS mirrors the real package keys and owner URL; a dated addendum in `docs/evidence/alpha.md`; docs only | check |
+| S38 | 2026-10-28 | `stonecrab::sensors` denies `clippy::indexing_slicing` like codec, modbus, sim and transport (finding G04): the outer attribute on its module declaration, the `sensors` row of `scripts/lint-attrs.sh` and its self-test fixtures, CODING_STANDARDS 5.1 and 5.5, an ADR-0018 addendum. The module had no indexing or slicing, so no code changed and sensors stays at 100% lines; a probe proved the lint is live | check, coverage, lint-attrs, fuzz (fuzz_sensors_profile_toml, 60 s) |
 
 ## Verified evidence and reproduction
 
@@ -492,8 +493,9 @@ in its S31 addendum, the parity gate.
   carries `#![forbid(unsafe_code)]`, `#![deny(missing_docs)]` and
   `#![deny(clippy::as_conversions)]` as inner attributes, and outer `#[deny(...)]`
   attributes on the `pub mod` declarations of `codec`, `modbus` and `sim`
-  (`indexing_slicing`, `arithmetic_side_effects`, `as_conversions`) and `transport`
-  (`indexing_slicing`, `as_conversions`). `scripts/lint-attrs.sh` checks both tables and
+  (`indexing_slicing`, `arithmetic_side_effects`, `as_conversions`), `transport`
+  (`indexing_slicing`, `as_conversions`) and `sensors` (`indexing_slicing`, since S38);
+  `testkit` carries none. `scripts/lint-attrs.sh` checks both tables and
   that the module root files carry no inner lint attribute; a new module takes a row in it
   and in `scripts/coverage-gate.sh`.
 - **Use `--all-features` for the full suite.** Most integration tests need the `testkit`

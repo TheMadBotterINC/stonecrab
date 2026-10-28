@@ -178,3 +178,10 @@ status section that points here.
 - The documents describe the single crate; the old names appear only in explicit history
   (superseded ADRs, the STATUS.md slice table, dated CHANGELOG entries, docs/ALPHA_PLAN.md),
   which the final grep of slice S33 enumerates.
+
+## Addendum (S38): `sensors` denies `indexing_slicing`
+Decision 4 said `sensors` carries no module-level promotion. The module parses untrusted
+TOML, so it now takes `#[deny(clippy::indexing_slicing)]` on its declaration in `lib.rs`,
+like `codec`, `transport` and the drivers; the other lints are not promoted there. The
+`sensors` row of the per-module table in `scripts/lint-attrs.sh` and CODING_STANDARDS 5.1
+list it. The module already had no indexing or slicing, so no code changed.

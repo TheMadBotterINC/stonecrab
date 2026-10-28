@@ -14,5 +14,5 @@ pub mod modbus;
 #[cfg(feature = "transport")]
 #[deny(clippy::indexing_slicing, clippy::as_conversions)]
 pub mod transport;
-#[deny(clippy::indexing_slicing)]
+#[deny(clippy::arithmetic_side_effects)]
 pub mod sensors;

@@ -40,7 +40,7 @@ codec|clippy::indexing_slicing clippy::arithmetic_side_effects clippy::as_conver
 modbus|clippy::indexing_slicing clippy::arithmetic_side_effects clippy::as_conversions
 sim|clippy::indexing_slicing clippy::arithmetic_side_effects clippy::as_conversions
 transport|clippy::indexing_slicing clippy::as_conversions
-sensors|
+sensors|clippy::indexing_slicing
 testkit|
 "
 

@@ -5,6 +5,8 @@ as `stonecrab` 0.2.0 (2026-10-27); `stonecrab` 0.1.0 is the specification-stage
 placeholder.
 
 ## Unreleased
+- `stonecrab::sensors` now denies `clippy::indexing_slicing` (checked by `lint-attrs`), like
+  the other modules that parse untrusted input; no code in the module needed to change.
 - Release process and evidence (no crate changes): ADR-0017, `release.toml`,
   `mutants.toml`, the `release-evidence` workflow, `docs/evidence/` with the recorded
   fuzz, mutation and coverage figures, and drafted (not filed) upstream issues.
