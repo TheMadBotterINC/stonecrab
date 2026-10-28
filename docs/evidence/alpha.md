@@ -89,7 +89,7 @@ From `STATUS.md` ("Hosted CI and the per-OS matrix"); no new run id is invented 
 | Run | Commit | Result |
 | --- | --- | --- |
 | https://github.com/TheMadBotterINC/stonecrab/actions/runs/40599885679 | `dd0dd73` (S33 build) | completed successfully; all 22 jobs green, `semver` included (baseline 0.1.0) |
-| not yet recorded | the S33 docs reconciliation commit | likewise |
+| https://github.com/TheMadBotterINC/stonecrab/actions/runs/40612938390 | `640665a` (S33 docs, the release commit) | completed successfully; every job green |
 | https://github.com/TheMadBotterINC/stonecrab/actions/runs/40584025718 | `2d38e48` (S32) | completed successfully; every job green except the report-only `semver` |
 | https://github.com/TheMadBotterINC/stonecrab/actions/runs/40557968227 | `8f5c3d0` (S31) | completed successfully; first run of the `parity` job |
 | https://github.com/TheMadBotterINC/stonecrab/actions/runs/40548582722 | `f19be4c` (S30) | completed successfully; the definition of done on the hosted runner |
@@ -391,13 +391,12 @@ one crate to publish, one tag. `[x]` means done and evidenced here; `[ ]` says w
 10. `[x]` The CHANGELOG release section carries the four SPEC items (upstream baseline,
     supported operations, hardware evidence, breaking changes) once, for the one crate;
     `SECURITY.md` names `stonecrab` 0.2.0 as the supported line.
-11. `[ ]` `cargo package --list` reviewed (done: 102 files, equal to
-    `packaging/stonecrab.txt`); SBOM generated (done locally, one file; **attach to the
-    draft pre-release: maintainer**); `cargo publish --dry-run` with a fresh `CARGO_HOME`
-    (**not run**: forbidden against the registry in S32 and S33; run by the maintainer per
-    ADR-0017 decision 3, `cargo publish --locked --dry-run -p stonecrab`); `cargo
-    semver-checks` report (**report only**: the published 0.1.0 is the baseline and its
-    API was replaced).
+11. `[x]` `cargo package --list` reviewed (102 files, equal to `packaging/stonecrab.txt`);
+    SBOM generated locally (one file; **attach to the draft pre-release: maintainer**);
+    `cargo publish --locked --dry-run -p stonecrab` run clean on `640665a`; the `semver`
+    job passed on the hosted runs of `dd0dd73` and `640665a` against the 0.1.0 baseline.
+    **Published:** `cargo publish --locked -p stonecrab` from `640665a` on 2026-10-27 with
+    the maintainer's explicit approval; crates.io lists `stonecrab` 0.2.0.
 12. `[ ]` The signed tag prepared but not pushed. **Prepared as commands only** (ADR-0017
     decision 4): no tag exists. The one annotated tag is `v0.2.0` on the release commit,
     signed when a signing key is configured (the maintainer decides). Creating and pushing

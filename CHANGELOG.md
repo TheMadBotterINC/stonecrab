@@ -9,7 +9,7 @@ needs a separate maintainer approval.
   `mutants.toml`, the `release-evidence` workflow, `docs/evidence/` with the recorded
   fuzz, mutation and coverage figures, and drafted (not filed) upstream issues.
 
-## Alpha (unreleased)
+## Alpha
 The first pre-release is `stonecrab` 0.2.0, one crate (ADR-0018). Its section below opens
 with the four release-note items that `docs/SPEC.md` ('Open-source project requirements')
 requires, once for the crate: the upstream baseline, the supported operations, the actual
@@ -24,7 +24,7 @@ semver-checks` against the specification-stage 0.1.0 package (its API was replac
 measured substitutes are recorded by the release-evidence slice S32 and re-recorded for
 the one crate by S33 (`docs/evidence/alpha.md`).
 
-### stonecrab 0.2.0 (unreleased)
+### stonecrab 0.2.0 (2026-10-27)
 - **Upstream baseline:** Apache PLC4X v1.0.0 (commit
   `ea229918f5d07700e04d7d69ab1645da679cb700`, pinned in `upstream/manifest.toml`; the
   inventory covers the Modbus TCP subset only and the source-release signature was

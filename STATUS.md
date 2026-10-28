@@ -19,9 +19,10 @@ published, tagged or posted upstream: those steps need the maintainer's separate
 - Primary/default branch: **`master`**, locally and remotely.
 - Author: **The Mad Botter INC**.
 - License: **Apache-2.0**.
-- Published on crates.io: **`stonecrab` 0.1.0**, a specification-stage placeholder. It is
-  the only published version.
-- Alpha version, unreleased: **`stonecrab` 0.2.0**, one crate. The former sibling crates
+- Published on crates.io: **`stonecrab` 0.2.0**, the alpha, on 2026-10-27 from commit
+  `640665a` after the maintainer's explicit approval (hosted run 40612938390 green);
+  `stonecrab` 0.1.0, the specification-stage placeholder, stays listed as an old version.
+- Alpha version: **`stonecrab` 0.2.0**, one crate. The former sibling crates
   (core, codec, transport, driver-sim, modbus, sensors) and the test kit are modules of it,
   and there are no other packages. The minor bump records removal of the published
   `placeholder::status` API; do not restore a compatibility shim without a real consumer
@@ -411,7 +412,7 @@ The hosted runs recorded so far, newest first:
 | Commit | Run | Result |
 | --- | --- | --- |
 | S33 build, `dd0dd73` | https://github.com/TheMadBotterINC/stonecrab/actions/runs/40599885679 | completed successfully: all 22 jobs green, `semver` included now that the crate has a published baseline |
-| S33 docs reconciliation (the commit after `dd0dd73`) | not yet recorded | |
+| S33 docs reconciliation, `640665a` (the release commit) | https://github.com/TheMadBotterINC/stonecrab/actions/runs/40612938390 | completed successfully: every job green |
 | `2d38e48` (S32) | https://github.com/TheMadBotterINC/stonecrab/actions/runs/40584025718 | completed successfully; every job green except the report-only `semver` |
 | `8f5c3d0` (S31) | https://github.com/TheMadBotterINC/stonecrab/actions/runs/40557968227 | completed successfully; first run of the `parity` job |
 | `f19be4c` (S30) | https://github.com/TheMadBotterINC/stonecrab/actions/runs/40548582722 | completed successfully; the definition of done on the hosted runner |

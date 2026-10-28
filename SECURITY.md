@@ -6,9 +6,9 @@ registers and input registers from Modbus TCP servers, an in-process simulator a
 declarative sensor profiles. It does not write to devices, subscribe, browse, discover or
 speak Modbus RTU, and it has been checked against one independent server (pymodbus 3.8.6)
 and no physical device. See [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) for the exact
-support levels. The only published version is `stonecrab` 0.1.0, a specification-stage
-package with no protocol code; `stonecrab` 0.2.0, the alpha, is one crate and is
-unreleased: it is published only after a separate maintainer approval.
+support levels. The supported published version is `stonecrab` 0.2.0, the alpha, one
+crate, published on 2026-10-27 after the maintainer's separate approval; `stonecrab`
+0.1.0 is a specification-stage package with no protocol code and is not supported.
 
 ## Supported versions
 The alpha line is the only supported line. Nothing older is supported, and the 0.1.0
