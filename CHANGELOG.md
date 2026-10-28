@@ -5,6 +5,8 @@ as `stonecrab` 0.2.0 (2026-10-27); `stonecrab` 0.1.0 is the specification-stage
 placeholder.
 
 ## Unreleased
+- CI (no crate changes): the `semver` job is blocking against the published 0.2.0, with
+  cargo-semver-checks pinned to 0.51.0.
 - `stonecrab::sensors` now denies `clippy::indexing_slicing` (checked by `lint-attrs`), like
   the other modules that parse untrusted input; no code in the module needed to change.
 - Release process and evidence (no crate changes): ADR-0017, `release.toml`,

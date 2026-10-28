@@ -332,6 +332,7 @@ commit; gates named were run locally before that commit.
 | S38 | 2026-10-28 | `stonecrab::sensors` denies `clippy::indexing_slicing` like codec, modbus, sim and transport (finding G04): the outer attribute on its module declaration, the `sensors` row of `scripts/lint-attrs.sh` and its self-test fixtures, CODING_STANDARDS 5.1 and 5.5, an ADR-0018 addendum. The module had no indexing or slicing, so no code changed and sensors stays at 100% lines; a probe proved the lint is live | check, coverage, lint-attrs, fuzz (fuzz_sensors_profile_toml, 60 s) |
 | S40 | 2026-10-28 | Ping in the core API (finding G07, ping part): `Operation::Ping` appended last, `Capabilities.ping` (default false) read by `supports`, and a provided `Connection::ping(&self) -> OpFuture<'_, ()>` modeled on `close` (no request type, like PLC4J's `ping()`) that does no I/O and returns `Unsupported(Ping)` with diagnostics; neither driver overrides it (Modbus in S47). The contract suite has 24 cases: the new one asserts the error, its diagnostics, no device access and no state change, and runs for the simulator and every Modbus fixture. ADR-0011 addendum; core, sim and Modbus parity rows updated; additive for semver by construction (both types are `#[non_exhaustive]`) | check, coverage, lint-attrs, parity, examples |
 | S04a | 2026-10-28 | Upstream Modbus vectors with provenance (P4 approved 2026-10-28, decision E2): `ParserSerializerTestsuite.xml`, `DriverTestsuite.xml`, `Modbus-all-datatypes.xml` and `Modbus-all-datatypes-little-endian.xml` retained byte for byte from commit ea229918 under `fixtures/modbus/upstream/tcp/` (git blob and sha256 in PROVENANCE.toml; identical to an independent checkout); the six `<raw>` frames of the parser suite as `tcp/adu_upstream-*` ADU vectors (FC04 request and 99-register response accepted; the four FC20/FC21 file-record frames cut by the framer and refused by the PDU codec as `must_fail`); `adapter_rederives_each_parser_suite_hex_from_raw_text` (string scan, no XML parser) and framing and PDU tests over the new vectors; NOTICE carries the PLC4X attribution and its NOTICE text; the crate ships nothing from `fixtures/` (package list unchanged); docs that said the vectors wait for P4 now say the exchanges wait for S04b | check, coverage, lint-attrs, parity, dependencies, package (with --allow-dirty before the commit) |
+| S35 | 2026-10-28 | The `semver` job is blocking against the published `stonecrab` 0.2.0: `continue-on-error` removed and cargo-semver-checks pinned to 0.51.0 (it floated on the latest release); with an unchanged `version` the tool checks a minor release, so additive changes pass and a breaking change fails until its version bump (CODING_STANDARDS 9.10). Round 1's run 40787826005 reported 202 checks passing with "no semver update required". ADR-0005 addendum; STATUS "Known gaps" updated | workflow YAML parse (no code change; the job itself runs in CI) |
 
 ## Verified evidence and reproduction
 
@@ -598,10 +599,10 @@ Deferred features, each a deferred row in `docs/parity/modbus.md` or an item of 
   30 minutes per target, made before S33), benchmarks, differential tests against PLC4J,
   branch coverage (region coverage is reported) and `cargo publish --dry-run` against the
   registry.
-- **The `semver` job** (report only) now has a baseline: the published `stonecrab` 0.1.0.
-  It will flag the removed `placeholder::status` API as a breaking change of a 0.x crate;
-  the 0.2.0 minor bump is the intended answer (ADR-0017, ADR-0018), so read the report
-  rather than expect green, and make the job blocking only after the first real release.
+- **The `semver` job is blocking** since S35, with cargo-semver-checks pinned to 0.51.0,
+  against the published `stonecrab` 0.2.0. An unchanged `version` is checked as a minor
+  release (run 40787826005: 202 checks pass, "no semver update required"), so a breaking
+  change fails CI until the version bump that announces it, with its migration note.
 - **A plain `cargo test` runs the reduced suite** (no `testkit` feature, so the test files
   that need the kit are skipped without a notice) and the kit's own tests need a checkout;
   see "Important implementation and tooling details".

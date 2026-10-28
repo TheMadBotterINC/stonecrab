@@ -19,8 +19,8 @@ concurrency:
 # The fuzz jobs use nightly-2026-10-01, also pinned in fuzz/rust-toolchain.toml
 # (ADR-0009). `mise run <task>` runs the same commands locally; the mapping is at the
 # top of mise.toml. Third-party actions
-# (actions/checkout, upload-artifact, taiki-e/install-action) float on a major tag and the
-# report-only semver job installs cargo-semver-checks unpinned (ADR-0005 decision 9).
+# (actions/checkout, upload-artifact, taiki-e/install-action) float on a major tag; the
+# blocking semver job pins cargo-semver-checks 0.51.0 (ADR-0005, addendum S35).
 jobs:
   test:
     env:
@@ -266,8 +266,9 @@ jobs:
           cargo install cargo-geiger --version 0.14.0 --locked
           cargo geiger --locked --all-features --manifest-path "$PWD/crates/stonecrab/Cargo.toml"
   semver:
-    # Report only until the first tag gives cargo-semver-checks a published baseline.
-    continue-on-error: true
+    # Blocking since S35. The baseline is the latest stonecrab on crates.io (0.2.0). An
+    # unchanged version in Cargo.toml is checked as a minor release, so a breaking change
+    # fails until the version bump that announces it (CODING_STANDARDS 9.10).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -276,7 +277,7 @@ jobs:
           toolchain: "1.99.1"
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-semver-checks
+          tool: cargo-semver-checks@0.51.0
       - run: cargo semver-checks -p stonecrab
   fuzz-smoke:
     # Also runs on workflow_dispatch. cargo-deny on the fuzz workspace comes first inside

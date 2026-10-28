@@ -187,3 +187,12 @@ the gate does not do: it does not prove that a named test exists or passes (the 
 jobs run the tests, and S31 checked once, by a throw-away script, that every backticked
 snake_case test id in the records exists as a `fn`); and a name in a comment satisfies
 (b), so review still judges whether the cited test verifies the row.
+
+Addendum (S35, 2026-10-28): the `semver` job is blocking. Decision 9 accepted it as report
+only, with cargo-semver-checks unpinned, until the first tag; `stonecrab` 0.2.0 is now
+published on crates.io and is the baseline. The job drops `continue-on-error` and pins
+cargo-semver-checks 0.51.0, so a new lint release cannot fail an unchanged tree. With the
+`version` in `Cargo.toml` unchanged the tool checks a minor release (its message is "no
+change; assume minor"), so additive changes pass and a breaking change fails until the
+version bump that announces it, as CODING_STANDARDS 9.10 requires. The first blocking run
+is recorded in STATUS.md. Third-party actions still float on a major tag.
