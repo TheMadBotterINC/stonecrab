@@ -1,54 +1,73 @@
 # Stonecrab
-Public facade for the independent native Rust industrial protocol library. **Alpha**:
-pre-release versions with experimental APIs. This version re-exports the
-runtime-independent foundation (`stonecrab-core`) and, behind optional features, the
-in-process simulator (`sim`), the read-only Modbus TCP driver (`modbus`) and declarative
-sensor profiles (`sensors`). No hardware access is implemented and no physical device has
-been tried.
+An independent native Rust industrial protocol library, built for sensor acquisition
+first. **Alpha**: pre-release versions with experimental APIs. This is one crate, with one
+version: the runtime-independent core contracts are at the crate root, and the codec, the
+transport, the in-process simulator, the read-only Modbus TCP driver, declarative sensor
+profiles and the test kit are modules, switched on by Cargo features. No hardware access
+is implemented and no physical device has been tried.
 
-Default features are empty. Importing this crate performs no I/O.
-See the [compatibility matrix](https://github.com/TheMadBotterINC/stonecrab/blob/master/docs/COMPATIBILITY.md)
+```sh
+cargo add stonecrab        # the simulator, Modbus TCP and the sensor profiles
+```
+
+Importing this crate performs no I/O. See the
+[compatibility matrix](https://github.com/TheMadBotterINC/stonecrab/blob/master/docs/COMPATIBILITY.md)
 for what is supported and at which level, and the
 [foundation parity record](https://github.com/TheMadBotterINC/stonecrab/blob/master/docs/parity/core.md)
 for the contracts. Upstream compatibility is claimed only where a parity row says so.
 
+## Features and modules
+| Feature | Module | Pulls in | Default |
+| --- | --- | --- | --- |
+| none | the core at the crate root, and `stonecrab::codec` | `thiserror`, `bytes` | always built |
+| `sim` | `stonecrab::sim`, the in-process simulator | `tracing` | yes |
+| `modbus` | `stonecrab::modbus`, the Modbus TCP driver (reads) | `transport`, `tracing` | yes |
+| `sensors` | `stonecrab::sensors`, sensor profiles and the TOML loader | `serde`, `toml` | yes |
+| `full` | the same set as the defaults, spelled out; the `profile_read` example requires it | `sim`, `modbus`, `sensors` | no |
+| `transport` | `stonecrab::transport`, deadline-bounded transports and the Tokio TCP transport | `tokio` | no (on through `modbus` and `testkit`) |
+| `testkit` | `stonecrab::testkit`, fakes, scripted peers, golden-vector loader and the driver contract suite | `transport`, `serde`, `serde_json`, `toml`, Tokio `macros` | no |
+
+`default-features = false` is the Tokio-free core: the crate root and the codec, which pull
+`thiserror` and `bytes` only. Tokio enters the crate through the `transport` feature and
+no other, so connections made by `modbus` must run inside a Tokio runtime with the time
+driver enabled. Parsing a connection string or an address opens no socket. The Modbus
+connection-string and address grammars are in the `stonecrab::modbus` module
+documentation.
+
+The foundation re-exported at the root includes scalar values, identifiers,
+capabilities, errors, deadlines, redacted secrets, immutable tags, bounded read requests,
+correlated read results, original protocol diagnostics and explicit unknown write
+outcomes, and the `Driver`, `Connection` and `DriverRegistry` boundary. Those are pure data
+contracts and traits; a driver (the simulator, or the Modbus driver for reads) performs the
+operations.
+
 | Capability | Support level |
 | --- | --- |
-| Core contracts through `DriverRegistry`, `Driver` and `Connection` (feature-free) | simulator-tested |
-| `sim` feature: in-process simulator, read and write, scripted failures | simulator-tested |
-| `modbus` feature: Modbus TCP connect, close and reads of coils, discrete inputs, holding registers and input registers (FC01 to FC04) | interoperability-tested |
-| `modbus` feature: reconnect, retry, cancellation, timeout, late-reply discard | simulator-tested |
-| `modbus` feature: write | not supported |
+| Core contracts through `DriverRegistry`, `Driver` and `Connection` (always built) | simulator-tested |
+| `sim`: in-process simulator, read and write, scripted failures | simulator-tested |
+| `modbus`: Modbus TCP connect, close and reads of coils, discrete inputs, holding registers and input registers (FC01 to FC04) | interoperability-tested |
+| `modbus`: reconnect, retry, cancellation, timeout, late-reply discard | simulator-tested |
+| `modbus`: write | not supported |
 | Subscribe, browse and discover | not supported |
-| `sensors` feature: synthetic profiles against the simulator | simulator-tested |
-| `sensors` feature: synthetic profiles against a Modbus TCP server | interoperability-tested |
+| `sensors`: synthetic profiles against the simulator | simulator-tested |
+| `sensors`: synthetic profiles against a Modbus TCP server | interoperability-tested |
 | Hardware verification | planned |
 
 `interoperability-tested` means the `interop` CI job ran the code against pymodbus 3.8.6.
-The levels of each crate are in its own README; the table above is the facade's view of
-the same evidence.
+The levels of each module are in its own documentation page (the component documents in
+`docs/components/` of this crate); the table above is the crate's view of the same
+evidence.
 
-## Features
-- `sim` (off by default): re-exports the in-process simulator driver as `stonecrab::sim`,
-  so an application or test can register a `SimDriver` with named `SimDevice`s and connect
-  to `sim://<device>` without any hardware or network. It adds `stonecrab-driver-sim` and
-  `tracing`; with no features the crate pulls `stonecrab-core` only. Until the alpha is
-  published, use the features from a checkout (a path dependency).
-- `modbus` (off by default): re-exports the native Modbus TCP driver as `stonecrab::modbus`
-  (`ModbusTcpDriver`, `ModbusOptions`, the address types and `SystemClock`). The alpha scope
-  is read-only (function codes 01 to 04). It adds `stonecrab-modbus` and, through it,
-  `stonecrab-transport` with its Tokio-based TCP transport, so connections must run inside a
-  Tokio runtime with the time driver enabled. Parsing a connection string or an address opens
-  no socket. See the `stonecrab-modbus` README for the connection-string grammar.
-- `sensors` (off by default): re-exports the declarative sensor profile crate as
-  `stonecrab::sensors` (`SensorProfile`, `Measurement`, `Quality`, `Unit` and the schema
-  types). It also turns on `stonecrab-sensors/toml`, the TOML loader, because
-  `SensorProfile::from_toml` is how an application reads a profile file and the
-  `profile_read` example needs it; `serde` and `toml` come in through that crate and
-  nothing else is added. The profiles in the repository's `profiles/` directory are
-  synthetic, describe no real device and are not part of this crate.
-- `full` (off by default): `sim`, `modbus` and `sensors` together. The `profile_read`
-  example requires it.
+## The test kit
+`stonecrab::testkit` (feature `testkit`, off by default, not a runtime feature) ships the
+driver contract suite, `ContractSuite`, so that the author of a new `Driver` can run the
+same cases against it, and the deterministic fakes that make such tests repeatable: a fake
+clock, a fake transport, scripted peers and a golden-vector loader. It is a module of this
+crate, and not a separate test crate, because a test crate that depends on `stonecrab`
+while `stonecrab` uses it in its own tests would be a dev-dependency cycle (ADR-0018).
+Its own tests and doctests read files of the repository (`testdata/`, `fixtures/`), which
+the packaged archive does not contain, so the full suite runs from a checkout with
+`cargo test --all-features`. A plain `cargo test` runs the reduced suite without it.
 
 ## Quick start with a Modbus TCP server
 The `modbus_tcp_read` example registers `ModbusTcpDriver`, parses the connection string
@@ -114,12 +133,6 @@ The simulated device `bench` holds the values of the Modbus interoperability reg
 so a profile under `profiles/synthetic/modbus-tcp/` read from a pymodbus server (see
 `interop/pymodbus/README.md`) yields the same measurements. The `sampled_at` values vary
 from run to run, and the connect and close span events are omitted above.
-
-The foundation re-exported here includes scalar values, identifiers, capabilities, errors,
-deadlines, redacted secrets, immutable tags, bounded read requests, correlated read
-results, original protocol diagnostics and explicit unknown write outcomes. Those are pure
-data contracts; a driver (the simulator, or the Modbus driver for reads) performs the
-operations.
 
 ```rust
 use stonecrab::{PlcValue, TagId};

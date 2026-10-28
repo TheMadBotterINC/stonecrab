@@ -1,12 +1,13 @@
 # Stonecrab Modbus
-Native Modbus TCP driver for Stonecrab (alpha). The alpha scope is read-only: function
+Native Modbus TCP driver for Stonecrab (alpha), `stonecrab::modbus`, behind the `modbus`
+feature (on by default). The alpha scope is read-only: function
 codes 01 (read coils), 02 (read discrete inputs), 03 (read holding registers) and 04
 (read input registers) over TCP with MBAP framing. RTU, ASCII, TLS, UDP, writes, extended
 registers, string types, subscriptions, browse, discovery and ping are out of scope for
 the alpha and are listed under "Not in the alpha" below. The driver has been checked
 against an independent server, pymodbus 3.8.6, and no physical device.
 
-This crate offers `ModbusTcpDriver`, the `Driver` of the `modbus-tcp` scheme, with
+This module offers `ModbusTcpDriver`, the `Driver` of the `modbus-tcp` scheme, with
 `ModbusOptions`, the parsed connection parameters; `ModbusConnection` with
 `ConnectionDefaults`, the `Connection` that reads tags in batches over a session;
 `ModbusSession` with `SessionStats` and `exception_item_error`, which send one read
@@ -17,9 +18,9 @@ underneath: `UnitId`, `ModbusArea`, `ModbusDataType`, `AddressConvention` and
 `ExceptionCode` and `ModbusPdu` with `encode_request`, `decode_request`, `decode_response`
 and `encode_response`, the framing types `MbapHeader`, `TransactionId`, `ModbusAdu` and
 `MbapFramer`, and `TypedDecoder`, which turns registers or coil bits into `PlcValue`s.
-`SystemClock`, the Tokio-backed clock the driver uses by default, is re-exported from the
-transport crate. Through the facade the driver is `stonecrab::modbus` behind the `modbus`
-feature.
+`SystemClock`, the Tokio-backed clock the driver uses by default, is re-exported from
+`stonecrab::transport`. The `modbus` feature turns on the `transport` feature (and with
+it Tokio) and `tracing`; the codec module is always built.
 
 ## Driver
 
@@ -109,15 +110,14 @@ address block, then the tag. A configuration built by hand with `ConnectionConfi
 carries no options, and `connect` then uses the driver's defaults.
 
 The session and the connection do I/O only through a transport factory the caller
-passes in, so the crate's tests run on the in-memory transport of the repository's
-unpublished testkit and, for the driver, over loopback sockets to a scripted peer. The
+passes in, so the module's tests run on the in-memory transport of the `testkit` feature
+and, for the driver, over loopback sockets to a scripted peer. The
 common driver contract suite passes against the driver over both: over the in-memory
 transport with the two write cases skipped by name, and over loopback sockets with those two
 and the three timing cases skipped by name (the loopback fixture cannot swallow a reply on a
-deterministic clock). The crate depends on `stonecrab-core`, `stonecrab-codec`,
-`stonecrab-transport` (with its `tcp` feature, for `TcpFactory`, and the `Framer` trait,
-`ConnectionGuard` and `TransportFactory`), `bytes` and `tracing`; default features are
-empty.
+deterministic clock). The module builds on the core, `stonecrab::codec` and
+`stonecrab::transport` (`TcpFactory`, the `Framer` trait, `ConnectionGuard` and
+`TransportFactory`), `bytes` and `tracing`.
 
 Upstream behavior is the Apache PLC4X Modbus TCP driver at the commit pinned in
 `upstream/manifest.toml`. Every claim about it, and every divergence, is recorded with a
@@ -185,7 +185,7 @@ error rather than ignoring it; operations that have no API at all do not exist:
 The `interop` job of the repository's CI builds `interop/pymodbus/` (a first-party Modbus
 TCP server on pymodbus 3.8.6, `python:3.12-slim` pinned by digest, serving the register
 map of `fixtures/modbus/interop/register-map.toml`), starts it on `127.0.0.1:5020` and
-runs ten tests of `tests/interop_pymodbus.rs` plus the `modbus_tcp_read` example against
+runs ten tests of `tests/modbus_interop_pymodbus.rs` plus the `modbus_tcp_read` example against
 it. The tests are `#[ignore]`d and run only when `STONECRAB_INTEROP_MODBUS` names the
 server, so `cargo test` needs no container and no network.
 
@@ -353,12 +353,12 @@ assert_eq!(
 
 The golden vectors in `fixtures/modbus/tcp/` are written from the examples of the Modbus
 Application Protocol Specification V1.1b or built to break the decoder; they are
-repository fixtures, not part of the published crate.
+repository fixtures, not part of the published package.
 
 ## MBAP framing
 On Modbus TCP every PDU travels behind a 7 byte MBAP header: the transaction id, the
 protocol id (always 0), a length that counts the unit id plus the PDU, and the unit id, all
-big-endian. `MbapFramer` implements the transport crate's `Framer` for `ModbusAdu`, an
+big-endian. `MbapFramer` implements the transport module's `Framer` for `ModbusAdu`, an
 `MbapHeader` plus the PDU as opaque `Bytes`; the PDU is decoded after the session has
 matched the reply to its request. `decode` follows these rules:
 
@@ -407,7 +407,7 @@ has not arrived, a 261 byte ADU and a 1 KiB stream of seven coalesced ADUs).
 ## Session
 `ModbusSession::new(config, factory, clock)` owns a
 `ConnectionGuard<ModbusAdu, MbapFramer>` (the lifecycle, request-driven reconnect and
-the single in-flight slot of the transport crate) and the transaction counter.
+the single in-flight slot of the transport module) and the transaction counter.
 `connect`, `close`, `state`, `watch_state` and `stats` pass through to the guard. `request(&pdu, unit_id, deadline, token)` encodes a read
 request, sends it with the next transaction id (1 to 0xFFFE, continuing across a
 reconnect) and returns the PDU that answers it:
@@ -622,7 +622,7 @@ assert_eq!(coil, PlcValue::Bool(true));
 
 The typed vectors in `fixtures/modbus/tcp/typed_*` hold register bytes for every type in
 every mode, written by byte permutation of the documented layouts and kept apart from the
-decoder; they are repository fixtures, not part of the published crate.
+decoder; they are repository fixtures, not part of the published package.
 
 ## Configuration
 The six connection parameters and the `address-convention` key are described under

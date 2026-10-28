@@ -1,11 +1,12 @@
 # Stonecrab Transport
-Deadline-bounded byte transports for the Stonecrab protocol drivers. A `Transport` sends
-and receives bytes to one peer and does nothing else: it does not frame, parse, retry or
-reconnect. The crate also holds the `TransportFactory` that opens transports, the
+Deadline-bounded byte transports for the Stonecrab protocol drivers
+(`stonecrab::transport`, behind the `transport` feature). A `Transport` sends and
+receives bytes to one peer and does nothing else: it does not frame, parse, retry or
+reconnect. The module also holds the `TransportFactory` that opens transports, the
 `ConnectionGuard` that owns a connection's lifecycle, the Tokio-backed `SystemClock`, and
-a small jitter source for reconnect backoff. It depends on
-`stonecrab-core` (plus `bytes` and a scoped set of Tokio features) and not on the codec
-crate; framing errors are reported with the crate's own `FrameError`.
+a small jitter source for reconnect backoff. It uses the core and a scoped set of Tokio
+features and not the codec module; framing errors are reported with the module's own
+`FrameError`.
 
 No upstream parity claim is made: Apache PLC4X builds its transports on Netty, and these
 types are Stonecrab's own contract. The behavior that is specified is recorded in the
@@ -14,7 +15,7 @@ types are Stonecrab's own contract. The behavior that is specified is recorded i
 | Capability | Support level |
 | --- | --- |
 | `Transport` and `TransportFactory` traits, `FrameError` | build-tested |
-| `TcpTransport` and `TcpFactory` (feature `tcp`) | interoperability-tested |
+| `TcpTransport` and `TcpFactory` | interoperability-tested |
 | `Framer` trait and `FramedTransport` (`next_frame`, `send_frame`) | interoperability-tested |
 | `FramedTransport::resync` | simulator-tested |
 | `ConnectionGuard` connect, close, lifecycle and one in-flight request, `GuardConfig`, `GuardStats` | interoperability-tested |
@@ -26,10 +27,10 @@ types are Stonecrab's own contract. The behavior that is specified is recorded i
 
 How the levels were reached. The TCP transport has byte-level tests over real loopback
 sockets (connect refusal, fragmented and coalesced delivery, peer close, buffer and frame
-bounds, shutdown) and, through `stonecrab-modbus`, carries every read of its `interop`
+bounds, shutdown) and, through `stonecrab::modbus`, carries every read of its `interop`
 job against pymodbus 3.8.6 (the Modbus MBAP framer runs over `FramedTransport` and the
 guard there). `interoperability-tested` therefore means those paths ran against an
-independent server; it is a statement about the crate used by that driver, not a claim
+independent server; it is a statement about the module as used by that driver, not a claim
 about any other protocol. Deadline expiry, resync, reconnect, the queue and late replies
 are tested on the in-memory `FakeTransport` and a fake clock (decision D21: Tokio paused
 time does not control socket readiness), and pymodbus has no way to drop a link or delay a
@@ -37,14 +38,13 @@ reply on demand, so those rows are `simulator-tested` and no further. The framin
 ships no protocol framer of its own; the only one is the Modbus one. No physical device has
 been tried.
 
-## Features
-- `tcp` (default): `TcpTransport` and `TcpFactory`, and Tokio's `net` feature. Without it
-  the crate still builds and exposes `Transport`, `TransportFactory`, `FrameError`,
-  `SystemClock` and `Jitter`.
-
-Tokio is used with `rt`, `time`, `sync` and `io-util` always on and `net` behind `tcp`;
-the `full` feature is banned by `deny.toml`. Nothing here spawns a task, and a transport
-does no work between calls (decision D15 of the alpha plan).
+## Feature
+The module exists only with the `transport` feature, which is the only thing that brings
+Tokio into the crate: `rt`, `net`, `time`, `sync` and `io-util` are scoped on, and the
+`full` feature of Tokio is banned by `deny.toml`. The `modbus` and `testkit` features
+turn `transport` on; `sim`, `sensors` and `default-features = false` do not, so the
+core stays free of Tokio. Nothing here spawns a task, and a transport does no work
+between calls (decision D15 of the alpha plan).
 
 ## The deadline rule
 Every call that waits takes the `Deadline` it must finish by, and that argument is the
@@ -110,7 +110,6 @@ put a prefix of the frame on the wire, so the transport poisons itself and the o
 reopens it.
 
 ```rust
-# #[cfg(feature = "tcp")]
 # fn main() -> Result<(), Box<dyn std::error::Error>> {
 use std::time::{Duration, Instant};
 use bytes::{Bytes, BytesMut};
@@ -146,6 +145,4 @@ runtime.block_on(async {
 })?;
 # Ok(())
 # }
-# #[cfg(not(feature = "tcp"))]
-# fn main() {}
 ```

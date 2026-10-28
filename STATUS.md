@@ -9,28 +9,38 @@ its own commit; the slice log below records what each one landed.
 
 Stonecrab is an independent native Rust port of Apache PLC4X, prioritizing sensor
 acquisition. The repository is at the **alpha baseline**: the alpha defined in
-[`docs/ALPHA_PLAN.md`](docs/ALPHA_PLAN.md) is built, its definition of done is met, and
-the release evidence and process (slice S32, ADR-0017, `docs/evidence/alpha.md`) are
-recorded. Nothing of the alpha is published, tagged or posted upstream: those steps need
-the maintainer's separate approval (see "Recommended continuation").
+[`docs/ALPHA_PLAN.md`](docs/ALPHA_PLAN.md) is built, its definition of done is met, the
+release evidence and process (slice S32, ADR-0017, `docs/evidence/alpha.md`) are recorded,
+and the code ships as **one crate** (slice S33, ADR-0018). Nothing of the alpha is
+published, tagged or posted upstream: those steps need the maintainer's separate approval
+(see "Recommended continuation").
 
 - Repository: https://github.com/TheMadBotterINC/stonecrab
 - Primary/default branch: **`master`**, locally and remotely.
 - Author: **The Mad Botter INC**.
 - License: **Apache-2.0**.
 - Published on crates.io: **`stonecrab` 0.1.0**, a specification-stage placeholder. It is
-  the only published version of any crate.
-- Alpha versions, all unreleased: facade **0.2.0**; core, codec, transport, driver-sim,
-  modbus and sensors **0.1.0**. The facade's minor bump records removal of the published
+  the only published version.
+- Alpha version, unreleased: **`stonecrab` 0.2.0**, one crate. The former sibling crates
+  (core, codec, transport, driver-sim, modbus, sensors) and the test kit are modules of it,
+  and there are no other packages. The minor bump records removal of the published
   `placeholder::status` API; do not restore a compatibility shim without a real consumer
-  requirement. Plain pre-1.0 versions are used rather than `-alpha.N` (plan D1).
+  requirement. A plain pre-1.0 version is used rather than `-alpha.N` (the published 0.1.0
+  placeholder would win resolution over a pre-release).
+- **The S33 decision (ADR-0018, the maintainer's, 2026-10-27):** Stonecrab ships as one
+  crate that is simple to explain, one package, one version, one line to add it
+  (`cargo add stonecrab`). Default features are `sim`, `modbus` and `sensors`;
+  `default-features = false` is the Tokio-free core; the test kit is the off-by-default
+  `testkit` feature because a separate test crate would be a dev-dependency cycle. It
+  supersedes plan decision D1 and the crate graph of ADR-0001, ADR-0011 and ADR-0014, and
+  amends ADR-0017's publish, tag and yank mechanics (one publish, one tag `v0.2.0`).
 - Review policy: ADR-0005 waives the two-approval rule of CODING_STANDARDS 18.6 while there
   is one maintainer (the single-maintainer waiver, plan prerequisite P5, done). The waiver
   expires when a second maintainer with merge rights exists; until then every PR carries an
   Appendix C self-review.
 - Landed slices are pushed to `origin/master` and the hosted CI run is checked. Publishing
-  a crate, pushing a tag and operating hardware need separate maintainer approval. There is
-  no unfinished source edit at this handoff.
+  the crate, pushing a tag and operating hardware need separate maintainer approval. There
+  is no unfinished source edit at this handoff.
 
 ## Source documents and precedence
 
@@ -39,17 +49,20 @@ Read these before changing contracts:
 1. [`docs/SPEC.md`](docs/SPEC.md): scope, parity definition and acceptance criteria.
 2. [`docs/CODING_STANDARDS.md`](docs/CODING_STANDARDS.md): normative coding policy,
    including links to repository-specific overrides.
-3. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): the crate graph and contracts. Its
+3. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): the module map and contracts. Its
    diagrams are the original targets; each shipped section has a "Shipped at alpha" note
    that wins where it differs, and what is not shipped is marked deferred with its owner.
 4. [`docs/PROJECT_BRIEF.md`](docs/PROJECT_BRIEF.md): retained original README brief.
-5. [`docs/adr/`](docs/adr/): accepted implementation decisions (ADR-0001 to ADR-0016).
+5. [`docs/adr/`](docs/adr/): accepted implementation decisions (ADR-0001 to ADR-0018;
+   ADR-0018 supersedes parts of ADR-0001, 0009, 0011, 0014 and 0017 and amends 0003, 0005,
+   0012, 0013, 0015 and 0016, each with a note at the top of its status).
 6. [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md): the support-level matrix, data types,
    configuration keys, tested peers, platforms and upstream divergences.
 7. [`docs/parity/`](docs/parity/): `modbus.md`, `core.md`, `sim.md`, `transport.md` and
    `sensors.md`, the row-by-row compatibility records with test ids.
 8. [`docs/ALPHA_PLAN.md`](docs/ALPHA_PLAN.md): the plan and decisions D1 to D23 the slices
-   follow.
+   follow (the plan keeps its original seven-crate wording as history; S33 is the last
+   slice and D1 carries the superseded note).
 
 Some original links refer to an old repository owner or `main`; active metadata uses the
 repository above. ADR-0004 explicitly overrides the original `main` branch policy with
@@ -64,6 +77,8 @@ read coils, discrete inputs, holding registers and input registers as the 15 num
 bit types in a correlated, request-ordered batch with `split_into` disclosure, observe
 `ConnectionState` through a `StateWatch` including request-driven reconnect with capped
 jittered backoff, and cancel or time out any operation with documented wire consequences.
+It is one crate: `cargo add stonecrab` gives all of it, and `default-features = false`
+leaves the Tokio-free core.
 
 **Definition of done: met.** `crates/stonecrab/examples/profile_read.rs` loads a synthetic
 TOML profile that declares its address convention, builds the tags through
@@ -90,24 +105,39 @@ against a physical device. Upstream compatibility is claimed only for the rows o
 
 ## Implemented
 
-Per crate, at the shipped shapes. The parity rows behind each item are in
-`docs/parity/`; ADR numbers are in `docs/adr/`.
+One crate, `crates/stonecrab`, at the shipped shapes: the infrastructure around it, then
+its modules and features. The parity rows behind each item are in `docs/parity/`; ADR
+numbers are in `docs/adr/`. Slice names in this section are the history of when each part
+landed; the table of landed slices below keeps the crate names the slices used then.
 
-### Workspace and development infrastructure
+### One crate and development infrastructure
 
-- Resolver-3 Cargo workspace, Rust 2024, shared metadata and strict safety lints.
-- Seven publishable crates (below) and the unpublished `tools/stonecrab-testkit`. All
-  publishable crates have empty or minimal default features (`stonecrab-transport/tcp` and
-  `stonecrab-sensors/toml` are on by default, plan D10) and docs.rs metadata
-  (`all-features`, `--cfg docsrs`). The facade archive no longer ships `tests/`.
+- Resolver-3 Cargo workspace with one member, Rust 2024, shared metadata and strict
+  safety lints. `crates/stonecrab` is the only package and the only published crate.
+- Features (ADR-0018): `default = ["sim", "modbus", "sensors"]`; `full` (the same set,
+  spelled out; the `profile_read` example requires it); `transport` (Tokio, the
+  only way Tokio enters the crate); `modbus` (turns on `transport`, adds `tracing`);
+  `sim` (`tracing`); `sensors` (`serde`, `toml`); `testkit` (turns on `transport`, adds
+  `serde`, `serde_json`, `toml` and Tokio `macros`; test tooling, not a runtime feature).
+  The former `tcp` and `toml` features are gone. docs.rs metadata (`all-features`,
+  `--cfg docsrs`). The archive ships `src/`, `docs/`, the README and the license files
+  (102 files, `packaging/stonecrab.txt`); no tests, fixtures or test data.
+- Examples `sim_read`, `modbus_tcp_read` and `profile_read` declare `required-features`,
+  and so does every integration test file whose `#![cfg(...)]` names a feature (46
+  `[[test]]` entries in `crates/stonecrab/Cargo.toml`), so a plain `cargo test` skips a
+  file it cannot build instead of compiling an empty test crate. Cargo 1.99.1 prints no
+  notice for the skipped files in `cargo test`; naming one with `--test` reports the
+  missing feature.
 - Local mise tasks that run the commands of the CI job or step of the same name
   (`lint-attrs`, `features`, `machete`, `dependencies`, `examples`, `interop`, `parity`,
   `package` and `dco`; `check`, `coverage` and `fuzz` map to `quality`/`test`, a `quality`
-  step and `fuzz-smoke`, see the header of `mise.toml`).
-  Scripts: `scripts/coverage-gate.sh`, `lint-attrs.sh`,
-  `dco-check.sh`, `fuzz-smoke.sh` and `parity-check.sh` (ADR-0005 and its S31 addendum);
-  `lint-attrs.sh` and `parity-check.sh` have `--self-test` fixture trees under
-  `scripts/testdata/`. Package allow-lists for all seven crates are in `packaging/`.
+  step and `fuzz-smoke`, see the header of `mise.toml`), plus `mutants` and `sbom`.
+  Scripts: `scripts/coverage-gate.sh` (per-module thresholds by path prefix of
+  `crates/stonecrab/src`), `lint-attrs.sh` (the crate-level and per-module promotion
+  tables), `dco-check.sh`, `fuzz-smoke.sh`, `parity-check.sh`, `mutants.sh`, `sbom.sh` and
+  `fuzz-evidence.sh` (ADR-0005, its S31 addendum and ADR-0017); `lint-attrs.sh` and
+  `parity-check.sh` have `--self-test` fixture trees under `scripts/testdata/`. The one
+  package allow-list is `packaging/stonecrab.txt`.
 - Community files: `CODE_OF_CONDUCT.md`, `.github/PULL_REQUEST_TEMPLATE.md`,
   `.github/dependabot.yml`, `docs/hardware/TEMPLATE.md` (a template, not a record).
   `CONTRIBUTING.md` mirrors standards section 18 plus the upstream-baseline and
@@ -119,30 +149,25 @@ Per crate, at the shipped shapes. The parity rows behind each item are in
   (ADR-0009); `scripts/fuzz-smoke.sh` runs cargo-deny on it and every target for 60 s.
   Targets: `fuzz_core_connection_string`, `fuzz_codec_bounded_reader`,
   `fuzz_modbus_address`, `fuzz_modbus_pdu`, `fuzz_modbus_mbap`,
-  `fuzz_modbus_connection_string` and `fuzz_sensors_profile_toml`. `fuzz/deny.toml` must
-  mirror every root `deny.toml` change; the smoke script refuses to run otherwise.
+  `fuzz_modbus_connection_string` and `fuzz_sensors_profile_toml` (their names keep the
+  former crate prefixes; they import `stonecrab::...`). `fuzz/deny.toml` must mirror every
+  root `deny.toml` change; the smoke script refuses to run otherwise.
 - `interop/pymodbus/`: the first-party pymodbus 3.8.6 peer (Dockerfile pinned by digest,
   `server.py`, `interop.sh`) behind the CI job `interop` and `mise run interop`
   (ADR-0015 decision 16).
 - `profiles/synthetic/`: six synthetic sensor profiles (three for the pymodbus map under
   `modbus-tcp/`, three simulator twins under `sim/`) with `profiles/README.md`;
-  repository data, not shipped in any crate.
+  repository data, not shipped in the package.
 - `fixtures/modbus/`: first-party golden vectors (`tcp/`: PDU, ADU and typed-decode
   vectors authored from the Modbus Application Protocol V1.1b or built to fail), the
   interop register map and `PROVENANCE.toml`. The upstream vectors are not in the
   repository (prerequisite P4).
 - `upstream/manifest.toml`: the pinned Apache PLC4X baseline and the Modbus TCP inventory.
+- Release process and evidence (ADR-0017 as amended): `release.toml` (cargo-release with
+  publish, push and tag off; tag name `v{{version}}`), `mutants.toml`, the
+  `release-evidence` dispatch workflow and `docs/evidence/`.
 
-### `stonecrab` (facade) 0.2.0
-
-Re-exports core. Behind the optional features `sim`, `modbus` and `sensors` (`full`
-enables all three; all off by default) it re-exports `stonecrab-driver-sim` as
-`stonecrab::sim`, `stonecrab-modbus` as `stonecrab::modbus` and `stonecrab-sensors` (with
-its TOML loader) as `stonecrab::sensors`, each sibling pinned `=0.1.0`. Examples
-`sim_read`, `modbus_tcp_read` and `profile_read` (each with `required-features`). No
-executable lines of its own, so coverage reports it `n/a`.
-
-### `stonecrab-core` 0.1.0
+### Core (crate root), always built
 
 No Tokio, executor or network dependency.
 
@@ -155,7 +180,7 @@ No Tokio, executor or network dependency.
 - Errors and state: `PlcError`, `ErrorKind` (with additive `Ord`), `Diagnostics`,
   `ConnectionState`, `FailureCategory`, `Capabilities`, `Operation`, `SubscriptionMode`,
   `ResourceLimits`, `Secret<T>` (redacted, no zeroization claim), `Deadline`.
-- Time and cancellation: `OpFuture`, the `Clock` trait (no implementation in core),
+- Time and cancellation: `OpFuture`, the `Clock` trait (no implementation in the core),
   `CancellationToken` with child tokens, `StateCell` / `StateWatch` (ADR-0007).
 - Requests and responses: `ReadRequest` and builder (limits-bound, optional cancel slot),
   `ReadResponse` (exact correlation, request order, `split_into`), `ReadItem`, `ItemError`,
@@ -172,23 +197,23 @@ No Tokio, executor or network dependency.
   `Driver::parse_address`) and the `DriverOptions` slot for options only one driver
   understands.
 
-### `stonecrab-codec` 0.1.0
+### `stonecrab::codec`, always built
 
 `BoundedReader`, `BoundedWriter`, `ParseError` with `From<ParseError> for PlcError`, coil
 bit helpers (ADR-0013). Lengths are checked before allocation; nothing panics on input.
 Checksums and nesting limits are deferred (M2).
 
-### `stonecrab-transport` 0.1.0
+### `stonecrab::transport`, feature `transport`
 
-The only crate with Tokio (scoped features, no spawned task; ADR-0014): `Transport` and
+The only module with Tokio, apart from the test kit (scoped features, no spawned task; ADR-0014): `Transport` and
 `TransportFactory` (a `Deadline` on every call, `shutdown(Deadline)`), `TcpTransport` and
-`TcpFactory` (feature `tcp`), `FrameError` (transport-local, plan D22), `Framer` and
+`TcpFactory`, `FrameError` (transport-local, plan D22), `Framer` and
 `FramedTransport` (`next_frame`, `send_frame`, `resync(Deadline)`), `ConnectionGuard` with
 `GuardConfig` and `GuardStats` (lifecycle through core `ConnectionState`, request-driven
 reconnect with capped jittered backoff, one in-flight slot with a bounded admission queue,
 resync after a timeout, `close` bounded by `Timeouts.request`), `SystemClock` and `Jitter`.
 
-### `stonecrab-driver-sim` 0.1.0
+### `stonecrab::sim`, feature `sim`
 
 Tokio-free simulator (ADR-0012): `SimDriver` (scheme `sim`,
 `sim://<device>?latency-ms=<n>&seed=<u64>`), `SimConnection`, `SimDevice`, `SimTag`,
@@ -196,7 +221,7 @@ Tokio-free simulator (ADR-0012): `SimDriver` (scheme `sim`,
 `RealtimeClock`. It reads and writes in-process devices, enforces the access policy, allows
 one operation in flight, applies bounded read retry and never retries a write.
 
-### `stonecrab-modbus` 0.1.0
+### `stonecrab::modbus`, feature `modbus`
 
 Modbus TCP, reads only (ADR-0015; hand-written, nothing generated): the address types and
 grammar (`ModbusAddress::parse`, the explicit-convention rule for bare `40001` forms, the
@@ -209,35 +234,40 @@ with `ModbusOptions` (the six upstream parameters with upstream defaults plus
 `address-convention`; unknown keys are `InvalidConfig`). `write` is `Unsupported` with no
 I/O. Deferred items are in "Known gaps".
 
-### `stonecrab-sensors` 0.1.0
+### `stonecrab::sensors`, feature `sensors`
 
-Profile schema version 1 and the TOML loader (feature `toml`, 64 KiB bound), semantic
+Profile schema version 1 and the TOML loader (64 KiB bound), semantic
 validation collecting every error and the fixed unit table, `SensorProfile::tags(&dyn
 Driver)` (declared convention passed as `AddressOptions`), and
 `SensorProfile::measurements(&ReadResponse, wall_now)` with `Measurement` and `Quality`
 (ADR-0016). Only synthetic profiles exist; no named device profile.
 
-### `tools/stonecrab-testkit` (unpublished, development only)
+### `stonecrab::testkit`, feature `testkit` (test tooling, off by default)
 
-`FixtureAddress`, `FakeClock`, `block_on`, `block_on_with`, `poll_once`, `CountingWaker`;
-behind `net`: `Script`, `Step` (including `Respond` and `React`), `Reaction`,
+`FixtureAddress`, `FakeClock`, `block_on`, `block_on_with`, `poll_once`, `CountingWaker`,
+`Script`, `Step` (including `Respond` and `React`), `Reaction`,
 `ScriptedPeer`, `ScriptedPeerFactory`, `FakeTransport`, `FakeTransportFactory`,
 `CountingFactory`, `LengthPrefixedFramer` (the sanctioned doubles of CODING_STANDARDS
-13.5); behind `fixtures`: the golden-vector loader and `InteropMap`; and the
-`ContractSuite` every driver runs (23 cases; skips are named, never silent). Contract
+13.5), the golden-vector loader and `InteropMap`, and the
+`ContractSuite` every driver runs (23 cases; skips are named, never silent), which driver
+authors can run against their own driver. Contract
 results: simulator 22 passed and 1 skip; Modbus over the fake transport 21 and 2; over
 loopback `ScriptedPeer` 18 and 5; against pymodbus 14 and 9.
 
-### Tests
+### Tests and component documents
 
-Unit tests, property tests, consumer integration tests, executable documentation (every
-crate README is a doctest) and Send/Sync assertions cover the implemented contracts.
-Mandatory failure cases are tagged `// covers: SPEC mandatory-failure-cases / F<n>` and
-listed in `docs/COMPATIBILITY.md`. The README-vs-`Capabilities` tests
-(`crates/stonecrab-driver-sim/tests/readme_matrix.rs`,
-`crates/stonecrab-modbus/tests/readme_matrix.rs`) keep each driver README's support table
-equal to `Driver::capabilities()`. The parity gate (`mise run parity`) keeps the parity
-records and the sources honest about each other.
+Unit tests, property tests, consumer integration tests, executable documentation (the
+crate README and every component document are doctests) and Send/Sync assertions cover the
+implemented contracts. The component documents live inside the crate, in
+`crates/stonecrab/docs/components/` (`codec.md`, `core.md`, `modbus.md`, `sensors.md`,
+`sim.md`, `testkit.md`, `transport.md`), and each module root includes its own as rustdoc;
+`core.md` is compiled for its doctests only. Mandatory failure cases are tagged
+`// covers: SPEC mandatory-failure-cases / F<n>` and listed in `docs/COMPATIBILITY.md`. The
+README-vs-`Capabilities` tests (`crates/stonecrab/tests/sim_readme_matrix.rs`,
+`modbus_readme_matrix.rs`) keep each driver document's support table equal to
+`Driver::capabilities()`. The parity gate (`mise run parity`) keeps the parity records and
+the sources honest about each other. Test files are named by module (`codec_*`, `core_*`,
+`modbus_*`, `sensors_*`, `sim_*`, `transport_*`).
 
 ## Alpha slices landed
 
@@ -286,6 +316,7 @@ gates named were run locally before that commit.
 | S31 | 2026-10-27 | Documentation reconciled to the shipped alpha: ARCHITECTURE.md "shipped at alpha" notes for the crate graph (D22), the core contracts, the transport layer, the Modbus crate, the lifecycle state machine and the feature matrix; README.md with the alpha statement, the capability matrix (support levels per `docs/SPEC.md`), the `profile_read` quick start and the full gate list; the seven crate READMEs and the testkit README at final support levels; `docs/COMPATIBILITY.md` (new); parity records at final statuses with real test ids; `scripts/parity-check.sh` as the `parity` CI job and `mise run parity` (every `# Compatibility` id resolves, every implemented row is referenced; eleven uncited rows were cited from rustdoc and test comments); SECURITY.md status, supported versions and the yanking rule; CHANGELOG per-crate alpha sections opening with the four SPEC.md release-note items; this file rewritten to the alpha baseline with the slice table kept | check, coverage, lint-attrs, parity, package |
 | S32 | 2026-10-27 | Release evidence and process: ADR-0017 (publish order, signed per-crate tags prepared as commands, the yank procedure of CODING_STANDARDS 20.5, the evidence policy; references the ADR-0005 waiver); `release.toml` for cargo-release 1.1.7 with publish, push and tag off; `mutants.toml` and `mise run mutants` with one recorded run over fourteen scoped files (569 mutants: 462 caught, 0 missed, 107 unviable, three equivalent mutants excluded with reasons; the first run's seven survivors were killed by four added tests, test code only) stored as `docs/evidence/mutants/outcomes.json`; seven concurrent 30-minute fuzz runs with no artifact (`scripts/fuzz-evidence.sh`); the `release-evidence` dispatch workflow and `mise run sbom` (CycloneDX 1.5 per crate, package lists, absolute paths scrubbed); `docs/evidence/alpha.md` with the checklist; the upstream 1.0.0 source-release signature verified in a temporary keyring (`signature_verified = true`, nine pending items left); six upstream issues drafted under `docs/evidence/upstream-issues/`, not filed; the weekly `scheduled` job now runs the mutation scope and an advisory dry run; pinned tools cargo-mutants 27.1.0, cargo-cyclonedx 0.5.9, cargo-release 1.1.7 | check, coverage, lint-attrs, parity, machete, dependencies, sbom, package |
 | S33 | 2026-10-27 | One crate (maintainer decision; supersedes D1 and the crate graph of ADR-0001, ADR-0011, ADR-0014): the six sibling crates become modules of `stonecrab` 0.2.0 (`stonecrab::codec`, `::transport`, `::modbus`, `::sim`, `::sensors`; core at the root) and the test kit becomes `stonecrab::testkit` behind the off-by-default `testkit` feature; default features enable `sim`, `modbus` and `sensors`, `default-features = false` is the tokio-free core; everything moved with `git mv`; 1182 tests and 414 doctests before and after; module-level lint promotions kept and checked by `lint-attrs`; coverage thresholds per module prefix; one packaging list and SBOM; fuzz workspace, scripts, mise tasks, CI and the interop driver renamed. The narrative sections of this file, README, ARCHITECTURE, COMPATIBILITY, ADR-0018 and the release evidence are reconciled in the following docs commit | check, coverage, lint-attrs, parity, features, machete, dependencies, fuzz, examples, interop, package |
+| S33 (docs) | 2026-10-27 | Documentation, ADRs, release files and evidence reconciled to the single crate: ADR-0018 (the decision, what it supersedes or amends), ADR-0017 amended in place (one package and publish command, one tag `v0.2.0`, one yank), README.md for a non-engineering reader, the crate README and component docs, ARCHITECTURE module map and feature table, COMPATIBILITY, DEPENDENCY_AUDIT, coding standards (per-module lint promotions, one version), SECURITY, CONTRIBUTING, parity prose, one CHANGELOG section grouped by module with every bullet kept, this file's narrative; fresh mutation run on the merged tree (574 mutants, 465 caught, 107 unviable, 2 equivalent survivors whose redundant explicit fields are removed in this commit), fresh fuzz smoke; 46 `[[test]]` `required-features` entries; the redundant `homepage` manifest key dropped; hosted run of `dd0dd73` recorded (22 jobs green, `semver` included) | check, coverage, lint-attrs, parity, features, machete, dependencies, package, sbom |
 
 ## Verified evidence and reproduction
 
@@ -293,9 +324,11 @@ Development toolchain: **Rust 1.99.1**.
 Declared MSRV: **1.97**; locally exercised with **1.97.1**.
 Pinned tools: `cargo-llvm-cov` **0.9.1**, `cargo-deny` **0.20.2**, `cargo-nextest`
 **0.9.148**, `cargo-hack` **0.6.45**, `cargo-machete` **0.9.2**, `cargo-fuzz` **0.13.2**
-(fuzz workspace on `nightly-2026-10-01`).
+(fuzz workspace on `nightly-2026-10-01`), `cargo-mutants` **27.1.0**, `cargo-cyclonedx`
+**0.5.9**, `cargo-release` **1.1.7**.
 
-From the repository root:
+From the repository root (the gates run with `--all-features`; a plain `cargo test` runs the
+reduced suite without the `testkit` feature):
 
 ```sh
 mise install
@@ -311,32 +344,54 @@ mise run interop     # needs Docker
 mise run parity
 mise run package
 mise run dco -- origin/master..HEAD
+mise run mutants     # recorded run, MUTANTS_JOBS sets the parallelism
+mise run sbom        # SBOM_ALLOW_DIRTY=1 on an uncommitted tree
 ```
 
-Most recent local results for the implementation baseline (slices S01 to S30; S31 changed
-documentation, one script and comments in Rust sources only):
+Most recent local results, for the S33 documentation tree (the code is that of the S33
+build commit `dd0dd73`; this docs slice changed documentation, the release configuration
+and the `[[test]]` entries of `crates/stonecrab/Cargo.toml`, no library source):
 
-- Formatting, strict Clippy, nextest, `cargo test` with doctests, documentation with
-  warnings denied, no-default-features, lint-attrs, feature powerset and unused-
-  dependency checks passed.
-- Per-crate line coverage (ADR-0005): `stonecrab-core` 3577/3577 lines (gate 100%),
-  `stonecrab-codec` 181/181 (gate 100%), `stonecrab-modbus` 2758/2758 (gate 100%),
-  `stonecrab-driver-sim` 2051/2051 (gate 100%), `stonecrab-sensors` 1411/1411 (gate
-  100%), `stonecrab-transport` 1216/1220 (gate 95%; the uncovered lines are the
-  real-socket deadline-expiry and resolver-failure arms named in ADR-0014),
-  `stonecrab-testkit` 4606/4679 (gate 90%), `stonecrab` n/a (no executable lines).
-  Error paths are not excluded. Region coverage is reported in
-  `target/coverage-summary.txt` and not gated; do not describe it as branch coverage.
-- Workspace tests and doctests passed on Rust 1.97.1.
-- Cross-compilation checks passed for `aarch64-unknown-linux-gnu` and
-  `armv7-unknown-linux-gnueabihf`. These are compile checks, not device tests.
-- Dependency advisories, licenses, bans and registry-source checks passed.
-  Unused license-allowance warnings are currently emitted by cargo-deny.
-- All seven publishable crate archives built and matched their committed allow-lists.
-- The `interop` run (Docker, pymodbus 3.8.6) passed locally in S27 and S30: ten interop
-  tests, the `modbus_tcp_read` example, the contract suite and `profile_read
-  --expect-good` for each `modbus-tcp` profile. The `examples` run (the simulator
-  profiles) passed in S30.
+- `mise run check`: formatting, strict Clippy, nextest (**1182 tests**, 10 skipped),
+  `cargo test` with doctests (**414 doctests**, the same counts and names as before the
+  merge), documentation with warnings denied and the no-default-features check passed.
+  `lint-attrs`, `parity` (and its self-test), `machete`, `dependencies` and `examples`
+  passed.
+- Per-module line coverage (ADR-0005, `mise run coverage`): core 3577/3577 lines (gate
+  100%), `codec` 181/181 (gate 100%), `modbus` 2768/2768 (gate 100%), `sim` 2053/2053
+  (gate 100%), `sensors` 1411/1411 (gate 100%), `transport` 1224/1228 (gate 95%; the
+  uncovered lines are the real-socket deadline-expiry and resolver-failure arms named in
+  ADR-0014), `testkit` 4609/4682 (gate 90%). Error paths are not excluded. Region
+  coverage is reported in `target/coverage-summary.txt` and not gated; do not describe
+  it as branch coverage.
+- `cargo tree -p stonecrab -e normal` with the default features shows `tokio`, `tracing`,
+  `serde` and `toml` (and `bytes`, `thiserror`); with `--no-default-features` it shows
+  `bytes` and `thiserror` only.
+- The package archive is **102 files** and equals `packaging/stonecrab.txt` (`cargo package
+  --locked --allow-dirty -p stonecrab --list`); `mise run package` itself needs a clean
+  tree. `SBOM_ALLOW_DIRTY=1 mise run sbom` writes one CycloneDX file.
+- Mutation testing (`mise run mutants`, MUTANTS_JOBS=3): 574 mutants tested in 69
+  minutes: 465 caught, 0 timeouts, 107 unviable and 2 missed. The two are equivalent
+  (deleting `subscribe` or `concurrency` from the `..Capabilities::default()` expression
+  of `SimDriver::capabilities`), and cargo-mutants 27.1.0 cannot exclude that mutant
+  genre, so the recorded run reports them as missed; the three earlier equivalent
+  mutants remain in `exclude_re`. The docs commit then removed those two redundant
+  explicit fields from `SimDriver::capabilities` (the defaults are those values, so the
+  behaviour is unchanged): the next run has no survivor and the script exits 0. See
+  `docs/evidence/mutants/README.md`.
+- Fuzzing: `scripts/fuzz-smoke.sh 10` ran all seven targets for 10 seconds each on the
+  merged tree and passed (246,088, 244,773, 185,626, 277,851, 224,544, 336,310 and
+  78,999 runs, exit 0, no artifact and no change under `fuzz/`). The seven recorded
+  30-minute runs predate S33; the targets' code is unchanged apart from their import paths
+  (`docs/evidence/alpha.md`).
+- Cross-compilation checks (`aarch64-unknown-linux-gnu`, `armv7-unknown-linux-gnueabihf`)
+  and the 1.97.1 test run are CI cells; they were last recorded in the S32 hosted run.
+  These are compile checks, not device tests.
+- The `interop` run (Docker, pymodbus 3.8.6) passed locally in S27 and S30 and on the
+  hosted runner for S30 and S32; it was re-run locally on the merged tree for this
+  slice: ten interop tests (10 passed), the `modbus_tcp_read` example, the contract suite
+  (14 passed, 9 skipped by name) and `profile_read --expect-good` for each `modbus-tcp`
+  profile, exit 0.
 - `scripts/parity-check.sh` and its `--self-test` pass: 117 implemented or
   `automated-verified` parity rows are each named by a `# Compatibility` section or a
   test and carry test ids, and every `# Compatibility` reference resolves.
@@ -351,19 +406,25 @@ mise exec -- cargo check --locked --workspace --all-features --target armv7-unkn
 
 ### Hosted CI and the per-OS matrix
 
-The latest hosted run recorded for this baseline is the one for `8f5c3d0` (S31), which
-**completed successfully** (every job green except the report-only `semver`; `scheduled`
-is skipped on push):
-https://github.com/TheMadBotterINC/stonecrab/actions/runs/40557968227
-The run for `f19be4c` (S30, the definition of done on the hosted runner):
-https://github.com/TheMadBotterINC/stonecrab/actions/runs/40548582722
-The earlier run, for `0429da3` (S27):
-https://github.com/TheMadBotterINC/stonecrab/actions/runs/40543567845
+The hosted runs recorded so far, newest first:
+
+| Commit | Run | Result |
+| --- | --- | --- |
+| S33 build, `dd0dd73` | https://github.com/TheMadBotterINC/stonecrab/actions/runs/40599885679 | completed successfully: all 22 jobs green, `semver` included now that the crate has a published baseline |
+| S33 docs reconciliation (the commit after `dd0dd73`) | not yet recorded | |
+| `2d38e48` (S32) | https://github.com/TheMadBotterINC/stonecrab/actions/runs/40584025718 | completed successfully; every job green except the report-only `semver` |
+| `8f5c3d0` (S31) | https://github.com/TheMadBotterINC/stonecrab/actions/runs/40557968227 | completed successfully; first run of the `parity` job |
+| `f19be4c` (S30) | https://github.com/TheMadBotterINC/stonecrab/actions/runs/40548582722 | completed successfully; the definition of done on the hosted runner |
+| `0429da3` (S27) | https://github.com/TheMadBotterINC/stonecrab/actions/runs/40543567845 | earlier run |
+
+The S33 build commit and this documentation commit have no hosted result recorded yet:
+push them, check the run and record its id in this table. The job list of the last
+recorded run (S32, `2d38e48`):
 
 | Job | Result |
 | --- | --- |
 | `test`: ubuntu, macOS, Windows, each on Rust 1.97.1 and 1.99.1 (six cells; nextest, `cargo test` with doctests, no-default-features check) | green |
-| `quality` (fmt, strict Clippy, docs with warnings denied, per-crate coverage gate) | green |
+| `quality` (fmt, strict Clippy, docs with warnings denied, per-module coverage gate) | green |
 | `cross` (aarch64 and armv7 compile checks) | green |
 | `dependencies`, `package`, `dco`, `features`, `machete`, `lint-attrs` | green |
 | `geiger` (no first-party `unsafe` outside `forbid(unsafe_code)`), `beta` (report only) | green |
@@ -371,10 +432,8 @@ https://github.com/TheMadBotterINC/stonecrab/actions/runs/40543567845
 | `parity` (`scripts/parity-check.sh` and its self-test) | green |
 | `examples` (`sim_read` and the three `profile_read --expect-good` runs on the hosted runner) | green |
 | `interop` (pymodbus 3.8.6 on the amd64 runner: ten interop tests, the `modbus_tcp_read` example, the `profiles` step, the `interop-evidence` artifact) | green |
-| `semver` (report only) | fails until the sibling crates exist on crates.io (no baseline); does not fail the run |
+| `semver` (report only) | did not pass (it had no published baseline for the sibling crates); does not fail the run. It now has a baseline, `stonecrab` 0.1.0, see "Known gaps" |
 
-The run for the S32 commit `2d38e48` (release evidence) also completed successfully:
-https://github.com/TheMadBotterINC/stonecrab/actions/runs/40584025718
 The `release-evidence` workflow runs on dispatch only and has not been dispatched yet.
 
 Platform fixes that hosted runs needed, for the next maintainer: the prebuilt cargo-fuzz
@@ -396,7 +455,8 @@ benchmark or hardware gates yet.
 ADR-0005 records the waiver of the two-approval rule of CODING_STANDARDS 18.6 while the
 repository has one maintainer, with the expiry condition "a second maintainer with merge
 rights exists" and the Appendix C self-review each PR carries. It also records the
-per-crate coverage tiers, the CI gates and, in its S31 addendum, the parity gate.
+coverage tiers (now thresholds per module of the one crate, ADR-0018), the CI gates and,
+in its S31 addendum, the parity gate.
 
 ## Important implementation and tooling details
 
@@ -409,38 +469,51 @@ per-crate coverage tiers, the CI gates and, in its S31 addendum, the parity gate
   `ConnectionConfig::address_options()` before `connect` consumes the configuration.
 - Passing request and response tests is not evidence of wire behavior. Claims rest on the
   parity rows and their evidence (the interop job, the contract suite, the fake-transport
-  tests), and the README tables must stay equal to the `Capabilities` impls.
+  tests), and the component documents' support tables must stay equal to the `Capabilities`
+  impls.
 - Partial and all-item failures remain valid response data. Do not collapse them
   into a batch error or invent a device timestamp (`source_time` is `None` unless a device
   supplies one).
 - Never turn an unknown write outcome into a rejection or automatically replay it.
 - Address methods must return stable, credential-free metadata. Do not add an
   `as_any` shim; stable trait upcasting is already used.
-- Reconnect is request-driven (plan D15): no background task, no `tokio::spawn` in a
-  published crate (`clippy.toml` disallows it; the testkit's `ScriptedPeer` owns the one
-  spawn with the required `#[expect]`).
+- **Lint promotions are per module** (CODING_STANDARDS 4.6 and 5.1, ADR-0018). `lib.rs`
+  carries `#![forbid(unsafe_code)]`, `#![deny(missing_docs)]` and
+  `#![deny(clippy::as_conversions)]` as inner attributes, and outer `#[deny(...)]`
+  attributes on the `pub mod` declarations of `codec`, `modbus` and `sim`
+  (`indexing_slicing`, `arithmetic_side_effects`, `as_conversions`) and `transport`
+  (`indexing_slicing`, `as_conversions`). `scripts/lint-attrs.sh` checks both tables and
+  that the module root files carry no inner lint attribute; a new module takes a row in it
+  and in `scripts/coverage-gate.sh`.
+- **Use `--all-features` for the full suite.** Most integration tests need the `testkit`
+  feature, and `[[test]]` `required-features` make a plain `cargo test` skip them silently
+  (the default features do not include `testkit`). `mise run check`, `coverage`,
+  `mutants` and CI run with `--all-features`.
+- **The testkit's own tests and doctests read repository files** (`testdata/`,
+  `fixtures/`), which the archive does not contain: run the full suite from a checkout, not
+  from the unpacked archive. Packaged unit tests and documentation without those files
+  are self-contained.
+- Reconnect is request-driven (plan D15): no background task, no `tokio::spawn` in the
+  library (`clippy.toml` disallows it; the testkit's `ScriptedPeer` owns the one spawn with
+  the required `#[expect]`).
 - The word `unsafe` may not appear in any first-party Rust file except the
   `forbid(unsafe_code)` attribute: the `geiger` job greps for it, comments and strings
   included.
-- Core's testkit dependency is development-only. The path-only dependency policy
-  exception is documented in ADR-0003; registry wildcard versions remain denied.
-- Core integration tests using the unpublished testkit are workspace-only and not
-  shipped in the core archive. Cargo emits an expected ignored-test warning while
-  packaging. Packaged core unit tests and documentation remain self-contained.
 - `mise run package` uses a **fresh Cargo cache**. Repeatedly verifying changed,
-  unpublished sibling crates with the same version in a reused cache previously
-  selected an older core archive. Do not remove the isolation as a cosmetic change.
-- Update the matching `packaging/<crate>.txt` allow-list when shipped files change, and
-  review the resulting archive contents.
+  unpublished crates with the same version in a reused cache previously selected an older
+  archive. Do not remove the isolation as a cosmetic change.
+- Update `packaging/stonecrab.txt` when shipped files change, and review the resulting
+  archive contents.
 - New dependencies require a rationale, the applicable audit/ADR entry and the D23
   `cargo tree -e normal,dev -i once_cell -i lazy_static -i log -i time -i chrono` check.
-  Runtime dependencies are `thiserror`, `bytes`, `tracing` (std only; `once_cell` reaches
-  the graph through `tracing-core` under a recorded deny.toml wrapper), `serde` and `toml`
-  in the sensors crate, and `tokio` with scoped features in the transport crate only;
-  dev-only `proptest`, `tracing-subscriber` (the examples; `lazy_static` reaches the graph
-  through `sharded-slab` under a second recorded wrapper) and, in the testkit,
-  `serde_json`. `toml_parser` is pinned in `Cargo.lock` so that only one `winnow`
-  resolves; a plain `cargo update` must keep that pin or allow the duplicate.
+  Runtime dependencies are `thiserror` and `bytes` (always), `tokio` with scoped features
+  (feature `transport`), `tracing` (std only; features `sim` and `modbus`; `once_cell`
+  reaches the graph through `tracing-core` under a recorded deny.toml wrapper), `serde` and
+  `toml` (feature `sensors`) and, for the `testkit` feature, `serde_json`; dev-only
+  `proptest` and `tracing-subscriber` (the examples; `lazy_static` reaches the graph
+  through `sharded-slab` under a second recorded wrapper). `toml_parser` is pinned in
+  `Cargo.lock` so that only one `winnow` resolves; a plain `cargo update` must keep that
+  pin or allow the duplicate.
 - A parity row id is the first cell of a table row in `docs/parity/*.md`. A public item
   that maps to upstream behavior carries a `# Compatibility: docs/parity/<file>.md#<ROW-ID>`
   rustdoc section; `mise run parity` fails on an id that does not resolve and on an
@@ -506,9 +579,16 @@ Deferred features, each a deferred row in `docs/parity/modbus.md` or an item of 
   code generation and the remaining baseline protocols (M5).
 - **Hardware**: no physical device has been tried and no hardware record exists.
 - **Gates not run**: the 8-hour release fuzz run and 24-hour soak (the recorded runs are
-  30 minutes per target), benchmarks, differential tests against PLC4J, branch coverage
-  (region coverage is reported), `cargo publish --dry-run` and a blocking `semver` job
-  (no published baseline).
+  30 minutes per target, made before S33), benchmarks, differential tests against PLC4J,
+  branch coverage (region coverage is reported) and `cargo publish --dry-run` against the
+  registry.
+- **The `semver` job** (report only) now has a baseline: the published `stonecrab` 0.1.0.
+  It will flag the removed `placeholder::status` API as a breaking change of a 0.x crate;
+  the 0.2.0 minor bump is the intended answer (ADR-0017, ADR-0018), so read the report
+  rather than expect green, and make the job blocking only after the first real release.
+- **A plain `cargo test` runs the reduced suite** (no `testkit` feature, so the test files
+  that need the kit are skipped without a notice) and the kit's own tests need a checkout;
+  see "Important implementation and tooling details".
 - **Upstream vectors**: the Apache-2.0 PLC4X test vectors are not redistributed (P4), so
   every test vector in the repository is first-party. This keeps the four byte-order mode
   rows at `implemented` instead of `automated-verified`.
@@ -535,30 +615,33 @@ These are actions outside the code (plan P1 to P5):
 
 ## Recommended continuation
 
-The alpha plan is executed (S01 to S32; S04a and S04b wait for P4). What remains is the
+The alpha plan is executed (S01 to S33; S04a and S04b wait for P4). What remains is the
 maintainer's: nothing below is done by an automated run, and nothing is published,
 tagged or posted without separate approval.
 
-1. Run the `release-evidence` workflow once (`workflow_dispatch`) and attach its
-   artifact to the draft pre-release when one exists.
+1. Push the S33 commits to `origin/master`, check the hosted run (the one-crate change
+   touches every job; the `semver` report will flag the removed placeholder) and record
+   its id in "Hosted CI and the per-OS matrix". Run the `release-evidence` workflow once
+   (`workflow_dispatch`) and attach its artifact to the draft pre-release when one exists.
 2. Close the maintainer prerequisites P1 to P3 (repository settings) and decide P4 (the
    upstream vector redistribution), which unblocks S04a and S04b and the
    `automated-verified` status of the byte-order rows.
 3. Decide whether to file the six drafted upstream issues under
    `docs/evidence/upstream-issues/` on the Apache PLC4X tracker and record the URLs in
    the divergence table of `docs/parity/modbus.md`.
-4. Release per ADR-0017: run the alpha release checklist in `docs/evidence/alpha.md`,
-   `cargo publish --dry-run` per crate in dependency order with a fresh `CARGO_HOME`,
-   create and push the signed tags `<crate>-v<version>`, then publish core, codec,
-   transport, driver-sim, modbus, sensors and the facade in that order. Harmonise the
-   facade's `stonecrab-core` range to `=0.1.0` first if CODING_STANDARDS 20.1 is to be
-   read strictly (recorded in ADR-0017).
+4. Release per ADR-0017 as amended by ADR-0018: run the alpha release checklist in
+   `docs/evidence/alpha.md`, then publish one crate with `cargo package --locked -p
+   stonecrab`, `cargo publish --locked --dry-run -p stonecrab` and, only with the
+   maintainer's separate approval, `cargo publish --locked -p stonecrab`; create one
+   annotated tag `v0.2.0` on the release commit (signed when a signing key is configured;
+   the maintainer decides) and push it by name after crates.io accepts the crate. There is
+   no publish order, no `=` pin and no sibling to yank with it.
 5. After publication: make `semver` blocking, re-run `scheduled` (30-minute fuzz,
    mutation scope, advisory dry run) and plan M2 (writes, Modbus RTU and ASCII, board
    adapters) from `docs/ALPHA_PLAN.md`'s deferred items.
 
 Keep changes reviewable, commit tested slices one signed commit per green slice, and
-maintain the per-crate coverage gates. No first-party unsafe, panics on input, unbounded
+maintain the per-module coverage gates. No first-party unsafe, panics on input, unbounded
 I/O, silent sample loss, inferred byte order or automatic replay of ambiguous writes. Do
 not mark planned capabilities supported.
 

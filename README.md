@@ -2,15 +2,45 @@
 **Apache PLC4X, carcinized.** An independent native Rust port, built for sensor acquisition first.
 Copyright 2026 The Mad Botter INC and the Stonecrab contributors. Apache-2.0.
 
-Stonecrab is **alpha** software. The alpha can read coils, discrete inputs, holding
-registers and input registers from a Modbus TCP server through one object-safe driver
-boundary (`DriverRegistry`, `Driver`, `Connection`), turn the values into scaled, qualified
-sensor measurements with declarative profiles, and run the same code against an
-in-process simulator with no network. It has been checked against an independent server,
-pymodbus 3.8.6, and has never touched a physical device. It does not write, subscribe,
-browse, discover or speak Modbus RTU, and its APIs may change before 1.0. The only
-published version is the specification-stage placeholder `stonecrab` 0.1.0; the alpha
-versions (`stonecrab` 0.2.0 and the 0.1.0 sibling crates) are unreleased.
+Stonecrab reads values from industrial equipment, such as sensors and controllers that
+speak Modbus TCP, and hands them to your program as plain, checked numbers. It is one
+package with one version, `stonecrab`, written in Rust. Today it can read coils, discrete
+inputs, holding registers and input registers from a Modbus TCP server, turn the raw
+values into scaled sensor measurements that carry a quality grade, using declarative
+profiles, and run the same code against a built-in simulator with no network and no
+hardware. It has been checked against an independent Modbus server (pymodbus 3.8.6) and
+has never touched a physical device. **It is alpha software and is not for production use
+yet**: it does not write, subscribe, browse, discover or speak Modbus RTU, and its APIs may
+change before 1.0.
+
+## Add it
+```sh
+cargo add stonecrab
+```
+That one line gives you the simulator, Modbus TCP and the sensor profiles. Until
+`stonecrab` 0.2.0 is published on crates.io, `cargo add stonecrab` would fetch the
+published 0.1.0, a specification-stage placeholder with no protocol code, so use the
+checkout instead: `stonecrab = { path = "crates/stonecrab" }`. Nothing of the alpha is
+published yet; publication needs the maintainer's separate approval.
+
+Programmers use it through one object-safe boundary (`DriverRegistry`, `Driver`,
+`Connection`): register a driver, connect with a connection string such as
+`modbus-tcp://192.0.2.10:502` or `sim://bench`, and read.
+
+### Features
+Everything is in the one crate; the features only decide what is compiled in.
+
+| Feature | What you get | On by default |
+| --- | --- | --- |
+| `sim` | `stonecrab::sim`, the in-process simulator | yes |
+| `modbus` | `stonecrab::modbus`, the Modbus TCP driver (reads only); brings in Tokio | yes |
+| `sensors` | `stonecrab::sensors`, declarative sensor profiles and the TOML loader | yes |
+| `transport` | `stonecrab::transport`, deadline-bounded transports; the only thing that needs Tokio, and on whenever `modbus` is | no |
+| `testkit` | `stonecrab::testkit`, fakes and the driver contract suite for tests; not for applications | no |
+
+`default-features = false` gives the small core with no Tokio and no network code, for a
+constrained target; then pick the features you need. The crate README,
+[`crates/stonecrab/README.md`](crates/stonecrab/README.md), has the module map.
 
 ## Capability matrix
 Support levels use only the labels of the project's hardware-evidence policy
@@ -48,7 +78,7 @@ parity row in [`docs/parity/`](docs/parity); divergences from Apache PLC4X are l
 there with their references.
 
 ## Quick start
-Clone the repository (the profiles are repository data, not shipped in a crate) and run
+Clone the repository (the profiles are repository data, not shipped in the package) and run
 the `profile_read` example from its root. It loads a synthetic profile, builds the tags
 through the driver the connection string names, reads them with a 2 second deadline,
 and logs name, value, unit, quality, origin, raw value and `sampled_at` for every
@@ -84,18 +114,18 @@ interop/pymodbus/interop.sh stop
 ```
 
 To use a driver from your own code before the alpha is published, depend on the checkout
-by path and enable the feature you need (`stonecrab = { path = "crates/stonecrab",
-features = ["modbus"] }`; without features only the core contracts are pulled) and read
-the crate README: [`crates/stonecrab/README.md`](crates/stonecrab/README.md) has the
-feature list and the two smaller examples, `sim_read` and `modbus_tcp_read`, and
-[`crates/stonecrab-modbus/README.md`](crates/stonecrab-modbus/README.md) has the
+by path (`stonecrab = { path = "crates/stonecrab" }`; the default features include the
+simulator, Modbus TCP and the sensor profiles) and read the crate README:
+[`crates/stonecrab/README.md`](crates/stonecrab/README.md) has the feature list and the two
+smaller examples, `sim_read` and `modbus_tcp_read`, and the
+[Modbus component document](crates/stonecrab/docs/components/modbus.md) has the
 connection-string and address grammars.
 
 ## Current status
 See [`STATUS.md`](STATUS.md) for the current engineering handoff, verification
 evidence, known gaps and continuation steps, and
 [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) for what is supported, at which level and
-against which peers. The published 0.1.0 crate is specification-stage only. Upstream
+against which peers. The published 0.1.0 package is specification-stage only. Upstream
 compatibility is claimed only for the rows of [`docs/parity/modbus.md`](docs/parity/modbus.md)
 that say so, at the support levels above.
 
@@ -106,13 +136,16 @@ describe shipped behavior and which are deferred targets.
 
 ## Development
 Install [mise](https://mise.jdx.dev/), then run `mise install`. Each task runs the commands of
-the CI job or step it is named for (the mapping is in the header of `mise.toml`):
+the CI job or step it is named for (the mapping is in the header of `mise.toml`). The gates
+run with `--all-features`, so they exercise the test kit too:
 
 - `mise run check`: formatting, strict Clippy, tests, doctests, documentation with
-  warnings denied (every crate README is a doctest) and the no-default-features build.
-- `mise run coverage`: the per-crate line-coverage thresholds of ADR-0005.
-- `mise run lint-attrs`: crate-level lint attributes against the section 5.1 table.
-- `mise run features`: the feature powerset (depth 2) and each crate without defaults.
+  warnings denied (the crate README and every component document are doctests) and the
+  no-default-features build.
+- `mise run coverage`: the per-module line-coverage thresholds of ADR-0005.
+- `mise run lint-attrs`: lint attributes in `lib.rs` against the section 5.1 table, crate
+  level and per module.
+- `mise run features`: the feature powerset (depth 2) and the crate without defaults.
 - `mise run machete`: unused dependencies. `mise run dependencies`: advisories, licenses,
   bans and sources.
 - `mise run fuzz`: the fuzz smoke check, 60 seconds per target.
@@ -121,15 +154,18 @@ the CI job or step it is named for (the mapping is in the header of `mise.toml`)
 - `mise run interop`: the pymodbus run described above (needs Docker).
 - `mise run parity`: every `# Compatibility` id in the sources resolves to a parity row and
   every implemented row is referenced (ADR-0005 addendum).
-- `mise run package`: the crate archives against their reviewed allow-lists.
+- `mise run package`: the crate archive against its reviewed allow-list.
 - `mise run dco -- <range>`: `Signed-off-by` on every commit in a range.
+
+A plain `cargo test` builds only the default features and so runs a reduced suite; use
+`cargo test --all-features` (what `mise run check` runs) for everything. The test kit's own
+tests read repository files, so the full suite runs from a checkout.
 
 The pinned development compiler is Rust 1.99.1, edition 2024; MSRV is 1.97.
 
-The facade is in `crates/stonecrab`, pure contracts in `crates/stonecrab-core`; the
-simulator, Modbus TCP driver, sensor profiles, transport and codec are their own crates,
-and `tools/stonecrab-testkit` holds the unpublished test doubles. The facade and core have
-empty default features; no executor is required by core.
+Stonecrab is one crate, `crates/stonecrab`: the core contracts are at its root and the
+simulator, Modbus TCP driver, sensor profiles, transport, codec and test kit are modules
+behind the features above (ADR-0018). The core needs no executor.
 See [contributing](CONTRIBUTING.md), [security](SECURITY.md),
 [license](LICENSE), [notices](NOTICE), and [changelog](CHANGELOG.md).
 Stonecrab is not affiliated with the Apache Software Foundation or Apache PLC4X.

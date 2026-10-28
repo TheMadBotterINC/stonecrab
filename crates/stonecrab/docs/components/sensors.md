@@ -2,9 +2,10 @@
 Declarative sensor profiles for Stonecrab: versioned TOML data that maps protocol
 addresses to named measurements, with a data type, byte and word order, a scaling
 pipeline, a unit, quality rules and the evidence behind it. A profile contains no
-executable code and is never written by this library.
+executable code and is never written by this library. The module is `stonecrab::sensors`,
+behind the `sensors` feature (on by default).
 
-This crate currently offers the schema types, a bounded loader, semantic validation and
+This module currently offers the schema types, a bounded loader, semantic validation and
 the measurement pipeline: `SensorProfile::from_toml`, `SensorProfile::validate`,
 `SensorProfile::tags`, `SensorProfile::measurements`, `Measurement`, `Quality`, `Unit`,
 `ProfileId`, `SchemaVersion` (version 1 is the only schema version; any other value is
@@ -12,9 +13,9 @@ the measurement pipeline: `SensorProfile::from_toml`, `SensorProfile::validate`,
 `MeasurementDef`, `ScaleStep`, `ValueRange`, `StatusField`, `QualityMapping`,
 `Provenance`, `ValidationStatus` and `ProfileError`. The loader checks the shape of a
 document, `validate` checks its meaning, `tags` asks a driver to parse its addresses and
-`measurements` turns a read response into qualified engineering values. The crate depends
-on `stonecrab-core`, `serde` and, behind the default `toml` feature, `toml`; it depends on
-no driver.
+`measurements` turns a read response into qualified engineering values. The `sensors`
+feature adds `serde` and `toml` and nothing else; the module depends on the core and on no
+driver.
 
 Profiles declare their address convention. A bare Modbus number such as `40001` is
 ambiguous (holding register 1 under the PLC4X convention, wire address 40001 otherwise),
@@ -40,18 +41,18 @@ register map and its own fixtures.
 
 The synthetic reference profiles (temperature, pressure/flow/level and discrete state)
 live in the repository under `profiles/synthetic/`, two files per device, one per scheme,
-and are labeled `synthetic`: they describe no real device and are not part of this crate.
-The facade's `profile_read` example reads each `sim` profile against the simulator in the
-`examples` CI job and each `modbus-tcp` profile against the pymodbus 3.8.6 server in the
-`interop` job, and every measurement comes back of quality `Good`. That is the evidence
+and are labeled `synthetic`: they describe no real device and are not part of the
+published package. The crate's `profile_read` example reads each `sim` profile against
+the simulator in the `examples` CI job and each `modbus-tcp` profile against the pymodbus
+3.8.6 server in the `interop` job, and every measurement comes back of quality `Good`. That is the evidence
 behind the two `tested` rows above: an independent Modbus server served the synthetic
 register map. No named device profile exists and no real device has been tried.
 
-## Features
-- `toml` (default): the TOML loader, `SensorProfile::from_toml`, and the `toml` crate
-  behind it. Without it the crate still builds and exposes every schema type, which
-  deserialize with any `serde` format, but the library itself cannot load a file: enable
-  `toml` to load profiles.
+## Feature
+The module exists only with the `sensors` feature, which brings in `serde` and the `toml`
+crate. That includes the TOML loader, `SensorProfile::from_toml`, which is how an
+application reads a profile file; the schema types also deserialize with any other
+`serde` format.
 
 ## Profile format
 A document is TOML with a bounded size (64 KiB). Unknown keys are errors at every level,

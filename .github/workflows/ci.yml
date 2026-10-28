@@ -62,7 +62,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov@0.9.1,cargo-nextest@0.9.148
-      # One instrumented nextest run, then a report pass per crate (ADR-0005).
+      # One instrumented nextest run, then a report pass per module (ADR-0005).
       - run: scripts/coverage-gate.sh
         env:
           NEXTEST_PROFILE: ci

@@ -1,5 +1,8 @@
 # 0001: Runtime-independent foundation
 ## Status
+Superseded in part by ADR-0018: the workspace crate graph below (separate crates for the
+core, drivers, transport, codec and testkit) is replaced by one crate, `stonecrab`, with
+the former crates as modules; the text is the original decision.
 Accepted for the initial development slice.
 ## Context
 The published package contains only a placeholder. The supplied architecture directs

@@ -5,6 +5,9 @@ It records decisions D13 (the ordering half) and D14 and satisfies the "ADR befo
 requirement of ARCHITECTURE.md section 11 for the deferred value representations. It
 affects `stonecrab-core` and the facade re-exports; every change is additive.
 
+> Note: this ADR keeps its original crate names. Map each crate name to its module with the
+> table in ADR-0018 decision 1.
+
 ## Context
 Later slices need `BTreeSet<ErrorKind>` for the retry policy (ADR-0008), a way to say how
 a multi-word value is laid out on the wire, and a decision on the architecture's

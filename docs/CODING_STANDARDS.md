@@ -1,6 +1,6 @@
 # Stonecrab Coding Standards
 
-**Version:** 1.0 draft · **Applies to:** every crate in the `stonecrab` workspace · **Owner:** maintainers · **Changes:** by pull request, with an ADR when a rule in §2, §4, §5, §8 or §15 changes.
+**Version:** 1.0 draft | **Applies to:** the `stonecrab` crate and everything else in the repository | **Owner:** maintainers | **Changes:** by pull request, with an ADR when a rule in §2, §4, §5, §8 or §15 changes.
 
 This document is normative. **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT** and **MAY** are used as in RFC 2119. A rule marked **CI** is enforced mechanically; a rule marked **review** is enforced by code review. Where this document and the [engineering specification](./SPEC.md) disagree, the specification wins and this document gets fixed.
 
@@ -40,7 +40,7 @@ The standards exist for one reason: this library parses bytes from industrial ne
 
 ## 1. Scope and precedence
 
-1.1. These standards apply to all first-party Rust in the workspace: published crates under `crates/`, tooling under `tools/`, examples, benchmarks, fuzz targets and tests. Where a rule is relaxed for a category (tests may `unwrap`, binaries may use `anyhow`), the relaxation is stated explicitly; otherwise the rule applies everywhere.
+1.1. These standards apply to all first-party Rust in the workspace: the published crate under `crates/stonecrab/`, tooling under `tools/` when it exists, examples, benchmarks, fuzz targets and tests. Where a rule is relaxed for a category (tests may `unwrap`, binaries may use `anyhow`), the relaxation is stated explicitly; otherwise the rule applies everywhere.
 
 1.2. Generated code (§17) is exempt from style and lint rules, is excluded from coverage thresholds, and is never edited by hand. It is **not** exempt from §4 (`unsafe`), §6 (panics) or §7 (bounded parsing): the generator must emit code that satisfies them.
 
@@ -78,7 +78,7 @@ The standards exist for one reason: this library parses bytes from industrial ne
 2.8. **Edition 2024 specifics worth knowing.**
 
 - `-> impl Trait` captures all in-scope lifetimes. Use precise capturing (`-> impl Iterator<Item = &T> + use<'_, T>`) when a return type must not capture a lifetime it does not need.
-- `gen` is a reserved keyword. Nothing is named `gen`; the generator crate is `stonecrab-codegen`, its entry point is `generate`.
+- `gen` is a reserved keyword. Nothing is named `gen`; the generator (a maintainer tool, `tools/stonecrab-codegen`) has the entry point `generate`.
 - `std::env::set_var` is `unsafe` and therefore unavailable (§4). Tests needing environment configuration use constructor arguments or a `Config` builder instead.
 - Temporaries in `if let` scrutinees and tail expressions drop earlier than in 2021. Bind lock guards and borrowed buffers to a named `let` and never rely on temporary lifetime extension.
 - `let` chains (`if let Some(x) = a && x > 3`) are stable and preferred over nested `if let`.
@@ -127,22 +127,23 @@ The standards exist for one reason: this library parses bytes from industrial ne
 
 4.5. **Hardware access** goes through `std` file I/O and `ioctl`-wrapping crates (`spidev`, `i2cdev`, `serialport`), which encapsulate the `unsafe` syscalls. Our adapters wrap those behind the `SpiBus`/`I2cBus`/`SerialPort` traits in §8.7 so the `unsafe` surface is one audited crate per bus, not scattered.
 
-4.6. **Miri.** Because there is no first-party `unsafe`, Miri is not a release gate. It runs on the nightly job against the `stonecrab-core` and `stonecrab-codec` test suites as a cheap detector of library misuse (uninitialized reads via a dependency, data races in tests), with findings filed as issues.
+4.6. **Miri.** Because there is no first-party `unsafe`, Miri is not a release gate. It runs on the nightly job against the test suites of the core and `stonecrab::codec` as a cheap detector of library misuse (uninitialized reads via a dependency, data races in tests), with findings filed as issues.
 
 ---
 
 ## 5. Lints
 
-5.1. **Single source of truth.** All lint levels live in `[workspace.lints]` in the root `Cargo.toml` (Appendix A). Every crate opts in with `[lints] workspace = true` (Cargo does not allow a crate to both inherit and override that table). Crate-level lint attributes in `lib.rs` are prohibited, with exactly two exceptions: the `#![forbid(unsafe_code)]` of §4.1, repeated in source so it survives a crate being built outside the workspace; and the **promotions** below, which raise a lint the workspace sets to `warn` up to `deny` in the crates where that code is never acceptable (source attributes take precedence over the `-W` flags Cargo passes, so this works):
+5.1. **Single source of truth.** All lint levels live in `[workspace.lints]` in the root `Cargo.toml` (Appendix A). The crate opts in with `[lints] workspace = true` (Cargo does not allow a crate to both inherit and override that table). Lint attributes in `lib.rs` are prohibited, with exactly two exceptions: the `#![forbid(unsafe_code)]` of §4.1, repeated in source so it survives the crate being built outside the workspace; and the **promotions** below, which raise a lint the workspace sets to `warn` up to `deny` where that code is never acceptable (source attributes take precedence over the `-W` flags Cargo passes, so this works). Stonecrab is one crate, so a promotion that holds for the whole crate is an inner attribute of `lib.rs`, and a promotion that holds for one module is an **outer attribute on that module's declaration** in `lib.rs` (`#[deny(...)] pub mod codec;`). Module root files (`src/codec.rs` and the like) carry no lint-level attribute of their own.
 
-| Promotion | Crates |
+| Promotion | Where |
 | --- | --- |
-| `#![deny(missing_docs)]` | every published crate |
-| `#![deny(clippy::indexing_slicing)]` | `stonecrab-codec`, `stonecrab-transport`, every driver crate |
-| `#![deny(clippy::arithmetic_side_effects)]` | `stonecrab-codec`, every driver crate |
-| `#![deny(clippy::as_conversions)]` | `stonecrab-core`, `stonecrab-codec`, every driver crate |
+| `#![deny(missing_docs)]` | the crate (inner attribute in `lib.rs`) |
+| `#![deny(clippy::as_conversions)]` | the crate (inner attribute in `lib.rs`), which covers the core and every module |
+| `#[deny(clippy::indexing_slicing)]` | the module declarations of `codec`, `transport`, and every driver module (`sim`, `modbus`) |
+| `#[deny(clippy::arithmetic_side_effects)]` | the module declarations of `codec` and every driver module |
+| `#[deny(clippy::as_conversions)]` | also stated on the module declarations of `codec`, `transport` and every driver module |
 
-A promotion may only *raise* a level; lowering one in source is prohibited. — **CI** (a `grep` in `xtask lint-attrs` fails on any other crate-level lint attribute)
+The modules `sensors` and `testkit` carry no module-level promotion. A promotion may only *raise* a level; lowering one in source is prohibited. A new module that parses wire bytes or does arithmetic on them takes the promotions of `codec` in the pull request that adds it. **CI** (`scripts/lint-attrs.sh`, the `lint-attrs` job, checks `lib.rs` against its table of permitted crate-level and per-module promotions, and fails on any other lint attribute in `lib.rs` or in a module root file)
 
 5.2. **Levels and promotion.** Locally, lints surface as **warnings** so a developer can iterate. In CI, `cargo clippy --workspace --all-targets --all-features -- -D warnings` promotes every warning to an error. A small set of lints is `deny` even locally because the code they flag is never acceptable to run (§6). — **CI**
 
@@ -157,7 +158,7 @@ A promotion may only *raise* a level; lowering one in source is prohibited. — 
 | `clippy::nursery` | **not enabled as a group** | individual nursery lints are enabled by name where they have proven stable |
 | `clippy::restriction` | **never enabled as a group** | the group is contradictory by design; individual lints are enabled by name |
 
-5.4. **Rust lints enabled individually** (`warn` unless stated): `missing_docs` (promoted to **deny** in published crates per §5.1; see §12), `missing_debug_implementations`, `unreachable_pub`, `unused_qualifications`, `unused_import_braces`, `unused_lifetimes`, `single_use_lifetimes`, `trivial_casts`, `trivial_numeric_casts`, `let_underscore_drop`, `macro_use_extern_crate`, `meta_variable_misuse`, `variant_size_differences`, `non_ascii_idents` (**deny**), `unsafe_code` (**forbid**).
+5.4. **Rust lints enabled individually** (`warn` unless stated): `missing_docs` (promoted to **deny** in the crate per §5.1; see §12), `missing_debug_implementations`, `unreachable_pub`, `unused_qualifications`, `unused_import_braces`, `unused_lifetimes`, `single_use_lifetimes`, `trivial_casts`, `trivial_numeric_casts`, `let_underscore_drop`, `macro_use_extern_crate`, `meta_variable_misuse`, `variant_size_differences`, `non_ascii_idents` (**deny**), `unsafe_code` (**forbid**).
 
 5.5. **Clippy restriction lints enabled individually.**
 
@@ -165,10 +166,10 @@ A promotion may only *raise* a level; lowering one in source is prohibited. — 
 | --- | --- | --- |
 | `unwrap_used`, `expect_used` | **deny** | §6.2. Allowed in tests via `clippy.toml` |
 | `panic`, `unimplemented`, `todo`, `unreachable` | **deny** | §6.1 |
-| `indexing_slicing` | warn; **promoted to deny** in `stonecrab-codec`, `stonecrab-transport` and driver crates (§5.1) | Index panics are the classic parser bug |
+| `indexing_slicing` | warn; **promoted to deny** in the `codec`, `transport` and driver modules (§5.1) | Index panics are the classic parser bug |
 | `string_slice` | **deny** | Byte-index slicing of `str` panics on a char boundary |
-| `arithmetic_side_effects` | warn; **promoted to deny** in `stonecrab-codec` and driver crates (§5.1) | §7.1 |
-| `as_conversions` | warn; **promoted to deny** in `stonecrab-core`, `stonecrab-codec` and driver crates (§5.1) | §7.2 |
+| `arithmetic_side_effects` | warn; **promoted to deny** in the `codec` and driver modules (§5.1) | §7.1 |
+| `as_conversions` | warn; **promoted to deny** crate-wide (§5.1) | §7.2 |
 | `integer_division` | warn | Review that truncation is intended |
 | `float_cmp_const` | warn | Alongside pedantic `float_cmp` |
 | `lossy_float_literal` | warn | |
@@ -226,7 +227,7 @@ const MAX_REGISTERS: NonZeroU16 = NonZeroU16::new(125).unwrap(); // const-evalua
 
 even this carries `#[expect(clippy::unwrap_used, reason = "const-evaluated")]` on the item. In tests, examples and binaries under `tools/`, `unwrap`/`expect` are allowed (`clippy.toml`), but `expect("…")` with a message describing the *assumption* is preferred.
 
-6.3. **One error type per public boundary.** `stonecrab-core` defines `PlcError`; every public function across the workspace that can fail returns `Result<T, PlcError>` (`stonecrab::Result<T>`). Driver and codec crates may define internal error enums (`ParseError`, `ModbusFrameError`) for precision, but they convert into `PlcError` at the crate boundary via `From`, preserving `source()`. Public functions never return `Box<dyn Error>`, `String`, `&'static str` or `anyhow::Error`.
+6.3. **One error type per public boundary.** the core (the crate root) defines `PlcError`; every public function in the crate that can fail returns `Result<T, PlcError>` (`stonecrab::Result<T>`). Driver and codec modules may define internal error enums (`ParseError`, `ModbusFrameError`) for precision, but they convert into `PlcError` at the module boundary via `From`, preserving `source()`. Public functions never return `Box<dyn Error>`, `String`, `&'static str` or `anyhow::Error`.
 
 6.4. **`PlcError` shape.** `ErrorKind` is the discriminator callers match on; the struct carries a message, an optional `source`, and `Diagnostics` (§14.4). The struct body lives behind a `Box` so `Result<T, PlcError>` stays two words wide and `clippy::result_large_err` never fires:
 
@@ -244,7 +245,7 @@ pub struct PlcError { inner: Box<ErrorInner> }
 
 6.8. **Ambiguous outcomes are first-class.** A write whose reply is lost returns `WriteOutcome::Unknown(reason)`, not `Err(Timeout)`. Code that retries a write to "resolve" the ambiguity is rejected in review regardless of configuration flags.
 
-6.9. **Error construction helpers.** Prefer `PlcError::invalid_address(addr, reason)` style constructors over `PlcError::new(ErrorKind::InvalidAddress, format!(…))` at call sites; the constructors live in `stonecrab-core::error` and are the only place messages are formatted. This keeps wording consistent and makes redaction (§14.5) a single code path.
+6.9. **Error construction helpers.** Prefer `PlcError::invalid_address(addr, reason)` style constructors over `PlcError::new(ErrorKind::InvalidAddress, format!(...))` at call sites; the constructors live in `stonecrab::error` (the core) and are the only place messages are formatted. This keeps wording consistent and makes redaction (§14.5) a single code path.
 
 6.10. **`Result` in `Drop`.** `Drop` cannot return errors. Types owning a connection expose an explicit `close()`; `Drop` only releases memory and, at most, emits a `tracing::warn!` that `close()` was not called. `Drop` never blocks, never spawns, never performs I/O.
 
@@ -254,13 +255,13 @@ pub struct PlcError { inner: Box<ErrorInner> }
 
 7.1. **Arithmetic is explicit.** In codec and driver code, `+ - * / <<` on integers are denied (`clippy::arithmetic_side_effects`). Use `checked_*` when overflow is an input error, `saturating_*` when a clamp is the specified behavior, `wrapping_*` only for counters whose rollover is part of the protocol (Modbus transaction id, sequence numbers) and say so in a comment. Elsewhere the lint is warn; an `#[expect]` is acceptable with a reason that explains why overflow is impossible.
 
-7.2. **No `as` casts** in `stonecrab-core`, `stonecrab-codec` and drivers. Widening uses `From`/`u32::from(x)`; narrowing uses `TryFrom` and returns `ParseError::Overflow` on failure. Float↔int conversion uses explicit functions that document rounding and range (`f64::from(i32)` is fine; `f64 as i64` is not).
+7.2. **No `as` casts** anywhere in the crate (the `as_conversions` promotion of §5.1). Widening uses `From`/`u32::from(x)`; narrowing uses `TryFrom` and returns `ParseError::Overflow` on failure. Float↔int conversion uses explicit functions that document rounding and range (`f64::from(i32)` is fine; `f64 as i64` is not).
 
-7.3. **Exact integers stay exact.** A `u64` counter is a `PlcValue::U64`, never an `f64`. Scaling in `stonecrab-sensors` converts to `f64` only when a profile step requires it; integer-only pipelines (bit fields, lookups, offsets by integer) stay in integers.
+7.3. **Exact integers stay exact.** A `u64` counter is a `PlcValue::U64`, never an `f64`. Scaling in `stonecrab::sensors` converts to `f64` only when a profile step requires it; integer-only pipelines (bit fields, lookups, offsets by integer) stay in integers.
 
 7.4. **Endianness is always written.** `u16::from_be_bytes`, `to_le_bytes`, never a shift-and-or by hand, never a dependency on host order. Word order for multi-register values is a parameter (`WordOrder`), never a default.
 
-7.5. **Bounded readers only.** All parsing goes through `BoundedReader`/`BoundedWriter` from `stonecrab-codec`. A length field is compared against the caller-supplied maximum *before* any `Vec::with_capacity`, `Bytes::copy_to_bytes` or `split_to`. Direct `&[u8]` indexing in parsers is denied (§5.5).
+7.5. **Bounded readers only.** All parsing goes through `BoundedReader`/`BoundedWriter` from `stonecrab::codec`. A length field is compared against the caller-supplied maximum *before* any `Vec::with_capacity`, `Bytes::copy_to_bytes` or `split_to`. Direct `&[u8]` indexing in parsers is denied (§5.5).
 
 7.6. **Floats.** No `==`/`!=` on floats (`clippy::float_cmp`). Comparisons in scaling use an explicit tolerance or `total_cmp`. `NaN` and infinities are detected (`is_finite()`) after every scaling chain and turn the measurement `Quality::Bad`; they are never propagated as values.
 
@@ -268,13 +269,13 @@ pub struct PlcError { inner: Box<ErrorInner> }
 
 7.8. **Strings from the wire** are decoded with a declared encoding; `String::from_utf8_lossy` is permitted only when the result is marked `Quality::Uncertain` and the raw bytes are retained in `RawValue`.
 
-7.9. **Time.** Deadlines, freshness and durations use `std::time::Instant` (monotonic). Receipt timestamps use `std::time::SystemTime`. `stonecrab-core` depends on neither `chrono`, `time` nor `jiff`; conversions to calendar types are the application's job (ADR pending for `PlcValue::DateTime`). Never derive a device timestamp from a local clock.
+7.9. **Time.** Deadlines, freshness and durations use `std::time::Instant` (monotonic). Receipt timestamps use `std::time::SystemTime`. The core depends on neither `chrono`, `time` nor `jiff`; conversions to calendar types are the application's job (ADR pending for `PlcValue::DateTime`). Never derive a device timestamp from a local clock.
 
 ---
 
 ## 8. Async and concurrency
 
-8.1. **Runtime boundary.** `stonecrab-core` has no dependency on Tokio or any executor and compiles with `--no-default-features` on any target. Tokio is a dependency of `stonecrab-transport`, driver crates and adapters only, and is scoped to the features actually used (`rt`, `net`, `time`, `sync`, `macros`, `io-util`); `tokio = { features = ["full"] }` is prohibited in published crates. — **CI** (`cargo-deny` + feature job)
+8.1. **Runtime boundary.** The core has no dependency on Tokio or any executor and compiles with `--no-default-features` on any target: Tokio enters the crate only through the `transport` feature (turned on by `modbus` and `testkit`) and the adapters, and is scoped to the features actually used (`rt`, `net`, `time`, `sync`, `macros`, `io-util`); `tokio = { features = ["full"] }` is prohibited in the published crate. **CI** (`cargo-deny` + feature job)
 
 8.2. **Object-safe boundary = boxed futures.** The public traits `Driver` and `Connection` return `OpFuture<'_, T>` (`Pin<Box<dyn Future<Output = Result<T>> + Send + '_>>`). Implementations write `Box::pin(async move { … })`. The `async-trait` macro is not used; it hides the `Send` bound and the allocation we are deliberately paying for. Inside a crate, `async fn` and `impl Future` are used freely.
 
@@ -341,41 +342,42 @@ fn public_types_are_send_sync() {
 
 ## 10. Crate and module layout
 
-10.1. **One responsibility per crate**, matching `ARCHITECTURE.md` §1. A driver crate contains exactly one protocol family. Shared code between two drivers moves down into `stonecrab-codec` or `stonecrab-transport`, never sideways.
+10.1. **One responsibility per module**, matching `ARCHITECTURE.md` §1; Stonecrab ships as one crate (ADR-0018), and each former crate is a module behind a Cargo feature where it carries a dependency. A driver module contains exactly one protocol family. Shared code between two drivers moves down into `stonecrab::codec` or `stonecrab::transport`, never sideways.
 
 10.2. **`lib.rs`** contains: crate-level docs, `#![forbid(unsafe_code)]`, the docs.rs `cfg_attr`, `mod` declarations, and `pub use` re-exports. No type definitions, no logic.
 
-10.3. **Public surface is deliberate.** Items are private by default; `pub(crate)` for cross-module use; `pub` only for the documented API. `unreachable_pub` warns on `pub` items that are not actually reachable. Re-export at the crate root what applications use; deep paths (`stonecrab::modbus::session::framing::MbapHeader`) are not part of the public API and are marked `#[doc(hidden)]` if they must be `pub` for a sibling crate.
+10.3. **Public surface is deliberate.** Items are private by default; `pub(crate)` for cross-module use; `pub` only for the documented API. `unreachable_pub` warns on `pub` items that are not actually reachable. Re-export at the crate root what applications use; deep paths (`stonecrab::modbus::session::framing::MbapHeader`) are not part of the public API and are marked `#[doc(hidden)]` if they must be `pub` for the test kit or another module.
 
-10.4. **Module files.** `foo.rs` with children in `foo/`; `mod.rs` is denied (`clippy::mod_module_files`). Test modules live in the file they test (`#[cfg(test)] mod tests`); integration tests in `tests/`; shared test helpers in `stonecrab-testkit`, not copied between crates.
+10.4. **Module files.** `foo.rs` with children in `foo/`; `mod.rs` is denied (`clippy::mod_module_files`). Test modules live in the file they test (`#[cfg(test)] mod tests`); integration tests in `tests/`; shared test helpers in `stonecrab::testkit` (the `testkit` feature), not copied between test files.
 
 10.5. **Size.** A module over ~800 lines or a function over ~80 lines is a review prompt, not a hard limit; the question is whether it has one responsibility. Generated files are exempt.
 
-10.6. **Driver crate skeleton** (required layout so reviewers find things):
+10.6. **Driver module skeleton** (required layout so reviewers find things):
 
 ```text
-crates/stonecrab-modbus/
-├── Cargo.toml
-├── README.md                 capability matrix, address syntax, support level
+crates/stonecrab/
+├── docs/components/modbus.md   capability matrix, address syntax, support level (the module's rustdoc root)
 ├── src/
-│   ├── lib.rs
-│   ├── driver.rs             Driver impls (tcp, rtu)
-│   ├── connection.rs         Connection impl around ConnectionGuard
-│   ├── address.rs            ModbusAddress + parsing + conventions
-│   ├── session.rs            request/response state machine
-│   ├── framing/              mbap.rs, rtu.rs
-│   ├── pdu/                  hand-written PDU helpers
-│   ├── generated/            MSpec output + MANIFEST.toml (never edited)
-│   ├── batch.rs              Batcher
-│   └── decode.rs             TypedDecoder
-├── tests/                    contract, interop, transport-integration
-├── benches/
-└── fixtures/ -> ../../fixtures/modbus  (symlink or path in Cargo metadata)
+│   ├── lib.rs                  the module declaration, feature gate and §5.1 promotions
+│   ├── modbus.rs               module root: docs include, mod declarations, re-exports
+│   └── modbus/
+│       ├── driver.rs           Driver impl
+│       ├── connection.rs       Connection impl around ConnectionGuard
+│       ├── address.rs          ModbusAddress + parsing + conventions
+│       ├── session.rs          request/response state machine
+│       ├── framing.rs          framing/mbap.rs (rtu.rs when RTU lands)
+│       ├── pdu.rs              pdu/ hand-written PDU codec
+│       ├── batch.rs            Batcher
+│       ├── decode.rs           TypedDecoder
+│       └── options.rs          ModbusOptions
+├── tests/                      modbus_*.rs: contract, interop, transport-integration
+└── (generated/ with MANIFEST.toml once the generator exists; never edited)
+fixtures/modbus/                golden vectors and the interop register map, repository data
 ```
 
-10.7. **Workspace dependencies.** Every external dependency's version is declared once in `[workspace.dependencies]`; crates reference it with `dep = { workspace = true }`. Two versions of the same crate in the tree is a `cargo deny` warning that must be resolved or justified.
+10.7. **Workspace dependencies.** Every external dependency's version is declared once in `[workspace.dependencies]`; the crate references it with `dep = { workspace = true }`. Two versions of the same crate in the tree is a `cargo deny` warning that must be resolved or justified.
 
-10.8. **Examples** under `examples/` in the facade crate compile in CI (`cargo build --examples --all-features`) and are smoke-run against the simulator where possible. An example that needs hardware says so in its first comment and is excluded from the smoke run by name.
+10.8. **Examples** under `crates/stonecrab/examples/` compile in CI (`cargo build --examples --all-features`) and are smoke-run against the simulator where possible. An example that needs hardware says so in its first comment and is excluded from the smoke run by name.
 
 ---
 
@@ -391,7 +393,7 @@ crates/stonecrab-modbus/
 
 11.5. **Booleans.** Fields are adjectives or participles (`readable`, `truncated`, `redacted`); predicate methods are `is_*`/`has_*`/`can_*`. Negated names (`not_ready`) are rejected.
 
-11.6. **Measurement names** in profiles are `snake_case` ASCII, unique within a profile, and double as the `TagId`. Units use UCUM-style symbols (`degC`, `kPa`, `m3/h`, `A`, `V`, `kWh`); a unit table lives in `stonecrab-sensors::units` and a profile may not introduce a symbol absent from it without adding it there with a test.
+11.6. **Measurement names** in profiles are `snake_case` ASCII, unique within a profile, and double as the `TagId`. Units use UCUM-style symbols (`degC`, `kPa`, `m3/h`, `A`, `V`, `kWh`); a unit table lives in `stonecrab::sensors::units` and a profile may not introduce a symbol absent from it without adding it there with a test.
 
 11.7. **Test names** read as sentences: `fn mbap_framer_rejects_length_over_260()`, `fn read_response_preserves_tag_order_after_split()`. No `test_` prefix. Property tests are `prop_*`; fuzz targets `fuzz_<crate>_<parser>`; hardware tests `hw_<device>_*`.
 
@@ -431,7 +433,7 @@ crates/stonecrab-modbus/
 
 ## 13. Testing
 
-13.1. **Layers** follow `SPEC.md` "Test layers". Each released crate carries, at minimum: unit tests, golden-vector tests, property tests on its parsers, a contract-suite run (drivers), and the mandatory failure cases that apply to it. The test plan for each crate lists which `SPEC.md` mandatory case each test covers, as a `// covers: SPEC mandatory-failure-cases / "truncated headers"` comment on the test or in the test's docstring, so coverage against the list is greppable.
+13.1. **Layers** follow `SPEC.md` "Test layers". Each released crate carries, at minimum: unit tests, golden-vector tests, property tests on its parsers, a contract-suite run (drivers), and the mandatory failure cases that apply to it. The test plan for each module lists which `SPEC.md` mandatory case each test covers, as a `// covers: SPEC mandatory-failure-cases / "truncated headers"` comment on the test or in the test's docstring, so coverage against the list is greppable.
 
 13.2. **Runner.** `cargo nextest` is the CI runner (per-test process isolation, timeouts, retries off). `cargo test` must also pass; nothing may depend on nextest-only behavior. Nextest's `slow-timeout` is 60 s with `terminate-after = 2`; a test that needs longer is a soak test and lives under `tests/soak_*.rs` behind the `soak` feature.
 
@@ -439,7 +441,7 @@ crates/stonecrab-modbus/
 
 13.4. **No sleeping.** `std::thread::sleep` and `tokio::time::sleep` in tests are rejected; use paused time (§8.12) or an explicit synchronization point (a `Notify`, a channel, a `FakeTransport` script step).
 
-13.5. **No mocks of our own traits except through the testkit.** `FakeTransport`, `FakeClock`, `ScriptedPeer` and `SimDriver` are the sanctioned doubles. A hand-rolled `struct MockConnection` in a driver crate duplicates behavior and drifts; put it in the testkit or use the simulator.
+13.5. **No mocks of our own traits except through the testkit.** `FakeTransport`, `FakeClock`, `ScriptedPeer` and `SimDriver` are the sanctioned doubles. A hand-rolled `struct MockConnection` in a driver module duplicates behavior and drifts; put it in the testkit (`stonecrab::testkit`) or use the simulator.
 
 13.6. **Golden vectors.** Wire bytes live in `fixtures/<protocol>/<name>.hex` (one hex line, comments with `#`), with `<name>.expected.json` authored *independently* of the decoder (from the protocol specification or a capture, never by running our decoder and pasting the output), and a `PROVENANCE.toml` per directory naming the source, revision and license. A decoder test loads the vector, decodes, compares against the expected JSON, re-encodes, and compares bytes. Both directions are asserted separately so a matching encode/decode bug cannot cancel out.
 
@@ -449,7 +451,7 @@ crates/stonecrab-modbus/
 
 13.9. **Mutation testing.** `cargo mutants` runs on the scheduled job over `address`, `value`, `scaling`, `framing` and `decode` modules; the kill rate per module is recorded in the release evidence. A survived mutant is either killed with a test or listed with a reason in `mutants.toml`'s exclusions.
 
-13.10. **Coverage.** `cargo llvm-cov nextest --workspace --all-features --lcov` with `generated/`, `examples/`, `tools/`, `benches/` and `fuzz/` excluded. `xtask coverage-gate` enforces per-crate line ≥ 90 %, changed-lines ≥ 95 %, branch ≥ 80 % where available, per `SPEC.md`. An error path may not be excluded from coverage to raise a number; `#[coverage(off)]` is prohibited (and nightly-only anyway).
+13.10. **Coverage.** `cargo llvm-cov nextest --workspace --all-features --lcov` with `generated/`, `examples/`, `tools/`, `benches/` and `fuzz/` excluded. `xtask coverage-gate` (today `scripts/coverage-gate.sh`, ADR-0005) enforces per-module line ≥ 90 % (the modules are the path prefixes of `crates/stonecrab/src`), changed-lines ≥ 95 %, branch ≥ 80 % where available, per `SPEC.md`. An error path may not be excluded from coverage to raise a number; `#[coverage(off)]` is prohibited (and nightly-only anyway).
 
 13.11. **Hardware tests** are `#[ignore = "hardware: <device>"]`, named `hw_*`, read their bench configuration from `STONECRAB_HW_BENCH=<path to bench.toml>`, and are run only by the controlled hardware runner with `cargo nextest run --run-ignored ignored-only -E 'test(/^hw_/)'`. Each run writes a record in the `docs/hardware/` format and the PR that claims a support level links it.
 
@@ -481,11 +483,11 @@ crates/stonecrab-modbus/
 
 A library crate emits nothing above `warn` in steady-state operation. A log line per poll tick at `info` is a bug.
 
-14.4. **`Diagnostics`** on every `PlcError` is structured (operation, state, latency, retries, category) and is the thing applications are expected to log/metricize; the error message is for humans. Drivers populate it at the point of failure; the facade never reconstructs it.
+14.4. **`Diagnostics`** on every `PlcError` is structured (operation, state, latency, retries, category) and is the thing applications are expected to log/metricize; the error message is for humans. Drivers populate it at the point of failure; no layer above the driver reconstructs it.
 
 14.5. **Redaction.** Credentials are typed `Secret<T>`, whose `Debug` and `Display` print `[REDACTED]`. Connection strings are logged through `ConnectionConfig::redacted_display()`. Payload bytes are never logged above `trace`, and `trace` payload logging is behind a Cargo feature so it is compiled out of production builds. `tracing` field values that could carry payload (`value`, `raw`) are logged as `?value.value_type()` not `?value`.
 
-14.6. **Metrics** are not emitted by published crates in M1–M3. `LossCounters`, `Diagnostics` and `watch_state()` expose what an application needs to build its own; a `metrics`-facade feature is an ADR candidate once there are two consumers.
+14.6. **Metrics** are not emitted by published crates in M1–M3. `LossCounters`, `Diagnostics` and `watch_state()` expose what an application needs to build its own; a `metrics` feature is an ADR candidate once there are two consumers.
 
 ---
 
@@ -507,7 +509,7 @@ A library crate emits nothing above `warn` in steady-state operation. A log line
 
 15.6. **Unused dependencies** are detected by `cargo machete` in CI (nightly `cargo udeps` is not required). — **CI**
 
-15.7. **Banned crates** (`deny.toml` `[bans]`): `openssl`/`openssl-sys` (use `rustls`), `async-trait` (§8.2), `anyhow`/`eyre`/`color-eyre` in published crates (§6.5), `chrono`/`time`/`jiff` in `stonecrab-core` (§7.9), `lazy_static`/`once_cell` (use `std::sync::LazyLock`/`OnceLock`), `log` (§14.1), `failure`, `error-chain`.
+15.7. **Banned crates** (`deny.toml` `[bans]`): `openssl`/`openssl-sys` (use `rustls`), `async-trait` (§8.2), `anyhow`/`eyre`/`color-eyre` in published crates (§6.5), `chrono`/`time`/`jiff` in the core (§7.9), `lazy_static`/`once_cell` (use `std::sync::LazyLock`/`OnceLock`), `log` (§14.1), `failure`, `error-chain`.
 
 15.8. **Sanctioned crates** for common needs, so the same job is not done three ways:
 
@@ -547,13 +549,13 @@ A library crate emits nothing above `warn` in steady-state operation. A log line
 
 16.5. **Profiles.** `[profile.release]` sets `lto = "thin"`, `codegen-units = 1`, `debug = "line-tables-only"` (so profiles symbolize), `overflow-checks = true` (our checked arithmetic makes this nearly free and it keeps soak runs honest). Consumers choose their own profile; we do not set `panic = "abort"` for them.
 
-16.6. **No premature `no_std`.** `stonecrab-core` avoids `std`-only APIs where `core`/`alloc` suffice (`core::error::Error`, `alloc::vec::Vec`) so a future `no_std` feature is plausible, but we do not maintain a `no_std` build until an ADR commits to it.
+16.6. **No premature `no_std`.** The core avoids `std`-only APIs where `core`/`alloc` suffice (`core::error::Error`, `alloc::vec::Vec`) so a future `no_std` feature is plausible, but we do not maintain a `no_std` build until an ADR commits to it.
 
 ---
 
 ## 17. Generated code
 
-17.1. **Location and marker.** Generated Rust lives under `src/generated/` in the owning driver crate. Every generated file begins with:
+17.1. **Location and marker.** Generated Rust lives under `src/generated/` in the owning driver module. Every generated file begins with:
 
 ```rust
 // @generated by stonecrab-codegen <version> from <mspec path> @ <upstream commit>
@@ -621,9 +623,9 @@ Every pull request runs the following; all are required for merge unless marked 
 | --- | --- | --- |
 | `fmt` | `cargo fmt --all --check` | yes |
 | `clippy` | `cargo clippy --workspace --all-targets --all-features -- -D warnings` on stable | yes |
-| `msrv` | `cargo +<rust-version> check --workspace --all-features` and tests of published crates | yes |
+| `msrv` | `cargo +<rust-version> check --workspace --all-features` and the tests of the published crate | yes |
 | `test` | `cargo nextest run --workspace --all-features` + `cargo test --doc` on Linux x86_64 | yes |
-| `features` | `cargo hack check --feature-powerset --depth 2 --no-dev-deps`; `--no-default-features` per crate; each driver standalone; `full` | yes |
+| `features` | `cargo hack check --feature-powerset --depth 2 --no-dev-deps`; `--no-default-features`; each driver feature standalone; `full` | yes |
 | `cross` | `cargo check --target aarch64-unknown-linux-gnu` and `armv7-unknown-linux-gnueabihf`, all features | yes |
 | `docs` | `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features` | yes |
 | `deny` | `cargo deny check` (licenses, advisories, bans, sources) | yes |
@@ -633,20 +635,20 @@ Every pull request runs the following; all are required for merge unless marked 
 | `regen` | `cargo xtask generate --all && git diff --exit-code` | yes |
 | `coverage` | `cargo llvm-cov nextest` + `xtask coverage-gate` | yes |
 | `fuzz-smoke` | 60 s per target touched by the PR | yes when a parser changes |
-| `interop` | containerized third-party peers | yes for driver crates |
+| `interop` | containerized third-party peers | yes for driver modules |
 | `beta` | `cargo check` + `clippy` on beta | report only |
 | `package` | `cargo package --list` diff against committed allow-list of shipped files | yes |
 | `dco` | Signed-off-by on every commit | yes |
 
-Scheduled (nightly) jobs add: 30-minute fuzzing per target, mutation testing, soak tests, benchmarks against baseline, Miri on `core`/`codec`, and `cargo update` dry-run advisories. Hardware jobs run on the controlled runner only on `main` and release branches after the §18.6 review.
+Scheduled (nightly) jobs add: 30-minute fuzzing per target, mutation testing, soak tests, benchmarks against baseline, Miri on the core and `codec`, and `cargo update` dry-run advisories. Hardware jobs run on the controlled runner only on `main` and release branches after the §18.6 review.
 
 ---
 
 ## 20. Releases and versioning
 
-20.1. **Semver per crate.** Crates version independently; `stonecrab` (facade) re-exports with `=`-compatible ranges to its own siblings so a facade version pins a coherent set. Pre-1.0 rules per §9.10.
+20.1. **One crate, one version.** `stonecrab` is the only published crate (ADR-0018); its modules do not version separately, and a fix to any module is a release of the whole crate. Features are additive and are part of the public API. Pre-1.0 rules per §9.10.
 
-20.2. **Release tooling.** `release-plz` (or `cargo-release`; one per ADR) bumps versions from Conventional Commits, updates `CHANGELOG.md`, tags `<crate>-v<version>`, and publishes in dependency order. Tags are signed. A human reviews the generated changelog and adds the release-note sections `SPEC.md` requires: upstream baseline, supported operations per driver, actual hardware evidence, breaking changes.
+20.2. **Release tooling.** `release-plz` (or `cargo-release`; one per ADR) bumps versions from Conventional Commits, updates `CHANGELOG.md`, tags `v<version>`, and publishes the one crate. Tags are signed. A human reviews the generated changelog and adds the release-note sections `SPEC.md` requires: upstream baseline, supported operations per driver, actual hardware evidence, breaking changes.
 
 20.3. **Release candidate checklist** (`xtask release-check`): capability matrix matches `Capabilities` impls; parity records have no `implemented` status without a test id; every `hardware-verified` claim links a record; 8-hour fuzz run clean; 24-hour soak clean; benchmarks within 10 % of baseline; `cargo package --list` reviewed; SBOM generated; README support table regenerated.
 
@@ -735,8 +737,8 @@ disallowed-macros = [
 ```toml
 [workspace]
 resolver = "3"
-members  = ["crates/*", "tools/*"]
-default-members = ["crates/*"]
+members  = ["crates/stonecrab"]
+exclude  = ["fuzz"]
 
 [workspace.package]
 edition      = "2024"
@@ -749,12 +751,6 @@ keywords     = ["plc", "modbus", "opc-ua", "industrial", "iot"]
 categories   = ["network-programming", "hardware-support", "embedded"]
 
 [workspace.dependencies]
-# first-party
-stonecrab-core      = { path = "crates/stonecrab-core",      version = "0.1" }
-stonecrab-transport = { path = "crates/stonecrab-transport", version = "0.1" }
-stonecrab-codec     = { path = "crates/stonecrab-codec",     version = "0.1" }
-stonecrab-sensors   = { path = "crates/stonecrab-sensors",   version = "0.1" }
-stonecrab-testkit   = { path = "tools/stonecrab-testkit" }
 # third-party (versions illustrative; pinned by Cargo.lock)
 bytes      = { version = "1",    default-features = false }
 bitvec     = { version = "1",    default-features = false, features = ["alloc"] }
@@ -812,7 +808,7 @@ allow_attributes_without_reason = "deny"
 map_err_ignore                = "deny"
 mod_module_files              = "deny"
 
-# restriction, warn — the first three are promoted to deny in lib.rs of the crates named in §5.1
+# restriction, warn; the first three are promoted to deny in lib.rs, crate-wide or on the module declarations named in §5.1
 indexing_slicing              = "warn"
 arithmetic_side_effects       = "warn"
 as_conversions                = "warn"
@@ -871,62 +867,68 @@ inherits = "release"
 debug    = true
 ```
 
-### Per-crate `Cargo.toml` (excerpt)
+### Crate `Cargo.toml` (excerpt)
 
 ```toml
 [package]
-name         = "stonecrab-modbus"
-version      = "0.1.0"
-description  = "Native Rust Modbus TCP and RTU driver for Stonecrab"
+name         = "stonecrab"
+version      = "0.2.0"
+description  = "Native Rust industrial protocol library: core contracts, Modbus TCP, an in-process simulator and sensor profiles in one crate"
 edition.workspace      = true
 rust-version.workspace = true
 license.workspace      = true
 repository.workspace   = true
 readme       = "README.md"
-include      = ["src/**", "README.md", "LICENSE", "NOTICE", "fixtures/**"]
+include      = ["src/**", "docs/**", "README.md", "LICENSE", "NOTICE"]
 
 [lints]
 workspace = true          # the whole table; Cargo forbids per-crate additions alongside this
 
 [features]
-default = []
-serial  = ["stonecrab-transport/serial"]
-trace-payloads = []
+default   = ["sim", "modbus", "sensors"]   # `default-features = false` is the Tokio-free core
+transport = ["dep:tokio"]
+modbus    = ["transport", "dep:tracing"]
+sim       = ["dep:tracing"]
+sensors   = ["dep:serde", "dep:toml"]
+testkit   = ["transport", "dep:serde", "dep:serde_json", "dep:toml", "tokio/macros"]
 
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 ```
 
-### Per-crate `src/lib.rs` header
+### Crate `src/lib.rs` header
 
-The only lint attributes a `lib.rs` may carry (§4.1, §5.1):
+The only lint attributes `lib.rs` may carry (§4.1, §5.1): the crate-level promotions as inner attributes, and the per-module promotions as outer attributes on the module declarations:
 
 ```rust
-//! Native Rust Modbus TCP and RTU driver for Stonecrab.
-//!
-//! (crate docs continue; the README is included below so the two never drift)
 #![doc = include_str!("../README.md")]
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-// §5.1 promotions — driver crate
+// §5.1 promotions, crate-wide
 #![deny(missing_docs)]
-#![deny(clippy::indexing_slicing)]
-#![deny(clippy::arithmetic_side_effects)]
 #![deny(clippy::as_conversions)]
 
-mod address;
-mod batch;
-mod connection;
-mod decode;
-mod driver;
-mod framing;
-mod generated;
-mod pdu;
-mod session;
+mod address_options;
+// ... the core's private modules, re-exported below
 
-pub use address::{AddressConvention, ModbusAddress, ModbusArea, UnitId};
-pub use driver::{ModbusRtuDriver, ModbusTcpDriver};
+// §5.1 promotions, per module (outer attributes on the declaration)
+#[deny(
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions
+)]
+pub mod codec;
+#[cfg(feature = "modbus")]
+#[deny(
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions
+)]
+#[cfg_attr(docsrs, doc(cfg(feature = "modbus")))]
+pub mod modbus;
+
+pub use address_options::{AddressOptions, AddressOptionsBuilder};
 ```
 
 ### `deny.toml` (excerpt)
@@ -1061,7 +1063,7 @@ Reviewers read in this order and stop at the first failure:
 - **Status:** proposed | accepted | superseded by ADR-MMMM
 - **Date:** YYYY-MM-DD
 - **Deciders:** <maintainers>
-- **Affects:** <crates / SPEC.md section / CODING_STANDARDS rule>
+- **Affects:** <modules / SPEC.md section / CODING_STANDARDS rule>
 
 ## Context
 
@@ -1086,4 +1088,4 @@ Reviewers read in this order and stop at the first failure:
 
 ---
 
-*End of standards. The next revision of this document is due with the M0 inventory, when the first concrete dependency list and the `stonecrab-codec` API exist to check these rules against.*
+*End of standards. The next revision of this document is due with the M0 inventory, when the first concrete dependency list and the `stonecrab::codec` API exist to check these rules against.*

@@ -7,6 +7,9 @@ to `stonecrab-core` and the facade. The types are data: nothing transmits, retri
 cancels. The connection contract that executes them is S11a; the simulator that
 implements `write` is S11b-2.
 
+> Note: this ADR keeps its original crate names. Map each crate name to its module with the
+> table in ADR-0018 decision 1.
+
 ## Context
 ADR-0003 fixed the read side as data: a bounded `ReadRequest`, a correlated
 `ReadResponse`, and per-item outcomes. For writes it fixed only the outcome enum:

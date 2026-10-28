@@ -7,6 +7,9 @@ cancellation. S11a added the cancel slots to `ReadRequest` and `WriteRequest`. I
 decisions D9 and D15 of docs/ALPHA_PLAN.md and adjusts ARCHITECTURE.md section 3.4, which
 the S31 reconciliation slice updates.
 
+> Note: this ADR keeps its original crate names. Map each crate name to its module with the
+> table in ADR-0018 decision 1.
+
 ## Context
 ADR-0002 shipped explicit absolute `Deadline`s and no clock, and ADR-0003 deferred
 cancellation tokens and relative-deadline clock ownership "until a connection

@@ -5,8 +5,8 @@ checks and `tags` turns into the tags a driver reads (see the
 [sensors component document](../crates/stonecrab/docs/components/sensors.md) for the format and
 [ADR-0016](../docs/adr/0016-sensor-profile-schema-and-loader.md) for the decisions).
 
-Profiles are repository data. They are not shipped in any crate archive (the reviewed
-lists in `packaging/` that `mise run package` compares pin this), and whether a later
+Profiles are repository data. They are not shipped in the crate archive (the reviewed
+list `packaging/stonecrab.txt` that `mise run package` compares pins this), and whether a later
 release ships them is a milestone M2 decision.
 
 ## What `validation = "synthetic"` means

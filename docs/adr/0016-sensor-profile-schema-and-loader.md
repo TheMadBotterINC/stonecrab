@@ -1,5 +1,8 @@
 # 0016: Sensor profile schema and TOML loader
 ## Status
+Amended by ADR-0018: `stonecrab-sensors` is now the module `stonecrab::sensors`, behind
+the `sensors` feature (on by default), which includes the TOML loader; the separate
+`toml` feature is gone. The decisions stand.
 Accepted by the sole maintainer on 2026-10-27, as slice S28a of docs/ALPHA_PLAN.md.
 It adds the new crate `stonecrab-sensors` (CODING_STANDARDS 12.6 requires an ADR for a
 new crate), adopts `serde` and `toml` (section 15.1), and implements decisions D10, D17

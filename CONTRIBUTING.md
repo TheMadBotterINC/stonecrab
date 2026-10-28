@@ -3,16 +3,22 @@ Read `docs/SPEC.md`, `docs/ARCHITECTURE.md` and `docs/CODING_STANDARDS.md` befor
 changing public contracts. The retained `docs/PROJECT_BRIEF.md` describes the target,
 not shipped functionality.
 
-Use `mise install`, then `mise run check` and `mise run coverage`.
+Stonecrab is one crate, `crates/stonecrab`, whose parts are modules behind Cargo features
+(ADR-0018). Use `mise install`, then `mise run check` and `mise run coverage`.
 Use `mise run dependencies` to check advisories, licenses, bans and sources.
 `mise run lint-attrs`, `features`, `machete`, `parity` and `dco -- <range>` run the CI jobs
-of the same names; `mise run coverage` applies the per-crate thresholds of ADR-0005.
+of the same names; `mise run coverage` applies the per-module thresholds of ADR-0005.
 `mise run parity` (`scripts/parity-check.sh`) fails when a `# Compatibility:
 docs/parity/<file>.md#<ROW-ID>` section in `crates/*/src` names a row that does not exist,
 or when a row marked `implemented` or `automated-verified` in `docs/parity/*.md` has no
 test id or is named by no `# Compatibility` section or test; a change to a parity row and
 to the code it describes goes in the same PR.
-Unit tests and doctests must also pass with ordinary `cargo test --workspace`.
+Unit tests and doctests must also pass with `cargo test --all-features` (what `mise run
+check` runs). A plain `cargo test` builds only the default features, leaves out the
+`testkit` feature and skips the test files that need it, so it runs the reduced suite; the
+test kit's own tests read repository files and so must run from a checkout.
+A new module takes its row in `scripts/lint-attrs.sh` and `scripts/coverage-gate.sh` in the
+same PR.
 Tests must not access devices or external networks. Use explicit fake time rather
 than sleeps, and bind loopback integration listeners to an ephemeral port.
 
@@ -22,7 +28,7 @@ Use Conventional Commits and DCO sign-off (`git commit -s`).
 The CI `geiger` job greps first-party Rust sources for the word `unsafe`; it may
 appear only in the `forbid(unsafe_code)` attribute, so keep it out of comments,
 strings and test names too.
-ADRs document new crates, public traits and dependency decisions.
+ADRs document new modules and features, public traits and dependency decisions.
 Never place credentials in source, fixtures, logs or commit messages.
 
 ## Workflow
@@ -68,13 +74,13 @@ its own PR and contains:
 ## Releases
 
 Releases, signed tags, the yank procedure and the release evidence are described in
-`docs/adr/0017-release-process-and-evidence.md`. Only the maintainer publishes crates or
-pushes tags, each with a separate approval.
+`docs/adr/0017-release-process-and-evidence.md`. Only the maintainer publishes the crate or
+pushes the tag, each with a separate approval.
 
 ## Fuzz findings
 
 A crash or hang found by fuzzing is handled per `docs/CODING_STANDARDS.md` section
 13.8. Commit the reproducing input under `fuzz/corpus/<target>/` and add a regression
-test named `fuzz_<target>_<short-hash>` in the owning crate. That test is merged before
+test named `fuzz_<target>_<short-hash>` in the crate. That test is merged before
 or together with the fix. Never commit inputs that contain credentials or private device
 data.

@@ -56,10 +56,10 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
 - Alternatives: hand-parsing `&[u8]` in each target; rejected for structured inputs.
 - Review date: 2026-10-27.
 
-## proptest 1.12.0 (dev-dependency of stonecrab-codec and stonecrab-core)
+## proptest 1.12.0 (dev-dependency of stonecrab)
 - Purpose: property tests of the codec (`prop_round_trip_exact_integers`,
   `prop_length_checked_before_allocation`) and of the connection URI parser in
-  `stonecrab-core` (`crates/stonecrab-core/tests/uri_properties.rs`), with shrinking and the tracked
+  core (`crates/stonecrab/tests/core_uri_properties.rs`), with shrinking and the tracked
   `proptest-regressions/` files of CODING_STANDARDS 13.3.
 - License: MIT OR Apache-2.0.
 - Features: `std` only; default features are disabled in `[workspace.dependencies]`
@@ -68,8 +68,8 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
   `rand/std`, `rand/sys_rng`, `regex-syntax` and `num-traits/std`; it does not enable
   `lazy_static`. The D23 check (`cargo tree -e normal,dev -i once_cell -i lazy_static -i log
   -i time -i chrono`) matches no package, so no `deny.toml` wrapper is needed (ADR-0013).
-- Reaches only dev builds of `stonecrab-codec` and `stonecrab-core`: it is in neither
-  crate's `[dependencies]`, not in the packaged manifests' runtime graph, and absent from the fuzz workspace lock.
+- Reaches only dev builds of `stonecrab`: it is not in the crate's `[dependencies]`, not
+  in the packaged manifest's runtime graph, and absent from the fuzz workspace lock.
 - Resolved transitive crates in `Cargo.lock`, all MIT OR Apache-2.0: `rand` 0.10.3,
   `rand_core` 0.10.1, `rand_xorshift` 0.5.0, `chacha20` 0.10.2, `getrandom` 0.4.3,
   `cfg-if`, `cpufeatures` and `core_detect` (CPU feature probes), `libc` and `r-efi`
@@ -88,17 +88,17 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
 - Review date: 2026-10-27. `cargo-deny` passes advisory, license, ban and source checks;
   this records the trust boundary, not a memory-safety certification.
 
-## tokio 1.54.1 (stonecrab-transport)
+## tokio 1.54.1 (stonecrab, feature `transport`)
 - Purpose: the async runtime pieces the transport needs: `TcpStream` and `lookup_host`
   (`net`), `timeout_at` and `sleep_until` (`time`), `read_buf` and `write_all`
   (`io-util`), and the runtime driver (`rt`). `std` has no async sockets or timers, and
   blocking sockets on a thread cannot honour a deadline (CODING_STANDARDS 8.4, ADR-0014).
 - License: MIT.
 - Features: `default-features = false` in `[workspace.dependencies]`
-  (`tokio = "1.54"`). `stonecrab-transport` enables `rt`, `time`, `sync` and `io-util`,
-  and `net` through its default `tcp` feature; dev-dependencies add `macros`, `test-util`
-  and `rt-multi-thread`. `sync` has no consumer in this slice (it adds no crate; the
-  connection guard of S19 uses it). `full` is banned by `[[bans.features]]` in
+  (`tokio = "1.54"`). `stonecrab` enables `rt`, `net`, `time`, `sync` and `io-util`
+  behind its `transport` feature (the `testkit` feature adds `macros`); dev-dependencies
+  add `macros`, `test-util` and `rt-multi-thread`. `sync` has no consumer in this slice
+  (it adds no crate; the connection guard of S19 uses it). `full` is banned by `[[bans.features]]` in
   `deny.toml` and the ban was verified to fire (ADR-0014).
 - Unsafe: tokio is not `forbid(unsafe_code)` and uses `unsafe` heavily in the task
   harness, the I/O driver and the timer wheel (about 1,100 occurrences of the keyword in
@@ -106,14 +106,14 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
   (13) add more, as expected for readiness polling, raw sockets and pin projection.
   First-party code stays `forbid(unsafe_code)`. No native code is compiled: the only
   build script in the tree is `libc`'s, which probes the target and links nothing.
-- Transitive crates in this configuration (normal graph, `tcp` on): `bytes` 1.12.1
+- Transitive crates in this configuration (normal graph, `transport` on): `bytes` 1.12.1
   (already audited above), `libc` 0.2.191 (MIT OR Apache-2.0), `mio` 1.2.4 (MIT),
   `socket2` 0.6.5 (MIT OR Apache-2.0), `pin-project-lite` 0.2.17 (Apache-2.0 OR MIT);
   `windows-sys` 0.61.2 and `windows-link` 0.2.1 (MIT OR Apache-2.0) on Windows targets and
   `wasi` 0.11.1 (Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT) on WASI. Dev builds
   add `tokio-macros` 2.7.2 (MIT; `proc-macro2`, `quote` and `syn` are already present
-  through `thiserror`). With `--no-default-features` only `bytes` and `pin-project-lite`
-  remain.
+  through `thiserror`). With `--no-default-features` (or any feature set without
+  `transport`) none of them is in the graph.
 - Banned crates: the D23 check (`cargo tree -e normal,dev -i once_cell -i lazy_static -i
   log -i time -i chrono`, and each name alone) matches no package, so no `deny.toml`
   wrapper is needed (ADR-0014).
@@ -123,7 +123,7 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
 - Review date: 2026-10-27. `cargo-deny` passes advisory, license, ban and source checks;
   this records the trust boundary, not a memory-safety certification.
 
-## tracing 0.1.44 (stonecrab-driver-sim, workspace-wide adoption)
+## tracing 0.1.44 (stonecrab, features `sim` and `modbus`)
 - Purpose: structured, level-filtered diagnostics that cost nothing without a subscriber.
   The coding standards (section 14) name `tracing` as the one diagnostics API; the print
   macros are denied and `log` is banned. The simulator emits `debug` events when a tag is
@@ -135,8 +135,8 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
   date). The default `attributes` feature is deliberately off: it adds `tracing-attributes`
   and a second `syn` major version (2.0.119) beside the `syn` 3.0.9 that `thiserror-impl`
   uses, and `clippy::multiple_crate_versions` then fails the `-D warnings` Clippy gate
-  for the one crate that depends on both. Nothing in the simulator needs `#[instrument]`
-  (manual spans and `Instrument` are in `tracing` itself). Adopt `attributes` later with
+  for the one crate that would depend on both. Nothing in the simulator needs
+  `#[instrument]` (manual spans and `Instrument` are in `tracing` itself). Adopt `attributes` later with
   an `allowed-duplicate-crates = ["syn"]` entry in `clippy.toml` and a note here.
   The `log`, `valuable`, `async-await` and `release_max_level_*` features are off.
 - Unsafe: `tracing` is not `forbid(unsafe_code)`; about 7 occurrences of the keyword in its
@@ -189,10 +189,10 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
   the thread-safe registry the simulator's shared device needs under a real subscriber.
 - Review date: 2026-10-27.
 
-## tracing-subscriber 0.3.23 (stonecrab facade, dev-dependency)
+## tracing-subscriber 0.3.23 (stonecrab, dev-dependency)
 - Purpose: the `fmt` subscriber that `examples/sim_read.rs` installs to print structured
-  events (ADR-0011 decision 8, ADR-0014 addendum for S14). Examples and facade tests only:
-  it is a `[dev-dependencies]` entry, so it never reaches the packaged runtime graph, and
+  events (ADR-0011 decision 8, ADR-0014 addendum for S14). Examples and integration
+  tests only: it is a `[dev-dependencies]` entry, so it never reaches the packaged runtime graph, and
   library crates still never install a subscriber (ADR-0012).
 - License: MIT.
 - Features: `[workspace.dependencies]` has `tracing-subscriber = { version = "0.3",
@@ -221,7 +221,7 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
 - Features: none selected.
 - Unsafe: not `forbid(unsafe_code)`; about 74 occurrences of the keyword in its sources
   (the slab's atomic page and slot handling). Third-party code, reached from dev builds of
-  the facade only.
+  the integration tests and examples only.
 - Role in `deny.toml`: the only wrapper allowed to depend on `lazy_static`
   (`wrappers = ["sharded-slab"]`).
 - Alternatives: none separate from `tracing-subscriber`'s `fmt`; dropping `fmt` would
@@ -257,13 +257,13 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
   through `tracing-subscriber`.
 - Review date: 2026-10-27.
 
-## serde 1.0.229 (stonecrab-sensors)
+## serde 1.0.229 (stonecrab, feature `sensors`)
 - Purpose: the `Deserialize` derive for the sensor profile schema types (ADR-0016). Profiles
   are read, never written, so `Serialize` is not derived and no format crate other than
   `toml` is involved.
 - License: MIT OR Apache-2.0.
 - Features: `[workspace.dependencies]` has `serde = { version = "1.0", default-features =
-  false, features = ["std"] }`; `stonecrab-sensors` enables `derive`. The `rc` and `alloc`
+  false, features = ["std"] }`; `stonecrab` enables `derive`. The `rc` and `alloc`
   features stay off.
 - Transitive crates, all MIT OR Apache-2.0: `serde_core` 1.0.229 (the trait definitions that
   `serde` re-exports; `toml` depends on it directly) and `serde_derive` 1.0.229, a procedural
@@ -280,7 +280,7 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
 - Review date: 2026-10-27. `cargo-deny` passes advisory, license, ban and source checks;
   this records the trust boundary, not a memory-safety certification.
 
-## toml 0.9.12 (stonecrab-sensors)
+## toml 0.9.12 (stonecrab, features `sensors` and `testkit`)
 - Purpose: the TOML reader behind `SensorProfile::from_toml`. TOML is the format the
   specification names for profiles ("initially TOML or an equivalently validated
   declarative format"). A hand-written reader would be the attack surface that this
@@ -292,7 +292,8 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
   `toml::from_str` for derived types, `std` is the standard-library build. `display` (the
   serializer, `toml_writer`) stays off because the library never writes a profile;
   `preserve_order` (`indexmap`), `fast_hash`, `debug` and `unbounded` stay off. The
-  crate is optional in `stonecrab-sensors` behind the default `toml` feature.
+  crate is optional in `stonecrab`, enabled by the `sensors` feature (on by default) and
+  by `testkit`.
 - Transitive crates in this configuration: `toml_parser` 1.0.9 (MIT OR Apache-2.0),
   `toml_datetime` 0.7.5 (MIT OR Apache-2.0), `serde_spanned` 1.1.2 (MIT OR Apache-2.0),
   `winnow` 0.7.15 (MIT) and `serde_core` (above). `toml_writer`, `indexmap`, `hashbrown`
@@ -323,13 +324,13 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
 - Review date: 2026-10-27. `cargo-deny` passes advisory, license, ban and source checks;
   this records the trust boundary, not a memory-safety certification.
 
-## serde_json 1.0.154 (stonecrab-testkit, feature `fixtures`)
+## serde_json 1.0.154 (stonecrab, feature `testkit`)
 - Purpose: parse the `<name>.expected.json` files of the golden-vector loader into
   `serde_json::Value` (CODING_STANDARDS 13.6, ADR-0009). The files are authored by hand
   from the protocol specification or a capture, and the loader only parses them. The
-  crate is declared in `[workspace.dependencies]` and used only by the unpublished
-  testkit behind the off-by-default feature `fixtures`; no published crate depends on it
-  (ADR-0009 decision 2).
+  crate is declared in `[workspace.dependencies]` and used only by the
+  testkit behind the off-by-default feature `testkit`; no default feature enables it
+  (ADR-0009 decision 2, ADR-0018).
 - License: MIT OR Apache-2.0.
 - Features: `[workspace.dependencies]` has `serde_json = { version = "1.0",
   default-features = false, features = ["std"] }`. `std` enables `memchr/std` and
@@ -348,7 +349,7 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
 - Banned crates: `cargo tree -e normal,dev -i once_cell` finds the one existing path,
   `once_cell` through `tracing-core` (wrapped in `deny.toml`, ADR-0012), and
   the same result holds with `--workspace --all-features -e normal,dev,build`, so
-  `serde_json`, `itoa`, `memchr`, `zmij` and the `fixtures` feature add no path to it.
+  `serde_json`, `itoa`, `memchr`, `zmij` and the `testkit` feature add no path to it.
   `lazy_static`, `log`, `time` and `chrono` match no package (ADR-0009 addendum).
 - Alternatives: `toml` for the expected files (rejected: the expected values are
   structured trees that other tools produce as JSON, and the plan names JSON), `miniserde`

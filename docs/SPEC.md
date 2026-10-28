@@ -123,6 +123,9 @@ Write support is staged, not abandoned. A protocol release must state exactly wh
 
 ## Architecture
 
+> Superseded: ADR-0018 ships Stonecrab as one crate, with these components as modules. The
+> table below is the original plan.
+
 Use a Cargo workspace with dependencies directed from applications to API and drivers, and from drivers to transports and codecs. Keep sensor metadata outside wire-level models.
 
 | Component | Responsibility |

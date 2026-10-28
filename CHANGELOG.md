@@ -1,6 +1,6 @@
 # Changelog
 All notable changes to this project are documented here, in the style of Keep a
-Changelog. There is one section per crate. Nothing in the alpha sections below is
+Changelog. Stonecrab is one crate, so there is one section for the alpha. Nothing in it is
 published: the only published version is `stonecrab` 0.1.0, and publication of the alpha
 needs a separate maintainer approval.
 
@@ -10,53 +10,127 @@ needs a separate maintainer approval.
   fuzz, mutation and coverage figures, and drafted (not filed) upstream issues.
 
 ## Alpha (unreleased)
-The first pre-release: `stonecrab` 0.2.0 and the 0.1.0 releases of `stonecrab-core`,
-`stonecrab-codec`, `stonecrab-transport`, `stonecrab-driver-sim`, `stonecrab-modbus` and
-`stonecrab-sensors`. Each crate section below carries the four release-note items that
-`docs/SPEC.md` ('Open-source project requirements') requires: the upstream baseline, the
-supported operations, the actual hardware evidence and the breaking changes. The support
-levels are those of the 'Hardware evidence' policy of `docs/SPEC.md`; the full matrix is
-`docs/COMPATIBILITY.md`.
+The first pre-release is `stonecrab` 0.2.0, one crate (ADR-0018). Its section below opens
+with the four release-note items that `docs/SPEC.md` ('Open-source project requirements')
+requires, once for the crate: the upstream baseline, the supported operations, the actual
+hardware evidence and the breaking changes. The support levels are those of the 'Hardware
+evidence' policy of `docs/SPEC.md`; the full matrix is `docs/COMPATIBILITY.md`.
 
 Gates not run for the alpha, so that nobody reads their absence as a pass: branch coverage
-(line coverage is gated per crate, region coverage is reported), a mutation-testing
+(line coverage is gated per module, region coverage is reported), a mutation-testing
 threshold, the 8-hour release fuzz run (CI fuzzes each target for 60 seconds), the 24-hour
 soak, benchmarks, differential tests against PLC4J, hardware verification, and `cargo
 semver-checks` against the specification-stage 0.1.0 package (its API was replaced). The
-measured substitutes are recorded by the release-evidence slice S32.
+measured substitutes are recorded by the release-evidence slice S32 and re-recorded for
+the one crate by S33 (`docs/evidence/alpha.md`).
 
 ### stonecrab 0.2.0 (unreleased)
-- **One crate:** `stonecrab` now contains the former sibling crates as modules
-  (`stonecrab::codec`, `transport`, `modbus`, `sim` and `sensors`, with the core contracts at
-  the crate root), and the test kit as `stonecrab::testkit` behind the off-by-default
-  `testkit` feature; `cargo add stonecrab` gives Modbus TCP, the simulator and the sensor
-  profiles with no feature flags (full reconciliation of this document follows).
 - **Upstream baseline:** Apache PLC4X v1.0.0 (commit
   `ea229918f5d07700e04d7d69ab1645da679cb700`, pinned in `upstream/manifest.toml`; the
   inventory covers the Modbus TCP subset only and the source-release signature was
-  verified in S32, see `docs/evidence/alpha.md`). The facade makes no upstream claim of
-  its own; claims are per parity row in `docs/parity/`.
-- **Supported operations:** the facade has no driver. `stonecrab::sim` (feature `sim`)
-  re-exports the simulator: connect, read, write, close, scripted failures,
-  `simulator-tested`. `stonecrab::modbus` (feature `modbus`) re-exports the Modbus TCP
-  driver: connect, close and reads of coils, discrete inputs, holding registers and input
-  registers (function codes 01 to 04) as 15 types, `interoperability-tested` against
-  pymodbus 3.8.6; writes, subscriptions, browse and discovery are not supported.
-  `stonecrab::sensors` (feature `sensors`) re-exports the synthetic-profile pipeline. The
-  matrix is `docs/COMPATIBILITY.md`.
+  verified in S32, see `docs/evidence/alpha.md`). The connection-string grammar of the core
+  and the Modbus TCP driver follow it; divergences are rows in `docs/parity/modbus.md` and
+  are listed in `docs/COMPATIBILITY.md`. The simulator, the transport, the codec and the
+  sensor-profile format are Stonecrab's own and make no upstream claim (Apache PLC4X ships
+  a simulated driver whose source is not inventoried, builds its transports on Netty and has
+  no sensor profile concept). Claims are per parity row in `docs/parity/`.
+- **Supported operations:** the core defines the driver boundary (`DriverRegistry`,
+  `Driver`, `Connection`: connect, read, write, close, state watching) and the data
+  contracts, and implements no driver; it is `simulator-tested` through the common driver
+  contract suite. `stonecrab::sim` (feature `sim`): connect, close, read (`STATE` and
+  `RANDOM`), write (`STATE` and `SINK`), scripted failures and bounded read retry,
+  `simulator-tested`. `stonecrab::modbus` (feature `modbus`): Modbus TCP connect, close and
+  reads of coils, discrete inputs, holding registers and input registers (function codes
+  01 to 04) as the 15 numeric and bit types, with batching and `split_into` disclosure,
+  request-driven reconnect, retry, cancellation and timeouts; reads are
+  `interoperability-tested` against pymodbus 3.8.6 and the fault handling is
+  `simulator-tested`. Writes (the driver reports `write: false`), subscriptions, browse,
+  discovery, ping, extended registers, strings, calendar types, RTU, ASCII, UDP and TLS are
+  not supported. `stonecrab::transport` (feature `transport`): the deadline-bounded TCP
+  transport, framing with resynchronization and the connection guard; the connect and
+  request path is `interoperability-tested` through the Modbus driver, resync, reconnect
+  and the queue are `simulator-tested`; serial, UDP and TLS are not supported.
+  `stonecrab::codec`: bounds-checked byte primitives, `build-tested`.
+  `stonecrab::sensors` (feature `sensors`): loading and validating version-1 TOML
+  profiles, building tags through a driver and turning a read response into scaled, graded
+  measurements; the synthetic profiles are `simulator-tested` against the simulator and
+  `interoperability-tested` against pymodbus 3.8.6, and no named device profile exists.
+  `stonecrab::testkit` (feature `testkit`) is test tooling and has no support level.
+  Subscribe, browse and discover are not defined or supported by any module. The matrix is
+  `docs/COMPATIBILITY.md`.
 - **Hardware evidence:** none. No physical device has been tried and no hardware record
-  exists; nothing is `hardware-verified`.
+  exists; nothing is `hardware-verified`. The simulator models no wire protocol.
 - **Breaking changes:** versus the published 0.1.0 specification-stage package, the
   `placeholder::status` API is removed with no replacement (migration: delete the call;
   consult `docs/COMPATIBILITY.md` for what is supported). Everything else is new: the
-  0.1.0 package exposed nothing else.
+  0.1.0 package exposed nothing else, and the sibling crates of the earlier seven-crate
+  layout were never published. Behavior that differs from upstream by design: bare `40001`
+  addresses need an explicit convention, unknown connection parameters are errors, replies
+  are validated on transaction id, unit id and function code.
 
-Changes:
+Changes. The first bullet is the single-crate build of slice S33; the bullets after it
+are grouped by module and keep the wording they had when each landed, so the crate names
+in them (`stonecrab-core`, `stonecrab-modbus` and so on) are the former crates, now the
+modules of the group heading (ADR-0018).
+
+- **One crate (S33, ADR-0018):** `stonecrab` now contains the former sibling crates as
+  modules (`stonecrab::codec`, `transport`, `modbus`, `sim` and `sensors`, with the core
+  contracts at the crate root) and the test kit as `stonecrab::testkit` behind the
+  off-by-default `testkit` feature (a separate test crate would be a dev-dependency
+  cycle). `cargo add stonecrab` gives Modbus TCP, the simulator and the sensor profiles
+  with no feature flags (default features `sim`, `modbus`, `sensors`);
+  `default-features = false` is the tokio-free core; `full` stays as an alias. The `tcp`
+  and `toml` features are gone (the TCP transport is part of `transport`, the TOML loader
+  of `sensors`). There is one version, one changelog, one packaging list, one SBOM and one
+  release tag, `v0.2.0`. Every test, doctest, gate, example, fuzz target and CI job is
+  kept; lint promotions and coverage thresholds apply per module; test files declare
+  `required-features` so a plain `cargo test` skips what it cannot build.
+
+#### Core (crate root)
 - Move the facade into a resolver-3 workspace with a runtime-independent core crate.
 - Remove the specification-only `placeholder::status` API. There is no replacement
   status API; consult the capability and parity documentation.
 - Add docs.rs metadata (`all-features`, `--cfg docsrs`) and stop shipping `tests/` in
   the crate archive.
+- Add docs.rs metadata (`all-features`, `--cfg docsrs`) for feature-gated item docs.
+- Establish shared metadata, safety lints and foundation contracts.
+- Add exact-width scalar values, validated tag identifiers, monotonic deadlines,
+  immutable finite resource budgets, explicit capabilities, typed diagnostic
+  failures and redacted secret formatting.
+- Add protocol-owned tags, bounded read builders, exact batch correlation,
+  preserved per-item protocol status and explicit unknown-after-transmit outcomes.
+- Add `ByteOrder` and `WordOrder`, optional `Tag::with_byte_order`/`with_word_order` with
+  `byte_order()`/`word_order()` accessors, and additive `PartialOrd, Ord` on `ErrorKind`,
+  `Operation` and `PlcValueType` (ADR-0006).
+- Add `OpFuture`, the `Clock` trait (no implementation in core), `CancellationToken` with
+  child tokens and `StateCell`/`StateWatch` latest-value connection-state observation,
+  all on `std` only (ADR-0007).
+- Add `ConnectionConfig` (not `Clone`) with its validating builder, `Endpoint`, `Timeouts`,
+  `ReconnectPolicy` with pure `next_delay`, `RetryPolicy`, `AccessPolicy` (default
+  `ReadOnly`), `Credentials`, and the `AddressOptions` carrier with its builder
+  (ADR-0008). The simulator connection enforces the timeouts, retry and access policies.
+- Add write batch contracts: `WriteItem`, `WriteRequest` with its bounded builder (item
+  budget, duplicate identities, value type versus tag hint, deadline) and `WriteResult`,
+  `WriteResponse` with its correlating builder, `iter_confirmed`, `iter_rejected` and
+  `iter_unknown`. Unknown outcomes are first-class and never retried or replayed
+  (ADR-0010). Data only.
+- Add `ConnectionUri::parse` for `scheme(:transport)?://authority(?k=v(&k=v)*)?` with
+  ordered `options()`; it rejects percent-encoding, credentials in the authority, empty
+  or duplicate keys, whitespace and input over 4096 bytes, and `Display` renders the
+  canonical text. Covered by the `fuzz_core_connection_string` target.
+- Add the `Driver` and `Connection` traits (object safe, `Send + Sync`; the narrow D2
+  surface) and `DriverRegistry` (`register` takes `&mut self`, duplicate scheme
+  `InvalidConfig`, unknown scheme `Unsupported(Operation::Connect)`, `parse` and `connect`
+  through `ConnectionUri`), and the default-deadline rule they document (ADR-0011).
+- Add `ReadRequestBuilder::cancel`, `ReadRequest::cancel`, `WriteRequestBuilder::cancel`
+  and `WriteRequest::cancel`: an optional `CancellationToken` carried by a request.
+- Accept ADR-0007: the simulator connection enforces the token and the default deadline.
+- Add `FakeClock`, `block_on`, `block_on_with`, `poll_once` and a counting waker to the
+  unpublished testkit for deterministic, sleep-free async tests.
+- Add `DriverOptions`, `ConnectionConfigBuilder::driver_options`,
+  `ConnectionConfig::driver_options` and `driver_options_as`: a slot for options only one
+  driver understands (ADR-0008 amendment). `Debug` and `redacted_display` print them, so
+  their `Debug` must hold no secrets.
 - Re-export `ByteOrder` and `WordOrder` from `stonecrab-core`.
 - Re-export `OpFuture`, `Clock`, `CancellationToken`, `StateCell` and `StateWatch` from
   `stonecrab-core`.
@@ -67,33 +141,9 @@ Changes:
   `WriteResponse` and `WriteResponseBuilder` from `stonecrab-core`.
 - Re-export `ConnectionUri` from `stonecrab-core`.
 - Re-export `Driver`, `Connection` and `DriverRegistry` from `stonecrab-core`.
-- Add the `sim` feature (off by default): `stonecrab::sim` re-exports the public items of
-  `stonecrab-driver-sim`, pinned `=0.1.0`, and the `sim_read` example reads three tags from a
-  simulated device through the driver registry.
-- Add the `modbus` feature (off by default): `stonecrab::modbus` re-exports the public items
-  of `stonecrab-modbus`, pinned `=0.1.0`, including `ModbusTcpDriver`, `ModbusOptions` and
-  `SystemClock`, and the `modbus_tcp_read` example reads one tag from a Modbus TCP server
-  through the driver registry. Each example now declares `required-features`.
 - Re-export `DriverOptions` from `stonecrab-core`.
-- Add the `sensors` feature (off by default): `stonecrab::sensors` re-exports the public
-  items of `stonecrab-sensors`, pinned `=0.1.0`, with its TOML loader enabled, and the
-  `full` feature (`sim`, `modbus`, `sensors`). The `profile_read` example (requires `full`)
-  loads a synthetic profile from `profiles/`, reads it from `sim://bench` or a Modbus TCP
-  server and reports name, value, unit, quality, origin and raw value through `tracing`;
-  `--expect-good` makes it fail on any measurement that is not of quality `Good`.
 
-### stonecrab-codec 0.1.0 (unreleased)
-- **Upstream baseline:** none; these are Stonecrab's own helpers and the crate makes no
-  upstream parity claim. The Modbus layouts that use them are tracked in
-  `docs/parity/modbus.md` against Apache PLC4X v1.0.0.
-- **Supported operations:** none; the crate offers bounds-checked byte primitives and no
-  protocol operation. `build-tested`; the Modbus PDU codec built on them runs against
-  pymodbus 3.8.6.
-- **Hardware evidence:** none. No physical device has been tried and no hardware record
-  exists; nothing is `hardware-verified`.
-- **Breaking changes:** none; this is the first release of the crate.
-
-Changes:
+#### Codec (`stonecrab::codec`)
 - Add the crate: `BoundedReader` and `BoundedWriter` with bounds-checked integer, float,
   byte-run and least-significant-bit-first coil reads and writes in an explicit
   `ByteOrder`, and `ParseError` (`Truncated`, `OversizedLength`, `InvalidDiscriminator`,
@@ -102,17 +152,36 @@ Changes:
 - Lengths are checked against the caller's maximum and the remaining input before any
   allocation or copy; no function panics on any input (ADR-0013).
 
-### stonecrab-driver-sim 0.1.0 (unreleased)
-- **Upstream baseline:** none claimed. Apache PLC4X ships a simulated driver whose source
-  is not inventoried, so the simulator is Stonecrab-owned (`docs/parity/sim.md`).
-- **Supported operations:** connect, close, read (`STATE` and `RANDOM`), write (`STATE`
-  and `SINK`), scripted failures and bounded read retry, `simulator-tested` by the common
-  driver contract suite. Subscribe, browse and discover are not supported.
-- **Hardware evidence:** none. No physical device has been tried and no hardware record
-  exists; nothing is `hardware-verified`. The simulator models no wire protocol.
-- **Breaking changes:** none; this is the first release of the crate.
+#### Transport (`stonecrab::transport`)
+- Add the crate: the object-safe `Transport` trait (`send`, `recv`, `shutdown`, `peer`,
+  `limits`; every call takes a `Deadline`) and `TransportFactory` (both return
+  `OpFuture`), and `FrameError` (`Truncated`, `Oversized`, `Malformed`) with
+  `From<FrameError> for PlcError` (ADR-0014).
+- Add `TcpTransport` and `TcpFactory { nodelay }` behind the default `tcp` feature: name
+  resolution and connection inside one connect deadline, refused and reset connections as
+  `Disconnected`, `recv` bounded by `max_buffered_bytes`, `send` bounded by
+  `max_frame_bytes`, and a transport that poisons itself when a `send` is cut short.
+- Add `SystemClock`, the Tokio-backed `Clock` (`now()` is Tokio's instant so paused-time
+  tests agree with `Deadline`), and `Jitter`, a seeded xorshift64* source for
+  `ReconnectPolicy::next_delay`.
+- Adopt `tokio` with scoped features (`rt`, `time`, `sync`, `io-util`, and `net` through
+  `tcp`); `deny.toml` bans its `full` feature. No task is spawned and nothing runs between
+  calls.
+- Add the `Framer<F>` trait (`decode`, `encode`, `max_frame_bytes`) and
+  `FramedTransport<F, R>` over a `Box<dyn Transport>`: `next_frame` assembles fragmented
+  and coalesced frames within `max_buffered_bytes`, `send_frame` encodes and sends one
+  bounded frame, and `resync(Deadline)` discards bytes until the framer finds a frame
+  boundary and fails with `Disconnected` at the deadline (ADR-0014 addendum).
+- Add `ConnectionGuard<F, R>`, `GuardConfig` and `GuardStats`: the connection lifecycle
+  machine over a `TransportFactory` and a `Framer` (`connect`, `request`,
+  `request_with_default_deadline`, `next_reply`, `close`, `state`, `watch_state`,
+  `stats`), one request in flight with a bounded FIFO queue (`Backpressure` beyond `max_pending_requests`),
+  request-driven reconnect with jittered backoff and `Failed(Disconnected)` when the retry
+  budget is spent, resync before the next request after a timeout, `Diagnostics` on every
+  error, and a `close` bounded by `Timeouts.request`. No background task (ADR-0014
+  addendum).
 
-Changes:
+#### Simulator (`stonecrab::sim`)
 - Add the crate: the in-process simulator driver, depending on `stonecrab-core` and
   `tracing` only, Tokio-free, default features empty (ADR-0012, accepted).
 - Add `RealtimeClock`, a `std`-only `Clock` whose `now()` is `Instant::now()` and whose
@@ -141,71 +210,11 @@ Changes:
   `pending_failures` and `clear_failures`. A connect, read or write takes at most one step;
   a scripted disconnect leaves the connection `Failed(Disconnected)`; a read without a
   deadline now gets `timeouts.request` afresh for each retry attempt.
+- Add the `sim` feature (off by default): `stonecrab::sim` re-exports the public items of
+  `stonecrab-driver-sim`, pinned `=0.1.0`, and the `sim_read` example reads three tags
+  from a simulated device through the driver registry.
 
-### stonecrab-transport 0.1.0 (unreleased)
-- **Upstream baseline:** none claimed; Apache PLC4X builds its transports on Netty and the
-  types here are Stonecrab's own contract (`docs/parity/transport.md`).
-- **Supported operations:** deadline-bounded TCP transport, framing with
-  resynchronization, and the connection guard (lifecycle, one request in flight, bounded
-  queue, request-driven reconnect). TCP, framing and the guard's connect and request path
-  are `interoperability-tested` through the Modbus driver; resync, reconnect and the queue
-  are `simulator-tested`. Serial, UDP and TLS are not supported.
-- **Hardware evidence:** none. No physical device has been tried and no hardware record
-  exists; nothing is `hardware-verified`.
-- **Breaking changes:** none; this is the first release of the crate.
-
-Changes:
-- Add the crate: the object-safe `Transport` trait (`send`, `recv`, `shutdown`, `peer`,
-  `limits`; every call takes a `Deadline`) and `TransportFactory` (both return
-  `OpFuture`), and `FrameError` (`Truncated`, `Oversized`, `Malformed`) with
-  `From<FrameError> for PlcError` (ADR-0014).
-- Add `TcpTransport` and `TcpFactory { nodelay }` behind the default `tcp` feature: name
-  resolution and connection inside one connect deadline, refused and reset connections as
-  `Disconnected`, `recv` bounded by `max_buffered_bytes`, `send` bounded by
-  `max_frame_bytes`, and a transport that poisons itself when a `send` is cut short.
-- Add `SystemClock`, the Tokio-backed `Clock` (`now()` is Tokio's instant so paused-time
-  tests agree with `Deadline`), and `Jitter`, a seeded xorshift64* source for
-  `ReconnectPolicy::next_delay`.
-- Adopt `tokio` with scoped features (`rt`, `time`, `sync`, `io-util`, and `net` through
-  `tcp`); `deny.toml` bans its `full` feature. No task is spawned and nothing runs between
-  calls.
-- Test the transport against the unpublished testkit's new `net` feature (`Script`,
-  `ScriptedPeer`, `FakeTransport`, `FakeTransportFactory`); no change to the public API.
-- Add the `Framer<F>` trait (`decode`, `encode`, `max_frame_bytes`) and
-  `FramedTransport<F, R>` over a `Box<dyn Transport>`: `next_frame` assembles fragmented
-  and coalesced frames within `max_buffered_bytes`, `send_frame` encodes and sends one
-  bounded frame, and `resync(Deadline)` discards bytes until the framer finds a frame
-  boundary and fails with `Disconnected` at the deadline (ADR-0014 addendum).
-- Add `ConnectionGuard<F, R>`, `GuardConfig` and `GuardStats`: the connection lifecycle
-  machine over a `TransportFactory` and a `Framer` (`connect`, `request`,
-  `request_with_default_deadline`, `next_reply`, `close`, `state`, `watch_state`, `stats`), one request
-  in flight with a bounded FIFO queue (`Backpressure` beyond `max_pending_requests`),
-  request-driven reconnect with jittered backoff and `Failed(Disconnected)` when the retry
-  budget is spent, resync before the next request after a timeout, `Diagnostics` on every
-  error, and a `close` bounded by `Timeouts.request`. No background task (ADR-0014
-  addendum).
-
-### stonecrab-modbus 0.1.0 (unreleased)
-- **Upstream baseline:** Apache PLC4X v1.0.0 (commit
-  `ea229918f5d07700e04d7d69ab1645da679cb700`, pinned in `upstream/manifest.toml`; the
-  inventory covers the Modbus TCP subset only and the source-release signature was
-  verified in S32, see `docs/evidence/alpha.md`). Divergences are rows in
-  `docs/parity/modbus.md` and are listed in `docs/COMPATIBILITY.md`.
-- **Supported operations:** Modbus TCP connect, close and reads of coils, discrete inputs,
-  holding registers and input registers (function codes 01 to 04) as the 15 numeric and
-  bit types, with batching and `split_into` disclosure, request-driven reconnect, retry,
-  cancellation and timeouts. Reads are `interoperability-tested` against pymodbus 3.8.6;
-  the fault handling is `simulator-tested`. Writes (the driver reports `write: false`),
-  subscriptions, browse, discovery, ping, extended registers, strings, calendar types,
-  RTU, ASCII, UDP and TLS are not supported.
-- **Hardware evidence:** none. No physical device has been tried and no hardware record
-  exists; nothing is `hardware-verified`.
-- **Breaking changes:** none; this is the first release of the crate. Behavior that
-  differs from upstream by design: bare `40001` addresses need an explicit convention,
-  unknown connection parameters are errors, replies are validated on transaction id, unit
-  id and function code.
-
-Changes:
+#### Modbus (`stonecrab::modbus`)
 - Add the native Modbus TCP driver crate, depending only on `stonecrab-core`, with default
   features empty. It starts with the address types and their text grammar; the codec,
   framing, session, connection and driver follow in the entries below.
@@ -309,19 +318,12 @@ Changes:
   tests in `tests/interop_pymodbus.rs` and the `modbus_tcp_read` example, with the image id,
   `pip freeze`, server log and contract report uploaded as `interop-evidence`; ADR-0015 is
   accepted (decision 16).
+- Add the `modbus` feature (off by default): `stonecrab::modbus` re-exports the public items
+  of `stonecrab-modbus`, pinned `=0.1.0`, including `ModbusTcpDriver`, `ModbusOptions` and
+  `SystemClock`, and the `modbus_tcp_read` example reads one tag from a Modbus TCP server
+  through the driver registry. Each example now declares `required-features`.
 
-### stonecrab-sensors 0.1.0 (unreleased)
-- **Upstream baseline:** none; Apache PLC4X has no sensor profile concept, so the format
-  is Stonecrab's own (`docs/parity/sensors.md`).
-- **Supported operations:** loading and validating version-1 TOML profiles, building tags
-  through a driver and turning a read response into scaled, graded measurements. The
-  synthetic profiles are `simulator-tested` against the simulator and
-  `interoperability-tested` against pymodbus 3.8.6; no named device profile exists.
-- **Hardware evidence:** none. No physical device has been tried and no hardware record
-  exists; nothing is `hardware-verified`.
-- **Breaking changes:** none; this is the first release of the crate.
-
-Changes:
+#### Sensors (`stonecrab::sensors`)
 - Add the crate: declarative sensor profiles for Stonecrab, depending on `stonecrab-core`,
   `serde` and, behind the default `toml` feature, `toml` (ADR-0016). No driver reads a
   profile yet; that arrives in a later slice.
@@ -359,57 +361,15 @@ Changes:
   from the pymodbus register map and a `sim` twin, all labeled `validation = "synthetic"`.
   They are repository data and are not packaged with the crate. The crate's code is
   unchanged; a new test loads and validates every file.
+- Add the `sensors` feature (off by default): `stonecrab::sensors` re-exports the public
+  items of `stonecrab-sensors`, pinned `=0.1.0`, with its TOML loader enabled, and the
+  `full` feature (`sim`, `modbus`, `sensors`). The `profile_read` example (requires `full`)
+  loads a synthetic profile from `profiles/`, reads it from `sim://bench` or a Modbus TCP
+  server and reports name, value, unit, quality, origin and raw value through `tracing`;
+  `--expect-good` makes it fail on any measurement that is not of quality `Good`.
 
-### stonecrab-core 0.1.0 (unreleased)
-- **Upstream baseline:** none for most contracts, which are Stonecrab-owned; the
-  connection-string grammar follows Apache PLC4X v1.0.0 (`CORE-URI-GRAMMAR` in
-  `docs/parity/core.md`).
-- **Supported operations:** defines the driver boundary (`DriverRegistry`, `Driver`,
-  `Connection`: connect, read, write, close, state watching) and the data contracts, and
-  implements no driver. `simulator-tested` through the common driver contract suite and,
-  for reads on a wire, `interoperability-tested` through `stonecrab-modbus`. Subscribe,
-  browse and discover are not defined.
-- **Hardware evidence:** none. No physical device has been tried and no hardware record
-  exists; nothing is `hardware-verified`.
-- **Breaking changes:** none; this is the first release of the crate.
-
-Changes:
-- Add docs.rs metadata (`all-features`, `--cfg docsrs`) for feature-gated item docs.
-- Establish shared metadata, safety lints and foundation contracts.
-- Add exact-width scalar values, validated tag identifiers, monotonic deadlines,
-  immutable finite resource budgets, explicit capabilities, typed diagnostic
-  failures and redacted secret formatting.
-- Add protocol-owned tags, bounded read builders, exact batch correlation,
-  preserved per-item protocol status and explicit unknown-after-transmit outcomes.
-- Add `ByteOrder` and `WordOrder`, optional `Tag::with_byte_order`/`with_word_order` with
-  `byte_order()`/`word_order()` accessors, and additive `PartialOrd, Ord` on `ErrorKind`,
-  `Operation` and `PlcValueType` (ADR-0006).
-- Add `OpFuture`, the `Clock` trait (no implementation in core), `CancellationToken` with
-  child tokens and `StateCell`/`StateWatch` latest-value connection-state observation,
-  all on `std` only (ADR-0007).
-- Add `ConnectionConfig` (not `Clone`) with its validating builder, `Endpoint`, `Timeouts`,
-  `ReconnectPolicy` with pure `next_delay`, `RetryPolicy`, `AccessPolicy` (default
-  `ReadOnly`), `Credentials`, and the `AddressOptions` carrier with its builder
-  (ADR-0008). The simulator connection enforces the timeouts, retry and access policies.
-- Add write batch contracts: `WriteItem`, `WriteRequest` with its bounded builder (item
-  budget, duplicate identities, value type versus tag hint, deadline) and `WriteResult`,
-  `WriteResponse` with its correlating builder, `iter_confirmed`, `iter_rejected` and
-  `iter_unknown`. Unknown outcomes are first-class and never retried or replayed
-  (ADR-0010). Data only.
-- Add `ConnectionUri::parse` for `scheme(:transport)?://authority(?k=v(&k=v)*)?` with
-  ordered `options()`; it rejects percent-encoding, credentials in the authority, empty
-  or duplicate keys, whitespace and input over 4096 bytes, and `Display` renders the
-  canonical text. Covered by the `fuzz_core_connection_string` target.
-- Add the `Driver` and `Connection` traits (object safe, `Send + Sync`; the narrow D2
-  surface) and `DriverRegistry` (`register` takes `&mut self`, duplicate scheme
-  `InvalidConfig`, unknown scheme `Unsupported(Operation::Connect)`, `parse` and `connect`
-  through `ConnectionUri`), and the default-deadline rule they document (ADR-0011).
-- Add `ReadRequestBuilder::cancel`, `ReadRequest::cancel`, `WriteRequestBuilder::cancel`
-  and `WriteRequest::cancel`: an optional `CancellationToken` carried by a request.
-- Accept ADR-0007: the simulator connection enforces the token and the default deadline.
+#### Testkit (`stonecrab::testkit`)
 - Add an unpublished deterministic address fixture testkit for contract tests.
-- Add `FakeClock`, `block_on`, `block_on_with`, `poll_once` and a counting waker to the
-  unpublished testkit for deterministic, sleep-free async tests.
 - Add the unpublished testkit's `fixtures` feature: the golden-vector loader (`load_dir`,
   `load_hex`, `GoldenVector`, `VectorSource`, `Provenance`, `GoldenError`) that enforces
   "every vector is listed in `PROVENANCE.toml`", and `InteropMap`, the reader of the
@@ -417,11 +377,10 @@ Changes:
   wait for maintainer prerequisite P4.
 - Add the unpublished testkit's driver contract suite (`ContractSuite`, `ContractFixture`,
   `ContractReport`): 23 named cases that every driver runs, green against `sim`.
-- Add `DriverOptions`, `ConnectionConfigBuilder::driver_options`,
-  `ConnectionConfig::driver_options` and `driver_options_as`: a slot for options only one
-  driver understands (ADR-0008 amendment). `Debug` and `redacted_display` print them, so
-  their `Debug` must hold no secrets.
 - Add the unpublished testkit's `ScriptedPeerFactory` (`net` feature): a `TransportFactory`
   that starts a fresh `ScriptedPeer` per `open` and connects with the real `TcpFactory`.
+- Test the transport against the unpublished testkit's new `net` feature (`Script`,
+  `ScriptedPeer`, `FakeTransport`, `FakeTransportFactory`); no change to the public API.
+
 ## stonecrab 0.1.0
 - Publish the specification-stage package. No industrial protocol support.

@@ -1,6 +1,6 @@
 name: Release evidence
-# Manual only. Builds the release evidence of ADR-0017 that CI does not keep: one
-# CycloneDX SBOM per published crate and the archive file lists. Nothing here publishes,
+# Manual only. Builds the release evidence of ADR-0017 that CI does not keep: the
+# CycloneDX SBOM of the published crate and the archive file lists. Nothing here publishes,
 # tags or pushes, and the job needs read access to the repository only. `mise run sbom`
 # runs the same script (scripts/sbom.sh) locally into target/release-evidence/.
 on:

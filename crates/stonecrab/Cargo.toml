@@ -7,7 +7,6 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
@@ -54,6 +53,194 @@ required-features = ["modbus"]
 [[example]]
 name = "profile_read"
 required-features = ["full"]
+
+# Each test file that is compiled out without a feature is listed with `required-features`, so a
+# plain `cargo test` skips it (cargo prints no notice) instead of building an empty test binary;
+# naming one with `--test` reports the missing feature. The gates run `--all-features` and so
+# run every file; this list must match each file's `#![cfg(...)]`.
+[[test]]
+name = "core_read_contract"
+required-features = ["testkit"]
+
+[[test]]
+name = "core_tag_order"
+required-features = ["testkit"]
+
+[[test]]
+name = "core_write_contract"
+required-features = ["testkit"]
+
+[[test]]
+name = "modbus_address"
+required-features = ["modbus"]
+
+[[test]]
+name = "modbus_batch"
+required-features = ["modbus", "testkit"]
+
+[[test]]
+name = "modbus_config"
+required-features = ["modbus", "testkit"]
+
+[[test]]
+name = "modbus_connection"
+required-features = ["modbus", "testkit"]
+
+[[test]]
+name = "modbus_contract"
+required-features = ["modbus", "testkit"]
+
+[[test]]
+name = "modbus_contract_scripted_peer"
+required-features = ["modbus", "testkit"]
+
+[[test]]
+name = "modbus_decode"
+required-features = ["modbus", "testkit"]
+
+[[test]]
+name = "modbus_feature"
+required-features = ["modbus"]
+
+[[test]]
+name = "modbus_framing"
+required-features = ["modbus", "testkit"]
+
+[[test]]
+name = "modbus_interop_pymodbus"
+required-features = ["modbus", "testkit"]
+
+[[test]]
+name = "modbus_parse"
+required-features = ["modbus"]
+
+[[test]]
+name = "modbus_pdu"
+required-features = ["modbus"]
+
+[[test]]
+name = "modbus_pdu_properties"
+required-features = ["modbus"]
+
+[[test]]
+name = "modbus_pdu_vectors"
+required-features = ["modbus", "testkit"]
+
+[[test]]
+name = "modbus_properties"
+required-features = ["modbus"]
+
+[[test]]
+name = "modbus_public_types"
+required-features = ["modbus"]
+
+[[test]]
+name = "modbus_read_batches"
+required-features = ["modbus", "testkit"]
+
+[[test]]
+name = "modbus_readme_matrix"
+required-features = ["modbus"]
+
+[[test]]
+name = "modbus_reconnect"
+required-features = ["modbus", "testkit"]
+
+[[test]]
+name = "modbus_retry"
+required-features = ["modbus", "testkit"]
+
+[[test]]
+name = "modbus_scripted_read"
+required-features = ["modbus", "testkit"]
+
+[[test]]
+name = "modbus_session"
+required-features = ["modbus", "testkit"]
+
+[[test]]
+name = "sensors_feature"
+required-features = ["sensors"]
+
+[[test]]
+name = "sensors_loader"
+required-features = ["sensors"]
+
+[[test]]
+name = "sensors_pipeline"
+required-features = ["sim", "sensors", "testkit"]
+
+[[test]]
+name = "sensors_profiles"
+required-features = ["sim", "sensors"]
+
+[[test]]
+name = "sensors_properties"
+required-features = ["sensors"]
+
+[[test]]
+name = "sensors_public_types"
+required-features = ["sensors"]
+
+[[test]]
+name = "sensors_validation"
+required-features = ["sensors"]
+
+[[test]]
+name = "sim_address_properties"
+required-features = ["sim"]
+
+[[test]]
+name = "sim_contract"
+required-features = ["sim", "testkit"]
+
+[[test]]
+name = "sim_driver_contract"
+required-features = ["sim", "testkit"]
+
+[[test]]
+name = "sim_failure_script"
+required-features = ["sim", "testkit"]
+
+[[test]]
+name = "sim_failure_trace"
+required-features = ["sim", "testkit"]
+
+[[test]]
+name = "sim_feature"
+required-features = ["sim"]
+
+[[test]]
+name = "sim_public_types"
+required-features = ["sim"]
+
+[[test]]
+name = "sim_readme_matrix"
+required-features = ["sim"]
+
+[[test]]
+name = "sim_spans"
+required-features = ["sim", "testkit"]
+
+[[test]]
+name = "transport_clock"
+required-features = ["testkit"]
+
+[[test]]
+name = "transport_framed"
+required-features = ["testkit"]
+
+[[test]]
+name = "transport_guard"
+required-features = ["testkit"]
+
+[[test]]
+name = "transport_public_types"
+required-features = ["testkit"]
+
+[[test]]
+name = "transport_tcp"
+required-features = ["testkit"]
 
 [dependencies]
 thiserror.workspace = true

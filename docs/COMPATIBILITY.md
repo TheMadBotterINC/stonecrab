@@ -1,8 +1,13 @@
 # Stonecrab compatibility matrix
 
-Status: alpha, reconciled with the code in slice S31 of
+Status: alpha, reconciled with the code in slices S31 and S33 of
 [`ALPHA_PLAN.md`](ALPHA_PLAN.md). Everything below is true of the code at that slice;
 nothing is promised that is not shipped, and deferred items say what owns them.
+
+Stonecrab is one crate, `stonecrab` 0.2.0 (ADR-0018). The Feature column of the table
+below names the Cargo feature that switches a capability on. `sim`, `modbus` and
+`sensors` are on by default; `default-features = false` leaves the core and the codec.
+The `testkit` feature is test tooling, not a capability, and carries no support level.
 
 Upstream baseline: Apache PLC4X v1.0.0, tag object
 `32a524591841ab56d26b032914ce06918148fbb6`, commit
@@ -36,31 +41,31 @@ hardware record exists.
 
 ## Protocols and operations
 
-| Protocol | Operation | Level | Parity row | Evidence |
-| --- | --- | --- | --- | --- |
-| Modbus TCP | connect, close, connection state | interoperability-tested | `MB-TCP-CONNECT` | `interop` job; `interop_contract_suite_passes_against_pymodbus` |
-| Modbus TCP | read coils (FC01) | interoperability-tested | `MB-TCP-READ-COIL` | `interop_reads_coils_1_to_10` |
-| Modbus TCP | read discrete inputs (FC02) | interoperability-tested | `MB-TCP-READ-DI` | `interop_reads_discrete_inputs_1_to_10` |
-| Modbus TCP | read holding registers (FC03) | interoperability-tested | `MB-TCP-READ-HR` | `interop_reads_all_fifteen_holding_register_types`, `interop_little_endian_region_decodes_real` |
-| Modbus TCP | read input registers (FC04) | interoperability-tested | `MB-TCP-READ-IR` | `interop_reads_input_registers_1_to_7` |
-| Modbus TCP | batched reads, adjacent merge, `split_into` disclosure | interoperability-tested | `MB-READ-MERGE`, `MB-LIMIT-COILS`, `MB-LIMIT-REGISTERS` | `interop_split_batch_discloses_chunks`, `interop_125_register_and_2000_coil_reads` |
-| Modbus TCP | per-chunk device exception 02 (illegal data address) | interoperability-tested | `MB-EXC-02` | `interop_read_beyond_map_yields_device_exception` |
-| Modbus TCP | other device exception codes (01, 03 to 0B) | simulator-tested | `MB-EXC-01`, `MB-EXC-03` to `MB-EXC-0B` | unit tests and `FakeTransport`; never seen from an independent server |
-| Modbus TCP | request-driven reconnect with capped jittered backoff | simulator-tested | `MB-READ-RECONNECT` | `FakeTransport` and fake clock; Stonecrab extension, upstream has none |
-| Modbus TCP | read retry, cancellation, timeout, late-reply discard, resync | simulator-tested | `MB-READ-RETRY`, `MB-READ-TIMEOUT`, `MB-READ-MATCH` | `FakeTransport` and fake clock (D21) |
-| Modbus TCP | write (FC05, 06, 15, 16) | not supported | `MB-TCP-WRITE` | deferred; `Capabilities.write = false`, `write` returns `Unsupported(Operation::Write)` before any I/O |
-| Modbus TCP | subscriptions (upstream: polling emulation) | not supported | `MB-TCP-SUBSCRIBE` | deferred, M2 |
-| Any physical device | everything | planned | none | milestone M2S (board adapters, hardware runner, hardware records); no record exists |
-| Modbus TCP | browse | not supported | `MB-TCP-BROWSE` | upstream has no Modbus browse |
-| Modbus TCP | discover, ping | not supported | `MB-TCP-DISCOVER`, `MB-TCP-PING` | deferred; `ping-address` is validated and unused |
-| Modbus TCP | UDP, TLS, TLS-PSK, `test` transports | not supported | `MB-TCP-TRANSPORTS-*` | deferred; `InvalidConfig` |
-| Modbus TCP | extended registers (FC20, FC21) | not supported | `MB-ADDR-EXTENDED` | deferred, M2; `InvalidAddress` |
-| Modbus RTU, ASCII | everything | planned | none yet | milestone M2 |
-| Simulator (`sim`) | connect, read, write, scripted failures, bounded read retry | simulator-tested | `SIM-DRIVER`, `SIM-CONNECTION`, `SIM-FAILURE-SCRIPT` | driver contract suite (22 passed, 1 named skip) |
-| Sensor profiles | load, validate, build tags, scale and grade measurements | simulator-tested | `SENSORS-*` | `sim` profiles through `profile_read` in the `examples` job |
-| Sensor profiles | the same, with the `modbus-tcp` synthetic profiles | interoperability-tested | `SENSORS-SYNTHETIC-PROFILES` | `profile_read --expect-good` in the `interop` job; green on the hosted runner for S30 (the `profiles` step, run 40548582722) |
-| OPC UA, EtherNet/IP, S7, other baseline drivers | everything | planned | none yet | milestones M3 to M5 |
-| Direct bench adapters (MAX31855, ADXL345) | everything | planned | none | milestone M2S |
+| Protocol | Operation | Feature | Level | Parity row | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| Modbus TCP | connect, close, connection state | `modbus` | interoperability-tested | `MB-TCP-CONNECT` | `interop` job; `interop_contract_suite_passes_against_pymodbus` |
+| Modbus TCP | read coils (FC01) | `modbus` | interoperability-tested | `MB-TCP-READ-COIL` | `interop_reads_coils_1_to_10` |
+| Modbus TCP | read discrete inputs (FC02) | `modbus` | interoperability-tested | `MB-TCP-READ-DI` | `interop_reads_discrete_inputs_1_to_10` |
+| Modbus TCP | read holding registers (FC03) | `modbus` | interoperability-tested | `MB-TCP-READ-HR` | `interop_reads_all_fifteen_holding_register_types`, `interop_little_endian_region_decodes_real` |
+| Modbus TCP | read input registers (FC04) | `modbus` | interoperability-tested | `MB-TCP-READ-IR` | `interop_reads_input_registers_1_to_7` |
+| Modbus TCP | batched reads, adjacent merge, `split_into` disclosure | `modbus` | interoperability-tested | `MB-READ-MERGE`, `MB-LIMIT-COILS`, `MB-LIMIT-REGISTERS` | `interop_split_batch_discloses_chunks`, `interop_125_register_and_2000_coil_reads` |
+| Modbus TCP | per-chunk device exception 02 (illegal data address) | `modbus` | interoperability-tested | `MB-EXC-02` | `interop_read_beyond_map_yields_device_exception` |
+| Modbus TCP | other device exception codes (01, 03 to 0B) | `modbus` | simulator-tested | `MB-EXC-01`, `MB-EXC-03` to `MB-EXC-0B` | unit tests and `FakeTransport`; never seen from an independent server |
+| Modbus TCP | request-driven reconnect with capped jittered backoff | `modbus` | simulator-tested | `MB-READ-RECONNECT` | `FakeTransport` and fake clock; Stonecrab extension, upstream has none |
+| Modbus TCP | read retry, cancellation, timeout, late-reply discard, resync | `modbus` | simulator-tested | `MB-READ-RETRY`, `MB-READ-TIMEOUT`, `MB-READ-MATCH` | `FakeTransport` and fake clock (D21) |
+| Modbus TCP | write (FC05, 06, 15, 16) | `modbus` | not supported | `MB-TCP-WRITE` | deferred; `Capabilities.write = false`, `write` returns `Unsupported(Operation::Write)` before any I/O |
+| Modbus TCP | subscriptions (upstream: polling emulation) | `modbus` | not supported | `MB-TCP-SUBSCRIBE` | deferred, M2 |
+| Any physical device | everything | none yet | planned | none | milestone M2S (board adapters, hardware runner, hardware records); no record exists |
+| Modbus TCP | browse | `modbus` | not supported | `MB-TCP-BROWSE` | upstream has no Modbus browse |
+| Modbus TCP | discover, ping | `modbus` | not supported | `MB-TCP-DISCOVER`, `MB-TCP-PING` | deferred; `ping-address` is validated and unused |
+| Modbus TCP | UDP, TLS, TLS-PSK, `test` transports | `modbus` | not supported | `MB-TCP-TRANSPORTS-*` | deferred; `InvalidConfig` |
+| Modbus TCP | extended registers (FC20, FC21) | `modbus` | not supported | `MB-ADDR-EXTENDED` | deferred, M2; `InvalidAddress` |
+| Modbus RTU, ASCII | everything | none yet | planned | none yet | milestone M2 |
+| Simulator (`sim`) | connect, read, write, scripted failures, bounded read retry | `sim` | simulator-tested | `SIM-DRIVER`, `SIM-CONNECTION`, `SIM-FAILURE-SCRIPT` | driver contract suite (22 passed, 1 named skip) |
+| Sensor profiles | load, validate, build tags, scale and grade measurements | `sensors`, `sim` | simulator-tested | `SENSORS-*` | `sim` profiles through `profile_read` in the `examples` job |
+| Sensor profiles | the same, with the `modbus-tcp` synthetic profiles | `sensors`, `modbus` | interoperability-tested | `SENSORS-SYNTHETIC-PROFILES` | `profile_read --expect-good` in the `interop` job; green on the hosted runner for S30 (the `profiles` step, run 40548582722) |
+| OPC UA, EtherNet/IP, S7, other baseline drivers | everything | none yet | planned | none yet | milestones M3 to M5 |
+| Direct bench adapters (MAX31855, ADXL345) | everything | none yet | planned | none | milestone M2S |
 
 The driver boundary itself (`DriverRegistry`, `Driver`, `Connection`, configuration,
 address options, cancellation, the state watch, diagnostics) is `simulator-tested` through
@@ -104,7 +109,7 @@ Address text: the long form `holding-register:16:INT` and the prefixed short for
 `4x00016:INT` are always accepted; the bare short forms (`40001`) are accepted only when
 the caller selects `address-convention=plc4x` (profiles declare it explicitly). The
 logical number is one-based; the wire address is one less. See the grammar in the
-[Modbus README](../crates/stonecrab-modbus/README.md).
+[Modbus component document](../crates/stonecrab/docs/components/modbus.md).
 
 ## Byte-order modes
 
@@ -148,9 +153,9 @@ unlimited attempts; `RetryPolicy` one attempt, retrying `Timeout`, `Disconnected
 | Peer | What ran | Where | Level it supports |
 | --- | --- | --- | --- |
 | pymodbus 3.8.6 on `python:3.12-slim` (pinned by digest), first-party `server.py` over the register map in `fixtures/modbus/interop/register-map.toml`, TCP port 5020 | ten `interop_` tests, the `modbus_tcp_read` example, `profile_read --expect-good` for each `modbus-tcp` synthetic profile, the common driver contract suite (14 passed, 9 skipped by name) | the CI job `interop` (ubuntu, every push and pull request) and `mise run interop` | `interoperability-tested` |
-| the in-process simulator (`sim`) | the driver contract suite (22 passed, 1 skipped), `sim_read`, `profile_read` on the `sim` profiles | `cargo test`, CI jobs `test` and `examples` | `simulator-tested` |
-| loopback `ScriptedPeer` (testkit) | a holding-register read over real sockets and the contract suite (18 passed, 5 skipped) | `cargo test` | `simulator-tested` |
-| `FakeTransport` with a first-party MBAP responder and `FakeClock` | the contract suite (21 passed, 2 skipped), timing, retry, reconnect and cancellation tests | `cargo test` | `simulator-tested` |
+| the in-process simulator (`sim`) | the driver contract suite (22 passed, 1 skipped), `sim_read`, `profile_read` on the `sim` profiles | `cargo test --all-features`, CI jobs `test` and `examples` | `simulator-tested` |
+| loopback `ScriptedPeer` (testkit) | a holding-register read over real sockets and the contract suite (18 passed, 5 skipped) | `cargo test --all-features` | `simulator-tested` |
+| `FakeTransport` with a first-party MBAP responder and `FakeClock` | the contract suite (21 passed, 2 skipped), timing, retry, reconnect and cancellation tests | `cargo test --all-features` | `simulator-tested` |
 
 pymodbus 3.8.6 is the peer the upstream project's own Docker test uses; the Stonecrab
 server is written independently and reproduces only the documented fixture values plus one
@@ -181,7 +186,7 @@ MSRV: Rust 1.97 (`rust-version` in the workspace manifest), exercised with 1.97.
 
 The applicable cases of [`SPEC.md`](SPEC.md) "Mandatory failure cases" are tagged in the
 tests with `// covers: SPEC mandatory-failure-cases / F<n> ...`; list them with
-`grep -rn "covers: SPEC mandatory-failure-cases / F3" crates tools`. The numbering is the
+`grep -rn "covers: SPEC mandatory-failure-cases / F3" crates`. The numbering is the
 order of the SPEC bullets. Counts are the number of tagged tests at S31.
 
 | Tag | SPEC case | Alpha coverage | Tagged tests |
@@ -234,7 +239,8 @@ byte-order names (`MB-ADDR-CONFIG-BLOCK`). Inferences about upstream behavior ar
 ## Known gaps
 
 Writes, subscriptions, extended registers, strings, calendar types, RTU, UDP and TLS, and
-hardware verification are listed above. Also not done: mutation testing, soak and
-benchmark gates, branch-coverage gating (line coverage per crate is gated, ADR-0005), a
+hardware verification are listed above. Also not done: a mutation threshold as a gate
+(one recorded run, `docs/evidence/alpha.md`), soak and
+benchmark gates, branch-coverage gating (line coverage per module is gated, ADR-0005), a
 differential test against PLC4J, and the upstream vector corpus (blocked on prerequisite
 P4). [`STATUS.md`](../STATUS.md) carries the current list.

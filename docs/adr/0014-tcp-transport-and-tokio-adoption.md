@@ -1,5 +1,8 @@
 # 0014: Transport trait, TCP transport and Tokio adoption
 ## Status
+Superseded in part by ADR-0018: Tokio's scoping to the `stonecrab-transport` crate and
+its `tcp` feature is now the `transport` feature of `stonecrab` (module
+`stonecrab::transport`). D15, D21, D22 and D23 stand.
 Accepted by the sole maintainer on 2026-10-27, as slice S16 of docs/ALPHA_PLAN.md.
 It adds the new crate `stonecrab-transport` (CODING_STANDARDS 12.6 requires an ADR for a
 new crate and for a new public trait), adopts `tokio` (section 15.1 and 8.1), and

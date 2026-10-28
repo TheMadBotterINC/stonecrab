@@ -1,5 +1,8 @@
 # 0015: Modbus TCP driver crate
 ## Status
+Amended by ADR-0018: `stonecrab-modbus` is now the module `stonecrab::modbus`, behind
+the `modbus` feature (on by default). The decisions stand; read the crate name as the
+module.
 Accepted on 2026-10-27 by slice S27: the driver answered reads from an independent peer,
 pymodbus 3.8.6, and the S13 contract suite ran against it (decision 16). It was drafted
 in slice S20a on 2026-10-27 and adds the new crate `stonecrab-modbus` (CODING_STANDARDS

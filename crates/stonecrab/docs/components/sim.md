@@ -1,5 +1,6 @@
-# Stonecrab Driver Sim
-In-process simulator driver for Stonecrab. It is the sanctioned test double for the
+# Stonecrab Simulator
+In-process simulator driver for Stonecrab (`stonecrab::sim`, behind the `sim` feature, on by
+default). It is the sanctioned test double for the
 driver boundary (coding standards section 13.5): the one place a `Driver` and
 `Connection` can be exercised without a device, a socket or a hand-rolled mock. It is
 not a Modbus simulator.
@@ -37,20 +38,17 @@ assert_eq!(response.items()[0].outcome().as_ref().ok(), Some(&PlcValue::F32(71.5
 # Ok::<(), stonecrab::PlcError>(())
 ```
 
-The crate depends on `stonecrab-core` and `tracing` only, has no Tokio dependency, and its
-default feature set is empty. Through the facade it is `stonecrab::sim` behind the `sim`
-feature; the `sim_read` example and the `sim` variants of the synthetic sensor profiles
-(`profile_read`) run against it with no network, which is what the alpha's `examples` CI
-job does. Tests that need time to pass inject the unpublished testkit's
-`FakeClock` with `SimDriver::with_clock`.
+The `sim` feature adds `tracing` to the core and nothing else; there is no Tokio
+dependency, so it works with the `transport` feature off. The `sim_read` example and the
+`sim` variants of the synthetic sensor profiles (`profile_read`) run against it with no
+network, which is what the alpha's `examples` CI job does. Tests that need time to pass
+inject the `testkit` feature's `FakeClock` with `SimDriver::with_clock`.
 
 Upstream behavior is the simulated driver of Apache PLC4X, and the simulator claims no
 parity with it. Stonecrab-owned rows and divergences are recorded in the
 [simulator record](https://github.com/TheMadBotterINC/stonecrab/blob/master/docs/parity/sim.md).
 
-## Features
-Default features are empty and there are no optional features.
-
+## Contents
 - `SimDriver`: scheme `sim`, a set of named `SimDevice`s and a clock. `with_device(name,
   device)` registers a device; `sim://<device>?latency-ms=<n>&seed=<u64>` opens it. Unknown
   devices and unknown options are `InvalidConfig`; `address-convention` is accepted and
@@ -93,9 +91,9 @@ in the connection's `Capabilities` and enforced: the simulator never splits a ba
 | Bounded read retry | simulator-tested |
 | Common driver contract suite | simulator-tested |
 
-The read and write rows rest on two kinds of evidence: this crate's own tests, and the
-common driver contract suite of the unpublished testkit (`ContractSuite`), which
-`tests/contract.rs` runs against a simulated device under `block_on_with` on a
+The read and write rows rest on two kinds of evidence: the module's own tests, and the
+common driver contract suite of the `testkit` feature (`ContractSuite`), which
+`tests/sim_contract.rs` runs against a simulated device under `block_on_with` on a
 `FakeClock`. The run is green with one named skip: "an unsupported write performs no
 I/O" is skipped because the simulator supports write. The fixture wires the suite's fault
 hooks to `SimDevice::push_failure` (`Disconnect`, `Timeout`, `DeviceException`,

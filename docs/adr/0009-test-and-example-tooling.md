@@ -1,5 +1,8 @@
 # 0009: Test and example tooling
 ## Status
+Superseded in part by ADR-0018: "the testkit is unpublished" no longer holds;
+`stonecrab::testkit` ships in the package behind the off-by-default `testkit` feature.
+The rest of this ADR stands, with crate names read as module names.
 Accepted by the sole maintainer on 2026-10-27, as slice S03b of docs/ALPHA_PLAN.md.
 It records policy only: no dependency entry is added to the root manifest here. It
 implements decision D23 for the test crates named below and builds on ADR-0005.

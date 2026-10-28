@@ -1,5 +1,8 @@
 # 0011: Driver, Connection and DriverRegistry boundary
 ## Status
+Superseded in part by ADR-0018: the decisions about the facade's re-exports and the
+feature that enables each sibling crate are replaced by the one-crate feature table. The
+`Driver`, `Connection` and `DriverRegistry` boundary stands.
 Accepted by the sole maintainer on 2026-10-27, as slice S11a of docs/ALPHA_PLAN.md,
 landed in one commit with S11b-2 (ADR-0012, `SimDriver` and `SimConnection`). It records
 decisions D2 (the narrow `Connection` surface), D4 (subscriptions out), D11 (how the

@@ -1,5 +1,8 @@
 # 0005: CI gates, per-crate coverage tiers and the single-maintainer waiver
 ## Status
+Amended by ADR-0018: the per-crate coverage tiers below are enforced per module of the
+single crate `stonecrab`, with the same thresholds (`scripts/coverage-gate.sh`); the
+text is the original decision.
 Accepted by the sole maintainer on 2026-10-27, with plan P5.
 It affects `.github/workflows/ci.yml`, `mise.toml`, `scripts/` and `.config/nextest.toml`,
 amends ADR-0001's coverage clause, CODING_STANDARDS 5.1, 13.2, 13.10, 18.6, 19 and

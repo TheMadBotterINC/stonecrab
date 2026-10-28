@@ -1,7 +1,10 @@
 # Stonecrab Core
-Runtime-independent foundation for Stonecrab. This crate has no executor or network dependency.
-Default features are empty. Public contracts are experimental (alpha); this crate holds
-the driver boundary and data contracts, and protocol behavior lives in the driver crates.
+Runtime-independent foundation for Stonecrab: the items at the root of the `stonecrab`
+crate. They have no executor or network dependency and are built whatever features are
+on, so `stonecrab` with `default-features = false` is exactly this foundation plus the
+`codec` module. Public contracts are experimental (alpha); the core holds the driver
+boundary and data contracts, and protocol behavior lives in the driver modules
+(`stonecrab::sim`, `stonecrab::modbus`).
 
 See the [foundation parity record](https://github.com/TheMadBotterINC/stonecrab/blob/master/docs/parity/core.md).
 
@@ -18,15 +21,15 @@ too; an unknown write outcome is never collapsed into a rejection or replayed.
 | --- | --- |
 | Driver boundary: `Driver`, `Connection`, `DriverRegistry`, configuration, address options, cancellation, state watch, diagnostics | simulator-tested |
 | Values, tags, read and write batches, errors and correlation | simulator-tested |
-| The same boundary on a real wire, through `stonecrab-modbus` (reads) | interoperability-tested |
+| The same boundary on a real wire, through `stonecrab::modbus` (reads) | interoperability-tested |
 | Subscribe, browse and discover | not supported |
 | Calendar, byte, list and raw values (`RawValue`) | not supported |
 | Hardware verification | planned |
 
-`simulator-tested` means the driver contract suite of the repository's unpublished testkit
-runs against the `sim` driver and the contracts have unit, property and documentation
-tests; `interoperability-tested` means the Modbus driver, built on these contracts, reads
-from an independent server (pymodbus 3.8.6) in the `interop` job. Core itself implements
+`simulator-tested` means the driver contract suite of the `testkit` feature runs against
+the `sim` driver and the contracts have unit, property and documentation tests;
+`interoperability-tested` means the Modbus driver, built on these contracts, reads from
+an independent server (pymodbus 3.8.6) in the `interop` job. The core itself implements
 no driver. `Timeouts.idle` is recorded and not enforced at the alpha.
 
 Read builders require explicit `ResourceLimits`. Duplicate identifiers and over-budget

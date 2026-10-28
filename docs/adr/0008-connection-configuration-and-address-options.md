@@ -7,6 +7,9 @@ Modbus grammar and its use of the carrier are ADR-0015). Every change is additiv
 `stonecrab-core` and the facade. Nothing enforces the policies yet: the types are data
 and pure arithmetic, consumed from S11a (`Driver`), S16 (transport) and S19 onward.
 
+> Note: this ADR keeps its original crate names. Map each crate name to its module with the
+> table in ADR-0018 decision 1.
+
 ## Context
 Every driver needs the same connection inputs: a scheme, an endpoint, time bounds, a
 reconnect and a read retry policy, whether writes are allowed, optional credentials and

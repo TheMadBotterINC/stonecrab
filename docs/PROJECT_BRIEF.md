@@ -88,6 +88,9 @@ A release can be useful without claiming M5. A 1.0 version number will carry an 
 
 ## Planned workspace
 
+> Superseded: ADR-0018 ships Stonecrab as one crate, with these components as modules. The
+> layout below is the original plan.
+
 ```text
 stonecrab/
 ├── crates/

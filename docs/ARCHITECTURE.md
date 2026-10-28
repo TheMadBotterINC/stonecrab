@@ -1,7 +1,7 @@
 # Stonecrab Architecture
 
 **Status:** design document, derived from the [engineering specification](./SPEC.md) and
-reconciled with the code at the alpha (slice S31). The diagrams are the original targets.
+reconciled with the code at the alpha (slice S31) and with the single-crate build (slice S33, ADR-0018). The diagrams are the original targets.
 Every section that has shipped carries a **Shipped at alpha** note that is authoritative
 wherever it differs from the diagram above it, and anything a diagram shows that the alpha
 does not ship is marked **deferred** with the slice or milestone that owns it (milestones
@@ -10,7 +10,7 @@ are those of SPEC.md 'Delivery milestones', slices those of
 `upstream/manifest.toml`; M0 is not complete. Support levels per capability are in
 [`COMPATIBILITY.md`](./COMPATIBILITY.md).
 
-This document is the diagram set for the workspace. It is organized from the outside in: crate graph first, then the public contract in `stonecrab-core`, then the layers beneath it, then the dynamic behavior (state machines and sequences) that the static diagrams cannot show.
+This document is the diagram set for the crate. It is organized from the outside in: module map first, then the public contract at the crate root (the core), then the layers beneath it, then the dynamic behavior (state machines and sequences) that the static diagrams cannot show.
 
 Every diagram is Mermaid so it renders on GitHub and in `cargo doc` via `#![doc = include_str!(...)]` with `rustdoc`'s `--html-in-header` mermaid shim if we choose to embed it later.
 
@@ -33,9 +33,13 @@ Lifetimes, `Send + Sync` bounds, and `#[derive]` lists are omitted from the diag
 
 ---
 
-## 1. Workspace crate graph
+## 1. The crate and its modules
 
-Dependencies point downward only: applications → facade → drivers → transport/codec → core. Sensor metadata is kept out of wire-level crates. Tooling is never a dependency of a published crate.
+Stonecrab is one package, `stonecrab` 0.2.0 (ADR-0018). What the original design drew as
+separate crates are modules of it; a module that carries a dependency sits behind a Cargo
+feature (section 10). Dependencies point downward only: applications -> `stonecrab` ->
+driver modules -> transport and codec -> the core at the crate root. Sensor metadata is kept
+out of the wire-level modules. Tooling is never a dependency of the published package.
 
 ```mermaid
 flowchart TB
@@ -44,48 +48,36 @@ flowchart TB
         EXAMPLES["examples/"]
     end
 
-    subgraph facade["Facade"]
-        STONECRAB["<b>stonecrab</b><br/>public re-exports · driver registration · Cargo feature selection"]
+    subgraph crate["stonecrab (one crate, one version)"]
+        subgraph drivers["Driver modules"]
+            SIM["<b>stonecrab::sim</b><br/>feature sim<br/>simulated device + scripted failures"]
+            MODBUS["<b>stonecrab::modbus</b><br/>feature modbus<br/>Modbus TCP over one PDU implementation"]
+            OPCUA["<b>opcua</b> (deferred)<br/>secure sessions , read , browse , native subscriptions"]
+            EIP["<b>eip</b> (deferred)<br/>EtherNet/IP incl. Logix"]
+            S7["<b>s7</b> (deferred)<br/>Siemens S7"]
+            REST["<b>...</b> (deferred)<br/>ADS , SLMP , KNX , BACnet , other baseline drivers"]
+        end
+
+        subgraph sensing["Sensors"]
+            SENSORS["<b>stonecrab::sensors</b><br/>feature sensors<br/>declarative profiles , units , scaling , quality"]
+            MAX["<b>max31855</b> (deferred)<br/>thermocouple over SPI"]
+            ADXL["<b>adxl345</b> (deferred)<br/>accelerometer over I2C (SPI later)"]
+        end
+
+        subgraph foundation["Foundation"]
+            CORE["<b>crate root</b> (always built)<br/>values , tags , requests , errors , driver traits<br/>no executor, no network"]
+            TRANSPORT["<b>stonecrab::transport</b><br/>feature transport<br/>TCP , deadlines , cancellation<br/>the only Tokio user outside the test kit"]
+            CODEC["<b>stonecrab::codec</b> (always built)<br/>bounded readers/writers , bit packing"]
+        end
+
+        TESTKIT["<b>stonecrab::testkit</b><br/>feature testkit (off by default)<br/>scripted peers , fake clock , golden vectors , contract suite"]
     end
 
-    subgraph drivers["Driver crates — each behind a Cargo feature"]
-        SIM["<b>stonecrab-driver-sim</b><br/>simulated device + scripted failures"]
-        MODBUS["<b>stonecrab-modbus</b><br/>TCP + RTU over one PDU implementation"]
-        OPCUA["<b>stonecrab-opcua</b><br/>secure sessions · read · browse · native subscriptions"]
-        EIP["<b>stonecrab-eip</b><br/>EtherNet/IP incl. Logix"]
-        S7["<b>stonecrab-s7</b><br/>Siemens S7"]
-        REST["…remaining baseline drivers<br/>ADS/AMS · SLMP · BACnet · CAN · proxy"]
-    end
+    GEN["<b>codegen</b> (deferred, maintainer tool)<br/>MSpec -> Rust (Java/Maven bootstrap)"]
+    XTASK["<b>scripts and mise tasks</b><br/>gates, fuzz, mutants, SBOM"]
 
-    subgraph sensors["Sensor layer"]
-        SENSORS["<b>stonecrab-sensors</b><br/>declarative profiles · units · scaling · quality"]
-        MAX["<b>stonecrab-adapter-max31855</b><br/>thermocouple over SPI"]
-        ADXL["<b>stonecrab-adapter-adxl345</b><br/>accelerometer over I²C (SPI later)"]
-    end
-
-    subgraph foundation["Foundation"]
-        CORE["<b>stonecrab-core</b><br/>values · tags · requests · errors · driver traits<br/><i>runtime-agnostic, no Tokio</i>"]
-        TRANSPORT["<b>stonecrab-transport</b><br/>TCP · UDP · serial · deadlines · cancellation<br/><i>Tokio</i>"]
-        CODEC["<b>stonecrab-codec</b><br/>bounded readers/writers · checksums · generated-message support"]
-    end
-
-    subgraph tooling["Maintainer tooling — never published, never a dependency"]
-        TESTKIT["<b>stonecrab-testkit</b><br/>scripted peers · fake clock · golden vectors · contract suite · differential runner"]
-        XTASK["<b>xtask</b><br/>upstream manifest · coverage · release evidence"]
-        GEN["<b>stonecrab-codegen</b><br/>MSpec → Rust (maintainer-only; Java/Maven bootstrap allowed at first)"]
-    end
-
-    APP --> STONECRAB
-    EXAMPLES --> STONECRAB
-    APP -. "optional" .-> SENSORS
-
-    STONECRAB --> CORE
-    STONECRAB -. "feature = sim" .-> SIM
-    STONECRAB -. "feature = modbus" .-> MODBUS
-    STONECRAB -. "feature = opcua" .-> OPCUA
-    STONECRAB -. "feature = eip" .-> EIP
-    STONECRAB -. "feature = s7" .-> S7
-    STONECRAB -. "feature = …" .-> REST
+    APP --> crate
+    EXAMPLES --> crate
 
     SIM --> CORE
     MODBUS --> CORE
@@ -113,9 +105,6 @@ flowchart TB
 
     TESTKIT --> CORE
     TESTKIT --> TRANSPORT
-    TESTKIT --> CODEC
-    TESTKIT -. "dev-dependency of" .-> MODBUS
-    TESTKIT -. "dev-dependency of" .-> OPCUA
     GEN -. "emits committed code into" .-> MODBUS
     GEN -. "emits committed code into" .-> OPCUA
     XTASK -.-> GEN
@@ -124,44 +113,50 @@ flowchart TB
 
 **Rules encoded in this graph**
 
-- `stonecrab-core` has no runtime dependency. Values, tags, requests, and errors must not change when a second async runtime is added later.
-- `stonecrab-transport` is the only foundation crate that depends on Tokio. Serial, SPI, and I²C access never runs on a runtime worker thread.
-- Driver crates depend on `stonecrab-transport` and `stonecrab-codec`, never on each other. Shared Modbus PDU logic lives inside `stonecrab-modbus`, not in a cross-driver crate.
-- `stonecrab-sensors` depends only on `stonecrab-core`; a profile is data about tags, not about wire bytes.
-- Board adapters depend on `stonecrab-sensors` so they share the measurement envelope and quality model, but they are not upstream-parity items.
-- A plain `cargo add stonecrab` with default features pulls in `stonecrab-core` and nothing else. Every protocol is opt-in.
-**Shipped at alpha (D22).** The alpha ships seven crates plus one unpublished tool crate.
-The graph above holds for them, with the exceptions listed after the table.
+- The crate root (the core) has no runtime dependency. Values, tags, requests, and errors must not change when a second async runtime is added later.
+- `stonecrab::transport` is the only module that depends on Tokio apart from the test kit (`stonecrab::testkit`, which spawns scripted peers), and the `transport` feature is the only way Tokio enters the crate. Serial, SPI, and I2C access never runs on a runtime worker thread.
+- Driver modules depend on `transport` and `codec`, never on each other. Shared Modbus PDU logic lives inside `stonecrab::modbus`, not in a cross-driver module.
+- `stonecrab::sensors` depends only on the core; a profile is data about tags, not about wire bytes.
+- Board adapters will depend on `sensors` so they share the measurement envelope and quality model, but they are not upstream-parity items.
+- `cargo add stonecrab` enables the default features `sim`, `modbus` and `sensors`; `default-features = false` pulls in the core and the codec and nothing else, with no Tokio. A protocol outside the defaults is opt-in.
+- The test kit is a module of this crate behind the `testkit` feature, not a separate crate, because a test crate that depends on `stonecrab` while `stonecrab` uses it in its tests is a dev-dependency cycle (ADR-0018).
 
-| Crate | Version | Normal dependencies | Notes |
-| --- | --- | --- | --- |
-| `stonecrab` (facade) | 0.2.0 | `stonecrab-core`; optional `stonecrab-driver-sim`, `stonecrab-modbus`, `stonecrab-sensors` | no logic of its own; features `sim`, `modbus`, `sensors`, `full`, all off (section 10) |
-| `stonecrab-core` | 0.1.0 | `thiserror`, `bytes` | no executor, no network, no Tokio |
-| `stonecrab-codec` | 0.1.0 | `stonecrab-core` | bounded readers and writers |
-| `stonecrab-transport` | 0.1.0 | `stonecrab-core`, `bytes`, `tokio` (`rt`, `time`, `sync`, `io-util`; `net` behind `tcp`) | the only crate with Tokio; no spawned task |
-| `stonecrab-driver-sim` | 0.1.0 | `stonecrab-core`, `tracing` | Tokio-free; depends on neither transport nor codec (D9) |
-| `stonecrab-modbus` | 0.1.0 | `stonecrab-core`, `stonecrab-codec`, `stonecrab-transport` (`tcp`), `bytes`, `tracing` | Modbus TCP reads only |
-| `stonecrab-sensors` | 0.1.0 | `stonecrab-core`, `serde`, `toml` (default feature) | depends on no driver |
-| `tools/stonecrab-testkit` | unpublished | `stonecrab-core`; `net` adds transport, Tokio, `bytes`; `fixtures` adds `serde`, `serde_json`, `toml` | dev-dependency only |
+**Shipped at alpha (D22, ADR-0018).** The alpha ships one crate. The graph above holds for
+it, with the exceptions listed after the table.
+
+| Module | Path | Feature | Normal dependencies | Notes |
+| --- | --- | --- | --- | --- |
+| core | crate root | none (always built) | `thiserror`, `bytes` | no executor, no network, no Tokio |
+| `codec` | `stonecrab::codec` | none (always built) | the core | bounded readers and writers |
+| `transport` | `stonecrab::transport` | `transport` | the core, `bytes`, `tokio` (`rt`, `net`, `time`, `sync`, `io-util`) | the only Tokio user outside the test kit; no spawned task |
+| `sim` | `stonecrab::sim` | `sim` (default) | the core, `tracing` | Tokio-free; depends on neither transport nor codec (D9) |
+| `modbus` | `stonecrab::modbus` | `modbus` (default) | the core, `codec`, `transport`, `tracing` | Modbus TCP reads only |
+| `sensors` | `stonecrab::sensors` | `sensors` (default) | the core, `serde`, `toml` | depends on no driver |
+| `testkit` | `stonecrab::testkit` | `testkit` (off) | the core, `transport`, `serde`, `serde_json`, `toml`, `tokio` (`macros`, task spawning for scripted peers) | test fixtures and the contract suite; not a runtime feature |
 
 Where the alpha differs from the graph and the original brief:
 
-- **Transport error type (D22).** `stonecrab-transport` does not depend on the codec. Its
+- **Transport error type (D22).** `transport` does not depend on the codec. Its
   framing errors are the transport-local `FrameError` (`Truncated`, `Oversized`,
-  `Malformed`) with `From<FrameError> for PlcError`, and `MbapFramer` in the Modbus crate
+  `Malformed`) with `From<FrameError> for PlcError`, and `MbapFramer` in the Modbus module
   converts the codec's `ParseError` into it. The edges `TRANSPORT --> CORE` and
   `CODEC --> CORE` therefore stand, there is no `TRANSPORT --> CODEC` edge, and the
   `ParseError` that sections 4.1 and 4.2 show on `Framer` is `FrameError` as shipped.
   The two sections were inconsistent on this point; this is the recorded choice.
-- **Deferred crates.** `stonecrab-opcua` (milestone M3), `stonecrab-eip` and
-  `stonecrab-s7` (M4), the remaining baseline drivers (M5), both board adapters (M2S),
-  `stonecrab-codegen` (M5) and the differential runner (M5) do not exist. `xtask` does
-  not exist either: its jobs are shell scripts under `scripts/` and mise tasks
-  (ADR-0005). Serial and UDP transports and Modbus RTU are M2 and M3.
-- **Drivers and shared crates.** The simulator depends on core alone, so the rule that
-  driver crates depend on transport and codec applies to `stonecrab-modbus` only.
-- **Opt-in.** A plain `cargo add stonecrab` pulls `stonecrab-core` and nothing else,
-  as the last rule says, and every shipped driver is behind a feature.
+- **One crate, not many (S33, ADR-0018).** The graph was first built as seven crates; the
+  maintainer decided on 2026-10-27 that Stonecrab ships as one crate that is simple to
+  explain and to version. The module edges above are the former crate edges, and the
+  lint promotions and coverage thresholds that were per crate are per module.
+- **Deferred modules.** `opcua` (milestone M3), `eip` and `s7` (M4), the remaining
+  baseline drivers (M5), both board adapters (M2S), the MSpec code generator (M5) and the
+  differential runner (M5) do not exist. `xtask` does not exist either: its jobs are shell
+  scripts under `scripts/` and mise tasks (ADR-0005). Serial and UDP transports and Modbus
+  RTU are M2 and M3. Each arrives as a module behind its own feature; whether a large one
+  is split into its own crate again is a decision for its ADR.
+- **Drivers and shared modules.** The simulator depends on the core alone, so the rule that
+  driver modules depend on transport and codec applies to `modbus` only.
+- **Opt-in.** The defaults give the simulator, Modbus TCP and the sensor profiles; a build
+  that wants less turns the defaults off and picks features (section 10).
 
 ---
 
@@ -185,11 +180,11 @@ Behavioral compatibility, not structural translation. This table is the index in
 | `PlcDiscoveryRequest` | `DiscoverRequest` / `DiscoveredDevice` | Never enabled by merely importing a crate. |
 | `PlcConnectionException` etc. | `PlcError { kind: ErrorKind, … }` | One error type; `ErrorKind` is the discriminator. |
 | `CompletableFuture<T>` | `OpFuture<T>` | Cancellation semantics documented per operation. |
-| MSpec protocol definitions | `stonecrab-codegen` output in each driver | Source revision, generator version, and options recorded with output. |
+| MSpec protocol definitions | `codegen` output in each driver module | Source revision, generator version, and options recorded with output. |
 
 ---
 
-## 3. `stonecrab-core` — public contract
+## 3. The core: public contract at the crate root
 
 The whole public API surface that applications and drivers agree on. Nothing here knows about any protocol, transport, or runtime.
 
@@ -882,9 +877,9 @@ classDiagram
 
 - `Clock` is `Send + Sync` with `now()`, `wall_now()` and `sleep_until(Instant) ->
   OpFuture<'_, ()>`. Core ships no implementation (it has no timer). `SystemClock` lives
-  in `stonecrab-transport`, not in core: a unit struct whose `now()` is Tokio's instant,
+  in `stonecrab::transport`, not in core: a unit struct whose `now()` is Tokio's instant,
   so paused-time tests agree with `Deadline`. The Tokio-free implementations are
-  `FakeClock` in the testkit (advanced by hand) and `RealtimeClock` in the simulator
+  `FakeClock` in `stonecrab::testkit` (advanced by hand) and `RealtimeClock` in the simulator
   (`std` only, `sleep_until` resolves at once).
 - `Deadline::after(now, duration) -> Result<Deadline>` takes the clock reading
   explicitly, with no hidden clock; `remaining(now)` and `is_elapsed(now)` are as drawn.
@@ -902,13 +897,13 @@ classDiagram
   latest-value semantics (intermediate states coalesce; the machine records every
   transition in tracing events).
 - **Deferred:** `StaleTracker` and the `Quality::Stale` it would produce (M2, with the
-  polling loop). The diagram's `SystemClock ..|> Clock` edge holds, in the transport crate.
+  polling loop). The diagram's `SystemClock ..|> Clock` edge holds, in the transport module.
 
 The diagram is not redrawn.
 
 ---
 
-## 4. `stonecrab-transport` and `stonecrab-codec`
+## 4. `stonecrab::transport` and `stonecrab::codec`
 
 ### 4.1 Transport
 
@@ -1002,7 +997,7 @@ classDiagram
     ConnectionGuard --> ReconnectPolicy
     ConnectionGuard --> CancellationToken
 
-    note for Transport "Every call takes a Deadline. There is no unbounded I/O\nanywhere in the workspace."
+    note for Transport "Every call takes a Deadline. There is no unbounded I/O\nanywhere in the crate."
     note for FramedTransport~F~ "Owns the receive buffer so TCP fragmentation and\ncoalescing are invisible to the driver."
 ```
 
@@ -1013,7 +1008,7 @@ authoritative where they differ.
 | --- | --- |
 | `Transport` (`Send`, object safe) | `send(&mut self, Bytes, Deadline) -> OpFuture<'_, ()>`; `recv(&mut self, &mut BytesMut, Deadline) -> OpFuture<'_, usize>` (`0` means the peer closed); **`shutdown(&mut self, Deadline) -> OpFuture<'_, ()>`**; `peer() -> &Endpoint`; `limits() -> &ResourceLimits` |
 | `TransportFactory` (`Send + Sync`) | `open(&self, &Endpoint, ResourceLimits, Deadline) -> OpFuture<'_, Box<dyn Transport>>` |
-| `TcpTransport`, `TcpFactory { nodelay }` | feature `tcp` (default on): name resolution and connect inside one connect deadline; refused or reset peers are `Disconnected`; `recv` bounded by `max_buffered_bytes`, `send` by `max_frame_bytes`; a `send` cut short poisons the transport. No keepalive field. |
+| `TcpTransport`, `TcpFactory { nodelay }` | feature `transport` (off by default, on through `modbus` and `testkit`): name resolution and connect inside one connect deadline; refused or reset peers are `Disconnected`; `recv` bounded by `max_buffered_bytes`, `send` by `max_frame_bytes`; a `send` cut short poisons the transport. No keepalive field. |
 | `Framer<F>` (`Send`) | `decode(&mut self, &mut BytesMut) -> Result<Option<F>, FrameError>`; `encode(&mut self, &F, &mut BytesMut) -> Result<(), FrameError>`; `max_frame_bytes() -> usize` |
 | `FramedTransport<F, R>` | `new(Box<dyn Transport>, R)`; `next_frame(Deadline)`; `send_frame(&F, Deadline)`; **`resync(Deadline)`**; owns the receive buffer, bounded by `max_buffered_bytes` |
 | `ConnectionGuard<F, R>` | `connect`, `request(frame, deadline, token)`, `request_with_default_deadline`, `next_reply(deadline, token)`, `close`, `state`, `watch_state`, `stats`; `GuardConfig`, `GuardStats` |
@@ -1144,7 +1139,7 @@ function panics on any input.
 
 ---
 
-## 5. `stonecrab-modbus` — first real driver
+## 5. `stonecrab::modbus`: first real driver
 
 TCP and RTU share one PDU implementation. Only framing (MBAP vs. RTU + CRC) and session rules differ.
 
@@ -1326,8 +1321,8 @@ classDiagram
     note for TypedDecoder "Never infers word order from plausible-looking values."
 ```
 
-**Shipped at alpha (ADR-0015).** `stonecrab-modbus` 0.1.0 ships the Modbus TCP **read**
-path. The diagram above is the original target for TCP and RTU; this note is
+**Shipped at alpha (ADR-0015).** The `stonecrab::modbus` module (feature `modbus`) ships
+the Modbus TCP **read** path. The diagram above is the original target for TCP and RTU; this note is
 authoritative. Nothing is generated: the PDUs are hand-written from `modbus.mspec` (D6).
 
 **What ships, layer by layer**
@@ -1488,7 +1483,7 @@ classDiagram
     note for SimDriver "Runs the same contract suite as every real driver.\nIt is the reference implementation of the API, not a toy."
 ```
 
-**Shipped at alpha (ADR-0012).** `stonecrab-driver-sim` 0.1.0 ships `SimDriver` (scheme
+**Shipped at alpha (ADR-0012).** The `stonecrab::sim` module (feature `sim`) ships `SimDriver` (scheme
 `sim`; `sim://<device>?latency-ms=<n>&seed=<u64>`; `new()`, `with_clock(Arc<dyn Clock>)`,
 `with_device`, `device`), `SimConnection`, `SimDevice`, `SimTag`, `SimAddress`
 (`STATE|RANDOM|SINK/<name>:<type>`), `FailureScript`, `FailureStep` and `RealtimeClock`.
@@ -1499,11 +1494,11 @@ connection to a device consumes the same queue, one step per operation. The step
 (`write` is rejected under `AccessPolicy::ReadOnly`), has one in-flight slot with no wait
 queue (a second operation is `Backpressure`), applies bounded read retry and never retries
 a write. It is Tokio-free and uses `RealtimeClock` unless a test injects a `FakeClock`. It
-runs the same contract suite as `stonecrab-modbus`, as the note beside the diagram says.
+runs the same contract suite as `stonecrab::modbus`, as the note beside the diagram says.
 
 ---
 
-## 6. `stonecrab-sensors` and board adapters
+## 6. `stonecrab::sensors` and board adapters
 
 ```mermaid
 classDiagram
@@ -1676,12 +1671,12 @@ classDiagram
     note for SampleBlock "Raw waveform data is a block with interval, layout and\nloss accounting — never a stream of unrelated scalars."
 ```
 
-**Shipped at alpha (ADR-0016).** `stonecrab-sensors` 0.1.0 ships the schema (version 1), the
+**Shipped at alpha (ADR-0016).** The `stonecrab::sensors` module (feature `sensors`) ships the schema (version 1), the
 loader, validation, the tag builder and the measurement pipeline; board adapters and the
 acquisition loop are deferred.
 
-- `SensorProfile::from_toml(&str) -> Result<SensorProfile, ProfileError>` (feature `toml`,
-  default on; 64 KiB bound checked before parsing, unknown keys denied), `validate(&self)
+- `SensorProfile::from_toml(&str) -> Result<SensorProfile, ProfileError>` (64 KiB
+  bound checked before parsing, unknown keys denied), `validate(&self)
   -> Result<(), Vec<ProfileError>>` (every error, never just the first),
   `tags(&self, &dyn Driver) -> Result<Vec<Tag>, ProfileError>` and `measurements(&self,
   &ReadResponse, wall_now: SystemTime) -> Vec<Measurement>`. `tags` refuses a driver whose
@@ -1700,8 +1695,8 @@ acquisition loop are deferred.
   produced only by the M2 tracker. Scaling is checked and ordered (`multiply`, `divide`,
   `offset`, `clamp`, `bit_field`); integers stay integers while every step is integral.
 - **Deferred:** `Acquisition`, queues and the polling loop (M2), `StaleTracker` (M2),
-  `Lookup` scale steps and named device profiles (M2), `stonecrab-adapter-max31855` and
-  `stonecrab-adapter-adxl345` (M2S). Section 6.1 is entirely deferred to M2S.
+  `Lookup` scale steps and named device profiles (M2), the `max31855` and
+  `adxl345` board adapters (M2S). Section 6.1 is entirely deferred to M2S.
 
 Section 9.7 shows the target pipeline with `Acquisition`; at the alpha an application calls
 `tags`, reads through a `Connection`, then calls `measurements` itself, as the
@@ -1797,7 +1792,7 @@ classDiagram
 
 ---
 
-## 7. `stonecrab-testkit`
+## 7. `stonecrab::testkit`
 
 ```mermaid
 classDiagram
@@ -1915,14 +1910,17 @@ classDiagram
     note for GoldenVector "Round trip alone can hide a matching encode/decode bug.\nexpected is independently authored, not derived."
 ```
 
-**Shipped at alpha (ADR-0009).** The testkit is `tools/stonecrab-testkit`, unpublished and
-a dev-dependency only. It ships `FakeClock`, `block_on`, `block_on_with`, `poll_once`,
-`CountingWaker` and `FixtureAddress`; behind the `net` feature `Script`, `Step` (including
-`Respond` and `React`), `Reaction`, `ScriptedPeer`, `ScriptedPeerFactory`, `FakeTransport`,
-`FakeTransportFactory`, `CountingFactory` and `LengthPrefixedFramer`; behind the `fixtures`
-feature the golden-vector loader (`load_dir`, `GoldenVector`, `VectorSource`) and
-`InteropMap`; and `ContractSuite` (23 cases, `ContractFixture`, `ContractReport`) which
-every driver runs. **Deferred:** `DifferentialRunner` and `UpstreamHarness` (M5), the
+**Shipped at alpha (ADR-0009, ADR-0018).** The testkit is the `stonecrab::testkit` module
+behind the off-by-default `testkit` feature; it is not a runtime feature, and it lives in
+the crate because a separate test crate would be a dev-dependency cycle. It ships
+`FakeClock`, `block_on`, `block_on_with`, `poll_once`, `CountingWaker` and `FixtureAddress`;
+`Script`, `Step` (including `Respond` and `React`), `Reaction`, `ScriptedPeer`,
+`ScriptedPeerFactory`, `FakeTransport`, `FakeTransportFactory`, `CountingFactory` and
+`LengthPrefixedFramer`; the golden-vector loader (`load_dir`, `GoldenVector`,
+`VectorSource`) and `InteropMap`; and `ContractSuite` (23 cases, `ContractFixture`,
+`ContractReport`) which every driver runs and which driver authors can run against their
+own driver. The loaders and some of its tests read repository files, so they run from a
+checkout. **Deferred:** `DifferentialRunner` and `UpstreamHarness` (M5), the
 hardware runner and `HardwareRecord` (M2S). The golden upstream vectors wait for
 prerequisite P4; the vectors in the repository are first-party.
 
@@ -1979,7 +1977,7 @@ stateDiagram-v2
 
 **Shipped at alpha (ADR-0007, ADR-0011, ADR-0014).**
 
-- The machine lives in `ConnectionGuard` (`stonecrab-transport`) and is observable through
+- The machine lives in `ConnectionGuard` (`stonecrab::transport`) and is observable through
   core's `ConnectionState`, held in a `StateCell` that every `watch_state()` reads. The
   private sub-states `Idle`, `InFlight` and `Resyncing` are not part of the public state.
   `ModbusConnection` and `ModbusSession` report the guard's state unchanged; the simulator
@@ -2300,34 +2298,32 @@ sequenceDiagram
 
 ---
 
-## 10. Cargo feature matrix
+## 10. Cargo features
 
-The shipped features. All are additive, and enabling one never opens a network endpoint
-or starts hardware discovery (parsing a connection string or an address opens no socket).
+The shipped features of the one crate. All are additive, and enabling one never opens a
+network endpoint or starts hardware discovery (parsing a connection string or an address
+opens no socket).
 
-| Crate | Feature | Pulls in | Default |
+| Feature | Enables | Pulls in | Default |
 | --- | --- | --- | --- |
-| `stonecrab` | `sim` | `stonecrab-driver-sim` (and through it `tracing`) | no |
-| `stonecrab` | `modbus` | `stonecrab-modbus` (Modbus TCP, reads), and through it `stonecrab-transport` with `tcp`, `stonecrab-codec` and Tokio | no |
-| `stonecrab` | `sensors` | `stonecrab-sensors` with its `toml` feature (the loader; `serde` and `toml` come with it) | no |
-| `stonecrab` | `full` | `sim`, `modbus` and `sensors` | no |
-| `stonecrab-transport` | `tcp` | Tokio `net`: `TcpTransport` and `TcpFactory` | yes |
-| `stonecrab-sensors` | `toml` | profile loading from TOML | yes |
-| `stonecrab-testkit` (unpublished) | `net`, `fixtures` | transport doubles and Tokio; golden-vector loader, `serde`, `serde_json`, `toml` | no |
+| `sim` | `stonecrab::sim`, the in-process simulator | `tracing` | yes |
+| `modbus` | `stonecrab::modbus`, Modbus TCP reads | `transport` (so Tokio) and `tracing`; the codec is always built | yes |
+| `sensors` | `stonecrab::sensors`, profiles and the TOML loader | `serde` and `toml` | yes |
+| `full` | the same set as the defaults, spelled out; the `profile_read` example requires it | `sim`, `modbus` and `sensors` | no |
+| `transport` | `stonecrab::transport`, deadline-bounded transports and `TcpTransport` | Tokio (`rt`, `net`, `time`, `sync`, `io-util`) | no (on through `modbus`) |
+| `testkit` | `stonecrab::testkit`, fixtures and the driver contract suite; not a runtime feature | `transport`, `serde`, `serde_json`, `toml`, Tokio `macros` | no |
 
-The facade, `stonecrab-core`, `stonecrab-codec`, `stonecrab-driver-sim` and
-`stonecrab-modbus` have empty default features and no other feature. `cargo add stonecrab`
-pulls `stonecrab-core` only. The facade pins the three optional sibling crates it
-re-exports (`stonecrab-driver-sim`, `stonecrab-modbus`, `stonecrab-sensors`) with `=`
-ranges (CODING_STANDARDS 20.1; ADR-0014 addendum). The two intra-foundation defaults,
-`stonecrab-transport/tcp` and `stonecrab-sensors/toml`, are on because a transport crate
-with no transport and a profile crate with no loader are not usable defaults (D10,
-ADR-0014, ADR-0016); the `features` job proves both crates build and expose their traits
-and types without them.
+`cargo add stonecrab` therefore gives the simulator, Modbus TCP and the sensor profiles.
+`default-features = false` gives the core and the codec only, which pull `thiserror` and
+`bytes` and no Tokio; a constrained target picks what it needs from there. The `features`
+job checks the feature powerset (depth 2) and the crate without default features, so
+every combination builds and exposes its traits and types. The quality gates run with
+`--all-features`; a plain `cargo test` runs the reduced suite without the `testkit`
+tests (ADR-0018).
 
-**Deferred (not declared):** the facade features `modbus-rtu`, `opcua`, `eip`, `s7`, `ads`,
-`slmp` and `adapters-linux`, and the transport features `udp` and `serial`. They arrive with
-their crates (RTU and serial in M2, OPC UA in M3, EtherNet/IP and S7 in M4, the board
+**Deferred (not declared):** the features `modbus-rtu`, `opcua`, `eip`, `s7`, `ads`, `slmp`
+and `adapters-linux`, and the transport features `udp` and `serial`. They arrive with
+their modules (RTU and serial in M2, OPC UA in M3, EtherNet/IP and S7 in M4, the board
 adapters in M2S).
 
 ---
@@ -2335,6 +2331,6 @@ adapters in M2S).
 ## 11. What this document does not decide
 
 - Exact MSpec constructs supported at M1 (decided in M0 inventory).
-- Whether `PlcValue::Date/Time/DateTime` are `std::time::SystemTime`-based or a dedicated calendar type (decided by an ADR before M1; `chrono`/`time`/`jiff` are not permitted in `stonecrab-core` by default).
+- Whether `PlcValue::Date/Time/DateTime` are `std::time::SystemTime`-based or a dedicated calendar type (decided by an ADR before M1; `chrono`/`time`/`jiff` are not permitted in the core by default).
 - OPC UA session and security-channel class structure (M3 design doc).
 - The C ABI, dynamic loading, and `no_std` subsets (post-M5 extensions).

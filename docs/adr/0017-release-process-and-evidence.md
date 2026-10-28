@@ -1,146 +1,135 @@
 # 0017: Release process and evidence
 ## Status
+Amended by ADR-0018 (2026-10-27): Stonecrab is one crate, so decisions 1 to 7 below are
+rewritten for the single package `stonecrab` (one version, one publish, one tag, one
+yank). The original seven-crate text (publish order core to facade, per-crate tags,
+the `=` pins and the facade-plus-sibling yank rule) is replaced, not kept; the git history
+holds it. Decisions 8 to 11 are unchanged except where they name a crate.
+
 Accepted by the sole maintainer on 2026-10-27, as slice S32 of docs/ALPHA_PLAN.md. It
-implements decision D1 (versioning) and D20 (release tooling and review), builds on
-ADR-0005 (gates, coverage tiers and the single-maintainer waiver) and ADR-0009 (the fuzz
-policy), and records the evidence the alpha release checklist asks for. It completes
-CODING_STANDARDS section 20 for the alpha. Nothing described here has been run against
-crates.io: no crate is published, no tag exists and none is pushed by this slice.
+implements decision D1 (versioning, itself superseded by ADR-0018) and D20 (release
+tooling and review), builds on ADR-0005 (gates, coverage thresholds and the
+single-maintainer waiver) and ADR-0009 (the fuzz policy), and records the evidence the
+alpha release checklist asks for. It completes CODING_STANDARDS section 20 for the alpha.
+Nothing described here has been run against crates.io: no crate is published, no tag
+exists and none is pushed by this slice.
 
 ## Context
 Only `stonecrab` 0.1.0, a specification-stage placeholder, is on crates.io. The alpha is
-seven crates (facade 0.2.0; core, codec, transport, driver-sim, modbus and sensors
-0.1.0) that depend on each other, so the order of publication matters, a published
-version cannot be replaced, and a mistake in an `=` pin makes a fresh resolution fail.
-CODING_STANDARDS 20.2 asks for signed `<crate>-v<version>` tags and a human-reviewed
-changelog, 20.3 for a release-candidate checklist (several of whose items the alpha does
-not meet, see decision 11), and 20.5 for a 24-hour yank rule. The plan's alpha release
-checklist (items 9 to 13) adds the evidence file, the SBOM, prepared-but-unpushed tags
-and the yank commitment. There is one maintainer, so ADR-0005 decision 6 (the waiver of
-the two-approval rule of 18.6, which names release tooling) applies to every release
-change.
+one crate, `stonecrab` 0.2.0, with the former sibling crates as modules (ADR-0018). A
+published version cannot be replaced. CODING_STANDARDS 20.2 asks for signed tags and a
+human-reviewed changelog, 20.3 for a release-candidate checklist (several of whose items
+the alpha does not meet, see decision 11), and 20.5 for a 24-hour yank rule. The plan's
+alpha release checklist (items 9 to 13) adds the evidence file, the SBOM,
+prepared-but-unpushed tags and the yank commitment. There is one maintainer, so ADR-0005
+decision 6 (the waiver of the two-approval rule of 18.6, which names release tooling)
+applies to every release change.
 
 ## Decision
-1. **Versions (D1).** The alpha is `stonecrab` 0.2.0 with `stonecrab-core`,
-   `stonecrab-codec`, `stonecrab-transport`, `stonecrab-driver-sim`, `stonecrab-modbus`
-   and `stonecrab-sensors` 0.1.0, plain pre-1.0 versions. `-alpha.N` is rejected: the
-   published 0.1.0 placeholder of `stonecrab` would win resolution over a pre-release,
-   and the facade's minor bump records the removal of `placeholder::status`. The Cargo
-   manifests already carry the release versions, so the alpha needs no version bump.
-   The facade requires its three optional siblings as `=0.1.0`; its requirement on
-   `stonecrab-core` is the caret `0.1`, which is looser than the `=`-compatible ranges
-   of CODING_STANDARDS 20.1. Tightening it is a manifest change outside this slice and
-   is listed in STATUS.md as the follow-up.
+1. **Version (D1, superseded by ADR-0018).** The alpha is `stonecrab` 0.2.0, a plain
+   pre-1.0 version. `-alpha.N` is rejected: the published 0.1.0 placeholder of `stonecrab`
+   would win resolution over a pre-release, and the minor bump records the removal of
+   `placeholder::status`. The manifest already carries the release version, so the alpha
+   needs no version bump. There are no sibling crates and so no `=` pins.
 2. **Tooling and pins (D20).** `cargo-release` is the release tool, with the pins
    `cargo-release` 1.1.7, `cargo-mutants` 27.1.0 and `cargo-cyclonedx` 0.5.9 in
    `mise.toml` (`cargo:` entries, which mise installs with `cargo install --locked`).
    `release-plz` is not used. `release.toml` sets `publish = false`, `push = false` and
    `tag = false`, so cargo-release can neither publish, push nor create a tag. It also
-   sets `sign-commit`, `sign-tag`, `allow-branch = ["master"]`, per-crate commits and the
-   tag name `{{crate_name}}-v{{version}}`, and `dependent-version = "fix"` so that a
-   sibling requirement is rewritten only when it stops matching (the `=` pins follow a
-   bumped sibling and are never loosened). A `pre-release-hook` runs `cargo package
-   --locked --list` for the crate; the full archive build is `mise run package`.
-   - Use only the steps that change files: `cargo release version <level> --workspace
-     --exclude stonecrab-testkit` (a dry run unless `--execute` is given; it prints the
-     planned bumps and the `=` pin rewrites), then `replace` and `hook`. Do not run the
-     all-in-one `cargo release <level>`: its commit step cannot add the `Signed-off-by`
-     trailer the `dco` job requires. The maintainer commits with `git commit -s -S`.
+   sets `sign-commit`, `sign-tag`, `allow-branch = ["master"]`, one release commit and
+   the tag name `v{{version}}`. A `pre-release-hook` runs `cargo package --locked --list`
+   for the crate; the full archive build is `mise run package`.
+   - Use only the steps that change files: `cargo release version <level>` (a dry run
+     unless `--execute` is given; it prints the planned bump), then `replace` and `hook`.
+     Do not run the all-in-one `cargo release <level>`: its commit step cannot add the
+     `Signed-off-by` trailer the `dco` job requires. The maintainer commits with
+     `git commit -s -S`.
    - The `tag`, `push` and `publish` steps run pre-flight checks even as a dry run
      (`git fetch` of the remote and crates.io index queries), so they are not used for
      verification. With `publish = false` the publish step publishes nothing even with
      `--execute`: cargo-release 1.1.7 filters the packages on that setting and returns
      before it would call `cargo publish` (read in the 1.1.7 source, not run).
-3. **Publish order and commands.** Order: `stonecrab-core`, `stonecrab-codec`,
-   `stonecrab-transport`, `stonecrab-driver-sim`, `stonecrab-modbus`, `stonecrab-sensors`,
-   `stonecrab`. It follows the normal dependencies (codec, transport and driver-sim need
-   core; modbus needs core, codec and transport; sensors needs core; the facade needs
-   core and the three optional siblings), and the dev-dependencies on `stonecrab-testkit`
-   (path only, `publish = false`) are dropped from the archives by cargo. Nothing is
-   published without the maintainer's separate approval, which is a message of the
-   maintainer for that version and is not given by this ADR, by a green CI run or by any
-   agent.
+3. **Publish commands.** There is one crate, so there is no order. Nothing is published
+   without the maintainer's separate approval, which is a message of the maintainer for
+   that version and is not given by this ADR, by a green CI run or by any agent.
    - Pre-flight, from a clean checkout of the release commit on `master` whose hosted CI
      run is green: `git status --porcelain` prints nothing; `mise run check`, `mise run
-     coverage`, `mise run package` (all seven archives built with a fresh `CARGO_HOME`
-     and compared with `packaging/*.txt`), `mise run interop` and `mise run sbom`.
-   - Per crate, in the order above, with the credentials of the maintainer's own
-     `cargo login` (a token is never written to the repository, a log or a commit):
+     coverage`, `mise run package` (the archive built with a fresh `CARGO_HOME` and
+     compared with `packaging/stonecrab.txt`), `mise run interop` and `mise run sbom`.
+   - Then, with the credentials of the maintainer's own `cargo login` (a token is never
+     written to the repository, a log or a commit):
 
      ```sh
-     cargo package --locked -p stonecrab-core         # the archive builds
-     cargo publish --locked --dry-run -p stonecrab-core
-     cargo publish --locked -p stonecrab-core         # only with the separate approval
+     cargo package --locked -p stonecrab            # the archive builds
+     cargo publish --locked --dry-run -p stonecrab
+     cargo publish --locked -p stonecrab            # only with the separate approval
      ```
 
-     `cargo publish` waits until the version is in the index. For a dependent crate the
-     per-crate `cargo package -p` and `--dry-run` resolve its siblings from crates.io, so
-     they can only succeed after those are published; before that, the workspace form
-     `mise run package` is the check (cargo overlays the unpublished siblings). Stop at
-     the first failure; do not publish a later crate on top of a failed earlier one.
-4. **Tags.** Annotated, signed, one per crate and version, named `<crate>-v<version>`:
-   `stonecrab-core-v0.1.0`, `stonecrab-codec-v0.1.0`, `stonecrab-transport-v0.1.0`,
-   `stonecrab-driver-sim-v0.1.0`, `stonecrab-modbus-v0.1.0`, `stonecrab-sensors-v0.1.0`
-   and `stonecrab-v0.2.0`, all on the release commit. Only the maintainer creates and
-   pushes them, with the maintainer's configured signing key:
+     `cargo publish` waits until the version is in the index. Stop at the first failure.
+     The archive holds the `testkit` feature's code but not the repository files its own
+     tests read (`testdata/`, `fixtures/`); the full suite runs from the checkout of the
+     release commit, which is what the pre-flight does.
+4. **Tag.** One annotated tag, `v0.2.0`, on the release commit. It is signed when a
+   signing key is configured; whether to sign is the maintainer's decision, and the
+   `sign-tag` setting of `release.toml` is a safeguard for a hand-run `cargo release tag`,
+   not a requirement on this procedure. Only the maintainer creates and pushes it:
 
    ```sh
-   git tag -s stonecrab-core-v0.1.0 -m "stonecrab-core 0.1.0" <release-commit>
-   git tag -v stonecrab-core-v0.1.0                  # must report a good signature
-   git push origin stonecrab-core-v0.1.0             # after crates.io accepted that crate
+   # sign the tag (use -a instead of -s when no key is configured)
+   git tag -s v0.2.0 -m "stonecrab 0.2.0" <release-commit>
+   # must report a good signature when signed
+   git tag -v v0.2.0
+   # only after crates.io accepted the crate
+   git push origin v0.2.0
    ```
 
-   The same three lines repeat for the other six tags. Tags are pushed one by one, by
-   name (never `--tags`), and each only after its crate was accepted. A tag is never
-   moved or deleted after the push; a wrong release is yanked and superseded.
+   The tag is pushed by name (never `--tags`) and only after crates.io accepted the
+   crate. A tag is never moved or deleted after the push; a wrong release is yanked and
+   superseded.
 5. **Yank procedure (CODING_STANDARDS 20.5).** A published version with a confirmed
    soundness or safety defect (unbounded allocation, a panic on input, write replay) is
    handled in this order, and the 24 hours run from the maintainer's recorded
    confirmation time:
-   1. `cargo yank --vers <version> <crate>` for each affected crate within 24 hours.
-      A sibling the facade pins with `=` is yanked together with the facade version that
-      pins it, because a fresh resolution of a facade whose pinned sibling is yanked
-      fails. `cargo yank --undo --vers <version> <crate>` reverses a mistaken yank.
-      Yanking does not remove the version from existing lock files.
-   2. An advisory pull request to `rustsec/advisory-db` for each affected crate
-      (`crates/<crate>/RUSTSEC-0000-0000.md`, the identifier assigned by the database),
+   1. `cargo yank --vers <version> stonecrab` within 24 hours. It is one crate: there is
+      no sibling to yank with it and no pin to follow. `cargo yank --undo --vers <version>
+      stonecrab` reverses a mistaken yank. Yanking does not remove the version from
+      existing lock files.
+   2. An advisory pull request to `rustsec/advisory-db` for `stonecrab`
+      (`crates/stonecrab/RUSTSEC-0000-0000.md`, the identifier assigned by the database),
       stating the affected and the patched versions, and a GitHub security advisory on
       the repository when a reporter is involved. The maintainer opens it; the
       description contains no credentials or private device data.
-   3. A fixed patch release, in the publish order of decision 3, of every affected crate
-      and of the facade when a pin moves, with a `CHANGELOG.md` entry, new signed tags
-      under decision 4 and the same pre-flight. A patch release is not waited for before
-      the yank.
+   3. A fixed patch release of `stonecrab` (a fix to any module is a release of the whole
+      crate) with a `CHANGELOG.md` entry, a new tag under decision 4 and the same
+      pre-flight. A patch release is not waited for before the yank.
    4. `SECURITY.md` is updated to name the supported versions after the fix.
    Review of the release change is the self-review of the ADR-0005 waiver until a
    second maintainer with merge rights exists.
 6. **SBOM.** `mise run sbom` runs `scripts/sbom.sh`: `cargo cyclonedx --format json
-   --all-features --spec-version 1.5` for the workspace, the files of the seven
-   published crates moved to `target/release-evidence/sbom/` (the testkit's is
-   discarded), and `cargo package --locked --workspace --exclude stonecrab-testkit
-   --list` (plus one list per crate) beside them. The `release-evidence` workflow
+   --all-features --spec-version 1.5` for the workspace, the one SBOM file moved to
+   `target/release-evidence/sbom/`, and `cargo package --locked -p stonecrab --list`
+   beside it. The `release-evidence` workflow
    (`.github/workflows/release-evidence.yml`, `workflow_dispatch` only, read-only
    permissions) runs the same script and uploads the directory as the `release-evidence`
-   artifact, to be attached to the draft pre-release. The script replaces the checkout path in the SBOM with `.` and fails if an absolute
-   home or temp path remains. The SBOM lists dependencies and is
-   not signed; it makes no vulnerability claim.
+   artifact, to be attached to the draft pre-release. The script replaces the checkout
+   path in the SBOM with `.` and fails if an absolute home or temp path remains. The SBOM
+   lists dependencies and is not signed; it makes no vulnerability claim.
 7. **Mutation evidence.** `mutants.toml` scopes `cargo mutants` to the modules named in
-   CODING_STANDARDS 13.9 and the plan: core `value` and `uri`; driver-sim `address` and
-   `driver` (its configuration parser); modbus `address`, `pdu`, `framing`, `decode`,
-   `batch`, `driver` and `options` (the configuration parser and its parameters); sensors
-   `measurement/scale`. It uses nextest with `--fail-fast` for the test phase (the nextest
-   profile keeps running after a failure, which turned caught mutants into timeouts),
-   `--all-features` and `--locked`, runs in a scratch copy of the tree (never
-   `--in-place`) and tests only the mutated package. `mise run mutants` runs
-   `scripts/mutants.sh`, which stores only `outcomes.json` under `docs/evidence/mutants/`.
-   A surviving mutant is killed by a test or listed in `exclude_re` of `mutants.toml` with
-   a reason a reviewer can check (cargo-mutants 27.1.0 has no `[exclusions]` table;
-   `exclude_re` is its mechanism). The kill rate per file is recorded in
-   `docs/evidence/alpha.md`. One recorded run is the alpha evidence; the 80% mutation
-   figure of the plan is not a gate at the alpha and the measured rates replace it
-   (decision 11). The weekly `scheduled` job of `ci.yml` keeps its no-op mutation step
-   until the maintainer enables `cargo mutants --config mutants.toml` there, which is a CI
-   change under the waiver.
+   CODING_STANDARDS 13.9 and the plan: the core's `value` and `uri`; `sim` `address` and
+   `driver` (its configuration parser); `modbus` `address`, `pdu`, `framing`, `decode`,
+   `batch`, `driver` and `options` (the configuration parser and its parameters);
+   `sensors` `measurement/scale`. It uses nextest with `--fail-fast` for the test phase
+   (the nextest profile keeps running after a failure, which turned caught mutants into
+   timeouts), `--all-features` and `--locked`, runs in a scratch copy of the tree (never
+   `--in-place`) and tests the one package. `mise run mutants` runs `scripts/mutants.sh`,
+   which stores only `outcomes.json` under `docs/evidence/mutants/`. A surviving mutant
+   is killed by a test or listed in `exclude_re` of `mutants.toml` with a reason a
+   reviewer can check (cargo-mutants 27.1.0 has no `[exclusions]` table; `exclude_re` is
+   its mechanism). The kill rate per file is recorded in `docs/evidence/alpha.md`. One
+   recorded run is the alpha evidence; the 80% mutation figure of the plan is not a gate
+   at the alpha and the measured rates replace it (decision 11). The weekly `scheduled`
+   job of `ci.yml` keeps its no-op mutation step until the maintainer enables
+   `cargo mutants --config mutants.toml` there, which is a CI change under the waiver.
 8. **Fuzz evidence.** The seven targets run at least 30 minutes each, concurrently, one
    single-threaded libFuzzer process per target, with `scripts/fuzz-evidence.sh` (the
    command per target is `cd fuzz && env -u RUSTUP_TOOLCHAIN cargo fuzz run --target
@@ -150,7 +139,7 @@ change.
    durations, final run counts, final coverage counters and the number of crash
    artifacts are tabulated in `docs/evidence/alpha.md`, not the raw logs. A crash is a
    finding: it is reproduced, its input committed as a corpus seed with a regression test
-   named `fuzz_<target>_<short-hash>` in the owning crate, and reported (CONTRIBUTING,
+   named `fuzz_<target>_<short-hash>` in the crate, and reported (CONTRIBUTING,
    "Fuzz findings"). CI keeps the 60-second `fuzz-smoke` job and the weekly 30-minute run.
 9. **Upstream baseline evidence.** `upstream/manifest.toml` records the verification of
    the Apache PLC4X 1.0.0 source-release signature (GnuPG, a temporary keyring holding

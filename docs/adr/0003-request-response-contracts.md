@@ -1,5 +1,8 @@
 # 0003: Bounded request and correlated response contracts
 ## Status
+Amended by ADR-0018: the testkit named below is no longer a separate crate, so the
+dev-dependency cycle between the core and the testkit no longer exists; it is the
+`testkit` feature of `stonecrab`.
 Accepted for the next unreleased core slice.
 ## Design
 Protocol implementations own validated addresses behind `ProtocolAddress`; a `Tag`

@@ -1,13 +1,18 @@
 # Alpha release evidence
-Recorded for slice S32 on 2026-10-27 (ADR-0017). This file is the evidence the alpha
-release checklist of `docs/ALPHA_PLAN.md` asks for. Every number below was measured on the
-date and tree stated next to it; nothing is estimated, and what was not run is listed under
-"Gates not run". Nothing here is published: no crate is on crates.io beyond the `stonecrab`
-0.1.0 placeholder, no tag exists and nothing is pushed by this slice.
+Recorded for slice S32 on 2026-10-27 (ADR-0017) and re-recorded for the single crate in
+slice S33 on the same day (ADR-0018). This file is the evidence the alpha release
+checklist of `docs/ALPHA_PLAN.md` asks for. Every number below was measured on the date
+and tree stated next to it; nothing is estimated, and what was not run is listed under
+"Gates not run". Nothing here is published: nothing is on crates.io beyond the `stonecrab`
+0.1.0 placeholder, no tag exists and nothing is pushed by these slices.
 
-Tree measured: `8f5c3d0` plus the S32 changes (the S32 commit adds documentation,
-configuration, scripts and the evidence files, plus four test additions that kill mutation
-survivors; no library behavior changes).
+Tree measured: the S33 build commit `dd0dd73` ("build: ship Stonecrab as one crate") plus
+the S33 documentation changes (documentation, `release.toml`, the `[[test]]
+required-features` entries of `crates/stonecrab/Cargo.toml` and this evidence; no library
+source and no dependency changed). Stonecrab is one crate, `stonecrab` 0.2.0; where this
+file says "module" it means a former crate (core at the crate root, `codec`, `transport`,
+`sim`, `modbus`, `sensors`, `testkit`). Figures of the S32 tree that this slice did not
+repeat say so.
 Machine: Apple silicon macOS, 12 cores; toolchain Rust 1.99.1 (development), fuzz nightly
 `nightly-2026-10-01`.
 
@@ -70,8 +75,12 @@ Contract suite (`ContractSuite`, 23 cases) per fixture, as recorded in
 | loopback `ScriptedPeer` over real sockets | 18 | 5 | 0 |
 | pymodbus 3.8.6 over a real `TcpFactory` | 14 | 9 | 0 |
 
-The S32 slice did not re-run `interop` (it needs Docker and a hosted-run comparison); the
-numbers above are the S27 and S30 records.
+The numbers above are the S27 and S30 records. Slice S33 re-ran `mise run interop` locally
+on the merged tree (exit 0): the ten `interop_` tests passed, the `modbus_tcp_read` example
+and `profile_read --expect-good` for each of the three `modbus-tcp` profiles succeeded, and
+the contract suite against pymodbus 3.8.6 reported 14 passed, 0 failed, 9 skipped by name,
+the figures of the table. The container was removed afterwards. The hosted `interop` job
+has not run on the S33 commits yet.
 
 ## Hosted CI matrix
 
@@ -79,6 +88,8 @@ From `STATUS.md` ("Hosted CI and the per-OS matrix"); no new run id is invented 
 
 | Run | Commit | Result |
 | --- | --- | --- |
+| https://github.com/TheMadBotterINC/stonecrab/actions/runs/40599885679 | `dd0dd73` (S33 build) | completed successfully; all 22 jobs green, `semver` included (baseline 0.1.0) |
+| not yet recorded | the S33 docs reconciliation commit | likewise |
 | https://github.com/TheMadBotterINC/stonecrab/actions/runs/40584025718 | `2d38e48` (S32) | completed successfully; every job green except the report-only `semver` |
 | https://github.com/TheMadBotterINC/stonecrab/actions/runs/40557968227 | `8f5c3d0` (S31) | completed successfully; first run of the `parity` job |
 | https://github.com/TheMadBotterINC/stonecrab/actions/runs/40548582722 | `f19be4c` (S30) | completed successfully; the definition of done on the hosted runner |
@@ -87,8 +98,10 @@ From `STATUS.md` ("Hosted CI and the per-OS matrix"); no new run id is invented 
 Jobs of the S30 run: `test` on ubuntu, macOS and Windows each with Rust 1.97.1 and 1.99.1
 (six cells), `quality`, `cross`, `dependencies`, `package`, `dco`, `features`, `machete`,
 `lint-attrs`, `geiger`, `beta` (report only), `fuzz-smoke` (seven targets), `examples`,
-`interop`: green. `semver` (report only) fails until the sibling crates exist on
-crates.io.
+`interop`: green. `semver` (report only) had no published baseline for the sibling crates;
+with one crate it now has one (`stonecrab` 0.1.0) and will report the removed
+`placeholder::status` as a breaking change of a 0.x crate, which the 0.2.0 minor bump
+answers.
 
 ## Fuzzing
 
@@ -138,105 +151,158 @@ fuzz_modbus_pdu                    100470025    311        1802     0        0
 fuzz_sensors_profile_toml          32175834     4715       1802     0        0
 ```
 
+**These seven 30-minute runs predate S33.** They ran against the seven-crate layout (the
+targets then imported `stonecrab_core`, `stonecrab_codec`, `stonecrab_modbus`,
+`stonecrab_transport` and `stonecrab_sensors`). The merge to one crate changed the targets
+only in their `use` lines: `git diff 2d38e48 HEAD -- fuzz/fuzz_targets` shows nothing but
+the import paths (`stonecrab::...`, `stonecrab::codec::...`, `stonecrab::modbus::...`,
+`stonecrab::transport::...`, `stonecrab::sensors::...`), and the library code they call
+moved between files without a behavior change (the unit, property and integration tests
+and doctests are the same 1,182 tests and 414 doctests before and after). The 30-minute
+figures are therefore kept as the alpha's fuzz evidence for the code, but they were not
+re-run on the merged tree. What was re-run is the smoke check below.
+
+Fresh `scripts/fuzz-smoke.sh 10` on the merged tree (S33, exit 0): cargo-deny on the fuzz
+workspace passed, then each of the seven targets ran for 10 seconds on a copy of its seed
+corpus with the host triple, nightly-2026-10-01, and exited 0 with no artifact
+(`git status --porcelain fuzz` printed nothing).
+
+| Target | Runs in 10 s |
+| --- | --- |
+| `fuzz_codec_bounded_reader` | 246,088 |
+| `fuzz_core_connection_string` | 244,773 |
+| `fuzz_modbus_address` | 185,626 |
+| `fuzz_modbus_connection_string` | 277,851 |
+| `fuzz_modbus_mbap` | 224,544 |
+| `fuzz_modbus_pdu` | 336,310 |
+| `fuzz_sensors_profile_toml` | 78,999 |
+
+The fuzz manifest now depends on `stonecrab` with `default-features = false` and
+`features = ["modbus", "sensors"]`. A fresh 30-minute run on the merged tree remains the
+maintainer's option before publication (`scripts/fuzz-evidence.sh 1800`).
+
 ## Mutation testing
 
 One recorded run of cargo-mutants 27.1.0 (`mise run mutants`, `mutants.toml`, nextest,
-3 jobs), 2026-10-27, 23 minutes. Scope, exclusions with reasons, the tests added to kill
-survivors and the earlier runs are in `docs/evidence/mutants/README.md`; the outcomes are
-in `docs/evidence/mutants/outcomes.json`.
+3 jobs), re-run on the single crate for S33 on 2026-10-27, 69 minutes. The S32 run on the
+seven-crate tree (569 mutants, 462 caught) is superseded; the comparison is in
+`docs/evidence/mutants/README.md`, with the scope, the exclusions and reasons, the tests
+added to kill survivors and the earlier runs. The outcomes are in
+`docs/evidence/mutants/outcomes.json`.
 
-**569 mutants run: 462 caught, 0 missed, 0 timeouts, 107 unviable; 3 more were excluded
-as equivalent. Kill rate 100% (462 / 462); 99.4% (462 / 465) if the three excluded
-mutants are counted as survivors.** The plan's 80% mutation target is therefore met by
-the measurement, but it was not a gate and one run is the whole evidence.
+**574 mutants run: 465 caught, 2 missed, 0 timeouts, 107 unviable; 3 more were excluded
+as equivalent. Kill rate 99.6% (465 / 467). The two missed mutants are equivalent (below),
+so 100% (465 / 465) of the mutants that can differ from the original are caught; 98.9%
+(465 / 470) if all five equivalent mutants are counted as survivors.** The plan's 80%
+mutation target is therefore met by the measurement, but it was not a gate and one run is
+the whole evidence. The recorded run exits 2 (a survivor exists) because of those two; the
+docs commit after the run removed the two redundant explicit fields they target, so the
+next run has no survivor.
 
-| File | Mutants | Caught | Missed | Excluded | Timeout | Unviable | Kill rate |
+| File (under `crates/stonecrab/src/`) | Mutants | Caught | Missed | Excluded | Timeout | Unviable | Kill rate |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | core `value.rs` | 15 | 14 | 0 | 0 | 0 | 1 | 100.0% |
 | core `uri.rs` | 35 | 33 | 0 | 0 | 0 | 2 | 100.0% |
-| driver-sim `address.rs` | 23 | 18 | 0 | 0 | 0 | 5 | 100.0% |
-| driver-sim `driver.rs` (configuration parser) | 34 | 25 | 0 | 0 | 0 | 9 | 100.0% |
-| modbus `address.rs` | 119 | 87 | 0 | 0 | 0 | 32 | 100.0% |
-| modbus `pdu/code.rs` | 12 | 10 | 0 | 0 | 0 | 2 | 100.0% |
-| modbus `pdu/codec.rs` | 41 | 38 | 0 | 0 | 0 | 3 | 100.0% |
-| modbus `pdu/model.rs` | 23 | 21 | 0 | 0 | 0 | 2 | 100.0% |
-| modbus `framing/mbap.rs` | 44 | 35 | 0 | 0 | 0 | 9 | 100.0% |
-| modbus `decode.rs` | 36 | 29 | 0 | 0 | 0 | 7 | 100.0% |
-| modbus `batch.rs` | 31 | 23 | 0 | 0 | 0 | 8 | 100.0% |
-| modbus `driver.rs` (configuration parser) | 35 | 26 | 0 | 0 | 0 | 9 | 100.0% |
-| modbus `options.rs` (configuration parameters) | 20 | 14 | 0 | 0 | 0 | 6 | 100.0% |
-| sensors `measurement/scale.rs` | 104 | 89 | 0 | 3 | 0 | 12 | 100.0% |
-| Total | 572 | 462 | 0 | 3 | 0 | 107 | 100.0% |
+| `sim/address.rs` | 23 | 18 | 0 | 0 | 0 | 5 | 100.0% |
+| `sim/driver.rs` (configuration parser, capabilities) | 38 | 27 | 2 | 0 | 0 | 9 | 93.1% |
+| `modbus/address.rs` | 119 | 87 | 0 | 0 | 0 | 32 | 100.0% |
+| `modbus/pdu/code.rs` | 12 | 10 | 0 | 0 | 0 | 2 | 100.0% |
+| `modbus/pdu/codec.rs` | 41 | 38 | 0 | 0 | 0 | 3 | 100.0% |
+| `modbus/pdu/model.rs` | 23 | 21 | 0 | 0 | 0 | 2 | 100.0% |
+| `modbus/framing/mbap.rs` | 44 | 35 | 0 | 0 | 0 | 9 | 100.0% |
+| `modbus/decode.rs` | 36 | 29 | 0 | 0 | 0 | 7 | 100.0% |
+| `modbus/batch.rs` | 31 | 23 | 0 | 0 | 0 | 8 | 100.0% |
+| `modbus/driver.rs` (configuration parser) | 36 | 27 | 0 | 0 | 0 | 9 | 100.0% |
+| `modbus/options.rs` (configuration parameters) | 20 | 14 | 0 | 0 | 0 | 6 | 100.0% |
+| `sensors/measurement/scale.rs` | 101 | 89 | 0 | 3 | 0 | 12 | 100.0% |
+| Total | 574 | 465 | 2 | 3 | 0 | 107 | 99.6% |
 
-The first run found 7 survivors. Four were killed by tests added in S32 (named in the
+The S32 first run found 7 survivors. Four were killed by tests added in S32 (named in the
 README: the modbus address prefix guard, the limit-parameter digits message, the sensors
 integer-zero sign and the `I32` own-type arm). Three are equivalent mutants listed in
 `exclude_re` of `mutants.toml` with their reasons (`own_type` `I64` arm, `integral` `|`
-versus `^`, `bits_of` `<` versus `<=`). No library code changed. The stored run also
-changed one setting: `--fail-fast` for the test phase, because 32 mutants that failed
+versus `^`, `bits_of` `<` versus `<=`). The S33 run on the one crate offers five new
+"delete field" mutants (cargo-mutants can now see `Default` for `Capabilities` and
+`Timeouts`); three are caught and two are equivalent survivors in
+`SimDriver::capabilities`: deleting `subscribe: SubscriptionMode::Unsupported` or
+`concurrency: NonZeroUsize::MIN` from a `..Capabilities::default()` expression whose
+defaults are those very values. cargo-mutants 27.1.0 cannot exclude that mutant genre by
+regular expression, so they are reported as missed and documented in the README, here and in
+`STATUS.md` instead of excluded. The only library change is the removal of those two
+redundant explicit fields after the run (behaviour unchanged). The stored run also changed
+one setting in S32: `--fail-fast` for the test phase, because 32 mutants that failed
 assertions at once were reported as timeouts only for lack of it.
 
 ## Coverage
 
-Fresh `mise run coverage` on the S32 tree (exit 0; 1,182 tests passed, 10 skipped; the
-gates are unchanged). Line coverage is the gated figure; region coverage is reported by
-`cargo llvm-cov` and is not gated and is not branch coverage (the `Branches` column of the
-summary is empty on stable). Source of the numbers: `target/coverage-summary.txt` and the
-gate output of the run.
+Fresh `mise run coverage` on the S33 tree (exit 0; one instrumented `cargo llvm-cov
+nextest --locked --workspace --all-features` run of 1,182 tests, 10 skipped; the gates are
+those of ADR-0005, now enforced per module by path prefix of `crates/stonecrab/src`). Line
+coverage is the gated figure; region coverage is reported by `cargo llvm-cov` and is not
+gated and is not branch coverage (the `Branches` column of the summary is empty on stable).
+Source of the numbers: `target/coverage-summary.txt` (region and function figures are summed
+per module from its per-file rows) and the gate output of the run.
 
-| Crate | Lines hit / total | Line coverage | Gate | Regions hit / total | Region coverage | Functions |
+| Module | Lines hit / total | Line coverage | Gate | Regions hit / total | Region coverage | Functions |
 | --- | --- | --- | --- | --- | --- | --- |
-| `stonecrab-core` | 3577 / 3577 | 100.00% | 100% | 5710 / 5725 | 99.74% | 424 / 424 |
-| `stonecrab-codec` | 181 / 181 | 100.00% | 100% | 258 / 259 | 99.61% | 32 / 32 |
-| `stonecrab-driver-sim` | 2051 / 2051 | 100.00% | 100% | 3467 / 3479 | 99.66% | 256 / 256 |
-| `stonecrab-modbus` | 2758 / 2758 | 100.00% | 100% | 4203 / 4236 | 99.22% | 323 / 323 |
-| `stonecrab-sensors` | 1411 / 1411 | 100.00% | 100% | 2185 / 2200 | 99.32% | 162 / 162 |
-| `stonecrab-transport` | 1216 / 1220 | 99.67% | 95% | 1819 / 1840 | 98.86% | 147 / 148 |
-| `stonecrab-testkit` (unpublished) | 4606 / 4679 | 98.44% | 90% | 8489 / 8700 | 97.57% | 584 / 589 |
-| `stonecrab` (facade) | n/a | n/a | n/a (no executable lines) | n/a | n/a | n/a |
-| Workspace total | 15800 / 15877 | 99.52% | none | 26131 / 26439 | 98.84% | 1928 / 1934 |
+| core (crate root) | 3577 / 3577 | 100.00% | 100% | 5710 / 5725 | 99.74% | 424 / 424 |
+| `codec` | 181 / 181 | 100.00% | 100% | 258 / 259 | 99.61% | 32 / 32 |
+| `sim` | 2053 / 2053 | 100.00% | 100% | 3454 / 3466 | 99.65% | 256 / 256 |
+| `modbus` | 2768 / 2768 | 100.00% | 100% | 4191 / 4224 | 99.22% | 323 / 323 |
+| `sensors` | 1411 / 1411 | 100.00% | 100% | 2185 / 2200 | 99.32% | 162 / 162 |
+| `transport` | 1224 / 1228 | 99.67% | 95% | 1815 / 1836 | 98.86% | 147 / 148 |
+| `testkit` | 4609 / 4682 | 98.44% | 90% | 8485 / 8696 | 97.57% | 584 / 589 |
+| Crate total | 15823 / 15900 | 99.52% | none | 26098 / 26406 | 98.83% | 1928 / 1934 |
 
 The four uncovered transport lines are the real-socket deadline-expiry and
-resolver-failure arms named in ADR-0005 and ADR-0014. The sensors line total rose from
-1398 to 1411 because S32 added two unit tests in `scale.rs`; every added line is executed.
-The other crates equal the figures in `STATUS.md`.
+resolver-failure arms named in ADR-0005 and ADR-0014. The S32 table was measured on the
+seven-crate tree. Core (3577), `codec` (181) and `sensors` (1411) have the same line
+totals; `sim` (2051 then), `modbus` (2758), `transport` (1216) and `testkit` (4606) differ
+by +4, +10, +8 and +3 lines, all covered at the stated ratios. The cause was not
+investigated beyond noting that the merge rewrote `use` paths and doctest wrappers in
+those files; no test was added or removed (the counts of tests and doctests are equal).
 
 ## Local gates
 
-Run from the worktree of the S32 tree on Rust 1.99.1. Exit statuses are the recorded
+Run from the S33 documentation worktree on Rust 1.99.1. Exit statuses are the recorded
 ones; the orchestrator re-runs them on the commit.
 
 | Command | Exit | Result |
 | --- | --- | --- |
-| `mise run check` | 0 | fmt, strict Clippy, nextest (1,182 passed, 10 skipped), `cargo test` with doctests, docs with warnings denied, no-default-features |
-| `mise run coverage` | 0 | per-crate gates pass (above) |
-| `mise run lint-attrs` | 0 | 8 `lib.rs` files checked |
-| `mise run parity` | 0 | the check and its self-test |
+| `mise run check` | 0 | fmt, strict Clippy, nextest (1,182 passed, 10 skipped), `cargo test` with doctests (414 passed), docs with warnings denied, no-default-features |
+| `cargo test --locked` | 0 | default features only: the library unit tests, 26 of the 54 integration test files (those with no feature gate or a `sim`, `modbus` or `sensors` gate) and the doctests ran, 827 passed in all; the other 28 files, which need `testkit`, were skipped by `required-features` without any notice in the output (naming one with `--test` fails with "requires the features: `testkit`") |
+| `cargo test --locked --all-features` | 0 | all 54 integration test files, the library unit tests and the doctests ran: 1,596 passed (1,182 tests and 414 doctests), 0 failed, 10 ignored (the pymodbus tests) |
+| `mise run coverage` | 0 | per-module gates pass (above) |
+| `mise run lint-attrs` | 0 | 1 `lib.rs` file checked |
+| `mise run parity` | 0 | the check (117 rows referenced) and its self-test |
 | `mise run dependencies` | 0 | advisories, bans, licenses and sources ok (unmatched-license-allowance warnings, as before) |
 | `mise run machete` | 0 | no unused dependencies |
-| `mise run mutants` | 0 | the stored run (above); runs 1 and 2 exited 3 |
-| `scripts/fuzz-evidence.sh 1800` | 0 | seven targets, no artifact |
-| `mise run package` | 101 | refused to package a tree with uncommitted changes (`scale.rs`), as designed; the same workspace `cargo package --locked --workspace --exclude stonecrab-testkit --allow-dirty` with a fresh `CARGO_HOME` exited 0 and every crate's `--list` equals `packaging/*.txt`; re-run on the clean commit |
-| `mise run sbom` | 101 / 0 | 101 on the dirty tree for the same reason; with `SBOM_ALLOW_DIRTY=1` exit 0: 7 CycloneDX 1.5 JSON files, `package-list.txt` (121 lines) and `package-lists/` per crate |
-| `cargo release --version` | 0 | `cargo-release 1.1.7` |
-| `cargo release version patch --workspace --exclude stonecrab-testkit` | 0 | dry run (no `--execute`): prints the planned 0.1.0 to 0.1.1 and 0.2.0 to 0.2.1 bumps and the `=` pin rewrites, then "aborting release due to dry run"; no file changed |
-| YAML parse of `release-evidence.yml` | 0 | PyYAML 6.0.3 `safe_load` |
-| `git status --porcelain` | 0 | only the files of the slice; `fuzz/corpus/` unchanged |
-| `ls fuzz/artifacts` | 0 | empty directories only |
+| `mise run examples` | 0 | every example built with all features; `sim_read` and the three simulator `profile_read --expect-good` runs |
+| `mise run interop` | 0 | pymodbus 3.8.6 in Docker: ten tests, example, contract suite 14 passed / 9 skipped, three profiles |
+| `MUTANTS_JOBS=3 mise run mutants` | 2 | the stored run (above); cargo-mutants' status 2 means a mutant survived, here the two equivalent ones, and `outcomes.json` was copied |
+| `scripts/fuzz-smoke.sh 10` | 0 | seven targets, 10 seconds each, no artifact |
+| `SBOM_ALLOW_DIRTY=1 mise run sbom` | 0 | one CycloneDX 1.5 file and `package-list.txt` (102 lines) |
+| `cargo package --locked --allow-dirty -p stonecrab --list \| diff -u packaging/stonecrab.txt -` | 0 | no difference: the archive is 102 files |
+| `cargo tree --locked -p stonecrab -e normal` | 0 | with default features: `bytes`, `serde`, `thiserror`, `tokio`, `toml`, `tracing` and their dependencies |
+| `cargo tree --locked -p stonecrab -e normal --no-default-features` | 0 | `bytes` and `thiserror` only |
+| `git status --porcelain` | 0 | only the files of the slice; `fuzz/` unchanged |
+
+`mise run package` needs a clean tree and was not run on the uncommitted worktree; the
+`--list` comparison above is its second half, and the orchestrator runs the full task on
+the commit. The per-OS matrix, the 1.97.1 cells and the cross-compilation checks are CI
+cells and were not run locally in S33.
 
 `cargo tree --locked -e normal,dev --workspace --all-features -i <package>` for `once_cell`,
-`lazy_static`, `log`, `time` and `chrono` in turn shows `once_cell` only through
+`lazy_static`, `log`, `time` and `chrono` shows, as in S32, `once_cell` only through
 `tracing-core` (wrapped), `lazy_static` only through `sharded-slab` under the
-`tracing-subscriber` dev-dependency (wrapped), and no `log`, `time` or `chrono`.
+`tracing-subscriber` dev-dependency (wrapped), and no `log`, `time` or `chrono`
+(`mise run dependencies` enforces it).
 
 SBOM output (`mise run sbom` and the `release-evidence` workflow), in
-`target/release-evidence/`: `sbom/<crate>.cdx.json` for `stonecrab`, `stonecrab-core`,
-`stonecrab-codec`, `stonecrab-transport`, `stonecrab-driver-sim`, `stonecrab-modbus` and
-`stonecrab-sensors`, plus `package-list.txt` and `package-lists/<crate>.txt`.
-The SBOM files have the checkout path replaced by `.` and the script fails if an absolute
-`/Users`, `/home`, `/private`, `/var` or `/tmp` path remains, so a local run and the
-workflow run are both safe to attach. The workflow has not been dispatched: it needs the
-commit on GitHub.
+`target/release-evidence/`: `sbom/stonecrab.cdx.json` and `package-list.txt`. The SBOM has
+the checkout path replaced by `.` and the script fails if an absolute `/Users`, `/home`,
+`/private`, `/var` or `/tmp` path remains, so a local run and the workflow run are both
+safe to attach. The workflow has not been dispatched: it needs the commit on GitHub.
 
 ## Divergence table and upstream issues
 
@@ -269,71 +335,73 @@ substitute where one exists:
 
 | Gate | State at the alpha |
 | --- | --- |
-| Branch coverage >= 80% | not run; line coverage is gated per crate and region coverage is reported (above); `--branch` on stable is UNVERIFIED |
+| Branch coverage >= 80% | not run; line coverage is gated per module and region coverage is reported (above); `--branch` on stable is UNVERIFIED |
 | Mutation >= 80% | not a gate; one recorded run, rates above |
-| Release fuzzing 8 h per target | not run; 30 minutes per target, table above |
+| Release fuzzing 8 h per target | not run; 30 minutes per target (before S33) and a 10-second smoke on the merged tree, tables above |
 | 24 h soak and memory stability | not run (a stable-driver-release gate) |
 | Benchmarks and the 10% gate | not run; no baseline, no performance claim |
 | Differential tests against PLC4J | not run; no Java harness |
 | Hardware verification | not run; no Modbus device on the bench, template only (`docs/hardware/TEMPLATE.md`) |
 | Real-clock timing and fault injection against a peer | not run; stock pymodbus has no fault hooks (ADR-0015 decision 16) |
-| `cargo semver-checks` | report-only; no baseline on crates.io for the sibling crates, and the 0.1.0 API was replaced |
-| `cargo publish --dry-run` in dependency order | not run in S32 (forbidden against the registry in this slice; a dependent crate cannot dry-run before its siblings are published); the workspace `cargo package` form passed |
+| `cargo semver-checks` | report-only; the baseline is the published `stonecrab` 0.1.0 and its API was replaced, so the job reports the removed `placeholder::status` as a breaking change of a 0.x crate; the 0.2.0 minor bump is the intended answer |
+| `cargo publish --dry-run` | not run in S32 or S33 (forbidden against the registry in these slices); `cargo package --list` equals `packaging/stonecrab.txt`, and `mise run package` builds the archive on a clean tree; the maintainer runs `cargo package --locked -p stonecrab` and `cargo publish --locked --dry-run -p stonecrab` (ADR-0017 decision 3) |
 | `regen`, RTU, OPC UA, direct-sensor cases | out of scope for the alpha |
 | Upstream vectors (P4) | not redistributed; every vector is first-party, so the four byte-order rows stay at `implemented` |
 | Stale-value enforcement, `Timeouts.idle`, queued cancellation on the simulator, real-socket connect-timeout arm | deferred or uncovered as named in the plan and ADR-0014 |
 
 ## Alpha release checklist
 
-Items of "Alpha release checklist" in `docs/ALPHA_PLAN.md`. `[x]` means done and evidenced
-here; `[ ]` says what blocks it.
+Items of "Alpha release checklist" in `docs/ALPHA_PLAN.md`, reworded for one crate (ADR-0018):
+one crate to publish, one tag. `[x]` means done and evidenced here; `[ ]` says what blocks it.
 
 1. `[ ]` P1 to P4 done. P5 (the waiver) is done and recorded in ADR-0005 and `STATUS.md`.
    **Blocked on the maintainer:** P1 (private vulnerability reporting, verified with a test
    report), P2 (secret scanning and push protection), P3 (the `master` ruleset), P4 (written
    approval to redistribute the PLC4X vectors, which also blocks S04a and S04b).
-2. `[ ]` Local gates green on 1.99.1. Green: `mise run check`, `lint-attrs`, `coverage`,
-   `dependencies`, `machete`, `parity` (table above), and `cargo tree -i` shows only the
-   recorded wrapped paths. The 60-second `mise run fuzz` smoke was not re-run; the
-   30-minute seven-target run above stands in for it. **Open:** `mise run package`
-   refuses the uncommitted tree and `mise run interop` needs Docker (last green in S30);
-   both are re-run on the clean commit. The MSRV cell is green in hosted run
-   40548582722.
-3. `[x]` Hosted CI green on `master` for the S32 commit `2d38e48` (run 40584025718:
-   every job green except the report-only `semver`, `interop`, `features`, `examples`,
-   `dco`, `lint-attrs` and `parity` included); `fuzz-smoke` ran on push, not by
-   `workflow_dispatch`. Re-confirm on the release candidate commit when it exists.
+2. `[ ]` Local gates green on 1.99.1. Green on the S33 tree: `mise run check`, `lint-attrs`,
+   `coverage`, `dependencies`, `machete`, `parity`, `examples`, `interop`, the 10-second
+   fuzz smoke and `mutants` (tables above), and `cargo tree -i` shows only the recorded
+   wrapped paths. **Open:** `mise run package` refuses an uncommitted tree and is re-run on
+   the clean commit; the MSRV cell and the other OS cells are CI cells (last green in
+   hosted run 40584025718 for the S32 commit; the S33 commits have no hosted run recorded).
+3. `[ ]` Hosted CI green on `master` for the release candidate commit. Last recorded: the
+   S32 commit `2d38e48` (run 40584025718: every job green except the report-only `semver`).
+   **Open:** the S33 commits are not pushed by this slice; push, check the run and record
+   its id in `STATUS.md`.
 4. `[x]` Both example runs pass: `profile_read` against pymodbus and against `sim` returned
-   success in the S30 `interop` and `examples` jobs (run 40548582722). Re-confirm on the
-   candidate commit with item 3.
-5. `[x]` `grep -rn "covers: " crates/ tools/` lists F1 to F7 with the counts of
+   success in the S33 local `interop` and `examples` runs (and in the S30 hosted run
+   40548582722). Re-confirm on the candidate commit with item 3.
+5. `[x]` `grep -rn "covers: " crates/` lists F1 to F7 with the counts of
    `docs/COMPATIBILITY.md` (50, 71, 69, 44, 32, 4, 36); `scripts/parity-check.sh` passes.
 6. `[x]` `docs/parity/*.md`: the parity check enforces a test id on every `implemented` or
    `automated-verified` row; deferred rows are visible; every divergence row cites a
    test and a protocol section, a draft or the stated reason no issue was drafted (quirks
    d, i and l are not divergences and have no row); the four byte-order rows
    stay below `automated-verified` until P4 (S23's little-endian vectors).
-7. `[x]` README matrix, crate READMEs and `Capabilities` agree (the README and matrix tests
-   pass in `mise run check`): `sim` read and write, `modbus-tcp` read only.
+7. `[x]` README matrix, the component documents and `Capabilities` agree (the README and
+   matrix tests pass in `mise run check`): `sim` read and write, `modbus-tcp` read only.
 8. `[ ]` `fixtures/` listed in `PROVENANCE.toml` with the adapter's exchange count; NOTICE.
    **Partly blocked by P4:** `fixtures/modbus/PROVENANCE.toml` lists every first-party
    fixture and `NOTICE` says no upstream vectors are redistributed; the upstream copies,
    the driver-suite adapter (S04a, S04b) and its exchange count do not exist.
 9. `[x]` This file is complete: fuzz durations, mutation rates with the exclusions,
-   region coverage, matrix results, pymodbus version and digest, upstream baseline,
-   gates not run, divergence references. The upstream issues are drafted and not filed
-   (reason above).
-10. `[x]` CHANGELOG release sections carry the four SPEC items (upstream baseline,
-    supported operations, hardware evidence, breaking changes); `SECURITY.md` names the
-    alpha as the supported line.
-11. `[ ]` `cargo package --list` reviewed per crate (done: equal to `packaging/*.txt`);
-    SBOM generated (done locally; **attach to the draft pre-release: maintainer**);
-    `cargo publish --dry-run` in dependency order with a fresh `CARGO_HOME`
-    (**not run**: forbidden against the registry in S32; run by the maintainer per
-    ADR-0017 decision 3); `cargo semver-checks` report (**not run**: no baseline for the
-    siblings, the facade's 0.1.0 API was replaced).
-12. `[ ]` Signed tags prepared but not pushed. **Prepared as commands only**
-    (ADR-0017 decision 4): no tag exists. Creating and pushing them, `cargo publish` and
-    crates.io registration need the maintainer's separate approval.
+   region coverage per module, matrix results, pymodbus version and digest, upstream
+   baseline, gates not run, divergence references. The upstream issues are drafted and not
+   filed (reason above).
+10. `[x]` The CHANGELOG release section carries the four SPEC items (upstream baseline,
+    supported operations, hardware evidence, breaking changes) once, for the one crate;
+    `SECURITY.md` names `stonecrab` 0.2.0 as the supported line.
+11. `[ ]` `cargo package --list` reviewed (done: 102 files, equal to
+    `packaging/stonecrab.txt`); SBOM generated (done locally, one file; **attach to the
+    draft pre-release: maintainer**); `cargo publish --dry-run` with a fresh `CARGO_HOME`
+    (**not run**: forbidden against the registry in S32 and S33; run by the maintainer per
+    ADR-0017 decision 3, `cargo publish --locked --dry-run -p stonecrab`); `cargo
+    semver-checks` report (**report only**: the published 0.1.0 is the baseline and its
+    API was replaced).
+12. `[ ]` The signed tag prepared but not pushed. **Prepared as commands only** (ADR-0017
+    decision 4): no tag exists. The one annotated tag is `v0.2.0` on the release commit,
+    signed when a signing key is configured (the maintainer decides). Creating and pushing
+    it, `cargo publish -p stonecrab` and crates.io registration need the maintainer's
+    separate approval.
 13. `[x]` `SECURITY.md` carries the yank and RUSTSEC commitment and points to ADR-0017
-    decision 5 for the procedure.
+    decision 5 for the procedure (one crate, one `cargo yank`).

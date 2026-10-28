@@ -3,7 +3,7 @@
 #
 # Enforces CODING_STANDARDS section 5.1: crate-level lint attributes in lib.rs are
 # prohibited except `#![forbid(unsafe_code)]`, `#![cfg_attr(docsrs, ...)]` and the
-# per-crate promotions (`#![deny(<lint>)]`) in the PERMITTED table below. This script
+# per-module promotions (`#![deny(<lint>)]`) in the PERMITTED table below. This script
 # replaces the `xtask lint-attrs` named in the standards (ADR-0005).
 #
 # The check is line based: an attribute must sit on one line with nothing after it (no

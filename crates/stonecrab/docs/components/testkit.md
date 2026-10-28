@@ -1,9 +1,20 @@
 # Stonecrab Testkit
-Maintainer-only deterministic fixtures. Never published or used as a runtime
-dependency of a published crate. It has no support level of its own; it is the
-tooling behind the evidence claimed by the other crates (coverage tier 90%, ADR-0005).
+Deterministic test fixtures, `stonecrab::testkit`, behind the `testkit` feature (off by
+default; it is not a runtime feature, and an application that only reads from a device
+never turns it on). It ships the driver contract suite so that authors of a new
+`Driver` can run the same cases against their driver, and the fakes (a clock, a
+transport, scripted peers) that make such tests deterministic. It has no support level
+of its own; it is the tooling behind the evidence claimed for the other modules
+(coverage tier 90%, ADR-0005).
 
-`FixtureAddress` supplies a protocol-address double for core integration tests.
+The kit lives in this crate, and not in a separate test crate, because a test crate
+needs the `Driver` contract from `stonecrab`, and `stonecrab` needs the kit in its own
+tests: that would be a dev-dependency cycle (ADR-0018). The feature turns on `transport`
+and adds `serde`, `serde_json`, `toml` and Tokio's `macros`. The kit's own tests and
+doctests for the golden vectors read files of the repository (`testdata/`, `fixtures/`),
+which the packaged archive does not contain, so they run from a checkout.
+
+`FixtureAddress` supplies a protocol-address double for tests of the core contracts.
 It retains supplied text and an optional type hint; it does not parse or validate
 a real industrial protocol or claim driver compatibility.
 
@@ -58,7 +69,7 @@ assert_eq!(clock.now(), deadline);
 ## Driver contract suite
 
 `ContractSuite::run(driver, uri, fixture)` runs one set of 23 cases, named as sentences,
-against any `Driver` and returns a `ContractReport`. It needs no feature. A
+against any `Driver` and returns a `ContractReport`. A
 `ContractFixture` is the suite's window into the device: a `readable` address, a
 `rejected` one (parseable, refused by the device), a `foreign` one, an `io_probe` counter
 that must not move when the suite says "no I/O", a `device_reads` counter, the `clock`
@@ -78,7 +89,7 @@ queued-cancellation case is not part of the suite (it needs a wait queue; see
 `crates/stonecrab/tests/sim_contract.rs`; ADR-0009's S13 addendum has the details.
 
 At the alpha the suite runs against four fixtures, and every skip is named in the
-report rather than hidden: the simulator (`tests/contract.rs` of the sim crate: 22 passed,
+report rather than hidden: the simulator (`tests/sim_contract.rs`: 22 passed,
 1 named skip, the unsupported-write case), the Modbus driver over a fake transport with a
 first-party MBAP responder (21 passed, 2 skipped: the two write cases), the Modbus driver
 over loopback sockets to a `ScriptedPeer` (18 passed, 5 skipped: three timing cases and
@@ -97,10 +108,9 @@ fn check(driver: &dyn Driver, fixture: &ContractFixture, clock: &FakeClock) {
 }
 ```
 
-## Network doubles (feature `net`)
+## Network doubles
 
-The `net` feature is off by default so that core's dev-dependency on this crate stays
-Tokio-free. It adds the doubles that stand in for a device, all driven by one `Script`
+These are the doubles that stand in for a device, all driven by one `Script`
 (`steps: Vec<Step>`, `strict: bool`; `Script::new` is lenient, `Script::strict` fails on
 the first mismatch).
 
@@ -124,7 +134,7 @@ the first mismatch).
   calls of `Respond` and `React` closures alike.
 - `ScriptedPeer::spawn(script)` listens on `127.0.0.1:0` and runs the script on the one
   connection it accepts. It is for bytes only: `Delay` and `LateReply` sleep for at most
-  `MAX_PEER_DELAY` (200 ms). It owns the workspace's single `tokio::spawn`; `close()` joins
+  `MAX_PEER_DELAY` (200 ms). It owns the crate's single `tokio::spawn`; `close()` joins
   the task and returns a `ScriptReport`, and dropping the peer aborts it.
 - `FakeTransport` implements `stonecrab::transport::Transport` over the same script and a
   `FakeClock`. Delays and late replies sleep on the fake clock, so `block_on_with` runs
@@ -150,7 +160,6 @@ the first mismatch).
   pymodbus interop run), where the test cannot count requests on the device side.
 
 ```rust
-# #[cfg(feature = "net")]
 # fn main() -> Result<(), Box<dyn std::error::Error>> {
 use std::time::Duration;
 use bytes::{Bytes, BytesMut};
@@ -178,15 +187,13 @@ assert_eq!(&reply[..], b"pong");
 assert_eq!(factory.probes()[0].sent(), vec![Bytes::from_static(b"ping")]);
 # Ok(())
 # }
-# #[cfg(not(feature = "net"))]
-# fn main() {}
 ```
 
-## Golden vectors and the interop map (feature `fixtures`)
+## Golden vectors and the interop map
 
-The `fixtures` feature is off by default so that core's dev-dependency on this crate stays
-free of `serde`, `serde_json` and `toml`. It adds the loader for the repository's golden
-vectors (section 13.6 of the coding standards) and the reader of the first-party interop register map.
+The kit also holds the loader for the repository's golden vectors (section 13.6 of the
+coding standards) and the reader of the first-party interop register map. Both read files
+of a checkout.
 
 - `load_dir(dir)` reads `dir/PROVENANCE.toml`, then, for every `[[vector]]` it lists,
   `<name>.hex` and the optional `<name>.expected.json`, and returns `GoldenVector`
@@ -211,7 +218,6 @@ vectors (section 13.6 of the coding standards) and the reader of the first-party
   hexadecimal integers. Addresses are logical; the wire address is one less.
 
 ```rust
-# #[cfg(feature = "fixtures")]
 # fn main() -> Result<(), Box<dyn std::error::Error>> {
 use std::path::Path;
 use stonecrab::testkit::{InteropMap, load_dir};
@@ -222,6 +228,4 @@ let map = InteropMap::load(&dir.join("interop/register-map.toml"))?;
 assert_eq!(map.holding_extension[0].words, [0xDC0F, 0x4940]);
 # Ok(())
 # }
-# #[cfg(not(feature = "fixtures"))]
-# fn main() {}
 ```

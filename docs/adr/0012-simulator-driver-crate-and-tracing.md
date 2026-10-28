@@ -1,5 +1,8 @@
 # 0012: Simulator driver crate and tracing adoption
 ## Status
+Amended by ADR-0018: `stonecrab-driver-sim` is now the module `stonecrab::sim`, behind
+the `sim` feature (on by default). The decisions stand; read the crate name as the
+module.
 Accepted by the sole maintainer on 2026-10-27, when slice S11b-2 landed `SimDriver` and
 `SimConnection` (in one commit with S11a, ADR-0011). It was proposed in slice S11b-1 on
 2026-10-27. It adds the new crate `stonecrab-driver-sim` (CODING_STANDARDS 12.6 requires an

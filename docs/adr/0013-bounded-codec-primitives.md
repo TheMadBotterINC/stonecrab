@@ -1,5 +1,7 @@
 # 0013: Bounded codec primitives
 ## Status
+Amended by ADR-0018: `stonecrab-codec` is now the module `stonecrab::codec`, always
+built. The decisions stand; read the crate name as the module.
 Accepted by the sole maintainer on 2026-10-27, as slice S15 of docs/ALPHA_PLAN.md.
 It adds the new crate `stonecrab-codec` (CODING_STANDARDS 12.6 requires an ADR for a new
 crate), adopts `proptest` under ADR-0009, and implements decisions D22 and D23 for this

@@ -1,10 +1,11 @@
 # Stonecrab Codec
-Bounded, panic-free byte-level primitives shared by the Stonecrab protocol crates.
-Every length that comes off the wire is checked against a caller-supplied maximum and
-against the bytes actually present before anything is allocated or copied, and no
-function in this crate panics on any input. The crate has no network, executor or
-filesystem dependency; it depends only on `stonecrab-core` for `ByteOrder` and
-`PlcError`. Default features are empty.
+Bounded, panic-free byte-level primitives shared by the Stonecrab protocol drivers
+(`stonecrab::codec`). Every length that comes off the wire is checked against a
+caller-supplied maximum and against the bytes actually present before anything is
+allocated or copied, and no function in this module panics on any input. The module has
+no network, executor or filesystem dependency; it uses only the core's `ByteOrder` and
+`PlcError`. It is always built: it has no feature of its own and is available with
+`default-features = false`.
 
 No upstream parity claim is made: these are Stonecrab's own helpers. The Modbus layouts
 that consume them are tracked in the
