@@ -223,7 +223,7 @@ use std::path::Path;
 use stonecrab::testkit::{InteropMap, load_dir};
 
 let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/modbus");
-assert!(!load_dir(&dir)?.is_empty(), "first-party PDU vectors; upstream ones wait for P4");
+assert!(!load_dir(&dir)?.is_empty(), "first-party and upstream vectors");
 let map = InteropMap::load(&dir.join("interop/register-map.toml"))?;
 assert_eq!(map.holding_extension[0].words, [0xDC0F, 0x4940]);
 # Ok(())

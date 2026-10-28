@@ -2,8 +2,9 @@
 //! section 13.7 list for `MbapFramer::decode`, the transaction counter and the framer over
 //! the in-memory transport double.
 //!
-//! The vectors are written by hand from the Modbus Messaging on TCP/IP Implementation
-//! Guide V1.0b and the V1.1b examples (section 13.6), never produced by this framer.
+//! Most vectors are written by hand from the Modbus Messaging on TCP/IP Implementation
+//! Guide V1.0b and the V1.1b examples (section 13.6), never produced by this framer; the
+//! six `adu_upstream-*` vectors are the frames of the Apache PLC4X parser suite.
 //! Decode and encode are asserted separately, each against the ADUs the expected file
 //! lists, so a framer bug and an encoder bug cannot cancel out. Timing is on the fake clock
 //! only: nothing here sleeps.
@@ -104,12 +105,21 @@ mod tests {
         usize::try_from(value.as_u64().expect("a number")).expect("a size")
     }
 
+    /// The framer cuts the ADUs the expected file lists. (`must_fail` is not the test: the
+    /// four upstream function 0x14 and 0x15 frames are framed and fail at the PDU layer.)
+    fn frames(vector: &GoldenVector) -> bool {
+        vector
+            .expected
+            .as_ref()
+            .is_some_and(|expected| expected.get("adus").is_some())
+    }
+
     fn accepted() -> Vec<GoldenVector> {
-        vectors().into_iter().filter(|v| !v.must_fail).collect()
+        vectors().into_iter().filter(frames).collect()
     }
 
     fn rejected() -> Vec<GoldenVector> {
-        vectors().into_iter().filter(|v| v.must_fail).collect()
+        vectors().into_iter().filter(|v| !frames(v)).collect()
     }
 
     fn upto(bytes: &[u8], end: usize) -> &[u8] {
@@ -184,9 +194,11 @@ mod tests {
             assert!(
                 matches!(
                     vector.source,
-                    VectorSource::ProtocolSpec | VectorSource::Adversarial
+                    VectorSource::ProtocolSpec
+                        | VectorSource::Adversarial
+                        | VectorSource::UpstreamFixture
                 ),
-                "{}: until P4 is granted no vector is upstream or captured",
+                "{}: no vector is captured from a device yet",
                 vector.name
             );
             assert!(
@@ -211,10 +223,15 @@ mod tests {
                     vector.name
                 );
             }
+            let pdu_error = vector
+                .expected
+                .as_ref()
+                .and_then(|expected| expected.get("pdu")?.get("error"))
+                .is_some();
             assert_eq!(
                 vector.must_fail,
-                text(vector, "error").is_some() || text(vector, "outcome").is_some(),
-                "{}: only a must_fail vector names an error or an outcome",
+                text(vector, "error").is_some() || text(vector, "outcome").is_some() || pdu_error,
+                "{}: only a must_fail vector names an error, an outcome or a PDU error",
                 vector.name
             );
         }
@@ -404,6 +421,81 @@ mod tests {
                     vector.name
                 ),
             }
+        }
+    }
+
+    #[test]
+    fn the_upstream_adus_are_cut_whole_as_the_parser_suite_describes() {
+        // Header fields and PDU lengths as written in ParserSerializerTestsuite.xml: the
+        // frames of the FC04 pair and of the four function 0x14 and 0x15 frames.
+        let expected: [(&str, u16, u16, u8, usize, usize); 6] = [
+            (
+                "upstream-read-input-registers-request",
+                0x0000,
+                6,
+                0xFF,
+                5,
+                12,
+            ),
+            (
+                "upstream-read-input-registers-response",
+                0x7CFE,
+                201,
+                0xFF,
+                200,
+                207,
+            ),
+            (
+                "upstream-read-extended-registers-request-split-file-record",
+                0x000A,
+                17,
+                1,
+                16,
+                23,
+            ),
+            (
+                "upstream-read-extended-registers-response-split-file-record",
+                0x000A,
+                27,
+                1,
+                26,
+                33,
+            ),
+            (
+                "upstream-write-extended-registers-request-file-record",
+                0x000A,
+                12,
+                1,
+                11,
+                18,
+            ),
+            (
+                "upstream-write-extended-registers-request-split-file-record",
+                0x000A,
+                21,
+                1,
+                20,
+                27,
+            ),
+        ];
+        for (name, transaction_id, length, unit_id, pdu_len, wire_len) in expected {
+            let vector = vector(name);
+            assert_eq!(vector.source, VectorSource::UpstreamFixture, "{name}");
+            assert_eq!(vector.bytes.len(), wire_len, "{name}: bytes");
+            let (adus, rest) = drain(&vector.bytes);
+            assert_eq!((adus.len(), rest), (1, 0), "{name}: one whole ADU");
+            let adu = adus.first().expect("one ADU");
+            let header = adu.header();
+            assert_eq!(header.transaction_id, transaction_id, "{name}: transaction");
+            assert_eq!(header.protocol_id, 0, "{name}: protocol");
+            assert_eq!(header.length, length, "{name}: length");
+            assert_eq!(header.unit_id, UnitId::from(unit_id), "{name}: unit");
+            assert_eq!(adu.pdu().len(), pdu_len, "{name}: pdu length");
+            assert_eq!(
+                vector.must_fail,
+                !name.contains("read-input-registers"),
+                "{name}: only the function 0x14 and 0x15 frames fail, and at the PDU layer"
+            );
         }
     }
 

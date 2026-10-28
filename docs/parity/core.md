@@ -70,8 +70,8 @@ decodes nothing, and `TypedDecoder` in `stonecrab::modbus` consumes it. The Modb
 and its row ids are the `MB-BYTEORDER-*` rows in `docs/parity/modbus.md`
 (`MB-BYTEORDER-BE`, `MB-BYTEORDER-LE`, `MB-BYTEORDER-BE-SWAP`, `MB-BYTEORDER-LE-SWAP`,
 `MB-BYTEORDER-PRECEDENCE`), which are `implemented` there and stay below
-`automated-verified` until the upstream little-endian vectors pass (maintainer
-prerequisite P4).
+`automated-verified` until the upstream little-endian vectors pass (the file is retained
+since S04a; the S04b adapter turns its exchanges into vectors).
 
 | Row id | Upstream behavior | Stonecrab behavior | Status | Test ids |
 | --- | --- | --- | --- | --- |

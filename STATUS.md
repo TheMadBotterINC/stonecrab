@@ -162,8 +162,9 @@ landed; the table of landed slices below keeps the crate names the slices used t
   repository data, not shipped in the package.
 - `fixtures/modbus/`: first-party golden vectors (`tcp/`: PDU, ADU and typed-decode
   vectors authored from the Modbus Application Protocol V1.1b or built to fail), the
-  interop register map and `PROVENANCE.toml`. The upstream vectors are not in the
-  repository (prerequisite P4, approved 2026-10-28; copies land in S04a).
+  interop register map and `PROVENANCE.toml`. Since S04a (P4 approved 2026-10-28),
+  `upstream/tcp/` retains four Apache PLC4X test files verbatim with NOTICE attribution,
+  and the six frames of the parser suite are `tcp/adu_upstream-*` vectors.
 - `upstream/manifest.toml`: the pinned Apache PLC4X baseline and the Modbus TCP inventory.
 - Release process and evidence (ADR-0017 as amended): `release.toml` (cargo-release with
   publish, push and tag off; tag name `v{{version}}`), `mutants.toml`, the
@@ -330,6 +331,7 @@ commit; gates named were run locally before that commit.
 | S34 | 2026-10-28 | Documents reconciled with the 0.2.0 publication (H02 to H06): README and SECURITY say 0.2.0 is published and show the crates.io dependency; STATUS.md start, maintainer prerequisites (P1 to P3 open, the "Basic" ruleset targets no branch, P4 approved) and continuation point at `docs/POST_ALPHA_PLAN.md` with the E1 to E7 outcomes; `docs/PROJECT_BRIEF.md` marked historical with corrected badges; CODING_STANDARDS mirrors the real package keys and owner URL; a dated addendum in `docs/evidence/alpha.md`; docs only | check |
 | S38 | 2026-10-28 | `stonecrab::sensors` denies `clippy::indexing_slicing` like codec, modbus, sim and transport (finding G04): the outer attribute on its module declaration, the `sensors` row of `scripts/lint-attrs.sh` and its self-test fixtures, CODING_STANDARDS 5.1 and 5.5, an ADR-0018 addendum. The module had no indexing or slicing, so no code changed and sensors stays at 100% lines; a probe proved the lint is live | check, coverage, lint-attrs, fuzz (fuzz_sensors_profile_toml, 60 s) |
 | S40 | 2026-10-28 | Ping in the core API (finding G07, ping part): `Operation::Ping` appended last, `Capabilities.ping` (default false) read by `supports`, and a provided `Connection::ping(&self) -> OpFuture<'_, ()>` modeled on `close` (no request type, like PLC4J's `ping()`) that does no I/O and returns `Unsupported(Ping)` with diagnostics; neither driver overrides it (Modbus in S47). The contract suite has 24 cases: the new one asserts the error, its diagnostics, no device access and no state change, and runs for the simulator and every Modbus fixture. ADR-0011 addendum; core, sim and Modbus parity rows updated; additive for semver by construction (both types are `#[non_exhaustive]`) | check, coverage, lint-attrs, parity, examples |
+| S04a | 2026-10-28 | Upstream Modbus vectors with provenance (P4 approved 2026-10-28, decision E2): `ParserSerializerTestsuite.xml`, `DriverTestsuite.xml`, `Modbus-all-datatypes.xml` and `Modbus-all-datatypes-little-endian.xml` retained byte for byte from commit ea229918 under `fixtures/modbus/upstream/tcp/` (git blob and sha256 in PROVENANCE.toml; identical to an independent checkout); the six `<raw>` frames of the parser suite as `tcp/adu_upstream-*` ADU vectors (FC04 request and 99-register response accepted; the four FC20/FC21 file-record frames cut by the framer and refused by the PDU codec as `must_fail`); `adapter_rederives_each_parser_suite_hex_from_raw_text` (string scan, no XML parser) and framing and PDU tests over the new vectors; NOTICE carries the PLC4X attribution and its NOTICE text; the crate ships nothing from `fixtures/` (package list unchanged); docs that said the vectors wait for P4 now say the exchanges wait for S04b | check, coverage, lint-attrs, parity, dependencies, package (with --allow-dirty before the commit) |
 
 ## Verified evidence and reproduction
 
@@ -603,10 +605,10 @@ Deferred features, each a deferred row in `docs/parity/modbus.md` or an item of 
 - **A plain `cargo test` runs the reduced suite** (no `testkit` feature, so the test files
   that need the kit are skipped without a notice) and the kit's own tests need a checkout;
   see "Important implementation and tooling details".
-- **Upstream vectors**: the Apache-2.0 PLC4X test vectors are not redistributed (P4,
-  approved 2026-10-28; copies land in S04a), so every test vector in the repository is
-  first-party. This keeps the four byte-order mode rows at `implemented` instead of
-  `automated-verified`.
+- **Upstream vectors**: S04a retains four Apache-2.0 PLC4X test files and derives the six
+  parser-suite frames; the driver-suite and all-datatypes exchanges become vectors only
+  with the S04b adapter. Until the little-endian ones pass in the decoder tests, the four
+  byte-order mode rows stay `implemented` instead of `automated-verified`.
 - **Not verified by the interop run**: timing over a real clock, dropped links and device
   exceptions on demand (a stock pymodbus has no fault hooks), unit-id correlation, and any
   server other than pymodbus 3.8.6.

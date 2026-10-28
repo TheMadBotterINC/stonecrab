@@ -121,9 +121,10 @@ logical number is one-based; the wire address is one less. See the grammar in th
 | `LITTLE_ENDIAN_BYTE_SWAP` | `BigEndian` | `LowWordFirst` | `[3,4,1,2]` | `MB-BYTEORDER-LE-SWAP`: first-party vectors |
 
 The mapping is derived from the documented layouts. The rows are `implemented`, not
-`automated-verified`, because the upstream little-endian vectors are not in the repository
-(maintainer prerequisite P4). Precedence: the tag's own order, then the address block, then
-the connection default; the order is never inferred from the values.
+`automated-verified`, because the upstream little-endian exchanges are not yet vectors (the
+file is retained since S04a; the S04b adapter turns it into vectors). Precedence: the tag's
+own order, then the address block, then the connection default; the order is never
+inferred from the values.
 
 ## Configuration keys
 
@@ -242,5 +243,6 @@ Writes, subscriptions, extended registers, strings, calendar types, RTU, UDP and
 hardware verification are listed above. Also not done: a mutation threshold as a gate
 (one recorded run, `docs/evidence/alpha.md`), soak and
 benchmark gates, branch-coverage gating (line coverage per module is gated, ADR-0005), a
-differential test against PLC4J, and the upstream vector corpus (blocked on prerequisite
-P4). [`STATUS.md`](../STATUS.md) carries the current list.
+differential test against PLC4J, and the upstream driver-suite and all-datatypes vectors
+(the files are retained since S04a; the S04b adapter is pending).
+[`STATUS.md`](../STATUS.md) carries the current list.

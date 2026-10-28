@@ -1,0 +1,19 @@
+{
+  "adus": [
+    {
+      "transaction_id": 10,
+      "protocol_id": 0,
+      "length": 27,
+      "unit_id": 1,
+      "pdu": "14 18 05 06 00 00 00 00 11 06 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+    }
+  ],
+  "leftover": 0,
+  "pdu": {
+    "direction": "response",
+    "function": 20,
+    "error": "InvalidDiscriminator",
+    "field": "unsupported function code",
+    "value": 20
+  }
+}

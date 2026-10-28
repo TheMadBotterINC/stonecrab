@@ -4,7 +4,9 @@
 //! Specification V1.1b, never produced by this decoder. Decode and encode are asserted
 //! separately and each against a PDU built from the expected file, so a decoder bug and an
 //! encoder bug cannot cancel out. Every vector is PDU bytes only, without an MBAP header; the
-//! whole-ADU vectors (`tcp/adu_*`) belong to `tests/framing.rs`.
+//! whole-ADU vectors (`tcp/adu_*`) belong to `tests/framing.rs`, except that the PDU of each
+//! upstream ADU (`tcp/adu_upstream-*`) is read here, from the bytes after the header and the
+//! `pdu` object of its expected file.
 #![cfg(all(feature = "modbus", feature = "testkit"))]
 #![forbid(unsafe_code)]
 
@@ -17,8 +19,8 @@ mod tests {
         BoundedReader, BoundedWriter, ParseError, coil_byte_count, unpack_bits_lsb_first,
     };
     use stonecrab::modbus::{
-        ExceptionCode, FunctionCode, MAX_PDU_BYTES, ModbusPdu, decode_request, decode_response,
-        encode_request, encode_response,
+        ExceptionCode, FunctionCode, MAX_PDU_BYTES, MbapHeader, ModbusPdu, decode_request,
+        decode_response, encode_request, encode_response,
     };
     use stonecrab::testkit::{GoldenVector, VectorSource, load_dir};
 
@@ -28,15 +30,24 @@ mod tests {
         load_dir(&dir)
             .expect("fixtures/modbus loads: every file listed, every listed vector present")
             .into_iter()
-            .filter(|vector| {
-                // The adu_* vectors are framing-level ADUs (tests/framing.rs) and the
-                // typed_* vectors hold register bytes for the typed decoder
-                // (tests/decode.rs), not PDUs.
-                vector.name.starts_with("tcp/")
-                    && !vector.name.starts_with("tcp/adu_")
-                    && !vector.name.starts_with("tcp/typed_")
-            })
+            .filter_map(pdu_of)
             .collect()
+    }
+
+    /// The vector as PDU bytes, or `None` when it is not one. The adu_* vectors are
+    /// framing-level ADUs (tests/framing.rs), except that an upstream ADU is seen here as
+    /// the PDU after its header with the `pdu` object of its expected file; the typed_*
+    /// vectors hold register bytes for the typed decoder (tests/decode.rs), not PDUs.
+    fn pdu_of(mut vector: GoldenVector) -> Option<GoldenVector> {
+        if vector.name.starts_with("tcp/adu_upstream-") {
+            vector.bytes = vector.bytes.get(MbapHeader::ENCODED_LEN..)?.to_vec();
+            vector.expected = vector.expected.as_ref()?.get("pdu").cloned();
+            return Some(vector);
+        }
+        (vector.name.starts_with("tcp/")
+            && !vector.name.starts_with("tcp/adu_")
+            && !vector.name.starts_with("tcp/typed_"))
+        .then_some(vector)
     }
 
     fn number(vector: &GoldenVector, key: &str) -> Option<u64> {
@@ -161,9 +172,11 @@ mod tests {
             assert!(
                 matches!(
                     vector.source,
-                    VectorSource::ProtocolSpec | VectorSource::Adversarial
+                    VectorSource::ProtocolSpec
+                        | VectorSource::Adversarial
+                        | VectorSource::UpstreamFixture
                 ),
-                "{}: until P4 is granted no vector is upstream or captured",
+                "{}: no vector is captured from a device yet",
                 vector.name
             );
             assert!(
@@ -243,8 +256,66 @@ mod tests {
             "tcp/response-read-file-record",
             "tcp/request-function-zero",
             "tcp/response-function-zero",
+            "tcp/adu_upstream-read-extended-registers-request-split-file-record",
+            "tcp/adu_upstream-read-extended-registers-response-split-file-record",
+            "tcp/adu_upstream-write-extended-registers-request-file-record",
+            "tcp/adu_upstream-write-extended-registers-request-split-file-record",
         ] {
             assert!(names.contains(name), "{name} is listed");
+        }
+    }
+
+    #[test]
+    fn the_upstream_function_04_pair_decodes_and_the_file_record_frames_are_refused() {
+        let all = vectors();
+        let upstream: Vec<&GoldenVector> = all
+            .iter()
+            .filter(|v| v.source == VectorSource::UpstreamFixture)
+            .collect();
+        assert_eq!(upstream.len(), 6, "the six frames of the parser suite");
+        let named = |name: &str| {
+            upstream
+                .iter()
+                .find(|v| v.name == format!("tcp/adu_upstream-{name}"))
+                .unwrap_or_else(|| panic!("adu_upstream-{name} is listed"))
+        };
+        let request = named("read-input-registers-request");
+        assert_eq!(
+            decode(request),
+            Ok(ModbusPdu::ReadInputRegisters {
+                start: 0x08D2,
+                quantity: 2
+            })
+        );
+        let response = named("read-input-registers-response");
+        let Ok(ModbusPdu::ReadRegistersResponse {
+            function,
+            registers,
+        }) = decode(response)
+        else {
+            panic!("the function 0x04 response decodes to registers");
+        };
+        assert_eq!(function, FunctionCode::ReadInputRegisters);
+        assert_eq!(registers.len(), 99, "byte count 198");
+        for (index, value) in [(10, 1), (40, 4), (48, 475), (50, 470), (52, 19000)] {
+            assert_eq!(registers.get(index), Some(&value), "register {index}");
+        }
+        for (name, function) in [
+            ("read-extended-registers-request-split-file-record", 0x14),
+            ("read-extended-registers-response-split-file-record", 0x14),
+            ("write-extended-registers-request-file-record", 0x15),
+            ("write-extended-registers-request-split-file-record", 0x15),
+        ] {
+            let vector = named(name);
+            assert!(vector.must_fail, "{name}");
+            assert_eq!(vector.bytes.first(), Some(&function), "{name}: function");
+            assert!(
+                matches!(
+                    decode(vector),
+                    Err(ParseError::InvalidDiscriminator { value, .. }) if value == u64::from(function)
+                ),
+                "{name}: the PDU codec refuses function {function:#04x}"
+            );
         }
     }
 
@@ -428,12 +499,20 @@ mod tests {
             .count()
             .saturating_sub(adu_entries)
             .saturating_sub(typed);
+        let upstream = vectors()
+            .iter()
+            .filter(|v| v.source == VectorSource::UpstreamFixture)
+            .count();
         assert_eq!(
             entries,
-            vectors().len(),
+            vectors().len() - upstream,
             "one [[vector]] entry per tcp vector"
         );
-        for vector in vectors() {
+        // The upstream ADUs are seen here only through their PDU; their files hold the header.
+        let own = vectors()
+            .into_iter()
+            .filter(|v| v.source != VectorSource::UpstreamFixture);
+        for vector in own {
             let hex = std::fs::read_to_string(dir.join(format!("{}.hex", vector.name)))
                 .expect("readable");
             assert!(

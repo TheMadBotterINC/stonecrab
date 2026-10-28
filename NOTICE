@@ -3,5 +3,21 @@ Copyright 2026 The Mad Botter INC and the Stonecrab contributors
 
 Stonecrab is independent of the Apache Software Foundation and Apache PLC4X.
 Apache, Apache PLC4X and PLC4X are trademarks of the Apache Software Foundation.
-No upstream source code or test fixtures are redistributed in this initial foundation.
+
+This repository redistributes test fixtures of Apache PLC4X under the Apache
+License, Version 2.0: the four unmodified XML files under fixtures/modbus/upstream/,
+taken from Apache PLC4X v1.0.0 (commit ea229918f5d07700e04d7d69ab1645da679cb700),
+and the six Modbus TCP frames in fixtures/modbus/tcp/adu_upstream-*.hex, which are
+copied from the <raw> elements of one of those files. Each XML file keeps its ASF
+license header. fixtures/modbus/PROVENANCE.toml records the origin of every file and
+vector. These fixtures are not part of the published stonecrab crate.
+
+The NOTICE file of Apache PLC4X at that commit reads:
+
+    Apache PLC4X
+    Copyright 2017-2026 The Apache Software Foundation
+
+    This product includes software developed at
+    The Apache Software Foundation (http://www.apache.org/).
+
 Any future adapted material must retain its original notices and provenance.

@@ -14,27 +14,40 @@
 #     must_fail optional, default false; true when a decoder must reject the bytes
 #     note      optional free text
 #
-#   [[file]]    one per non-vector first-party fixture
+#   [[file]]    one per non-vector fixture, first-party or a verbatim upstream copy
 #     path      path relative to this file; must exist
 #     origin    where the content was authored from
 #     license   SPDX expression
 #     note      optional free text
 #
 # The tcp/ directory holds Modbus PDU vectors (CODING_STANDARDS 13.6), PDU bytes only: no
-# MBAP header and no unit identifier (those are the S22 framing vectors). Until maintainer
-# prerequisite P4 (written approval to redistribute Apache PLC4X test vectors with NOTICE
-# attribution) is granted, every vector is first-party: "protocol_spec" bytes written out
-# from the examples of the Modbus Application Protocol Specification V1.1b, or "adversarial"
-# bytes built to break the decoder. Nothing was copied from an upstream file. The PDF of
-# the specification is not retained in this repository, so the section numbers are the
-# published table of contents (docs/parity/modbus.md, UNVERIFIED) and the example bytes
-# are transcribed from the published examples; a maintainer should check them against the
-# PDF. When P4 is granted the upstream FC04 request and response vectors and the FC20 and
-# FC21 must_fail vectors are added here with source "upstream_fixture".
+# MBAP header and no unit identifier (those are the S22 framing vectors). Most are
+# first-party: "protocol_spec" bytes written out from the examples of the Modbus
+# Application Protocol Specification V1.1b, or "adversarial" bytes built to break the
+# decoder. The PDF of the specification is not retained in this repository, so the section
+# numbers are the published table of contents (docs/parity/modbus.md, UNVERIFIED) and the
+# example bytes are transcribed from the published examples; a maintainer should check
+# them against the PDF.
+#
+# The upstream/ directory holds verbatim, unmodified copies of four Apache PLC4X test
+# files (maintainer prerequisite P4, decision E2 of docs/POST_ALPHA_PLAN.md, approved on
+# 2026-10-28: redistribution is allowed with NOTICE attribution). They keep their ASF
+# license headers and are listed as [[file]] entries with the git blob SHA the upstream
+# repository gives them. The six vectors tcp/adu_upstream-* are the six <raw> elements of
+# upstream/tcp/ParserSerializerTestsuite.xml, source "upstream_fixture": whole ADUs, MBAP
+# header included, so they are framing vectors like the other tcp/adu_* ones. Two (the
+# function 0x04 request and response) decode at the PDU layer; the four function 0x14 and
+# 0x15 ("extended registers") vectors are framed by the MBAP framer but are must_fail
+# there: the PDU codec refuses function codes outside the alpha set. A test
+# (adapter_rederives_each_parser_suite_hex_from_raw_text) re-derives every one of the six
+# .hex files from the <raw> text of the retained XML by a string scan. The two
+# all-datatypes files and DriverTestsuite.xml are retained for the S04b adapter and the
+# S23 typed decoder tests; no vector is derived from them yet.
 #
 # Every tcp vector has <name>.hex (comment lines, then one hex line) and a
-# <name>.expected.json written by hand (or from the stated byte pattern), never produced
-# by running the decoder. The expected files carry:
+# <name>.expected.json written by hand (or from the stated byte pattern, or, for the upstream
+# vectors below, by a script that does not use the decoder), never produced by running the
+# decoder. The expected files carry:
 #   direction   "request" or "response": which decoder reads the bytes
 #   function    the function code a response is decoded for
 #   start, quantity       an accepted request
@@ -65,6 +78,13 @@
 #             means decode returns Ok(None) and leaves the buffer alone (adu_len, the ADU
 #             length the header declares, when the header is complete); header_error
 #             "Truncated" is what MbapHeader::decode says about the same bytes
+# The six tcp/adu_upstream-* expected files carry adus and leftover, read by the framer
+# tests, and a `pdu` object, read by the PDU codec tests: the expectation for the bytes
+# after the 7 byte header, in the schema of the PDU vectors above (direction, function and
+# start, quantity or registers, or error with its parameters). For these vectors must_fail
+# means that the PDU codec rejects the PDU; the framer accepts all six. The expected files
+# were written out from the <raw> hex by a throwaway script that uses neither the framer
+# nor the decoder; the script is not kept.
 # The vectors named tcp/typed_* (S23) are the exception to "PDU bytes only": their .hex
 # holds REGISTER bytes, the data section of a read response without the function code and
 # byte count, each register high byte first as sent on the wire, and they are read by the
@@ -1233,3 +1253,73 @@ origin = "Authored to break the typed decoder: LWORD needs a different register 
 license = "Apache-2.0"
 must_fail = true
 note = "MalformedData: the 3 register(s) are rejected and kept as 6 raw bytes on the ItemError"
+
+[[file]]
+path = "upstream/tcp/ParserSerializerTestsuite.xml"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), protocols/modbus/src/test/resources/protocols/modbus/tcp/ParserSerializerTestsuite.xml"
+license = "Apache-2.0"
+note = "Verbatim, unmodified, ASF license header kept. git blob 76ff08103ea950accc377d5a45afac15057f55e3, sha256 b686c5a7e593d54e8ee853cb02ddbdb9d3e504d9d6000c93fd179f00ff341914. Its six <raw> elements are the vectors tcp/adu_upstream-*."
+
+[[file]]
+path = "upstream/tcp/DriverTestsuite.xml"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), protocols/modbus/src/test/resources/protocols/modbus/tcp/DriverTestsuite.xml"
+license = "Apache-2.0"
+note = "Verbatim, unmodified, ASF license header kept. git blob cc6976df4850e4494ebc806c60948c9132c828af, sha256 719890485e5d7f40a59c7ddd92d6f59b1d3391f5bb661bb9ac67ae19f2011318. Retained for the S04b adapter; it has no <raw> elements and no vector is derived from it yet."
+
+[[file]]
+path = "upstream/tcp/Modbus-all-datatypes.xml"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml"
+license = "Apache-2.0"
+note = "Verbatim, unmodified, ASF license header kept. git blob 31b5d343cd665871d845a128c706d478504aaf2a, sha256 808d656c6fded47e460b5dec8b53f0f22c2a0d392f2ebc53a3e7c0366bd8811c. Retained for the S04b adapter and the S23 big-endian tests; no vector is derived from it yet."
+
+[[file]]
+path = "upstream/tcp/Modbus-all-datatypes-little-endian.xml"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml"
+license = "Apache-2.0"
+note = "Verbatim, unmodified, ASF license header kept. git blob a875b5f4d59e884f123bd6c97a9581b6c547f6a9, sha256 ff096c7a4f23512eecb4fb4f99dde1f2b23301a43e91a3e30baf0b9c1970b439. Retained for the S04b adapter and the S23 little-endian tests; no vector is derived from it yet."
+
+[[vector]]
+name = "tcp/adu_upstream-read-input-registers-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/ParserSerializerTestsuite.xml, test case \"Read Input Registers Request\" (kept at fixtures/modbus/upstream/tcp/ParserSerializerTestsuite.xml)"
+license = "Apache-2.0"
+note = "A whole ADU, MBAP header included: the framer accepts it and the PDU codec decodes the PDU after the header."
+
+[[vector]]
+name = "tcp/adu_upstream-read-input-registers-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/ParserSerializerTestsuite.xml, test case \"Read Input Registers Response\" (kept at fixtures/modbus/upstream/tcp/ParserSerializerTestsuite.xml)"
+license = "Apache-2.0"
+note = "A whole ADU, MBAP header included: the framer accepts it and the PDU codec decodes the PDU after the header."
+
+[[vector]]
+name = "tcp/adu_upstream-read-extended-registers-request-split-file-record"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/ParserSerializerTestsuite.xml, test case \"Read Extended Registers Request Split File Record\" (kept at fixtures/modbus/upstream/tcp/ParserSerializerTestsuite.xml)"
+license = "Apache-2.0"
+must_fail = true
+note = "A whole ADU the framer accepts. ParseError::InvalidDiscriminator at the PDU layer: function code 0x14 (read file record) is outside the alpha set (decision D3). Retained for framing tests and PDU-layer negative tests only."
+
+[[vector]]
+name = "tcp/adu_upstream-read-extended-registers-response-split-file-record"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/ParserSerializerTestsuite.xml, test case \"Read Extended Registers Response Split File Record\" (kept at fixtures/modbus/upstream/tcp/ParserSerializerTestsuite.xml)"
+license = "Apache-2.0"
+must_fail = true
+note = "A whole ADU the framer accepts. ParseError::InvalidDiscriminator at the PDU layer: function code 0x14 (read file record) is outside the alpha set (decision D3). Retained for framing tests and PDU-layer negative tests only."
+
+[[vector]]
+name = "tcp/adu_upstream-write-extended-registers-request-file-record"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/ParserSerializerTestsuite.xml, test case \"Write Extended Registers Request File Record\" (kept at fixtures/modbus/upstream/tcp/ParserSerializerTestsuite.xml)"
+license = "Apache-2.0"
+must_fail = true
+note = "A whole ADU the framer accepts. ParseError::InvalidDiscriminator at the PDU layer: function code 0x15 (write file record) is outside the alpha set (decision D3). Retained for framing tests and PDU-layer negative tests only."
+
+[[vector]]
+name = "tcp/adu_upstream-write-extended-registers-request-split-file-record"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/ParserSerializerTestsuite.xml, test case \"Write Extended Registers Request Split File Record\" (kept at fixtures/modbus/upstream/tcp/ParserSerializerTestsuite.xml)"
+license = "Apache-2.0"
+must_fail = true
+note = "A whole ADU the framer accepts. ParseError::InvalidDiscriminator at the PDU layer: function code 0x15 (write file record) is outside the alpha set (decision D3). Retained for framing tests and PDU-layer negative tests only."

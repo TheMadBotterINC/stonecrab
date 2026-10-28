@@ -179,9 +179,10 @@ error rather than ignoring it; operations that have no API at all do not exist:
   milestone M2 (no row yet);
 - the upstream gap-filling read optimizer: Stonecrab merges adjacent or overlapping tags
   only (`MB-READ-GAP`), and a background reconnect task: reconnect is request-driven;
-- the upstream test vectors, which wait for maintainer approval to redistribute them
-  (prerequisite P4): the repository's vectors are first-party, and the byte-order rows
-  stay below `automated-verified` for that reason.
+- the upstream driver-suite and all-datatypes exchanges as vectors: the four upstream
+  test files are retained since S04a and the six parser-suite frames are vectors, but the
+  exchanges wait for the S04b adapter, so the byte-order rows stay below
+  `automated-verified`.
 
 ## Interoperability
 The `interop` job of the repository's CI builds `interop/pymodbus/` (a first-party Modbus
@@ -566,9 +567,9 @@ names are four pairs of them (ADR-0006) and lay the value `0x01020304` out as sh
 | `LITTLE_ENDIAN_BYTE_SWAP` | `BigEndian` | `LowWordFirst` | `[3,4,1,2]` |
 
 The mapping is derived from the documented layouts. The first-party vectors and the
-pymodbus register map agree with it, but the upstream little-endian vectors are not in the
-repository until the maintainer approval P4 is granted, so the byte-order rows of the
-parity record are `implemented`, not `automated-verified`.
+pymodbus register map agree with it. The upstream little-endian test file is retained
+since S04a, but its exchanges become vectors only with the S04b adapter, so the byte-order
+rows of the parity record are `implemented`, not `automated-verified`.
 
 A lone `BOOL`, `BYTE`, `SINT` or `USINT` occupies one register: the low byte (and, for a
 `BOOL`, bit 0) under `BigEndian`, the high byte (bit 8) under `LittleEndian`. The other

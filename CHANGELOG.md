@@ -15,6 +15,9 @@ placeholder.
   use the old repository owner.
 - `Operation::Ping`, `Capabilities.ping` and a provided `Connection::ping` that returns
   `Unsupported` until a driver overrides it (additive; no driver overrides it yet).
+- Upstream Modbus test vectors (no crate changes): four Apache PLC4X test files are
+  retained verbatim under `fixtures/modbus/upstream/` with NOTICE attribution, and the six
+  frames of the parser suite are vectors, none of them in the published crate.
 
 ## Alpha
 The first pre-release is `stonecrab` 0.2.0, one crate (ADR-0018). Its section below opens

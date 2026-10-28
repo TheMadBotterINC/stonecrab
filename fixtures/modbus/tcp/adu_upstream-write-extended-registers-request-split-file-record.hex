@@ -1,0 +1,4 @@
+# ADU bytes: the 7 byte MBAP header (transaction id, protocol id, length, unit id), then the PDU.
+# Copied from the <raw> element of the test case "Write Extended Registers Request Split File Record" in fixtures/modbus/upstream/tcp/ParserSerializerTestsuite.xml (Apache PLC4X v1.0.0, commit ea229918); a test re-derives it from that file.
+# Transaction 10, protocol id 0, length 21 (unit id plus 20 PDU bytes), unit id 1 (0x01). Function 0x15 (21) request: byte count 18, two sub-requests. Outside the alpha set, so the PDU layer refuses it.
+00 0A 00 00 00 15 01 15 12 06 00 01 27 0F 00 01 00 00 06 00 02 00 00 00 01 00 00

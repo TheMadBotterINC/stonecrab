@@ -874,21 +874,72 @@ mod tests {
         // covers: CODING_STANDARDS 13.6, every vector is listed in PROVENANCE.toml
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/modbus");
         let vectors = load_dir(&dir).expect("fixtures/modbus loads: every file is listed");
-        assert!(!vectors.is_empty(), "the first-party Modbus PDU vectors");
+        assert!(!vectors.is_empty(), "the Modbus vectors");
+        let upstream = vectors
+            .iter()
+            .filter(|v| v.source == VectorSource::UpstreamFixture)
+            .count();
+        assert_eq!(upstream, 6, "the six <raw> elements of the parser suite");
         assert!(
-            vectors.iter().all(|v| matches!(
-                v.source,
-                VectorSource::ProtocolSpec | VectorSource::Adversarial
-            )),
-            "no upstream vector lands before P4"
+            vectors.iter().all(|v| v.source != VectorSource::Captured),
+            "nothing is captured from a device yet"
         );
         let provenance = load_provenance(&dir).expect("provenance parses");
         let files: Vec<_> = provenance.file.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(
             files,
-            ["interop/register-map.toml"],
-            "the register map is the one file"
+            [
+                "interop/register-map.toml",
+                "upstream/tcp/ParserSerializerTestsuite.xml",
+                "upstream/tcp/DriverTestsuite.xml",
+                "upstream/tcp/Modbus-all-datatypes.xml",
+                "upstream/tcp/Modbus-all-datatypes-little-endian.xml",
+            ],
+            "the register map and the four retained upstream files"
         );
+    }
+
+    // Every upstream vector is derived from the retained file, never hand-typed.
+    #[test]
+    fn adapter_rederives_each_parser_suite_hex_from_raw_text() {
+        // The order of the <raw> elements in upstream/tcp/ParserSerializerTestsuite.xml.
+        let names = [
+            "tcp/adu_upstream-read-input-registers-request",
+            "tcp/adu_upstream-read-input-registers-response",
+            "tcp/adu_upstream-read-extended-registers-request-split-file-record",
+            "tcp/adu_upstream-read-extended-registers-response-split-file-record",
+            "tcp/adu_upstream-write-extended-registers-request-file-record",
+            "tcp/adu_upstream-write-extended-registers-request-split-file-record",
+        ];
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/modbus");
+        let xml = fs::read_to_string(dir.join("upstream/tcp/ParserSerializerTestsuite.xml"))
+            .expect("the retained parser suite is readable");
+        // A string scan, not an XML parser: the text between each `<raw>` and its `</raw>`.
+        let mut raws = Vec::new();
+        let mut rest = xml.as_str();
+        while let Some((_, after_open)) = rest.split_once("<raw>") {
+            let (inside, after_close) = after_open
+                .split_once("</raw>")
+                .expect("every <raw> is closed");
+            raws.push(inside.split_whitespace().collect::<String>().to_lowercase());
+            rest = after_close;
+        }
+        assert_eq!(raws.len(), names.len(), "six <raw> elements");
+        let vectors = load_dir(&dir).expect("fixtures/modbus loads");
+        for (name, raw) in names.iter().zip(&raws) {
+            let vector = vectors
+                .iter()
+                .find(|v| v.name == *name)
+                .unwrap_or_else(|| panic!("{name} is listed"));
+            assert_eq!(vector.source, VectorSource::UpstreamFixture, "{name}");
+            let mut derived = String::new();
+            for byte in &vector.bytes {
+                for nibble in [byte >> 4, byte & 0x0F] {
+                    derived.push(char::from_digit(u32::from(nibble), 16).expect("a nibble"));
+                }
+            }
+            assert_eq!(&derived, raw, "{name}: the .hex against the <raw> text");
+        }
     }
 
     #[test]

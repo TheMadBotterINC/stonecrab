@@ -1,0 +1,4 @@
+# ADU bytes: the 7 byte MBAP header (transaction id, protocol id, length, unit id), then the PDU.
+# Copied from the <raw> element of the test case "Read Input Registers Request" in fixtures/modbus/upstream/tcp/ParserSerializerTestsuite.xml (Apache PLC4X v1.0.0, commit ea229918); a test re-derives it from that file.
+# Transaction 0, protocol id 0, length 6 (unit id plus 5 PDU bytes), unit id 255 (0xFF). Function 0x04 (read input registers) request: start 0x08D2 (2258), quantity 2.
+00 00 00 00 00 06 FF 04 08 D2 00 02
