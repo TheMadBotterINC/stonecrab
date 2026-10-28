@@ -2,6 +2,16 @@
 **Apache PLC4X, carcinized.** An independent native Rust port, built for sensor acquisition first.
 Copyright 2026 The Mad Botter INC and the Stonecrab contributors. Apache-2.0.
 
+```
+            _ _ _ _
+   \\     /  (o) (o)  \     //
+    \\___|     ____     |___//
+         |  \________/  |
+         '-.__      __.-'
+            _/ \  / \_
+           (_)  \/  (_)
+```
+
 Stonecrab reads values from industrial equipment, such as sensors and controllers that
 speak Modbus TCP, and hands them to your program as plain, checked numbers. It is one
 package with one version, `stonecrab`, written in Rust. Today it can read coils, discrete
