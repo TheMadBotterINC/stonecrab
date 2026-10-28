@@ -1,8 +1,10 @@
 //! The connection boundary: one live link to one device.
 
+use std::time::Duration;
+
 use crate::{
-    Capabilities, ConnectionState, OpFuture, ReadRequest, ReadResponse, ResourceLimits, StateWatch,
-    WriteRequest, WriteResponse,
+    Capabilities, ConnectionState, Diagnostics, ErrorKind, FailureCategory, OpFuture, Operation,
+    PlcError, ReadRequest, ReadResponse, ResourceLimits, StateWatch, WriteRequest, WriteResponse,
 };
 
 /// One live link to one device: state observation, reads, writes and an explicit close.
@@ -14,12 +16,13 @@ use crate::{
 /// request) lives behind it.
 ///
 /// # Narrow surface
-/// The alpha surface is exactly the seven methods below (decision D2). `subscribe`,
-/// `browse` and `discover` are not here: their request and response types do not exist
-/// yet (ADR-0001 forbids empty scaffolds) and subscriptions are out of the alpha (D4).
-/// They will be added as provided methods returning
-/// [`ErrorKind::Unsupported`](crate::ErrorKind::Unsupported), so adding them breaks no
-/// implementor.
+/// The surface is the seven required methods below (decision D2) and one provided method,
+/// [`ping`](Self::ping), which takes no request and so needs no new type (ADR-0011,
+/// addendum of slice S40). `subscribe`, `browse` and `discover` are not here: their
+/// request and response types do not exist yet (ADR-0001 forbids empty scaffolds) and
+/// subscriptions are out of the alpha (D4). They will be added as provided methods
+/// returning [`ErrorKind::Unsupported`](crate::ErrorKind::Unsupported), as `ping` is, so
+/// adding them breaks no implementor.
 ///
 /// # The default-deadline rule
 /// Every operation is bounded (`CODING_STANDARDS` 8.5). A request that carries an explicit
@@ -40,9 +43,10 @@ use crate::{
 ///
 /// # Compatibility: docs/parity/core.md#CORE-CONNECTION-TRAIT
 /// Corresponds to the upstream `PlcConnection`: read and write requests execute against
-/// one connection, and capability support is queryable. Upstream's `ping` and
-/// subscription methods are deferred; see ADR-0011 for every difference from the
-/// ARCHITECTURE.md 3.1 diagram.
+/// one connection, and capability support is queryable. Upstream's `ping` is a provided
+/// method that returns `Unsupported` until a driver overrides it; its subscription
+/// methods are deferred. See ADR-0011 for every difference from the ARCHITECTURE.md 3.1
+/// diagram.
 ///
 /// # Examples
 /// Code that is written against the trait works with any driver's connection. This
@@ -180,4 +184,66 @@ pub trait Connection: Send + Sync {
     /// May send a protocol goodbye and shuts the transport down. Pending requests are not
     /// replayed.
     fn close(&self) -> OpFuture<'_, ()>;
+
+    /// Check that the peer answers, without reading or writing tagged values.
+    ///
+    /// The default implementation performs no I/O and fails with
+    /// [`ErrorKind::Unsupported`](crate::ErrorKind::Unsupported) for
+    /// [`Operation::Ping`]; a driver that can ping overrides it and sets
+    /// [`Capabilities::ping`]. Like [`close`](Self::close) the call takes no request, so it
+    /// has no deadline slot of its own: an override bounds its attempt by
+    /// `timeouts.request`, and the way to cancel it is to drop the future.
+    ///
+    /// # Errors
+    /// The default returns [`ErrorKind::Unsupported`](crate::ErrorKind::Unsupported)
+    /// for [`Operation::Ping`], with `Diagnostics` naming the operation, the connection
+    /// state and the `Validation` category. An override may also return
+    /// [`ErrorKind::Disconnected`](crate::ErrorKind::Disconnected) when the connection is
+    /// not open and [`ErrorKind::Timeout`](crate::ErrorKind::Timeout) when the peer does
+    /// not answer within `timeouts.request`.
+    ///
+    /// # Cancel safety
+    /// The default is cancel-safe: it does no I/O and resolves at once. An override must
+    /// stay cancel-safe, because dropping the future abandons the attempt and a ping
+    /// changes nothing on the device.
+    ///
+    /// # Wire effects
+    /// The default sends nothing. An override sends one protocol-level probe and never a
+    /// read or write of a tagged value.
+    ///
+    /// # Compatibility: docs/parity/core.md#CORE-CONNECTION-TRAIT
+    /// Corresponds to the upstream `PlcConnection.ping()`, which also takes no argument.
+    /// The default reports `Unsupported(Operation::Ping)`; see the parity row for the
+    /// Modbus driver.
+    ///
+    /// # Examples
+    /// A caller can tell "no ping" from "no answer" by the error kind.
+    /// ```
+    /// use stonecrab::{Connection, ErrorKind, Operation, Result};
+    ///
+    /// async fn answers(connection: &dyn Connection) -> Result<Option<bool>> {
+    ///     match connection.ping().await {
+    ///         Ok(()) => Ok(Some(true)),
+    ///         Err(error) if error.kind() == ErrorKind::Unsupported(Operation::Ping) => Ok(None),
+    ///         Err(error) if error.kind() == ErrorKind::Timeout => Ok(Some(false)),
+    ///         Err(error) => Err(error),
+    ///     }
+    /// }
+    /// ```
+    fn ping(&self) -> OpFuture<'_, ()> {
+        Box::pin(async move {
+            let diagnostics = Diagnostics {
+                operation: Some(Operation::Ping),
+                connection_state: Some(self.state()),
+                latency: Some(Duration::ZERO),
+                category: Some(FailureCategory::Validation),
+                ..Diagnostics::default()
+            };
+            Err(PlcError::new(
+                ErrorKind::Unsupported(Operation::Ping),
+                "this connection does not implement ping",
+            )
+            .with_diagnostics(diagnostics))
+        })
+    }
 }

@@ -18,6 +18,8 @@ pub enum Operation {
     Discover,
     /// Release a connection explicitly.
     Close,
+    /// Check that the peer answers, without reading or writing tagged values.
+    Ping,
 }
 
 /// How a driver obtains subscription updates.
@@ -60,6 +62,9 @@ pub struct Capabilities {
     pub browse: bool,
     /// Explicit device discovery is implemented.
     pub discover: bool,
+    /// Ping is implemented: [`Connection::ping`](crate::Connection::ping) checks that the
+    /// peer answers.
+    pub ping: bool,
     /// Advertised device item limit; unknown when absent.
     pub max_items_per_request: Option<NonZeroUsize>,
     /// Advertised device PDU limit; unknown when absent.
@@ -76,6 +81,7 @@ impl Default for Capabilities {
             subscribe: SubscriptionMode::Unsupported,
             browse: false,
             discover: false,
+            ping: false,
             max_items_per_request: None,
             max_pdu_bytes: None,
             concurrency: NonZeroUsize::MIN,
@@ -97,6 +103,7 @@ impl Capabilities {
             Operation::Subscribe => !matches!(self.subscribe, SubscriptionMode::Unsupported),
             Operation::Browse => self.browse,
             Operation::Discover => self.discover,
+            Operation::Ping => self.ping,
         }
     }
 }
@@ -116,6 +123,7 @@ mod tests {
             Operation::Browse,
             Operation::Discover,
             Operation::Close,
+            Operation::Ping,
         ];
         let mut reversed = declared;
         reversed.reverse();
@@ -143,6 +151,7 @@ mod tests {
             Operation::Subscribe,
             Operation::Browse,
             Operation::Discover,
+            Operation::Ping,
         ] {
             assert!(
                 !capabilities.supports(operation),
@@ -166,11 +175,13 @@ mod tests {
         capabilities.write = true;
         capabilities.browse = true;
         capabilities.discover = true;
+        capabilities.ping = true;
         for operation in [
             Operation::Read,
             Operation::Write,
             Operation::Browse,
             Operation::Discover,
+            Operation::Ping,
         ] {
             assert!(
                 capabilities.supports(operation),

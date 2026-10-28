@@ -68,7 +68,7 @@ assert_eq!(clock.now(), deadline);
 
 ## Driver contract suite
 
-`ContractSuite::run(driver, uri, fixture)` runs one set of 23 cases, named as sentences,
+`ContractSuite::run(driver, uri, fixture)` runs one set of 24 cases, named as sentences,
 against any `Driver` and returns a `ContractReport`. A
 `ContractFixture` is the suite's window into the device: a `readable` address, a
 `rejected` one (parseable, refused by the device), a `foreign` one, an `io_probe` counter

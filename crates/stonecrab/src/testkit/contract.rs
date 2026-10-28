@@ -491,11 +491,11 @@ impl ContractSuite {
     /// use stonecrab::testkit::ContractSuite;
     ///
     /// let cases = ContractSuite::cases();
-    /// assert_eq!(cases.len(), 23);
+    /// assert_eq!(cases.len(), 24);
     /// let mut names: Vec<_> = cases.iter().map(|case| case.name).collect();
     /// names.sort_unstable();
     /// names.dedup();
-    /// assert_eq!(names.len(), 23, "case names are unique");
+    /// assert_eq!(names.len(), 24, "case names are unique");
     /// ```
     #[must_use]
     pub fn cases() -> Vec<ContractCase> {

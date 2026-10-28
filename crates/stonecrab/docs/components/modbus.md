@@ -167,9 +167,11 @@ error rather than ignoring it; operations that have no API at all do not exist:
 - writes (`MB-TCP-WRITE`): `write` is `Unsupported(Operation::Write)`, sends nothing, and
   `Capabilities.write` is false; write PDUs, the upstream FC06-versus-FC16 choice and
   `WriteOutcome::Unknown` on the wire come after the alpha;
-- subscriptions, browse, discovery and ping (`MB-TCP-SUBSCRIBE`, `MB-TCP-BROWSE`,
-  `MB-TCP-DISCOVER`, `MB-TCP-PING`): these operations do not exist in the API; the
-  `ping-address` key is validated and unused;
+- subscriptions, browse and discovery (`MB-TCP-SUBSCRIBE`, `MB-TCP-BROWSE`,
+  `MB-TCP-DISCOVER`): these operations do not exist in the API;
+- ping (`MB-TCP-PING`): `Connection::ping` exists since S40, but the Modbus connection
+  does not override it yet, so it returns `Unsupported` and `Capabilities.ping` is false;
+  the `ping-address` key is validated and unused;
 - extended registers (FC20 and FC21, `extended-register`, `6x`), `STRING`, `WSTRING`,
   `CHAR`, `WCHAR`, the `TIME` and `DATE` family, array selections and the legacy array
   form (`MB-ADDR-*`, `MB-TYPE-*`);

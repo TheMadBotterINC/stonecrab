@@ -168,3 +168,25 @@ tested through the simulator in `crates/stonecrab-driver-sim/tests/driver_contra
 `the_registry_connects_reads_state_random_and_a_ramp_and_writes_state_and_sink`. The
 default-deadline rule is tested by `an_absent_deadline_uses_timeouts_request`.
 `scripts/coverage-gate.sh` holds core and the simulator at 100% lines.
+
+## Addendum (2026-10-28, slice S40): `Connection::ping`
+Slice S40 of docs/POST_ALPHA_PLAN.md (finding G07, the ping part) adds the first of the
+deferred provided methods. `Operation::Ping` is appended as the last variant of
+`Operation`, so the existing variants keep their relative order and the derived `Ord`
+stays additive. `Capabilities` gains `ping: bool`, false by default and initialised like
+`browse` and `discover`; `Capabilities::supports(Operation::Ping)` reads it.
+`Connection` gains `fn ping(&self) -> OpFuture<'_, ()>` with a default body that performs
+no I/O and resolves to `ErrorKind::Unsupported(Operation::Ping)` with `Diagnostics`
+naming the operation, the connection state and the `Validation` category (the shape the
+Modbus write path uses). Adding a provided method breaks no implementor.
+
+Why there is no request type. `ping` follows `close`, which also takes no request: the
+upstream `PlcConnection.ping()` takes no argument, so there is nothing to carry, and a
+type with no field would be the empty scaffold ADR-0001 forbids. An override bounds its
+attempt by `timeouts.request` and cancellation is by dropping the future, as for `close`.
+
+The first override is the Modbus ping (S47, parity row `MB-TCP-PING`); neither the
+simulator nor `modbus-tcp` overrides it in S40 and both keep `Capabilities.ping` false.
+The contract suite gains the case `an unsupported ping performs no I/O and changes no
+state`, which runs for any driver that reports ping unsupported. `subscribe`, `browse` and
+`discover` are still not declared.

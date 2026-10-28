@@ -13,6 +13,8 @@ placeholder.
 - Documents reconciled with the 0.2.0 publication (no crate changes): README, SECURITY,
   STATUS, the project brief and the coding standards no longer call 0.2.0 unpublished or
   use the old repository owner.
+- `Operation::Ping`, `Capabilities.ping` and a provided `Connection::ping` that returns
+  `Unsupported` until a driver overrides it (additive; no driver overrides it yet).
 
 ## Alpha
 The first pre-release is `stonecrab` 0.2.0, one crate (ADR-0018). Its section below opens

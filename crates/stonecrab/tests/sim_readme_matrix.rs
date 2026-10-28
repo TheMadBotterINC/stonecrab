@@ -94,6 +94,7 @@ mod tests {
         );
         assert!(!capabilities.browse, "browse");
         assert!(!capabilities.discover, "discover");
+        assert!(!capabilities.ping, "ping");
     }
 
     #[test]

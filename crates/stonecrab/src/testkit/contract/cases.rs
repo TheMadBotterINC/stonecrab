@@ -410,10 +410,11 @@ pub(super) enum Id {
     ReadOnlyPolicy,
     UnknownNotReplayed,
     UnsupportedWrite,
+    UnsupportedPing,
 }
 
 impl Id {
-    pub(super) const ALL: [Self; 23] = [
+    pub(super) const ALL: [Self; 24] = [
         Self::Capabilities,
         Self::Lifecycle,
         Self::Correlation,
@@ -437,6 +438,7 @@ impl Id {
         Self::ReadOnlyPolicy,
         Self::UnknownNotReplayed,
         Self::UnsupportedWrite,
+        Self::UnsupportedPing,
     ];
 
     pub(super) const fn case(self) -> ContractCase {
@@ -561,6 +563,11 @@ impl Id {
                 "F3 unsupported capability",
                 &[Requires::WriteUnsupported, Requires::WritableAddress],
             ),
+            Self::UnsupportedPing => ContractCase::new(
+                "an unsupported ping performs no I/O and changes no state",
+                "F3 unsupported capability; ADR-0011 addendum (S40)",
+                &[],
+            ),
         }
     }
 
@@ -589,6 +596,7 @@ impl Id {
             Self::ReadOnlyPolicy => read_only_policy(env).await,
             Self::UnknownNotReplayed => unknown_not_replayed(env).await,
             Self::UnsupportedWrite => unsupported_write(env).await,
+            Self::UnsupportedPing => unsupported_ping(env).await,
         }
     }
 }
@@ -612,6 +620,10 @@ async fn capabilities_match(env: &Env<'_>) -> Check {
     ensure(
         !actual.discover || declared.discover,
         "the connection claims discover; the driver does not",
+    )?;
+    ensure(
+        !actual.ping || declared.ping,
+        "the connection claims ping; the driver does not",
     )?;
     ensure(
         !actual.supports(Operation::Subscribe) || declared.supports(Operation::Subscribe),
@@ -1063,6 +1075,48 @@ async fn unsupported_write(env: &Env<'_>) -> Check {
         "a write on a driver without write",
     )?;
     env.no_io(before, "an unsupported write")?;
+    release(connection).await;
+    Ok(())
+}
+
+async fn unsupported_ping(env: &Env<'_>) -> Check {
+    if env.driver.capabilities().ping {
+        return skip("driver reports ping supported; the case needs it unsupported");
+    }
+    let connection = env.open().await?;
+    ensure(
+        !connection.capabilities().ping,
+        "the connection reports ping although the driver does not",
+    )?;
+    let state = connection.state();
+    let before = env.probe();
+    let error = refused(
+        connection.ping().await,
+        ErrorKind::Unsupported(Operation::Ping),
+        "a ping on a driver without ping",
+    )?;
+    let found = error.diagnostics();
+    ensure_eq(
+        found.operation,
+        Some(Operation::Ping),
+        "an unsupported ping: diagnostics.operation",
+    )?;
+    ensure_eq(
+        found.connection_state,
+        Some(state),
+        "an unsupported ping: diagnostics.connection_state",
+    )?;
+    ensure_eq(
+        found.category,
+        Some(FailureCategory::Validation),
+        "an unsupported ping: diagnostics.category",
+    )?;
+    env.no_io(before, "an unsupported ping")?;
+    ensure_eq(
+        connection.state(),
+        state,
+        "the state after an unsupported ping",
+    )?;
     release(connection).await;
     Ok(())
 }

@@ -90,6 +90,7 @@ mod tests {
         );
         assert!(!capabilities.browse, "browse");
         assert!(!capabilities.discover, "discover");
+        assert!(!capabilities.ping, "ping");
 
         // The interoperability job (S27) exists; no hardware claim at all.
         assert_eq!(level_of("Interoperability"), "interoperability-tested");

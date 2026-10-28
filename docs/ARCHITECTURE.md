@@ -1917,7 +1917,7 @@ the crate because a separate test crate would be a dev-dependency cycle. It ship
 `Script`, `Step` (including `Respond` and `React`), `Reaction`, `ScriptedPeer`,
 `ScriptedPeerFactory`, `FakeTransport`, `FakeTransportFactory`, `CountingFactory` and
 `LengthPrefixedFramer`; the golden-vector loader (`load_dir`, `GoldenVector`,
-`VectorSource`) and `InteropMap`; and `ContractSuite` (23 cases, `ContractFixture`,
+`VectorSource`) and `InteropMap`; and `ContractSuite` (24 cases, `ContractFixture`,
 `ContractReport`) which every driver runs and which driver authors can run against their
 own driver. The loaders and some of its tests read repository files, so they run from a
 checkout. **Deferred:** `DifferentialRunner` and `UpstreamHarness` (M5), the
