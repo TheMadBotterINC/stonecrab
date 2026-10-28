@@ -1,13 +1,16 @@
 # Changelog
 All notable changes to this project are documented here, in the style of Keep a
-Changelog. Stonecrab is one crate, so there is one section for the alpha. Nothing in it is
-published: the only published version is `stonecrab` 0.1.0, and publication of the alpha
-needs a separate maintainer approval.
+Changelog. Stonecrab is one crate, so there is one section for the alpha. It is published
+as `stonecrab` 0.2.0 (2026-10-27); `stonecrab` 0.1.0 is the specification-stage
+placeholder.
 
 ## Unreleased
 - Release process and evidence (no crate changes): ADR-0017, `release.toml`,
   `mutants.toml`, the `release-evidence` workflow, `docs/evidence/` with the recorded
   fuzz, mutation and coverage figures, and drafted (not filed) upstream issues.
+- Documents reconciled with the 0.2.0 publication (no crate changes): README, SECURITY,
+  STATUS, the project brief and the coding standards no longer call 0.2.0 unpublished or
+  use the old repository owner.
 
 ## Alpha
 The first pre-release is `stonecrab` 0.2.0, one crate (ADR-0018). Its section below opens

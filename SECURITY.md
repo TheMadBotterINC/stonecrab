@@ -16,7 +16,7 @@ placeholder has no code to defend.
 
 | Crate | Supported version |
 | --- | --- |
-| `stonecrab` | 0.2.0 (once published) |
+| `stonecrab` | 0.2.0 |
 
 Stonecrab is one crate with one version; its modules (the simulator, Modbus TCP, the
 sensor profiles, the transport and the codec) are not versioned separately. Pre-1.0
@@ -45,5 +45,5 @@ pull request, the patch release) are written down in
 [`docs/adr/0017-release-process-and-evidence.md`](docs/adr/0017-release-process-and-evidence.md),
 decision 5.
 
-Because nothing beyond the 0.1.0 placeholder is published, no version has been yanked and
-no advisory has been filed.
+`stonecrab` 0.2.0 and the 0.1.0 placeholder are the published versions. No version has
+been yanked and no advisory has been filed.

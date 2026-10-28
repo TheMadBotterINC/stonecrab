@@ -1,6 +1,6 @@
 # Stonecrab status and engineering handoff
 
-Updated: 2026-10-27.
+Updated: 2026-10-28.
 Implementation baseline: the commit that last modified this file
 (`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
 its own commit; the slice log below records what each one landed.
@@ -11,9 +11,10 @@ Stonecrab is an independent native Rust port of Apache PLC4X, prioritizing senso
 acquisition. The repository is at the **alpha baseline**: the alpha defined in
 [`docs/ALPHA_PLAN.md`](docs/ALPHA_PLAN.md) is built, its definition of done is met, the
 release evidence and process (slice S32, ADR-0017, `docs/evidence/alpha.md`) are recorded,
-and the code ships as **one crate** (slice S33, ADR-0018). Nothing of the alpha is
-published, tagged or posted upstream: those steps need the maintainer's separate approval
-(see "Recommended continuation").
+and the code ships as **one crate** (slice S33, ADR-0018). The alpha, `stonecrab` 0.2.0,
+is published on crates.io. It is not yet tagged (no `v0.2.0` tag, no GitHub release) and
+nothing is posted upstream: those steps are the maintainer's (see "Recommended
+continuation" and [`docs/POST_ALPHA_PLAN.md`](docs/POST_ALPHA_PLAN.md)).
 
 - Repository: https://github.com/TheMadBotterINC/stonecrab
 - Primary/default branch: **`master`**, locally and remotely.
@@ -162,7 +163,7 @@ landed; the table of landed slices below keeps the crate names the slices used t
 - `fixtures/modbus/`: first-party golden vectors (`tcp/`: PDU, ADU and typed-decode
   vectors authored from the Modbus Application Protocol V1.1b or built to fail), the
   interop register map and `PROVENANCE.toml`. The upstream vectors are not in the
-  repository (prerequisite P4).
+  repository (prerequisite P4, approved 2026-10-28; copies land in S04a).
 - `upstream/manifest.toml`: the pinned Apache PLC4X baseline and the Modbus TCP inventory.
 - Release process and evidence (ADR-0017 as amended): `release.toml` (cargo-release with
   publish, push and tag off; tag name `v{{version}}`), `mutants.toml`, the
@@ -318,6 +319,15 @@ gates named were run locally before that commit.
 | S32 | 2026-10-27 | Release evidence and process: ADR-0017 (publish order, signed per-crate tags prepared as commands, the yank procedure of CODING_STANDARDS 20.5, the evidence policy; references the ADR-0005 waiver); `release.toml` for cargo-release 1.1.7 with publish, push and tag off; `mutants.toml` and `mise run mutants` with one recorded run over fourteen scoped files (569 mutants: 462 caught, 0 missed, 107 unviable, three equivalent mutants excluded with reasons; the first run's seven survivors were killed by four added tests, test code only) stored as `docs/evidence/mutants/outcomes.json`; seven concurrent 30-minute fuzz runs with no artifact (`scripts/fuzz-evidence.sh`); the `release-evidence` dispatch workflow and `mise run sbom` (CycloneDX 1.5 per crate, package lists, absolute paths scrubbed); `docs/evidence/alpha.md` with the checklist; the upstream 1.0.0 source-release signature verified in a temporary keyring (`signature_verified = true`, nine pending items left); six upstream issues drafted under `docs/evidence/upstream-issues/`, not filed; the weekly `scheduled` job now runs the mutation scope and an advisory dry run; pinned tools cargo-mutants 27.1.0, cargo-cyclonedx 0.5.9, cargo-release 1.1.7 | check, coverage, lint-attrs, parity, machete, dependencies, sbom, package |
 | S33 | 2026-10-27 | One crate (maintainer decision; supersedes D1 and the crate graph of ADR-0001, ADR-0011, ADR-0014): the six sibling crates become modules of `stonecrab` 0.2.0 (`stonecrab::codec`, `::transport`, `::modbus`, `::sim`, `::sensors`; core at the root) and the test kit becomes `stonecrab::testkit` behind the off-by-default `testkit` feature; default features enable `sim`, `modbus` and `sensors`, `default-features = false` is the tokio-free core; everything moved with `git mv`; 1182 tests and 414 doctests before and after; module-level lint promotions kept and checked by `lint-attrs`; coverage thresholds per module prefix; one packaging list and SBOM; fuzz workspace, scripts, mise tasks, CI and the interop driver renamed. The narrative sections of this file, README, ARCHITECTURE, COMPATIBILITY, ADR-0018 and the release evidence are reconciled in the following docs commit | check, coverage, lint-attrs, parity, features, machete, dependencies, fuzz, examples, interop, package |
 | S33 (docs) | 2026-10-27 | Documentation, ADRs, release files and evidence reconciled to the single crate: ADR-0018 (the decision, what it supersedes or amends), ADR-0017 amended in place (one package and publish command, one tag `v0.2.0`, one yank), README.md for a non-engineering reader, the crate README and component docs, ARCHITECTURE module map and feature table, COMPATIBILITY, DEPENDENCY_AUDIT, coding standards (per-module lint promotions, one version), SECURITY, CONTRIBUTING, parity prose, one CHANGELOG section grouped by module with every bullet kept, this file's narrative; fresh mutation run on the merged tree (574 mutants, 465 caught, 107 unviable, 2 equivalent survivors whose redundant explicit fields are removed in this commit), fresh fuzz smoke; 46 `[[test]]` `required-features` entries; the redundant `homepage` manifest key dropped; hosted run of `dd0dd73` recorded (22 jobs green, `semver` included) | check, coverage, lint-attrs, parity, features, machete, dependencies, package, sbom |
+
+## Post-alpha slices landed
+
+Slices follow [`docs/POST_ALPHA_PLAN.md`](docs/POST_ALPHA_PLAN.md). Each row is one
+commit; gates named were run locally before that commit.
+
+| Slice | Date | Landed | Gates |
+| --- | --- | --- | --- |
+| S34 | 2026-10-28 | Documents reconciled with the 0.2.0 publication (H02 to H06): README and SECURITY say 0.2.0 is published and show the crates.io dependency; STATUS.md start, maintainer prerequisites (P1 to P3 open, the "Basic" ruleset targets no branch, P4 approved) and continuation point at `docs/POST_ALPHA_PLAN.md` with the E1 to E7 outcomes; `docs/PROJECT_BRIEF.md` marked historical with corrected badges; CODING_STANDARDS mirrors the real package keys and owner URL; a dated addendum in `docs/evidence/alpha.md`; docs only | check |
 
 ## Verified evidence and reproduction
 
@@ -590,9 +600,10 @@ Deferred features, each a deferred row in `docs/parity/modbus.md` or an item of 
 - **A plain `cargo test` runs the reduced suite** (no `testkit` feature, so the test files
   that need the kit are skipped without a notice) and the kit's own tests need a checkout;
   see "Important implementation and tooling details".
-- **Upstream vectors**: the Apache-2.0 PLC4X test vectors are not redistributed (P4), so
-  every test vector in the repository is first-party. This keeps the four byte-order mode
-  rows at `implemented` instead of `automated-verified`.
+- **Upstream vectors**: the Apache-2.0 PLC4X test vectors are not redistributed (P4,
+  approved 2026-10-28; copies land in S04a), so every test vector in the repository is
+  first-party. This keeps the four byte-order mode rows at `implemented` instead of
+  `automated-verified`.
 - **Not verified by the interop run**: timing over a real clock, dropped links and device
   exceptions on demand (a stock pymodbus has no fault hooks), unit-id correlation, and any
   server other than pymodbus 3.8.6.
@@ -602,46 +613,48 @@ Deferred features, each a deferred row in `docs/parity/modbus.md` or an item of 
 
 ### Maintainer prerequisites still owed
 
-These are actions outside the code (plan P1 to P5):
+These are actions outside the code (plan P1 to P5), as verified on 2026-10-28:
 
-- **P1** enable GitHub private vulnerability reporting (it was `enabled: false`) and verify
-  it with a test report. `SECURITY.md` still says the channel is a release prerequisite.
-- **P2** enable secret scanning and push protection.
-- **P3** add a `master` ruleset (required checks, linear history, squash-only, no
-  force-push) before accepting external pull requests.
-- **P4** give written approval to redistribute the Apache-2.0 PLC4X Modbus test vectors
-  with NOTICE attribution. It blocks **S04a** and **S04b** (the upstream vector copies, the
-  adapter and the upstream-driven tests).
+- **P1** open: GitHub private vulnerability reporting is still disabled (`enabled: false`).
+  Enable it and verify it with a test report. `SECURITY.md` still says the channel is a
+  release prerequisite.
+- **P2** open: secret scanning and push protection are disabled.
+- **P3** open: a repository ruleset named "Basic" exists with the rules deletion and
+  non_fast_forward, enforcement active, but its branch include list is empty, so it
+  applies to no branch. Required checks, linear history and squash-only are not
+  configured.
+- **P4** approved by the maintainer on 2026-10-28 (decision E2 of the post-alpha plan):
+  the Apache-2.0 PLC4X Modbus test vectors are redistributed with NOTICE attribution. It
+  unblocks **S04a** and **S04b** (the upstream vector copies, the adapter and the
+  upstream-driven tests).
 - **P5** (the single-maintainer waiver) is done and recorded in ADR-0005.
 
 ## Recommended continuation
 
-The alpha plan is executed (S01 to S33; S04a and S04b wait for P4). What remains is the
-maintainer's: nothing below is done by an automated run, and nothing is published,
-tagged or posted without separate approval.
+The alpha plan is executed (S01 to S33; S04a and S04b are unblocked by the P4 approval and
+are scheduled in the post-alpha plan) and `stonecrab` 0.2.0 is published. The next work is
+[`docs/POST_ALPHA_PLAN.md`](docs/POST_ALPHA_PLAN.md), accepted by the maintainer on
+2026-10-28: do Phase A (S34, S35) first, then the phases in the order that plan gives.
 
-1. Push the S33 commits to `origin/master`, check the hosted run (the one-crate change
-   touches every job; the `semver` report will flag the removed placeholder) and record
-   its id in "Hosted CI and the per-OS matrix". Run the `release-evidence` workflow once
-   (`workflow_dispatch`) and attach its artifact to the draft pre-release when one exists.
-2. Close the maintainer prerequisites P1 to P3 (repository settings) and decide P4 (the
-   upstream vector redistribution), which unblocks S04a and S04b and the
-   `automated-verified` status of the byte-order rows.
-3. Decide whether to file the six drafted upstream issues under
-   `docs/evidence/upstream-issues/` on the Apache PLC4X tracker and record the URLs in
-   the divergence table of `docs/parity/modbus.md`.
-4. Release per ADR-0017 as amended by ADR-0018: run the alpha release checklist in
-   `docs/evidence/alpha.md`, then publish one crate with `cargo package --locked -p
-   stonecrab`, `cargo publish --locked --dry-run -p stonecrab` and, only with the
-   maintainer's separate approval, `cargo publish --locked -p stonecrab`; create one
-   annotated tag `v0.2.0` on the release commit (signed when a signing key is configured;
-   the maintainer decides) and push it by name after crates.io accepts the crate. There is
-   no publish order, no `=` pin and no sibling to yank with it.
-5. After publication: make `semver` blocking, re-run `scheduled` (30-minute fuzz,
-   mutation scope, advisory dry run) and plan M2 (writes, Modbus RTU and ASCII, board
-   adapters) from `docs/ALPHA_PLAN.md`'s deferred items.
+Maintainer-only steps, which no automated run does: P1 to P3 above, creating and pushing
+the annotated tag `v0.2.0` on commit `640665a`, dispatching the `release-evidence`
+workflow once (it has never been dispatched), deciding whether to file the six drafted
+upstream issues under `docs/evidence/upstream-issues/` (none is filed), and E4 (test
+hardware, deferred).
 
-Keep changes reviewable, commit tested slices one signed commit per green slice, and
+### Post-alpha decisions (2026-10-28)
+
+- **E1** done: 1fcc6ae was amended with a `Signed-off-by` trailer as 554ad24 and
+  force-pushed with a lease; no commit is GPG-signed and no signing key is configured.
+- **E2** P4 approved: redistribute the Apache-2.0 PLC4X Modbus test vectors with NOTICE
+  attribution (unblocks S04a and S04b).
+- **E3** the MSpec generator (Phase G) comes before OPC UA.
+- **E4** test hardware is deferred: no purchase is possible now.
+- **E5** S7 or EtherNet/IP is decided when a test PLC is available.
+- **E6** PLC4X tools count toward parity; integrations go in a tracked list.
+- **E7** the sensor `unit` becomes `Option<String>` in the next 0.x minor release.
+
+Keep changes reviewable, commit tested slices one signed-off commit per green slice, and
 maintain the per-module coverage gates. No first-party unsafe, panics on input, unbounded
 I/O, silent sample loss, inferred byte order or automatic replay of ambiguous writes. Do
 not mark planned capabilities supported.

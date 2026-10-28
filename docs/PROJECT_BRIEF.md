@@ -18,16 +18,20 @@
 **Apache PLC4X, carcinized.** An independent, native Rust port of [Apache PLC4X](https://plc4x.apache.org/): one API for industrial protocols, built for sensor acquisition first.
 
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Status: specification](https://img.shields.io/badge/status-specification-orange.svg)](docs/SPEC.md)
 [![MSRV 1.97](https://img.shields.io/badge/MSRV-1.97-informational.svg)](docs/CODING_STANDARDS.md#2-toolchain)
-[![CI](https://github.com/themadbotter/stonecrab/actions/workflows/ci.yml/badge.svg)](https://github.com/themadbotter/stonecrab/actions/workflows/ci.yml)
+[![CI](https://github.com/TheMadBotterINC/stonecrab/actions/workflows/ci.yml/badge.svg)](https://github.com/TheMadBotterINC/stonecrab/actions/workflows/ci.yml)
 [![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-success.svg)](docs/CODING_STANDARDS.md#4-unsafe-policy)
 
 </div>
 
 ---
 
-> **Project status: specification stage.** There is no code in this repository yet. The documents here define what will be built, how parity with upstream will be measured, and what the first release must prove before it claims anything. Read [`docs/SPEC.md`](docs/SPEC.md) for the engineering specification and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design.
+> **Historical document.** This is the retained project brief, written before any code
+> existed. It is superseded by [`docs/SPEC.md`](docs/SPEC.md) (normative behavior) and
+> [`STATUS.md`](STATUS.md) (what exists today); `stonecrab` 0.2.0 is published. The body
+> below is left as written.
+
+> **Project status at the time of writing: specification stage.** There is no code in this repository yet. The documents here define what will be built, how parity with upstream will be measured, and what the first release must prove before it claims anything. Read [`docs/SPEC.md`](docs/SPEC.md) for the engineering specification and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design.
 
 ## What it is
 

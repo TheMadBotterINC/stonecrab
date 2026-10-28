@@ -6,6 +6,10 @@ and tree stated next to it; nothing is estimated, and what was not run is listed
 "Gates not run". Nothing here is published: nothing is on crates.io beyond the `stonecrab`
 0.1.0 placeholder, no tag exists and nothing is pushed by these slices.
 
+Addendum (2026-10-28): `stonecrab` 0.2.0 was published to crates.io on 2026-10-27, after
+this evidence was recorded. The paragraph above is the pre-publication record and is kept
+unchanged; no tag or GitHub release exists.
+
 Tree measured: the S33 build commit `dd0dd73` ("build: ship Stonecrab as one crate") plus
 the S33 documentation changes (documentation, `release.toml`, the `[[test]]
 required-features` entries of `crates/stonecrab/Cargo.toml` and this evidence; no library

@@ -494,7 +494,9 @@ A library crate emits nothing above `warn` in steady-state operation. A log line
 ## 15. Dependencies and supply chain
 
 > Local tooling exception: [ADR-0003](adr/0003-request-response-contracts.md)
-> permits a path-only development dependency on the unpublished shared testkit.
+> permits a path-only development dependency on the unpublished shared testkit (since
+> superseded by [ADR-0018](adr/0018-one-crate.md): the testkit is now the `testkit` feature
+> of the published `stonecrab` crate).
 > Wildcard registry versions remain prohibited.
 
 15.1. **Justify every dependency** in the PR that adds it: what it does, why `std` is insufficient, its `unsafe` status (§4.4), its license, its maintenance signal (last release, open advisories), and the features enabled. A reviewer may ask for it to be replaced by 50 lines of first-party code; "it's popular" is not a justification.
@@ -744,11 +746,10 @@ exclude  = ["fuzz"]
 edition      = "2024"
 rust-version = "1.97"
 license      = "Apache-2.0"
-repository   = "https://github.com/themadbotter/stonecrab"
-homepage     = "https://github.com/themadbotter/stonecrab"
-authors      = ["The Mad Botter INC", "Stonecrab contributors"]
-keywords     = ["plc", "modbus", "opc-ua", "industrial", "iot"]
-categories   = ["network-programming", "hardware-support", "embedded"]
+repository   = "https://github.com/TheMadBotterINC/stonecrab"
+authors      = ["The Mad Botter INC"]
+keywords     = ["plc", "industrial", "modbus", "opcua", "protocols"]
+categories   = ["network-programming", "embedded"]
 
 [workspace.dependencies]
 # third-party (versions illustrative; pinned by Cargo.lock)

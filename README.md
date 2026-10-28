@@ -27,11 +27,10 @@ change before 1.0.
 ```sh
 cargo add stonecrab
 ```
-That one line gives you the simulator, Modbus TCP and the sensor profiles. Until
-`stonecrab` 0.2.0 is published on crates.io, `cargo add stonecrab` would fetch the
-published 0.1.0, a specification-stage placeholder with no protocol code, so use the
-checkout instead: `stonecrab = { path = "crates/stonecrab" }`. Nothing of the alpha is
-published yet; publication needs the maintainer's separate approval.
+That one line gives you the simulator, Modbus TCP and the sensor profiles. `stonecrab`
+0.2.0, the alpha, is published on crates.io (2026-10-27), so it fetches 0.2.0. The older
+0.1.0 is a specification-stage placeholder with no protocol code and stays listed as an
+old version. The repository has no `v0.2.0` tag and no GitHub release yet.
 
 Programmers use it through one object-safe boundary (`DriverRegistry`, `Driver`,
 `Connection`): register a driver, connect with a connection string such as
@@ -123,9 +122,9 @@ STONECRAB_URL='modbus-tcp://127.0.0.1:5020?address-convention=plc4x' \
 interop/pymodbus/interop.sh stop
 ```
 
-To use a driver from your own code before the alpha is published, depend on the checkout
-by path (`stonecrab = { path = "crates/stonecrab" }`; the default features include the
-simulator, Modbus TCP and the sensor profiles) and read the crate README:
+To use a driver from your own code, add the crate (`cargo add stonecrab`; the default
+features include the simulator, Modbus TCP and the sensor profiles) and read the crate
+README:
 [`crates/stonecrab/README.md`](crates/stonecrab/README.md) has the feature list and the two
 smaller examples, `sim_read` and `modbus_tcp_read`, and the
 [Modbus component document](crates/stonecrab/docs/components/modbus.md) has the
@@ -135,9 +134,9 @@ connection-string and address grammars.
 See [`STATUS.md`](STATUS.md) for the current engineering handoff, verification
 evidence, known gaps and continuation steps, and
 [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) for what is supported, at which level and
-against which peers. The published 0.1.0 package is specification-stage only. Upstream
-compatibility is claimed only for the rows of [`docs/parity/modbus.md`](docs/parity/modbus.md)
-that say so, at the support levels above.
+against which peers. The 0.1.0 package on crates.io is specification-stage only; 0.2.0
+is the alpha. Upstream compatibility is claimed only for the rows of
+[`docs/parity/modbus.md`](docs/parity/modbus.md) that say so, at the support levels above.
 
 The original [project brief](docs/PROJECT_BRIEF.md), [specification](docs/SPEC.md),
 [architecture](docs/ARCHITECTURE.md), and [coding standards](docs/CODING_STANDARDS.md)
