@@ -44,7 +44,8 @@ the plan fixes the shape in D12. Three constraints shaped the details.
    contents are not validated in core (name resolution and port policy belong to the
    transport). `Timeouts { connect, request, idle: Option<Duration> }` defaults to 5 s,
    5 s and `None`; `idle` is recorded and unenforced at alpha because there is no
-   background task, and the rustdoc says so. `request` is the source of the
+   background task, and the rustdoc says so. (S57 later added the task: see the addendum
+   in ADR-0014.) `request` is the source of the
    default-deadline rule of ADR-0007. `Credentials { username, password:
    Secret<String> }` has a derived `Debug` in which the password prints as
    `[REDACTED]`; the configuration stores it inside a further `Secret`, so even the
@@ -136,7 +137,8 @@ the plan fixes the shape in D12. Three constraints shaped the details.
 - Defaulting to read-only means a caller who forgets `access(ReadWrite)` gets
   `Unsupported`-style refusals from write paths instead of a surprise write.
 - `idle` is accepted and ignored at alpha. A caller who sets it gets no timeout, and
-  the documentation is the only warning.
+  the documentation is the only warning. (S57: a supervised guard now enforces it, see
+  ADR-0014.)
 - A NaN sample being neutral hides a broken random source rather than failing. This is
   acceptable because the delay stays inside its documented bounds either way.
 

@@ -1,7 +1,7 @@
 use std::fmt;
 use std::future::{Future, poll_fn};
 use std::pin::pin;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::task::Poll;
 use std::time::Instant;
@@ -11,7 +11,9 @@ use crate::{
     ErrorKind, FailureCategory, OpFuture, Operation, PlcError, ReconnectPolicy, ResourceLimits,
     Result, StateCell, StateWatch, Timeouts,
 };
-use tokio::sync::{Mutex as SlotMutex, Semaphore};
+use tokio::runtime::Handle;
+use tokio::sync::{Mutex as SlotMutex, Notify, Semaphore};
+use tokio::task::JoinHandle;
 
 use crate::transport::{FramedTransport, Framer, Jitter, TransportFactory};
 
@@ -110,7 +112,8 @@ impl From<&ConnectionConfig> for GuardConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub struct GuardStats {
-    /// Transports opened after the first one: successful request-driven reopens.
+    /// Transports opened after the first one: successful reopens, by a request or by the
+    /// supervisor, including the reopen after an idle close.
     pub reconnects: u64,
     /// Times the guard ran `FramedTransport::resync` before a request, because bytes the
     /// stream could not account for were still buffered.
@@ -162,6 +165,8 @@ struct Book {
     next_at: Option<Instant>,
     /// Whether any transport has been opened, so a later open counts as a reconnect.
     opened_before: bool,
+    /// When the last exchange or open ended: where the idle bound counts from.
+    last_active: Instant,
 }
 
 /// A failure inside the slot, and whether the transport must be dropped because of it.
@@ -217,8 +222,55 @@ impl Drop for Restore<'_> {
     }
 }
 
+/// The supervisor task's handle; the task is aborted when this is dropped, so it never
+/// outlives the guard or a `close` that was abandoned (coding standards section 8.7).
+struct Supervisor(JoinHandle<()>);
+
+impl Drop for Supervisor {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// Counts a taker of the slot from before it signals the supervisor until it holds the
+/// slot or gives up, so that the reader can see a request that has not queued yet.
+struct Queued<'a>(&'a AtomicUsize);
+
+impl<'a> Queued<'a> {
+    fn join(count: &'a AtomicUsize) -> Self {
+        count.fetch_add(1, Ordering::SeqCst);
+        Self(count)
+    }
+}
+
+impl Drop for Queued<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Which of two raced futures finished first.
+enum Race<A, B> {
+    First(A),
+    Second(B),
+}
+
+/// Drive both futures until one finishes; `first` is polled first and wins a tie.
+async fn race<A: Future, B: Future>(first: A, second: B) -> Race<A::Output, B::Output> {
+    let mut first = pin!(first);
+    let mut second = pin!(second);
+    poll_fn(|cx| {
+        if let Poll::Ready(done) = first.as_mut().poll(cx) {
+            return Poll::Ready(Race::First(done));
+        }
+        second.as_mut().poll(cx).map(Race::Second)
+    })
+    .await
+}
+
 /// Owner of one connection: the lifecycle state machine, one in-flight request and a
-/// bounded FIFO behind it, and request-driven reconnect with backoff.
+/// bounded FIFO behind it, and reconnect with backoff, driven by requests or, once
+/// [`supervise`](Self::supervise) started it, by a background task.
 ///
 /// The guard holds a [`FramedTransport`] (made by an [`TransportFactory`] and a framer
 /// constructor) and offers one operation on it, [`request`](Self::request): one frame out
@@ -233,19 +285,20 @@ impl Drop for Restore<'_> {
 /// | `Disconnected` | `connect` | `Connecting`, then `Connected` |
 /// | `Connected` | peer closed, I/O error, send or resync failed | `Reconnecting { attempt, next_at }`, or `Failed(Disconnected)` when `is_exhausted` |
 /// | `Connected` | request timed out, was cancelled or hit a framing error | stays `Connected`; the next request resyncs first |
-/// | `Reconnecting` | next request or `connect` | waits until `next_at`, then `Connecting`, then `Connected` |
+/// | `Reconnecting` | next request or `connect`, or `next_at` passes under a supervisor | waits until `next_at`, then `Connecting`, then `Connected` |
 /// | `Connecting` | open fails with `Timeout` or `Disconnected` | `Reconnecting` with the next attempt, or `Failed(Disconnected)` when exhausted |
 /// | `Connecting` | open fails with any other kind (for example `InvalidConfig`) | `Failed(kind)` |
 /// | `Connecting` | the caller's token fires | back to the state before the open |
+/// | `Connected` | no exchange for `timeouts.idle`, under a supervisor | stays `Connected` with the transport closed; the next request reopens it |
 /// | any non-terminal | `close` | `Closing`, then `Closed` |
 ///
 /// `Closed` and `Failed` are terminal: a new connection needs a new guard, and every
 /// later request fails with `Disconnected` before any I/O. Inside `Connected` the guard
 /// keeps three private sub-states, `Idle`, `InFlight` and `Resyncing`.
 ///
-/// # Reconnect is request-driven (decision D15)
-/// There is no background task and nothing runs between calls: a dead peer is noticed by
-/// the next request. After a failure the state is `Reconnecting { attempt, next_at }`
+/// # Reconnect
+/// Without a supervisor, nothing runs between calls (decision D15): a dead peer is noticed
+/// by the next request. After a failure the state is `Reconnecting { attempt, next_at }`
 /// with `next_at = clock.now() + reconnect.next_delay(attempt - 1, sample)` (`attempt`
 /// is one-based; the sample comes from [`Jitter`] unless
 /// [`with_jitter_source`](Self::with_jitter_source) replaces it). The next request (or
@@ -256,8 +309,31 @@ impl Drop for Restore<'_> {
 /// `reconnect.max_attempts` retries are allowed after the first failure; when the next
 /// one would exceed them the state becomes `Failed(Disconnected)`. Only a received reply
 /// resets the attempt count, not an open: a peer that accepts and then closes keeps
-/// spending the budget. An open cut short by the caller's own earlier deadline does not
+/// spending the budget (a supervised link that stays up for a whole read also resets it,
+/// see below). An open cut short by the caller's own earlier deadline does not
 /// count as a failed attempt.
+///
+/// # The supervisor and the idle bound
+/// [`supervise`](Self::supervise) starts one task on the current Tokio runtime that does
+/// the same without waiting for a request: it reads the stream while no request runs, so
+/// a peer that closes is noticed at once, and when the state is `Reconnecting` it opens
+/// the transport as soon as `next_at` passes, attempt after attempt, until the guard is
+/// `Connected` again or `Failed`. Every state it reaches is published through
+/// [`watch_state`](Self::watch_state). A request never waits for the reader: it takes the
+/// slot from it in arrival order. A link that stays up for a whole read counts as a
+/// reply for the retry budget: the attempt count starts over. A frame the reader finds
+/// after an abandoned exchange (a timeout, a cancel) is that exchange's reply and is
+/// dropped. A frame it finds while nothing is owed is kept for the next
+/// [`next_reply`](Self::next_reply) (a caller may be between two guard calls) and dropped
+/// by the next request; behind it the reader only buffers what arrives, so a peer close is
+/// still noticed. With a supervisor, `timeouts.idle` is enforced, a kept frame or not: when
+/// no exchange has run for that long, the transport is shut down and dropped (with
+/// whatever it buffered), the state stays `Connected`, and the next request opens a new
+/// transport without backoff, while `next_reply` fails `Disconnected`. A session that
+/// correlates replies uses [`request_matching`](Self::request_matching), which keeps the
+/// slot from the send to the accepted reply, so neither the reader nor the idle bound
+/// comes between its reads. `close` stops and joins the task; dropping the guard aborts
+/// it.
 ///
 /// # Queue and backpressure
 /// At most `limits.max_pending_requests()` requests are owned at once, the running one
@@ -273,7 +349,10 @@ impl Drop for Restore<'_> {
 /// `Deadline::after(clock.now(), timeouts.request)` (ADR-0007). Queueing, the backoff
 /// sleep, the open (also limited by `timeouts.connect`), the send, the resync and the
 /// wait for the reply all end at that deadline. `close` is bounded by
-/// `Deadline::after(clock.now(), timeouts.request)`.
+/// `Deadline::after(clock.now(), timeouts.request)`. The supervisor's open is bounded by
+/// `timeouts.connect`, its idle shutdown by `timeouts.request`, and its read of an idle
+/// stream by `last_active + timeouts.idle`, or `timeouts.request` from the start of each
+/// read when there is no idle bound.
 ///
 /// # Late replies
 /// A request that times out, is cancelled after the frame went out, or hits a framing
@@ -283,8 +362,11 @@ impl Drop for Restore<'_> {
 /// [`FramedTransport::resync`] within that request's deadline and discards the frame the
 /// resync recognised; a resync that finds no boundary in time is `Disconnected` and the
 /// guard reconnects. A reply that arrives whole after the guard has moved on is not
-/// seen by the guard: it comes out of the next `next_frame` as that request's reply, and
-/// discarding it is the session's job, by correlation (the transaction id).
+/// judged by the guard: it comes out of the next `next_frame` as that request's reply,
+/// and discarding it is the session's job, by correlation (the transaction id), with
+/// [`request_matching`](Self::request_matching) or [`next_reply`](Self::next_reply). With
+/// a supervisor, a reply that arrives whole between two requests after a timeout is read
+/// and dropped by the supervisor instead.
 ///
 /// # Compatibility: docs/parity/transport.md#TRANSPORT-GUARD-LIFECYCLE
 /// Upstream has no equivalent: its Netty channel reconnect logic is outside the
@@ -332,6 +414,14 @@ impl Drop for Restore<'_> {
 /// # fn main() {}
 /// ```
 pub struct ConnectionGuard<F, R> {
+    shared: Arc<Shared<F, R>>,
+    /// The supervisor task once [`supervise`](Self::supervise) started one: joined by
+    /// `close`, aborted when dropped.
+    supervisor: Mutex<Option<Supervisor>>,
+}
+
+/// The guard's state, shared with its supervisor task.
+struct Shared<F, R> {
     config: GuardConfig,
     factory: Arc<dyn TransportFactory>,
     new_framer: Box<dyn Fn() -> R + Send + Sync>,
@@ -344,17 +434,25 @@ pub struct ConnectionGuard<F, R> {
     admission: Semaphore,
     /// The single in-flight slot; `tokio`'s mutex queues its waiters in arrival order.
     link: SlotMutex<Link<F, R>>,
+    /// Signalled by every taker of the slot before it queues, so that the supervisor's
+    /// reader lets go.
+    wanted: Notify,
+    /// Takers of the slot that have signalled and do not hold it yet. Unlike `wanted`, it
+    /// stays set until the request has the slot, so a reader that took the slot back
+    /// before the request queued sees it and lets go again.
+    waiting: AtomicUsize,
     counters: Counters,
 }
 
-/// Shows the endpoint, the state and, when the slot is free, the private sub-state.
+/// Shows the endpoint, the state and, when the slot is free, the private sub-state (the
+/// supervisor's reader holds the slot while it watches an idle stream).
 impl<F, R> fmt::Debug for ConnectionGuard<F, R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut shown = f.debug_struct("ConnectionGuard");
         shown
-            .field("endpoint", &self.config.endpoint)
-            .field("state", &self.state.current());
-        match self.link.try_lock() {
+            .field("endpoint", &self.shared.config.endpoint)
+            .field("state", &self.shared.state.current());
+        match self.shared.link.try_lock() {
             Ok(link) => shown.field("phase", &link.book.phase),
             Err(_busy) => shown.field("phase", &"slot in use"),
         };
@@ -407,7 +505,8 @@ impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
         let (state, _watch) = StateCell::new(ConnectionState::Disconnected);
         let mut jitter = Jitter::new();
         let admission = Semaphore::new(config.limits.max_pending_requests().get());
-        Self {
+        let last_active = clock.now();
+        let shared = Shared {
             config,
             factory,
             new_framer,
@@ -423,9 +522,16 @@ impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
                     failures: 0,
                     next_at: None,
                     opened_before: false,
+                    last_active,
                 },
             }),
+            wanted: Notify::new(),
+            waiting: AtomicUsize::new(0),
             counters: Counters::default(),
+        };
+        Self {
+            shared: Arc::new(shared),
+            supervisor: Mutex::new(None),
         }
     }
 
@@ -462,8 +568,12 @@ impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
     /// # fn main() {}
     /// ```
     #[must_use]
-    pub fn with_jitter_source(mut self, source: impl FnMut() -> f64 + Send + 'static) -> Self {
-        self.jitter = Mutex::new(Box::new(source));
+    pub fn with_jitter_source(self, source: impl FnMut() -> f64 + Send + 'static) -> Self {
+        *self
+            .shared
+            .jitter
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Box::new(source);
         self
     }
 
@@ -494,7 +604,7 @@ impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
     /// ```
     #[must_use]
     pub fn state(&self) -> ConnectionState {
-        self.state.current()
+        self.shared.state.current()
     }
 
     /// An observer of the lifecycle state, with the current state counted as seen.
@@ -529,7 +639,7 @@ impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
     /// ```
     #[must_use]
     pub fn watch_state(&self) -> StateWatch {
-        self.state.watch()
+        self.shared.state.watch()
     }
 
     /// A snapshot of the guard's counters.
@@ -559,18 +669,21 @@ impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
     /// ```
     #[must_use]
     pub fn stats(&self) -> GuardStats {
+        let counters = &self.shared.counters;
         GuardStats {
-            reconnects: self.counters.reconnects.load(Ordering::Relaxed),
-            resyncs: self.counters.resyncs.load(Ordering::Relaxed),
-            requests: self.counters.requests.load(Ordering::Relaxed),
-            timeouts: self.counters.timeouts.load(Ordering::Relaxed),
+            reconnects: counters.reconnects.load(Ordering::Relaxed),
+            resyncs: counters.resyncs.load(Ordering::Relaxed),
+            requests: counters.requests.load(Ordering::Relaxed),
+            timeouts: counters.timeouts.load(Ordering::Relaxed),
         }
     }
 
     /// Open the transport: `Disconnected` to `Connecting` to `Connected`.
     ///
-    /// The open is bounded by `timeouts.connect`. Called while `Connected` it does
-    /// nothing. Called while `Reconnecting` it waits out the backoff first and then opens,
+    /// The open is bounded by `timeouts.connect`. Called while `Connected` with a
+    /// transport it does nothing; after an idle close (the state is `Connected` with no
+    /// transport) it opens a new one without backoff. Called while `Reconnecting` it waits
+    /// out the backoff first and then opens,
     /// like a request does. A failed open with `Timeout` or `Disconnected` leaves the
     /// guard `Reconnecting` (or `Failed(Disconnected)` when the retry budget is spent);
     /// any other kind leaves it `Failed(kind)`. The deadline source is
@@ -627,7 +740,7 @@ impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
     /// # fn main() {}
     /// ```
     pub fn connect(&self) -> OpFuture<'_, ()> {
-        Box::pin(self.open_link())
+        Box::pin(self.shared.open_link())
     }
 
     /// Send one frame and return the next frame the peer sends.
@@ -720,14 +833,95 @@ impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
         token: Option<&'a CancellationToken>,
     ) -> OpFuture<'a, F> {
         Box::pin(async move {
-            let result = self.exchange(Some(frame), deadline, token).await;
-            if result
-                .as_ref()
-                .is_err_and(|error| error.kind() == ErrorKind::Timeout)
-            {
-                bump(&self.counters.timeouts);
-            }
-            result
+            let result = self
+                .shared
+                .exchange(Some(frame), deadline, token, None)
+                .await;
+            self.shared.counted(result)
+        })
+    }
+
+    /// Send one frame and return the first frame back that `accept` takes, dropping the
+    /// ones it refuses, all under one hold of the in-flight slot.
+    ///
+    /// [`request`](Self::request) followed by [`next_reply`](Self::next_reply) until a
+    /// frame answers does the same in several calls, and between two of them the slot is
+    /// free: a [supervisor](Self::supervise) may read the stream there or close an idle
+    /// link (with `timeouts.idle` of zero, at once). This call keeps the slot from the send
+    /// to the accepted reply, so a protocol session that discards replies by correlation (a
+    /// late reply after a timeout, a reply to another transaction) loses no frame between
+    /// its reads. `accept` is called once per frame read, in arrival order, and should
+    /// return quickly; a frame it refuses is dropped, and the wait goes on within the same
+    /// deadline and token.
+    ///
+    /// # Compatibility: docs/parity/transport.md#TRANSPORT-GUARD-LIFECYCLE
+    /// No upstream parity claim (see the type).
+    ///
+    /// # Errors
+    /// As [`request`](Self::request). A deadline, a token or a peer close that ends the
+    /// wait for an accepted reply fails the call as it fails the reply wait of `request`,
+    /// whatever `accept` refused before.
+    ///
+    /// # Cancel safety
+    /// As [`request`](Self::request): a dropped future releases the slot and the queue
+    /// place, and the next request treats the stream as owing a reply.
+    ///
+    /// # Wire effects
+    /// As [`request`](Self::request): one frame is transmitted, never twice, bounded by the
+    /// caller's `Deadline`.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[cfg(feature = "testkit")]
+    /// # fn main() -> Result<(), stonecrab::PlcError> {
+    /// use std::sync::Arc;
+    /// use std::time::Duration;
+    /// use stonecrab::{Clock, Deadline, Endpoint, ResourceLimits};
+    /// use stonecrab::testkit::{
+    ///     FakeClock, FakeTransportFactory, LengthPrefixedFramer, Script, Step, block_on_with,
+    /// };
+    /// use stonecrab::transport::{ConnectionGuard, GuardConfig};
+    ///
+    /// let clock = FakeClock::default();
+    /// let factory = FakeTransportFactory::new(clock.clone());
+    /// factory.push_script(Script::strict(vec![
+    ///     Step::Expect(vec![0, 1, b'a']),
+    ///     Step::Reply(vec![0, 5, b's', b't', b'a', b'l', b'e']),
+    ///     Step::Reply(vec![0, 1, b'a']),
+    /// ]));
+    /// let limits = ResourceLimits::builder().build()?;
+    /// let guard = ConnectionGuard::new(
+    ///     GuardConfig::new(Endpoint::Custom("fake://plc".to_owned()), limits),
+    ///     Arc::new(factory),
+    ///     Box::new(|| LengthPrefixedFramer::new(64)),
+    ///     Arc::new(clock.clone()),
+    /// );
+    /// block_on_with(&clock, guard.connect())?;
+    /// let deadline = Deadline::after(clock.now(), Duration::from_secs(1))?;
+    /// let mut answers = |reply: &Vec<u8>| reply.as_slice() == b"a";
+    /// let reply = block_on_with(
+    ///     &clock,
+    ///     guard.request_matching(b"a".to_vec(), deadline, None, &mut answers),
+    /// )?;
+    /// assert_eq!(reply, b"a"); // the stale frame was read and dropped
+    /// # Ok::<(), stonecrab::PlcError>(())
+    /// # }
+    /// # #[cfg(not(feature = "testkit"))]
+    /// # fn main() {}
+    /// ```
+    pub fn request_matching<'a>(
+        &'a self,
+        frame: F,
+        deadline: Deadline,
+        token: Option<&'a CancellationToken>,
+        accept: &'a mut (dyn FnMut(&F) -> bool + Send),
+    ) -> OpFuture<'a, F> {
+        Box::pin(async move {
+            let result = self
+                .shared
+                .exchange(Some(frame), deadline, token, Some(accept))
+                .await;
+            self.shared.counted(result)
         })
     }
 
@@ -737,14 +931,19 @@ impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
     /// timeout or a cancel) and must drop it by correlation: it calls this until the
     /// frame it wants arrives, all within one deadline. It takes the in-flight slot like
     /// [`request`](Self::request) does, never reopens the connection (a reply owed by a
-    /// connection that is gone will not come) and does not count as a request.
+    /// connection that is gone will not come) and does not count as a request. Under a
+    /// [supervisor](Self::supervise) the slot is free between two calls, so the idle bound
+    /// may close the link there; [`request_matching`](Self::request_matching) keeps the
+    /// slot for the whole correlation instead.
     ///
     /// # Compatibility: docs/parity/transport.md#TRANSPORT-GUARD-LIFECYCLE
     /// No upstream parity claim (see the type).
     ///
     /// # Errors
     /// As [`request`](Self::request), except that nothing is ever sent and a lost
-    /// transport is [`ErrorKind::Disconnected`] without a reopen. A timeout or a
+    /// transport is [`ErrorKind::Disconnected`] without a reopen. That includes a
+    /// transport the supervisor closed for the idle bound: the state is then still
+    /// `Connected`, and the call fails `Disconnected` all the same. A timeout or a
     /// framing error leaves the guard `Connected` and the next request resyncs.
     ///
     /// # Cancel safety
@@ -792,14 +991,8 @@ impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
         token: Option<&'a CancellationToken>,
     ) -> OpFuture<'a, F> {
         Box::pin(async move {
-            let result = self.exchange(None, deadline, token).await;
-            if result
-                .as_ref()
-                .is_err_and(|error| error.kind() == ErrorKind::Timeout)
-            {
-                bump(&self.counters.timeouts);
-            }
-            result
+            let result = self.shared.exchange(None, deadline, token, None).await;
+            self.shared.counted(result)
         })
     }
 
@@ -863,16 +1056,17 @@ impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
         token: Option<&'a CancellationToken>,
     ) -> OpFuture<'a, F> {
         Box::pin(async move {
+            let shared = &self.shared;
             let site = Site {
-                started: self.clock.now(),
+                started: shared.clock.now(),
                 operation: None,
             };
-            let Ok(deadline) = Deadline::after(site.started, self.config.timeouts.request) else {
-                return Err(self.error(
+            let Ok(deadline) = Deadline::after(site.started, shared.config.timeouts.request) else {
+                return Err(shared.error(
                     ErrorKind::InvalidConfig,
                     "timeouts.request does not fit the clock's range",
                     &site,
-                    self.attempt_hint(),
+                    shared.attempt_hint(),
                     FailureCategory::Validation,
                 ));
             };
@@ -894,19 +1088,24 @@ impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
     /// `timeouts.request` the clock cannot represent gives a bound that has already
     /// passed, so the shutdown is attempted once and `close` never waits.
     ///
+    /// A [supervisor](Self::supervise) is stopped the same way: whatever it waits on (a
+    /// backoff, an open, a read of the idle stream) ends, it releases the slot, and after
+    /// the shutdown `close` joins it within the same deadline. A supervisor still running
+    /// at the deadline is aborted and the call reports `Timeout`.
+    ///
     /// # Compatibility: docs/parity/transport.md#TRANSPORT-GUARD-LIFECYCLE
     /// No upstream parity claim (see the type).
     ///
     /// # Errors
-    /// - [`ErrorKind::Timeout`] if the slot or the shutdown was not finished by the
-    ///   deadline. The guard is `Closed` regardless.
+    /// - [`ErrorKind::Timeout`] if the slot, the shutdown or the supervisor's exit was not
+    ///   finished by the deadline. The guard is `Closed` regardless.
     ///
     /// A peer that already went away is not an error. Failures carry `Diagnostics` with
     /// `operation = Close`.
     ///
     /// # Cancel safety
     /// Cancel-safe in the sense that the state is already `Closing`; a repeat call
-    /// finishes the job.
+    /// finishes the job. A dropped call aborts the supervisor if it had not exited yet.
     ///
     /// # Wire effects
     /// Half-closes the transport (a FIN for TCP). A request that was in flight is an
@@ -945,12 +1144,128 @@ impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
     /// # fn main() {}
     /// ```
     pub fn close(&self) -> OpFuture<'_, ()> {
-        Box::pin(self.shut_down())
+        Box::pin(async move {
+            let supervisor = self
+                .supervisor
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take();
+            self.shared.shut_down(supervisor).await
+        })
+    }
+}
+
+// The supervisor needs `'static` frames and framers to run as a task; the methods above
+// keep their published bounds.
+impl<F: Send + 'static, R: Framer<F> + 'static> ConnectionGuard<F, R> {
+    /// Start the supervisor: a background task that reconnects without waiting for a
+    /// request and enforces `timeouts.idle`.
+    ///
+    /// The task runs on the current Tokio runtime until the guard is `Closed` or `Failed`.
+    /// While no request runs it reads the stream, so a peer that closes is noticed at
+    /// once; in `Reconnecting` it opens the transport when `next_at` passes, attempt after
+    /// attempt, following the reconnect policy, until the guard is `Connected` again or
+    /// `Failed`; and when no exchange has run for `timeouts.idle` it shuts the transport
+    /// down (the state stays `Connected`, and the next request opens a new transport). All
+    /// of it happens on the guard's clock and under its in-flight slot, which a request
+    /// takes from the reader in arrival order. [`close`](Self::close) stops and joins the
+    /// task; dropping the guard aborts it.
+    ///
+    /// The task lives on the runtime that is current when this is called. Dropping the
+    /// guard aborts it without joining it (the abort takes effect when the runtime next
+    /// polls), and if that runtime is dropped first the task ends with it and reconnect is
+    /// request-driven again until the next call, which starts a new task on the runtime
+    /// current then.
+    ///
+    /// Returns `true` if a supervisor runs after the call (a second call while the task
+    /// runs starts no second one), `false` if the caller is not inside a Tokio runtime or
+    /// the guard is already closing, closed or failed, in which case nothing is started
+    /// and reconnect stays request-driven.
+    ///
+    /// # Compatibility: docs/parity/transport.md#TRANSPORT-RECONNECT
+    /// Upstream drivers do not reconnect; its connection cache closes idle connections.
+    /// No upstream parity claim (see the type).
+    ///
+    /// # Wire effects
+    /// The task sends no application bytes. It reads what the peer sends while no request
+    /// runs (the late reply of an abandoned exchange is dropped; a frame nobody asked for
+    /// is kept for the next `next_reply` and dropped by the next request), opens
+    /// transports within `timeouts.connect` and half-closes an idle one within
+    /// `timeouts.request`.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[cfg(feature = "testkit")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use std::sync::Arc;
+    /// use stonecrab::{ConnectionState, Endpoint, ResourceLimits};
+    /// use stonecrab::testkit::{FakeClock, FakeTransportFactory, LengthPrefixedFramer, Script};
+    /// use stonecrab::transport::{ConnectionGuard, GuardConfig};
+    ///
+    /// let clock = FakeClock::default();
+    /// let factory = FakeTransportFactory::new(clock.clone());
+    /// factory.push_script(Script::default());
+    /// let limits = ResourceLimits::builder().build()?;
+    /// let guard = ConnectionGuard::new(
+    ///     GuardConfig::new(Endpoint::Custom("fake://plc".to_owned()), limits),
+    ///     Arc::new(factory),
+    ///     Box::new(|| LengthPrefixedFramer::new(64)),
+    ///     Arc::new(clock),
+    /// );
+    /// // Outside a Tokio runtime there is nothing to run the task on.
+    /// assert!(!guard.supervise());
+    ///
+    /// let runtime = tokio::runtime::Builder::new_current_thread().build()?;
+    /// runtime.block_on(async {
+    ///     guard.connect().await?;
+    ///     assert!(guard.supervise());
+    ///     guard.close().await
+    /// })?;
+    /// assert_eq!(guard.state(), ConnectionState::Closed);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "testkit"))]
+    /// # fn main() {}
+    /// ```
+    #[must_use]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "ConnectionGuard owns the JoinHandle: joined by close, aborted on drop (CODING_STANDARDS 8.7)"
+    )]
+    pub fn supervise(&self) -> bool {
+        let mut supervisor = self
+            .supervisor
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        // A guard that is closing, closed or failed has nothing left to tend.
+        if matches!(
+            self.shared.state.current(),
+            ConnectionState::Closing | ConnectionState::Closed | ConnectionState::Failed(_)
+        ) {
+            return false;
+        }
+        // A task that ended with its runtime is replaced by one on the current runtime.
+        if supervisor
+            .as_ref()
+            .is_some_and(|task| !task.0.is_finished())
+        {
+            return true;
+        }
+        if Handle::try_current().is_err() {
+            return false;
+        }
+        let shared = Arc::clone(&self.shared);
+        // The guard owns the task (CODING_STANDARDS 8.7): `close` joins it and `Supervisor`
+        // aborts it on drop.
+        *supervisor = Some(Supervisor(tokio::spawn(async move {
+            shared.supervise().await;
+        })));
+        true
     }
 }
 
 // The lifecycle itself.
-impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
+impl<F: Send, R: Framer<F>> Shared<F, R> {
     /// `connect`: take the slot and open the transport if there is none.
     #[expect(
         clippy::significant_drop_tightening,
@@ -982,6 +1297,7 @@ impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
         frame: Option<F>,
         deadline: Deadline,
         token: Option<&CancellationToken>,
+        accept: Option<&mut (dyn FnMut(&F) -> bool + Send)>,
     ) -> Result<F> {
         let site = Site {
             started: self.clock.now(),
@@ -1020,8 +1336,17 @@ impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
         };
         let framed = link.transport.insert(framed);
         let driven = self
-            .drive(framed, &mut link.book, frame, deadline, token, &site)
+            .drive(
+                framed,
+                &mut link.book,
+                frame,
+                accept,
+                deadline,
+                token,
+                &site,
+            )
             .await;
+        link.book.last_active = self.clock.now();
         driven.map_err(|fault| {
             if fault.lose {
                 link.transport = None;
@@ -1031,12 +1356,18 @@ impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
         })
     }
 
-    /// Resync if the stream owes bytes, send the frame, wait for the reply.
+    /// Resync if the stream owes bytes, send the frame, wait for the reply (the first one
+    /// `accept` takes, when there is an `accept`).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one exchange's whole context; a struct would only rename the borrows"
+    )]
     async fn drive(
         &self,
         framed: &mut FramedTransport<F, R>,
         book: &mut Book,
         frame: Option<F>,
+        accept: Option<&mut (dyn FnMut(&F) -> bool + Send)>,
         deadline: Deadline,
         token: Option<&CancellationToken>,
         site: &Site,
@@ -1045,7 +1376,19 @@ impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
             self.realign(framed, book, deadline, token, site).await?;
             self.transmit(framed, book, frame, deadline, site).await?;
         }
-        self.await_reply(framed, book, deadline, token, site).await
+        let mut reply = self
+            .await_reply(framed, book, deadline, token, site)
+            .await?;
+        if let Some(accept) = accept {
+            while !accept(&reply) {
+                // The frame answered something else: the stream still owes this reply.
+                book.phase = Phase::InFlight;
+                reply = self
+                    .await_reply(framed, book, deadline, token, site)
+                    .await?;
+            }
+        }
+        Ok(reply)
     }
 
     /// Before a request: if bytes of an abandoned exchange are buffered, find the next
@@ -1058,6 +1401,10 @@ impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
         token: Option<&CancellationToken>,
         site: &Site,
     ) -> std::result::Result<(), Fault> {
+        if framed.parked() {
+            // The supervisor kept a frame nobody asked for: a new request does not want it.
+            drop(framed.next_frame(Deadline::at(self.clock.now())).await);
+        }
         if framed.buffered_len() > 0 {
             bump(&self.counters.resyncs);
             match self.until(framed.resync(deadline), token, None, true).await {
@@ -1230,6 +1577,7 @@ impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
                     bump(&self.counters.reconnects);
                 }
                 book.opened_before = true;
+                book.last_active = self.clock.now();
                 restore.disarm();
                 self.state.set(ConnectionState::Connected);
                 Ok(FramedTransport::new(transport, (self.new_framer)()))
@@ -1273,8 +1621,9 @@ impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
         });
     }
 
-    /// `close`: see [`close`](Self::close).
-    async fn shut_down(&self) -> Result<()> {
+    /// `close`: see [`ConnectionGuard::close`]. The supervisor, if any, is joined after
+    /// the shutdown and aborted when this future ends without it.
+    async fn shut_down(&self, supervisor: Option<Supervisor>) -> Result<()> {
         let site = Site {
             started: self.clock.now(),
             operation: Some(Operation::Close),
@@ -1291,12 +1640,18 @@ impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
         }
         let deadline = Deadline::after(site.started, self.config.timeouts.request)
             .unwrap_or(Deadline::at(site.started));
-        // The slot and the shutdown share one bound, so a holder that never lets go and a
-        // transport that never finishes are both cut off at the deadline.
-        let outcome = match self
-            .until(self.finish(deadline, &site), None, Some(deadline), false)
-            .await
-        {
+        // The slot, the shutdown and the join share one bound, so a holder that never lets
+        // go, a transport that never finishes and a task that never ends are all cut off
+        // at the deadline.
+        let work = async {
+            let finished = self.finish(deadline, &site).await;
+            if let Some(mut task) = supervisor {
+                // The task only ever returns; how it ended is no news to `close`.
+                drop((&mut task.0).await);
+            }
+            finished
+        };
+        let outcome = match self.until(work, None, Some(deadline), false).await {
             Ok(done) => done,
             Err(cut) => Err(self.cut(cut, &site, self.attempt_hint(), FailureCategory::Transport)),
         };
@@ -1331,6 +1686,11 @@ impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
         deadline: Option<Deadline>,
         token: Option<&CancellationToken>,
     ) -> Result<tokio::sync::MutexGuard<'_, Link<F, R>>> {
+        // A supervisor reading the idle stream lets go of the slot when it hears this, or
+        // when it takes the slot back and finds the count set (the request may not have
+        // queued for the slot yet).
+        let _queued = Queued::join(&self.waiting);
+        self.wanted.notify_one();
         self.until(self.link.lock(), token, deadline, true)
             .await
             .map_err(|cut| self.cut(cut, site, self.attempt_hint(), FailureCategory::Validation))
@@ -1375,6 +1735,17 @@ impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
             Poll::Pending
         })
         .await
+    }
+
+    /// Count a timed-out exchange in the stats and hand its result on.
+    fn counted(&self, result: Result<F>) -> Result<F> {
+        if result
+            .as_ref()
+            .is_err_and(|error| error.kind() == ErrorKind::Timeout)
+        {
+            bump(&self.counters.timeouts);
+        }
+        result
     }
 
     /// The next jitter sample.
@@ -1517,5 +1888,184 @@ impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
         diagnostics.retries = retries;
         diagnostics.category = diagnostics.category.or(Some(category));
         diagnostics
+    }
+}
+
+// The supervisor task (`ConnectionGuard::supervise`): one turn per state until the guard
+// is closing, closed or failed. Every wait races the closing signal, whose cut ends the
+// task.
+impl<F: Send, R: Framer<F>> Shared<F, R> {
+    /// Tend the connection until it ends.
+    async fn supervise(&self) {
+        let watch = self.state.watch();
+        loop {
+            let turn = match self.state.current() {
+                ConnectionState::Closing | ConnectionState::Closed | ConnectionState::Failed(_) => {
+                    return;
+                }
+                ConnectionState::Reconnecting { next_at, .. } => {
+                    self.reconnect_at(next_at, &watch).await
+                }
+                ConnectionState::Connected => self.watch_link(&watch).await,
+                ConnectionState::Disconnected | ConnectionState::Connecting => {
+                    self.rest(&watch).await
+                }
+            };
+            if turn.is_err() {
+                return;
+            }
+        }
+    }
+
+    /// Wait for the backoff to pass (or the state to move on), then reopen the transport
+    /// if it is still gone. A failed open has already set the next state.
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "the slot guard is the in-flight slot and is held for the whole open"
+    )]
+    async fn reconnect_at(
+        &self,
+        next_at: Instant,
+        watch: &StateWatch,
+    ) -> std::result::Result<(), Cut> {
+        let nap = race(watch.changed(), self.clock.sleep_until(next_at));
+        if let Race::First(_) = self.until(nap, None, None, true).await? {
+            return Ok(());
+        }
+        let mut held = self.until(self.link.lock(), None, None, true).await?;
+        let link = &mut *held;
+        // A request may have reopened the transport while this task waited for the slot.
+        let due =
+            link.transport.is_none() && link.book.next_at.is_some_and(|at| at <= self.clock.now());
+        let site = Site {
+            started: self.clock.now(),
+            operation: Some(Operation::Connect),
+        };
+        // The error has no caller to go to: the state already tells what happened.
+        if due && let Ok(opened) = self.reopen(&mut link.book, &site, None, None).await {
+            link.transport = Some(opened);
+        }
+        Ok(())
+    }
+
+    /// While no request runs, hold the slot and read the stream until a request wants the
+    /// slot, the peer goes away, something arrives, or the idle bound passes; then shut an
+    /// idle transport down.
+    async fn watch_link(&self, watch: &StateWatch) -> std::result::Result<(), Cut> {
+        let mut held = self.until(self.link.lock(), None, None, true).await?;
+        if self.waiting.load(Ordering::SeqCst) > 0 {
+            // A request signalled before this task took the slot back and may not be queued
+            // yet: let go again and give it the turn.
+            drop(held);
+            tokio::task::yield_now().await;
+            return Ok(());
+        }
+        let link = &mut *held;
+        let now = self.clock.now();
+        let idle_at = self
+            .config
+            .timeouts
+            .idle
+            .and_then(|idle| link.book.last_active.checked_add(idle));
+        // Without an idle bound the read is renewed every `timeouts.request`; a zero
+        // timeout leaves nothing to read for, and the supervisor waits for news instead.
+        let until = idle_at.or_else(|| {
+            now.checked_add(self.config.timeouts.request)
+                .filter(|until| *until > now)
+        });
+        let (Some(framed), Some(until)) = (link.transport.as_mut(), until) else {
+            drop(held);
+            return self.rest(watch).await;
+        };
+        if until > now {
+            // A frame kept for `next_reply` stays first in line: behind it the reader only
+            // buffers what arrives, so that a peer close is still noticed.
+            let parked = framed.parked();
+            // After an abandoned exchange (a timeout, a cancel, a framing error, a dropped
+            // request) the stream may still owe that exchange's reply, or the rest of it.
+            let owed = link.book.phase != Phase::Idle;
+            // Bytes left in the buffer then are realigned as a request would before the
+            // read, so that a framing error is not met again.
+            let realign = owed && framed.buffered_len() > 0;
+            let read = async {
+                let limit = Deadline::at(until);
+                if parked {
+                    framed.listen(limit).await.map(|()| None)
+                } else if realign {
+                    framed.resync(limit).await?;
+                    framed.next_frame(Deadline::at(now)).await.map(Some)
+                } else {
+                    framed.next_frame(limit).await.map(Some)
+                }
+            };
+            let heard = race(self.wanted.notified(), read);
+            match self.until(heard, None, None, true).await? {
+                // A request is queued for the slot, or bytes arrived behind the kept frame
+                // (they wait in the buffer).
+                Race::First(()) | Race::Second(Ok(None)) => return Ok(()),
+                // A frame nobody asked for arrived. After an abandoned exchange it is that
+                // exchange's reply (or debris): nobody waits for it, so it is dropped and
+                // the reader reads on. Otherwise it is kept for a `next_reply` (a caller
+                // may be between two guard calls) and the next request drops it.
+                Race::Second(Ok(Some(frame))) => {
+                    if owed {
+                        drop(frame);
+                        link.book.phase = Phase::Idle;
+                    } else {
+                        framed.park(frame);
+                    }
+                    return Ok(());
+                }
+                // A framing error, or a buffer full behind the kept frame: the stream is
+                // intact, and the next turn (or request) resyncs it. A kept frame is
+                // dropped, so that the resync can run.
+                Race::Second(Err(error))
+                    if matches!(
+                        error.kind(),
+                        ErrorKind::ResourceLimit | ErrorKind::MalformedData
+                    ) =>
+                {
+                    framed.unpark();
+                    link.book.phase = Phase::Resyncing;
+                    return Ok(());
+                }
+                // The peer went away, or the transport failed: reconnect. A resync that ran
+                // out of time reports `Disconnected`, which is the read's deadline here.
+                Race::Second(Err(error))
+                    if error.kind() != ErrorKind::Timeout
+                        && !(realign && self.clock.now() >= until) =>
+                {
+                    link.transport = None;
+                    self.schedule_reconnect(&mut link.book);
+                    return Ok(());
+                }
+                // The read's deadline: the idle bound, or time to read again. A link that
+                // stayed up for the whole read proves itself, as a reply does, so the
+                // reconnect budget starts over.
+                Race::Second(Err(_)) => link.book.failures = 0,
+            }
+        }
+        // The idle bound: a kept frame and buffered bytes go with the transport.
+        if idle_at.is_some_and(|at| self.clock.now() >= at)
+            && let Some(framed) = link.transport.take()
+        {
+            let now = self.clock.now();
+            let deadline =
+                Deadline::after(now, self.config.timeouts.request).unwrap_or(Deadline::at(now));
+            let mut transport = framed.into_inner();
+            // The link is let go either way; a peer that is already gone is no news.
+            drop(
+                self.until(transport.shutdown(deadline), None, None, true)
+                    .await?,
+            );
+        }
+        Ok(())
+    }
+
+    /// Wait until a request wants the slot or the state changes.
+    async fn rest(&self, watch: &StateWatch) -> std::result::Result<(), Cut> {
+        let news = race(self.wanted.notified(), watch.changed());
+        drop(self.until(news, None, None, true).await?);
+        Ok(())
     }
 }

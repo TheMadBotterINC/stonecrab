@@ -150,7 +150,7 @@ they exercise read `interoperability-tested`. No physical device has been tried.
 | Browse and discover | not supported |
 | Connection string and parameters (`parse_config`) | simulator-tested |
 | Connect, close and connection state | interoperability-tested |
-| Request-driven reconnect, read retry, cancellation, timeout and late-reply discard | simulator-tested |
+| Reconnect (in the background when opened in a Tokio runtime, else request-driven), the idle bound, read retry, cancellation, timeout and late-reply discard | simulator-tested |
 | Batched reads with split disclosure | interoperability-tested |
 | Interoperability against an independent server | interoperability-tested |
 | Hardware verification | planned |
@@ -187,8 +187,9 @@ error rather than ignoring it; operations that have no API at all do not exist:
   milestone M2 (no row yet);
 - the upstream gap-filling read optimizer, by decision (S51, ADR-0015 addendum): Stonecrab
   merges adjacent or overlapping tags only (`MB-READ-GAP`), because reading through a hole
-  in a device's map is refused with exception 02 for every tag of the request; and a
-  background reconnect task: reconnect is request-driven;
+  in a device's map is refused with exception 02 for every tag of the request; and
+  upstream's lack of reconnect: Stonecrab reconnects in the background when the connection
+  is opened inside a Tokio runtime (S57, `MB-READ-RECONNECT`);
 - the two byte-swap modes (`BIG_ENDIAN_BYTE_SWAP`, `LITTLE_ENDIAN_BYTE_SWAP`) as upstream
   vectors: the retained PLC4X files configure only `BIG_ENDIAN` and `LITTLE_ENDIAN`, so
   those two rows stay `implemented`, not `automated-verified`;
@@ -551,8 +552,8 @@ the adversarial cases (lengths 255, 1 and 0, protocol id 1, a truncated header, 
 has not arrived, a 261 byte ADU and a 1 KiB stream of seven coalesced ADUs).
 ## Session
 `ModbusSession::new(config, factory, clock)` owns a
-`ConnectionGuard<ModbusAdu, MbapFramer>` (the lifecycle, request-driven reconnect and
-the single in-flight slot of the transport module) and the transaction counter.
+`ConnectionGuard<ModbusAdu, MbapFramer>` (the lifecycle, reconnect, supervised when
+opened in a Tokio runtime, and the single in-flight slot of the transport module) and the transaction counter.
 `connect`, `close`, `state`, `watch_state` and `stats` pass through to the guard. `request(&pdu, unit_id, deadline, token)` encodes a read
 request, sends it with the next transaction id (1 to 0xFFFE, continuing across a
 reconnect) and returns the PDU that answers it:

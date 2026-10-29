@@ -91,33 +91,46 @@ mod tests {
         t0: Instant,
     }
 
+    /// A 100 ms to 1 s backoff without jitter, `reconnect_attempts` retries (unlimited for
+    /// `None`) and a read retry policy of `max_attempts` for `Disconnected`.
+    fn config(max_attempts: u32, reconnect_attempts: Option<u32>) -> ConnectionConfig {
+        config_with_idle(max_attempts, reconnect_attempts, None)
+    }
+
+    /// [`config`] with `timeouts.idle` set to `idle`.
+    fn config_with_idle(
+        max_attempts: u32,
+        reconnect_attempts: Option<u32>,
+        idle: Option<Duration>,
+    ) -> ConnectionConfig {
+        let mut reconnect = ReconnectPolicy::default();
+        reconnect.initial = millis(100);
+        reconnect.max = secs(1);
+        reconnect.jitter = 0.0;
+        reconnect.max_attempts = reconnect_attempts.and_then(NonZeroU32::new);
+        let mut retry = RetryPolicy::default();
+        retry.max_attempts = NonZeroU32::new(max_attempts).expect("positive");
+        retry.retry_on = std::iter::once(ErrorKind::Disconnected).collect();
+        let mut timeouts = Timeouts::default();
+        timeouts.connect = secs(2);
+        timeouts.request = secs(5);
+        timeouts.idle = idle;
+        ConnectionConfig::builder("modbus-tcp", Endpoint::Custom("fake://plc".to_owned()))
+            .timeouts(timeouts)
+            .reconnect(reconnect)
+            .retry(retry)
+            .build()
+            .expect("config")
+    }
+
     impl Rig {
-        /// Open against the `scripts`, one per transport, with a 100 ms to 1 s backoff
-        /// without jitter, `reconnect_attempts` retries (unlimited for `None`) and a read
-        /// retry policy of `max_attempts` for `Disconnected`.
+        /// Open against the `scripts`, one per transport, with the [`config`].
         fn open(
             scripts: Vec<Vec<Step>>,
             max_attempts: u32,
             reconnect_attempts: Option<u32>,
         ) -> Self {
-            let mut reconnect = ReconnectPolicy::default();
-            reconnect.initial = millis(100);
-            reconnect.max = secs(1);
-            reconnect.jitter = 0.0;
-            reconnect.max_attempts = reconnect_attempts.and_then(NonZeroU32::new);
-            let mut retry = RetryPolicy::default();
-            retry.max_attempts = NonZeroU32::new(max_attempts).expect("positive");
-            retry.retry_on = std::iter::once(ErrorKind::Disconnected).collect();
-            let mut timeouts = Timeouts::default();
-            timeouts.connect = secs(2);
-            timeouts.request = secs(5);
-            let config =
-                ConnectionConfig::builder("modbus-tcp", Endpoint::Custom("fake://plc".to_owned()))
-                    .timeouts(timeouts)
-                    .reconnect(reconnect)
-                    .retry(retry)
-                    .build()
-                    .expect("config");
+            let config = config(max_attempts, reconnect_attempts);
             let clock = FakeClock::default();
             let factory = FakeTransportFactory::new(clock.clone());
             for steps in scripts {
@@ -494,5 +507,141 @@ mod tests {
             );
             assert_eq!(clock.now() - started, waited, "{plan}: time spent");
         }
+    }
+
+    /// Yield to the connection's supervisor until `done` holds; fail after 1000 yields.
+    async fn settle(done: impl Fn() -> bool, what: &str) {
+        for _ in 0..1000 {
+            if done() {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+        panic!("the supervisor never got there: {what}");
+    }
+
+    // covers: SPEC mandatory-failure-cases / device restart, network outage, recovery, explicit shutdown during reconnect
+    // Opened inside a Tokio runtime, the connection reconnects with no read asking for it.
+    #[tokio::test]
+    async fn opened_in_a_runtime_the_connection_reconnects_in_the_background_and_close_stops_it() {
+        let clock = FakeClock::default();
+        let factory = FakeTransportFactory::new(clock.clone());
+        // The first peer goes away at 1 s; the second answers one read, then goes away.
+        factory.push_script(Script::strict(vec![Step::Delay(secs(1)), Step::CloseAt(0)]));
+        let mut second = answers(1, 4242);
+        second.push(Step::CloseAt(0));
+        factory.push_script(Script::strict(second));
+        let t0 = clock.now();
+        let connection = ModbusConnection::open(
+            config(1, None),
+            Arc::new(factory.clone()),
+            Arc::new(clock.clone()),
+            ConnectionDefaults::default(),
+        )
+        .await
+        .expect("open");
+        let state = || connection.state();
+
+        assert!(clock.set(t0 + secs(1)), "the peer goes away");
+        let first_retry = ConnectionState::Reconnecting {
+            attempt: 1,
+            next_at: t0 + millis(1100),
+        };
+        settle(|| state() == first_retry, "reconnecting").await;
+        assert!(clock.set(t0 + millis(1100)), "the backoff is over");
+        settle(|| state() == ConnectionState::Connected, "reconnected").await;
+        assert_eq!(factory.opens().len(), 2, "reopened without a read");
+        assert!(
+            factory
+                .probes()
+                .first()
+                .expect("transport was opened")
+                .sent()
+                .is_empty(),
+            "nothing was asked of the first peer"
+        );
+
+        let response = connection
+            .read(
+                ReadRequest::builder(connection.limits())
+                    .tag(tag())
+                    .build()
+                    .expect("request"),
+            )
+            .await
+            .expect("read");
+        assert_eq!(value_of(&response), PlcValue::I16(4242), "value");
+
+        // The second peer goes away after its answer; close lands in the backoff.
+        let second_retry = ConnectionState::Reconnecting {
+            attempt: 1,
+            next_at: t0 + millis(1200),
+        };
+        settle(|| state() == second_retry, "reconnecting again").await;
+        connection.close().await.expect("close");
+        assert_eq!(state(), ConnectionState::Closed, "closed");
+        assert_eq!(
+            clock.sleeper_count(),
+            0,
+            "the backoff sleep went with the task"
+        );
+        assert!(clock.set(t0 + secs(10)), "past every backoff");
+        assert_eq!(factory.opens().len(), 2, "nothing was reopened after close");
+    }
+
+    // covers: SPEC mandatory-failure-cases / F2 delayed replies after timeout
+    // A zero idle bound closes the link after every read. Each peer answers with a reply to
+    // another transaction first and the real one right behind it, in one write; on real
+    // threads the supervisor runs in parallel with the read, and must never close the link
+    // between the discarded reply and the real one.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn under_a_zero_idle_bound_a_read_keeps_the_reply_behind_a_mismatched_one() {
+        const ROUNDS: usize = 100;
+        let clock = FakeClock::default();
+        let factory = FakeTransportFactory::new(clock.clone());
+        for _ in 0..=ROUNDS {
+            factory.push_script(Script::new(vec![Step::respond(|request| {
+                let txn = txn_of(request);
+                let mut bytes = reply(txn.wrapping_add(1000), 1);
+                bytes.extend_from_slice(&reply(txn, 4242));
+                Some(bytes)
+            })]));
+        }
+        let connection = ModbusConnection::open(
+            config_with_idle(1, None, Some(Duration::ZERO)),
+            Arc::new(factory.clone()),
+            Arc::new(clock.clone()),
+            ConnectionDefaults::default(),
+        )
+        .await
+        .expect("open");
+        for round in 0..ROUNDS {
+            let response = connection
+                .read(
+                    ReadRequest::builder(connection.limits())
+                        .tag(tag())
+                        .build()
+                        .expect("request"),
+                )
+                .await
+                .expect("read");
+            assert_eq!(value_of(&response), PlcValue::I16(4242), "round {round}");
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            connection.state(),
+            ConnectionState::Connected,
+            "still available"
+        );
+        connection.close().await.expect("close");
+        // A read reopens only a link that is gone: each one before the last was closed by
+        // the idle bound, and close shut the last one down.
+        assert!(
+            factory
+                .probes()
+                .iter()
+                .all(stonecrab::testkit::FakeTransportProbe::is_shut_down),
+            "every link was shut down"
+        );
     }
 }

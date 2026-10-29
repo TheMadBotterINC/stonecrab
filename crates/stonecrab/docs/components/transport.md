@@ -20,6 +20,7 @@ types are Stonecrab's own contract. The behavior that is specified is recorded i
 | `FramedTransport::resync` | simulator-tested |
 | `ConnectionGuard` connect, close, lifecycle and one in-flight request, `GuardConfig`, `GuardStats` | interoperability-tested |
 | `ConnectionGuard` request-driven reconnect, bounded queue, resync after a timeout | simulator-tested |
+| `ConnectionGuard::supervise`: background reconnect and the `Timeouts.idle` bound | simulator-tested |
 | `SystemClock` (Tokio timer) | interoperability-tested |
 | `Jitter` (xorshift64* sample source for `ReconnectPolicy::next_delay`) | build-tested |
 | `SerialTransport` and `SerialFactory` (feature `serial`) | simulator-tested |
@@ -52,8 +53,10 @@ The module exists only with the `transport` feature, which is the only thing tha
 Tokio into the crate: `rt`, `net`, `time`, `sync` and `io-util` are scoped on, and the
 `full` feature of Tokio is banned by `deny.toml`. The `modbus` and `testkit` features
 turn `transport` on; `sim`, `sensors` and `default-features = false` do not, so the
-core stays free of Tokio. Nothing here spawns a task, and a transport does no work
-between calls (decision D15 of the alpha plan).
+core stays free of Tokio. A transport does no work between calls. The one task in the
+module is the connection guard's optional supervisor, which `ConnectionGuard::supervise`
+starts on the current Tokio runtime and the guard owns: `close` joins it and dropping the
+guard aborts it (ADR-0014, addendum S57).
 
 The `serial` feature adds `SerialTransport` and `SerialFactory` to the module and turns on
 `transport` and the `serial2` crate. No other feature enables it, so a build without it has
@@ -133,28 +136,55 @@ receive buffer, bounded by `max_buffered_bytes`:
 it and does the correlation. Observe it with `state()` and `watch_state()`, count with
 `stats()`, and end it with `close()`.
 
-- **Reconnect is request-driven (D15).** There is no background task. After a transport
-  failure the state is `Reconnecting` with `next_at = now + next_delay(attempt - 1,
-  sample)`; the next request sleeps until `next_at` on the clock (cancellably, within its
-  own deadline), reopens within `timeouts.connect` and carries on. When
-  `ReconnectPolicy::is_exhausted` says so the state becomes `Failed(Disconnected)` and
-  every later request fails with `Disconnected` before any I/O.
+- **Reconnect.** After a transport failure the state is `Reconnecting` with
+  `next_at = now + next_delay(attempt - 1, sample)`; the next request sleeps until
+  `next_at` on the clock (cancellably, within its own deadline), reopens within
+  `timeouts.connect` and carries on. When `ReconnectPolicy::is_exhausted` says so the
+  state becomes `Failed(Disconnected)` and every later request fails with `Disconnected`
+  before any I/O.
+- **The supervisor.** `supervise()` starts a background task on the current Tokio
+  runtime (outside one, or once the guard is closing, closed or failed, it returns
+  `false` and reconnect stays request-driven; the task lives on that runtime and is
+  aborted, not joined, when the guard is dropped). It reads the stream (in every
+  sub-state, so a link that dropped after a request timed out is noticed too), so a peer
+  that closes is noticed with no request; in `Reconnecting` it reopens the transport as
+  soon as `next_at` passes, attempt after attempt, until the guard is `Connected` or
+  `Failed`. Every state it reaches goes through `watch_state()`. A request takes the
+  slot from its reader at once, even on a multi-thread runtime; one that arrives while
+  it is opening a transport waits in line, within its own deadline. A frame the reader
+  finds after a timed-out or cancelled request is that request's late reply and is
+  dropped. A frame it finds while nothing is owed is kept for the next `next_reply` (a
+  caller may be between two guard calls) and dropped by the next request; behind it the
+  reader only buffers what arrives, so a peer close is still noticed. The Modbus TCP
+  connection starts it when it is opened inside a Tokio runtime.
+- **The idle bound.** With a supervisor, `timeouts.idle` is enforced, a kept frame or
+  not: when no exchange has run for that long the transport is shut down (with whatever
+  it buffered), the state stays `Connected`, and the next request opens a new transport
+  without backoff, while `next_reply` fails `Disconnected`. A zero bound closes the
+  transport after every exchange. Without a supervisor `idle` is ignored.
 - **One in flight, a bounded line behind it.** At most `max_pending_requests` requests
   are owned at once, the running one included; one more is `Backpressure` before any
   I/O. The rest wait in arrival order on `tokio::sync` primitives and leave the line when
   cancelled, timed out or overtaken by `close`.
 - **Deadlines.** `request` takes the deadline from the caller;
   `request_with_default_deadline` uses `timeouts.request`. `close` is bounded by
-  `timeouts.request` too and always ends `Closed`.
+  `timeouts.request` too, joins the supervisor within that bound (aborting it if it is
+  still running then) and always ends `Closed`.
 - **Late replies.** A request that times out or is cancelled after its frame went out
   leaves the guard `Connected`. If bytes of its reply are buffered, the next request first
   runs `resync` within its own deadline and drops the frame found; if none is found in
   time that request fails with `Disconnected` and the guard reconnects. A reply that
-  arrives whole later is the next request's reply, and the session discards it by
-  correlation, so a session must loop on `next_reply(deadline, token)` (which reads a
-  further frame without sending) until the correlated frame arrives.
+  arrives whole later is the next request's reply (with a supervisor, one that arrives
+  between two requests is read and dropped by the supervisor instead), and the session
+  discards it by correlation. A session does that with
+  `request_matching(frame, deadline, token, accept)`, which keeps the in-flight slot from
+  the send to the first frame `accept` takes, so neither the supervisor nor the idle bound
+  comes between its reads; `next_reply(deadline, token)` reads one further frame without
+  sending, and under a supervisor the slot is free between two such calls.
 - **Reconnect budget.** Only a received reply resets the attempt count; an open alone
-  does not, so a peer that accepts and then closes ends in `Failed(Disconnected)`.
+  does not, so a peer that accepts and then closes ends in `Failed(Disconnected)`. With a
+  supervisor, a reconnected link that stays up for a whole read (`idle` after its last
+  activity, else `timeouts.request`) also resets it.
 
 ## Limits
 `recv` appends only up to `ResourceLimits::max_buffered_bytes` and fails with

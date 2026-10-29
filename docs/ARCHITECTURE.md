@@ -412,8 +412,8 @@ diagram in three ways:
 - `ReconnectPolicy::next_delay(attempt, sample: f64)` is pure (no random source in core),
   `RetryPolicy.retry_on` is a `BTreeSet<ErrorKind>` (default `{Timeout, Disconnected,
   Backpressure}`, equal to `PlcError::is_retryable`), `AccessPolicy` defaults to
-  `ReadOnly`, and `Timeouts.idle` is recorded and **not enforced** at alpha because no
-  background task exists (M2).
+  `ReadOnly`, and `Timeouts.idle` is enforced only by a guard's supervisor (S57); the
+  simulator and an unsupervised guard ignore it.
 
 `ResourceLimits.max_items_per_request` is a mandatory `NonZeroUsize`, not an `Option`;
 `Capabilities` and `ResourceLimits` are `Copy` and returned by value. `Capabilities` is
@@ -1012,7 +1012,7 @@ authoritative where they differ.
 | `TcpTransport`, `TcpFactory { nodelay }` | feature `transport` (off by default, on through `modbus` and `testkit`): name resolution and connect inside one connect deadline; refused or reset peers are `Disconnected`; `recv` bounded by `max_buffered_bytes`, `send` by `max_frame_bytes`; a `send` cut short poisons the transport. No keepalive field. |
 | `Framer<F>` (`Send`) | `decode(&mut self, &mut BytesMut) -> Result<Option<F>, FrameError>`; `encode(&mut self, &F, &mut BytesMut) -> Result<(), FrameError>`; `max_frame_bytes() -> usize` |
 | `FramedTransport<F, R>` | `new(Box<dyn Transport>, R)`; `next_frame(Deadline)`; `send_frame(&F, Deadline)`; **`resync(Deadline)`**; owns the receive buffer, bounded by `max_buffered_bytes` |
-| `ConnectionGuard<F, R>` | `connect`, `request(frame, deadline, token)`, `request_with_default_deadline`, `next_reply(deadline, token)`, `close`, `state`, `watch_state`, `stats`; `GuardConfig`, `GuardStats` |
+| `ConnectionGuard<F, R>` | `connect`, `request(frame, deadline, token)`, `request_with_default_deadline`, `request_matching(frame, deadline, token, accept)`, `next_reply(deadline, token)`, `supervise`, `close`, `state`, `watch_state`, `stats`; `GuardConfig`, `GuardStats` |
 | `FrameError` | `Truncated`, `Oversized(usize)`, `Malformed`, with `From<FrameError> for PlcError` (D22) |
 | `SystemClock`, `Jitter` | the Tokio-backed `Clock` and the xorshift64* sample source for `ReconnectPolicy::next_delay` |
 
@@ -1030,9 +1030,10 @@ driver never sees them.
 `ConnectionGuard` owns one connection and is the state machine of section 8. It is not a
 struct of public fields as drawn: the pending slot, reconnect policy and token are
 private. It offers one in-flight request on a single slot with an admission queue bounded
-by `ResourceLimits.max_pending_requests` (`Backpressure` beyond it), request-driven
-reconnect, a resync before the next send after a timeout, and a `close` bounded by
-`Timeouts.request`. Nothing is spawned and nothing runs between calls (D15).
+by `ResourceLimits.max_pending_requests` (`Backpressure` beyond it), reconnect, a resync before the next send after a timeout, and a `close` bounded by
+`Timeouts.request`. Nothing runs between calls unless `supervise` starts the guard's one
+background task (S57, ADR-0014 addendum), which reconnects eagerly and enforces
+`Timeouts.idle`.
 
 **Deferred:** `UdpTransport` (M3), `SerialTransport`, `SerialSettings` and
 `BlockingWorker` (M2, with Modbus RTU), TLS transports (M3), and the TCP `keepalive`
@@ -1373,8 +1374,9 @@ chunk's members; a failed exchange is retried per the configuration's `RetryPoli
 (retryable kinds only, never past the request deadline) and otherwise fails the read. The
 response has one item per tag in request order, `split_into` is the chunk count,
 `sampled_at` is the instant each chunk was answered and `source_time` is `None`. Reconnect
-is the guard's, request-driven: a lost peer shows as `Reconnecting`, the next read waits
-out the backoff and reopens, and the read in flight when the peer closed fails with
+is the guard's, supervised when the connection is opened in a Tokio runtime (S57): a lost
+peer shows as `Reconnecting`, the supervisor reopens it after the backoff (else the next
+read waits out the backoff and reopens), and the read in flight when the peer closed fails with
 `Disconnected` and is never replayed.
 
 **Configuration keys** (read by `ModbusTcpDriver::parse_config` from
@@ -1418,8 +1420,7 @@ never inferred.
 - `ModbusRtuDriver`, `RtuFramer`, `Crc16Modbus`, the `Framing` enum and the serial
   transport (M2); UDP, TLS and TLS-PSK transports (M3 or the parity backlog);
 - the upstream gap-filling read optimizer (the batcher never reads a gap, divergence
-  `MB-READ-GAP`) and a background reconnect task (D15; eager reconnect is the first M2
-  slice);
+  `MB-READ-GAP`) and, before S57, a background reconnect task (now shipped, ADR-0014 addendum);
 - the upstream write exchanges: the driver-suite and all-datatypes read exchanges are
   vectors since S04b (serialized by a test-only adapter); the write cases are not emitted.
 
@@ -1968,7 +1969,8 @@ stateDiagram-v2
     Closed --> [*]
 
     note right of Reconnecting
-        Request-driven: nothing runs between calls.
+        Request-driven unless the guard is supervised (S57):
+        then the supervisor reopens after the backoff.
         The request in flight when the peer closed fails
         with ErrorKind::Disconnected and is never replayed.
     end note
@@ -1988,7 +1990,8 @@ stateDiagram-v2
   runs its own, smaller lifecycle (`Disconnected`, `Connecting`, `Connected`, `Closing`,
   `Closed`, plus `Failed(Disconnected)` after a scripted disconnect) through the same
   `StateCell`.
-- **Reconnect is request-driven (D15).** There is no background task. After a failure the
+- **Reconnect is request-driven without a supervisor (D15), eager with one (S57).** Without
+  `supervise` there is no background task. After a failure the
   state is `Reconnecting { attempt, next_at }` with `next_at = now + next_delay(attempt - 1,
   sample)`; the next request (or `connect`) sleeps until `next_at` on the clock,
   cancellably and within its own deadline, reopens within `Timeouts.connect` and carries on.
@@ -2009,12 +2012,12 @@ stateDiagram-v2
 - **`close`** is bounded by `Timeouts.request`, always ends `Closed` and wakes every wait
   the guard owns.
 
-**Deferred:** the RTU variant of `Resyncing` ("drain until t3.5 silence", M2); the
-`idle timeout` transition into `Reconnecting` (`Timeouts.idle` is recorded and unenforced,
-M2); pending writes resolving to `WriteOutcome::Unknown` on reconnect (the Modbus driver
-reports an `Unknown` at the call instead, and never replays a write); and an eager
-background reconnect task (first M2 slice). Subscriptions receive no `Ended` event: since
-S55 a polling subscription watches the connection's state and ends after its queued events
+**Deferred:** the RTU variant of `Resyncing` ("drain until t3.5 silence", M2); the `idle
+timeout` as a transition into `Reconnecting` (S57 enforces `Timeouts.idle` by closing an
+unused link instead; the state stays `Connected`); and pending writes resolving to
+`WriteOutcome::Unknown` on reconnect (the Modbus driver reports an `Unknown` at the call
+instead, and never replays a write). Subscriptions receive no `Ended` event: since S55 a
+polling subscription watches the connection's state and ends after its queued events
 when the connection closes or fails, and `recv` then returns `None`.
 
 ### 8.1 Request lifecycle
@@ -2064,7 +2067,7 @@ times out is retried per `RetryPolicy` (default one attempt), a write never.
 | 9.1 Connect through the registry | shipped | the connection-string parameter is `default-unit-identifier` (corrected in the diagram); the driver is built with its transport factory and clock, `ModbusConnection::open` creates the `ConnectionGuard` |
 | 9.2 Batched read with split and partial failure | shipped | the exception is mapped per D18 (`0x02` is `InvalidAddress`, not `DeviceException`); the Modbus connection runs the chunks one after another |
 | 9.3 Timeout, late reply, resynchronization | shipped for TCP | the guard resyncs before the next send; the RTU variant is deferred (M2); write `Unknown` outcomes are shipped (S46) |
-| 9.4 Reconnect with backoff | shipped, request-driven | no background sleep: the next request waits out the backoff; no `StateChanged` or `Ended` event reaches a `Subscription`: a Modbus polling tick that meets the link down is skipped and counted, and the next tick's read reconnects (S55) |
+| 9.4 Reconnect with backoff | shipped; eager with a supervisor (S57), else request-driven | the supervisor reopens after the backoff, or the next request waits it out; no `StateChanged` or `Ended` event reaches a `Subscription`: a Modbus polling tick that meets the link down is skipped and counted, and the supervisor or the next tick's read reconnects (S55, S57) |
 | 9.5 Polling subscription | shipped (S55) as polling driven from `recv`; `StaleTracker` still S56 | no `PollTask` is spawned: the `Subscription` owns the producer future and polls it while `recv` waits on an empty queue (ADR-0020 addendum S55); ticks lie on a grid of the interval and the missed ones count in `LossCounters::skipped`; each tick's read takes the connection's default deadline, not `tick + interval`; events are `ReadItem`s (no `Value` or `Stale` event, no `stale_after`); `CoalesceLatest` never engages for a polling subscription, whose slow consumer sees `skipped` instead |
 | 9.6 Write with an ambiguous outcome | shipped (S46) | the Modbus driver sends one request per item, reports `Unknown` for a request that went out without a usable answer and stops after the first one; the simulator's `UnknownAfterTransmit` step exercises the same |
 | 9.7 Sensor profile to measurement | partly shipped | `tags` and `measurements` exist; `Acquisition` and the polling loop are deferred (M2); a profile declares `plc4x`, `one-based-40001` or `zero-based` (S51) |

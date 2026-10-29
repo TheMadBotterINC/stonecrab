@@ -176,6 +176,32 @@ impl<F: Send, R: Framer<F>> FramedTransport<F, R> {
         self.buffer.len()
     }
 
+    /// Hold `frame` for the next [`next_frame`](Self::next_frame), which returns it before
+    /// anything else. The guard's supervisor uses it to keep a frame it read while nobody
+    /// had asked for one.
+    pub(crate) fn park(&mut self, frame: F) {
+        self.ready = Some(frame);
+    }
+
+    /// Whether a frame is held for the next [`next_frame`](Self::next_frame).
+    pub(crate) const fn parked(&self) -> bool {
+        self.ready.is_some()
+    }
+
+    /// Drop the frame held for the next [`next_frame`](Self::next_frame), if any.
+    pub(crate) fn unpark(&mut self) {
+        self.ready = None;
+    }
+
+    /// Receive once more into the buffer, without decoding, within `deadline`. The guard's
+    /// supervisor uses it behind a parked frame, to notice a peer close.
+    ///
+    /// Fails `Disconnected` at end of stream and `ResourceLimit` when the buffer is
+    /// already at its bound, as a read for a frame does.
+    pub(crate) async fn listen(&mut self, deadline: Deadline) -> Result<()> {
+        self.fill(deadline).await
+    }
+
     /// Give back the transport, dropping the framer, the buffered bytes and any frame
     /// held for the next `next_frame`.
     ///

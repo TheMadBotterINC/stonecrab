@@ -224,9 +224,12 @@ The only module with Tokio, apart from the test kit (scoped features, no spawned
 `TransportFactory` (a `Deadline` on every call, `shutdown(Deadline)`), `TcpTransport` and
 `TcpFactory`, `FrameError` (transport-local, plan D22), `Framer` and
 `FramedTransport` (`next_frame`, `send_frame`, `resync(Deadline)`), `ConnectionGuard` with
-`GuardConfig` and `GuardStats` (lifecycle through core `ConnectionState`, request-driven
-reconnect with capped jittered backoff, one in-flight slot with a bounded admission queue,
-resync after a timeout, `close` bounded by `Timeouts.request`), `SystemClock` and `Jitter`.
+`GuardConfig` and `GuardStats` (lifecycle through core `ConnectionState`, reconnect with
+capped jittered backoff, one in-flight slot with a bounded admission queue, resync after a
+timeout, `close` bounded by `Timeouts.request`; since S57 an opt-in supervisor task,
+started by `ConnectionGuard::supervise` inside a Tokio runtime and used by every Modbus
+connection, notices a drop and reconnects without waiting for a request and enforces
+`Timeouts.idle` by closing an unused link), `SystemClock` and `Jitter`.
 Behind the off-by-default `serial` feature (S58): `SerialFactory` and `SerialTransport` on
 the `serial2` crate, one blocking worker thread per port talking to async callers over a
 bounded channel, every call bounded by its deadline, `recv` cancel-safe through a
@@ -383,6 +386,7 @@ commit; gates named were run locally before that commit.
 | S52a | 2026-10-29 | A second independent interop peer: libmodbus 3.1.11's `unit-test-server`, built in a two-stage image from the sources Debian's `libmodbus-dev` 3.1.11-2 ships (base `debian:trixie-slim` pinned by digest, the two source files checked by sha256, non-root, port 1502, restarted after every connection by `serve.sh`); nothing of libmodbus is copied, the `unit-test.h` constants are transcribed with their BSD-3-Clause source. Ten tests (`modbus_interop_libmodbus.rs`, a new CI job `interop-libmodbus` and `mise run interop` for both peers): reads at unit 17, FC15, FC06 and FC16 writes read back (REAL under all four byte orders), exception 06 at 0x170, the wrong-TID-and-unit reply at 0x171 discarded with the session usable, the 500 ms reply within and beyond a deadline, a byte-at-a-time reply reassembled, and the short FC03 reply as `MalformedData` (without raw bytes: a recorded gap); the shared `Peer` helper moved to `tests/support/interop.rs` | check, coverage, lint-attrs, parity, semver, interop for both peers (80 of 80 repeated local runs) |
 | S58 (fix) | 2026-10-29 | The first hosted run with S58 (40806708069) failed in its Linux-only by-name test: it asked a pseudo-terminal for 7E2, and Linux's pty driver forces eight data bits and no parity (`pty_set_termios`), so serial2 reported "failed to apply some or all settings". Checked with termios in a Linux container: a pty keeps the baud rate, two stop bits and XON/XOFF. The test now opens 19200 8N2 XON/XOFF, and a new test pins that a setting the port refuses fails the open as `Disconnected` | fmt; clippy of the Linux-only tests with their cfg widened on macOS; the termios behavior checked in a Linux container |
 | S55 | 2026-10-29 | Polling subscriptions for the simulator and Modbus (`SubscriptionMode::Polling`): a private `polling` module plans the subscription before any I/O (Event refused; ChangeOfState refused on a clock that never sleeps; cyclic at the request's interval, change-of-state at upstream's 1000 ms) and the `Subscription` drives its producer while its consumer waits in `recv` (no spawned task: the core has no executor and the contract suite runs on `block_on_with`). Ticks sample on a grid through the connection's read path and skip, counted in `LossCounters::skipped`, when the slot is busy, the link is being reopened or nobody waits; `recv` takes `&mut self` (two pending receives do not compile); a panic in the producer ends it without aborting. Both connections hold their state in a private `Arc<Link>` so the producer never outlives them. Six contract cases (33); ADR-0020 addendum; the verification pass found a change-of-state spin, lost wakeups between concurrent receives and doc overstatements, all fixed | check, coverage (core, modbus and sim 100%), lint-attrs, parity, examples, semver, package list, interop; an independent verification pass (concurrency and design lenses), a fix round and a recheck |
+| S57 | 2026-10-29 | Eager reconnect and the idle timeout: `ConnectionGuard::supervise` (opt-in, Tokio runtime only, bounds kept off the published constructors so the change stays additive) starts a supervised task owned by the guard (`close` joins it within `timeouts.request`, drop aborts it) that, while nothing is requested, holds the slot and reads the stream so a peer close is noticed, reconnects per `ReconnectPolicy` on the guard's clock, ends in `Failed` when the budget is spent, and yields to requests through a `Notify`; a request and its reply are correlated under one hold. `Timeouts.idle` closes a link no request used and the next request reopens it (state stays `Connected`). The Modbus connection opts in. ADR-0014 addendum records the deviation from D15; the verification pass restored ADR history the slice had deleted and fixed a parked frame that suspended the idle bound and drop detection; frames the reader drops are not yet counted (Known gaps) | check, coverage (transport 99.73%), lint-attrs, parity, examples, semver; an independent verification pass, a fix round and a recheck |
 
 ## Verified evidence and reproduction
 
@@ -671,6 +675,11 @@ Deferred features, each a deferred row in `docs/parity/modbus.md` or an item of 
   (S52a) surfaces as a whole-read `MalformedData` from the byte-count check, without the
   raw bytes the plan expected an item error to keep; keeping them is a small follow-up in
   the session's decode path.
+- **The background reader is quiet** (S57): frames a supervised guard drops between
+  exchanges (a late reply to a timed-out request, an unsolicited frame) are not counted
+  in `GuardStats` or the session's late and mismatched counters, and the supervisor emits
+  no tracing events (the `transport` feature does not depend on `tracing`); its state
+  changes are visible through `watch_state`. A follow-up adds the counter.
 - **Not verified by the interop run**: timing over a real clock, dropped links and device
   exceptions on demand (a stock pymodbus has no fault hooks), unit-id correlation, and any
   server other than pymodbus 3.8.6.

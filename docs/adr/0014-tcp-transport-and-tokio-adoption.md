@@ -14,7 +14,8 @@ implements decisions D10, D15, D21, D22 and D23 for this crate. It builds on ADR
 Drivers need a byte pipe that every call bounds with a deadline, a way to open it again
 after a failure, and a real clock. Core is Tokio-free by design (CODING_STANDARDS 8.1), so
 the first runtime-bound code lands here. Decision D15 fixes the concurrency model: no
-background task, request-driven reconnect, no `tokio::spawn` in any published crate.
+background task, request-driven reconnect, no `tokio::spawn` in any published crate. (The
+S57 addendum below relaxes this for one opt-in task, the connection guard's supervisor.)
 Decision D21 fixes how the transport is tested: timing on fakes, bytes on loopback.
 
 ## Decision
@@ -99,7 +100,9 @@ Decision D21 fixes how the transport is tested: timing on fakes, bytes on loopba
    in this crate produced a `disallowed_methods` warning for each (the scratch file is not
    committed), and clippy reports no unresolved-path warning for `clippy.toml`.
    `JoinSet::spawn` in one test is not on the list; it keeps the handle in the set
-   (section 8.7).
+   (section 8.7). Superseded in part by the S57 addendum below: a guard that is asked to
+   (`ConnectionGuard::supervise`) runs one owned background task; without that call this
+   decision holds as written.
 10. **D10: `tcp` is default-on.** `[features] default = ["tcp"]`, `tcp = ["tokio/net"]`.
     This follows ARCHITECTURE.md section 10 and is the recorded deviation from the
     off-by-default rule: a transport crate with no transport is not a usable default.
@@ -332,7 +335,8 @@ declared; the "declared and unused until S19" consequence above is therefore res
   open that fails with `Timeout` or `Disconnected` backs off; any other kind is
   `Failed(kind)`. A peer close, a failed send or a failed resync drops the transport and
   backs off the same way.
-- **Request-driven reconnect (D15).** Nothing runs between calls. The next `request` or
+- **Request-driven reconnect (D15).** (Without a supervisor; superseded for a supervised
+  guard by the S57 addendum below.) Nothing runs between calls. The next `request` or
   `connect` sleeps until `next_at` with `Clock::sleep_until`, raced against its token,
   its deadline and the guard's own closing signal; it then opens within
   `min(timeouts.connect, request deadline)`, makes one attempt, and fails with the open's
@@ -629,6 +633,105 @@ attempt used the `serialport` crate and was set aside because that crate is MPL-
     `open_serial`; a macOS run leaves them uncovered, a few lines in all, and none is an
     excluded line.
 
+## Addendum (S57): eager reconnect and the idle timeout
+Slice S57 adds `ConnectionGuard::supervise` and `ConnectionGuard::request_matching`, and
+enforces `Timeouts.idle` under a supervisor. It needs no ADR of its own: it adds no
+dependency (`tokio::spawn`, `JoinHandle` and `Notify` come with the `rt` and `sync`
+features already enabled), no new crate and no new public trait, and the owner it adds is
+the guard that this ADR already defines.
+
+- **Deviations from the text above.** The Context sentence on D15, decision 9 ("No
+  background work"), the S19 bullet "Request-driven reconnect (D15)" and the alternative
+  "`spawn` a reader task that fills a channel" are superseded for a supervised guard; each
+  carries a pointer here. Why: D15 was an alpha scoping decision, made before there was an
+  owner for a task, and the property it protected is kept by other means. The spawn is
+  opt-in (only `supervise` starts it, and only inside a Tokio runtime; the Modbus
+  connection calls it when it is opened in one), it is owned by the guard (CODING_STANDARDS
+  8.7: `close` joins it, dropping the guard aborts it), and the one `tokio::spawn` carries
+  `#[expect(clippy::disallowed_methods)]` with that reason. There is still no channel and
+  no timer task: the supervisor sleeps on the guard's `Clock`, and every state it reaches
+  is published through `watch_state`, so a background failure is not hidden. Without
+  `supervise` the S19 text holds unchanged.
+- **The task and its owner.** The guard's state lives in an `Arc<Shared>` that the task
+  shares; the guard keeps `Mutex<Option<Supervisor>>`, where `Supervisor` wraps the
+  `JoinHandle<()>` and aborts it on drop. `supervise` returns `false` outside a Tokio
+  runtime (`Handle::try_current`) and once the guard is closing, closed or failed; a call
+  while the task runs starts no second one; a stored handle whose task has finished (its
+  runtime was dropped) is replaced by a task on the runtime current at the call. `close`
+  cancels the closing token, takes the slot, shuts the transport down and then awaits the
+  handle, all within `Deadline::after(clock.now(), timeouts.request)`; at that deadline
+  the handle is dropped, which aborts the task, and `close` reports `Timeout`.
+  `supervise` alone needs `F: 'static` and `R: 'static`; the other methods keep their
+  bounds.
+- **Turns.** The task runs one turn per state until the state is terminal. In
+  `Reconnecting` it races a state change against `sleep_until(next_at)`, then takes the
+  slot and, if the transport is still gone and `next_at` has passed, reopens within
+  `timeouts.connect`; a failed open has already set the next state (`Reconnecting` with the
+  next attempt, or `Failed`). In `Connected` it reads the stream (below). In `Disconnected`
+  and `Connecting` it waits for a taker of the slot or a state change. Every wait races the
+  closing signal, whose cut ends the task.
+- **Hand-over.** The reader holds the in-flight slot while it reads. Every taker of the
+  slot (`request`, `request_matching`, `next_reply`, `connect`) first increments `waiting`
+  (an `AtomicUsize`, decremented by a drop guard once it holds the slot or gives up), then
+  calls `wanted.notify_one()`, then queues on the fair mutex. The reader races its read
+  against `wanted.notified()` and lets go when it fires. After it takes the slot it also
+  checks `waiting` and lets go again if it is not zero: a `Notify` permit can be consumed by
+  a turn that ends before the request has queued, and the count closes that window.
+- **The reader in every sub-state.** While nothing is owed (`Idle`) it reads the next
+  frame. After an abandoned exchange (`Resyncing`, or `InFlight` left by a dropped request)
+  it first realigns buffered bytes as a request would (`resync`, then drop the frame
+  found), and a whole frame it reads is that exchange's late reply and is dropped; either
+  way it reads on, so the idle bound and a peer close are still seen. A framing error sets
+  `Resyncing` for the next turn. A peer close or a transport failure drops the transport
+  and schedules a reconnect. The read is bounded by `last_active + timeouts.idle`, or by
+  `timeouts.request` from its start when there is no idle bound; with neither (a zero
+  request timeout and no idle bound) the reader does not read and waits for news.
+- **Budget reset on a whole read.** A read that reaches its own deadline on a live link
+  resets the attempt count, as a received reply does: a quiet link that is dropped now and
+  then would otherwise spend `max_attempts` across unrelated outages. The S19 rule (only a
+  reply resets the count, not an open) still holds for a peer that accepts and closes at
+  once, because such a link does not survive a whole read.
+- **Parking.** A frame the reader finds while nothing is owed is parked in the
+  `FramedTransport` (`park`, returned first by the next `next_frame`): the next
+  `next_reply` gets it, and the next request drops it before it sends. Behind a parked
+  frame the reader only receives into the buffer without decoding (`listen`), so a peer
+  close is noticed; a buffer that reaches `max_buffered_bytes` drops the parked frame and
+  sets `Resyncing`, and the next turn realigns it.
+- **Correlation under one hold.** `request_matching(frame, deadline, token, accept)`
+  keeps the slot from the send to the first frame `accept` takes; a refused frame is
+  dropped and the read goes on within the same deadline and token. The Modbus session
+  uses it (its `accept` counts and logs a discarded reply, as before), so neither the
+  reader nor the idle bound can run between a stale reply and the real one behind it; on
+  a multi-thread runtime, `request` followed by `next_reply` lost most of those replies
+  under `timeouts.idle = 0`. `next_reply` stays, and its rustdoc says that a supervisor can
+  act between two calls.
+- **The idle bound.** `last_active` is set when an exchange or an open ends. When
+  `timeouts.idle` is set and the bound has passed at the end of a reader turn, the
+  transport is shut down within `timeouts.request` and dropped, with a parked frame and any
+  buffered bytes. The state stays `Connected` (core's `ConnectionState` is unchanged); the
+  next request or `connect` reopens without backoff (`next_at` is unset) and the reopen
+  counts in `stats().reconnects`; `next_reply` fails `Disconnected`. A zero bound closes
+  the transport after every exchange. Without a supervisor `idle` is ignored, as before.
+- **Not done here.** The tracing events of CODING_STANDARDS 14.3 for the background
+  transitions (warn on a background drop and on an exhausted budget, info on a reconnect,
+  error on `Failed`, debug on an idle close). `tracing` is not a dependency of the
+  `transport` feature (`transport = ["dep:tokio"]`; decision 13 above), so those
+  transitions are visible through `watch_state` only; the Modbus connection logs whether
+  it is `supervised` when it opens.
+- **Rows and tests.** `TRANSPORT-RECONNECT` and `TRANSPORT-GUARD-LIFECYCLE` in
+  `docs/parity/transport.md`. The supervisor tests in
+  `crates/stonecrab/tests/transport_guard.rs` run a current-thread Tokio runtime on the
+  fake clock (the test moves the clock and yields until the task has acted), and two run
+  on a multi-thread runtime: back-to-back requests never wait behind the reader, and a
+  correlated exchange keeps its reply under a zero idle bound.
+  `crates/stonecrab/tests/modbus_reconnect.rs` covers the Modbus connection opened in a
+  runtime, including reads under a zero idle bound on a multi-thread runtime.
+- **Named uncovered lines (ADR-0005).** None new. `scripts/coverage-gate.sh` reports
+  transport at 1476 of 1480 lines (99.73%, up from 1224 of 1228 before the slice). The
+  lcov file lists two zero-hit lines, the S19 arms of `transmit` named above; the other two
+  are the S16 arms in `deadline.rs` and `tcp.rs`.
+
+
 ## Alternatives considered
 - **`async-std` or `smol`.** Rejected: CODING_STANDARDS 15.8 names Tokio as the sanctioned
   runtime, the later OPC UA and TLS crates in the ecosystem assume it, and a second
@@ -649,7 +752,9 @@ attempt used the `serialport` crate and was set aside because that crate is MPL-
 - **Letting a timed-out `send` leave the transport usable.** Rejected: the peer may hold
   half a frame, and continuing would corrupt the next one.
 - **`spawn` a reader task that fills a channel.** Rejected by D15: background tasks hide
-  failures until a request arrives and need an owner to abort them.
+  failures until a request arrives and need an owner to abort them. S57 adopts an owned,
+  opt-in reader task with no channel instead (see that addendum): the guard is its owner,
+  and every state it reaches is published through `watch_state`.
 
 ## Compliance
 - `crates/stonecrab-transport/tests/tcp.rs`, unit tests in

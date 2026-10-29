@@ -132,8 +132,9 @@ impl Default for ConnectionDefaults {
 ///
 /// `ModbusConnection` is what the `modbus-tcp` driver hands out as a `dyn Connection`
 /// (slice S26). It owns a [`ModbusSession`] (transaction ids, reply correlation, the
-/// request-driven reconnect of the connection guard underneath) and adds the read
-/// semantics of the [`Connection`] contract:
+/// reconnect of the connection guard underneath, in the background when the connection is
+/// opened inside a Tokio runtime) and adds the read semantics of the [`Connection`]
+/// contract:
 ///
 /// - **Batching.** A read request is planned by [`Batcher::plan`] into chunks, one wire
 ///   request each (function codes 01 to 04, at most 125 registers or 2000 bits), and the
@@ -301,6 +302,13 @@ impl ModbusConnection {
     ///
     /// The deadline source is `timeouts.connect`, applied by the guard to the open.
     ///
+    /// Opened inside a Tokio runtime, the connection starts the guard's supervisor
+    /// (`ConnectionGuard::supervise`): a dropped link is reopened in the background
+    /// following the reconnect policy, without waiting for a request, and `timeouts.idle`,
+    /// when set, closes a link no request has used for that long (the next request reopens
+    /// it). [`close`](Connection::close) stops and joins the task. Opened elsewhere (the
+    /// testkit's executor), reconnect is driven by the next request instead.
+    ///
     /// # Compatibility: docs/parity/modbus.md#MB-CFG-REQUEST-TIMEOUT
     /// The request timeout of the configuration becomes the per-chunk deadline bound.
     ///
@@ -381,7 +389,8 @@ impl ModbusConnection {
             async move {
                 let link = Link::build(&config, factory, clock, defaults)?;
                 link.session.connect().await?;
-                tracing::info!("modbus connection established");
+                let supervised = link.session.supervise();
+                tracing::info!(supervised, "modbus connection established");
                 Ok(Self {
                     link: Arc::new(link),
                 })
@@ -1299,8 +1308,9 @@ impl Connection for ModbusConnection {
     /// Close the connection: `Closing`, then `Closed`.
     ///
     /// A read in flight fails with [`ErrorKind::Disconnected`], and so does a read that is
-    /// waiting out a reconnect backoff. The call is idempotent. The deadline source is
-    /// `timeouts.request`, applied by the guard to the shutdown.
+    /// waiting out a reconnect backoff. A background reconnect in progress stops, and its
+    /// task is joined. The call is idempotent. The deadline source is
+    /// `timeouts.request`, applied by the guard to the shutdown and the join.
     ///
     /// # Errors
     /// - [`ErrorKind::Timeout`] if the shutdown did not finish within `timeouts.request`;

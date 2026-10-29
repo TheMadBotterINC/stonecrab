@@ -469,6 +469,12 @@ impl ModbusSession {
         self.guard.connect()
     }
 
+    /// Start the guard's supervisor (`ConnectionGuard::supervise`): background reconnect
+    /// and the idle bound. False outside a Tokio runtime, where nothing is started.
+    pub(crate) fn supervise(&self) -> bool {
+        self.guard.supervise()
+    }
+
     /// Close the connection: `Closing`, then `Closed`.
     ///
     /// A running request fails with [`ErrorKind::Disconnected`]. The call is idempotent
@@ -670,17 +676,22 @@ impl ModbusSession {
             sent_before: self.guard.stats().requests,
             settled: false,
         };
-        let mut incoming = self.guard.request(frame, deadline, token).await;
-        loop {
-            let reply =
-                incoming.map_err(|error| self.stamp(error, started, FailureCategory::Transport))?;
-            if Self::answers(&reply, txn, unit_id, request.function()) {
-                outstanding.settled = true;
-                return self.interpret(request, &reply, started);
+        // The guard keeps the in-flight slot from the send to the reply that answers, so
+        // a supervisor never comes between two reads of the correlation.
+        let mut answers = |reply: &ModbusAdu| {
+            let answered = Self::answers(reply, txn, unit_id, request.function());
+            if !answered {
+                self.discard(reply, txn);
             }
-            self.discard(&reply, txn);
-            incoming = self.guard.next_reply(deadline, token).await;
-        }
+            answered
+        };
+        let reply = self
+            .guard
+            .request_matching(frame, deadline, token, &mut answers)
+            .await
+            .map_err(|error| self.stamp(error, started, FailureCategory::Transport))?;
+        outstanding.settled = true;
+        self.interpret(request, &reply, started)
     }
 
     /// The request PDU as an ADU with the next transaction id.

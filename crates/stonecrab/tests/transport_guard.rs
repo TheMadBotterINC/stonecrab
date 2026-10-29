@@ -144,10 +144,14 @@ mod tests {
         }
 
         fn with(pending: usize, reconnect: ReconnectPolicy, sample: f64) -> Self {
+            Self::with_config(guard_config(pending, reconnect), sample)
+        }
+
+        fn with_config(config: GuardConfig, sample: f64) -> Self {
             let clock = FakeClock::default();
             let factory = FakeTransportFactory::new(clock.clone());
             let guard = ConnectionGuard::new(
-                guard_config(pending, reconnect),
+                config,
                 Arc::new(factory.clone()),
                 Box::new(|| LengthPrefixedFramer::new(64)),
                 Arc::new(clock.clone()),
@@ -1774,5 +1778,880 @@ mod tests {
             delay >= ms(200) && delay <= ms(300),
             "250 ms +/- 20%: {delay:?}"
         );
+    }
+
+    // The supervisor (`ConnectionGuard::supervise`, ADR-0014 addendum S57). These tests run
+    // the guard on a current-thread Tokio runtime with the fake clock: the test moves the
+    // clock, then yields until the task has acted on it. Nothing waits on real time.
+
+    /// Yield to the supervisor until `done` holds; fail the test after 1000 yields.
+    async fn settle(done: impl Fn() -> bool, what: &str) {
+        for _ in 0..1000 {
+            if done() {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+        panic!("the supervisor never got there: {what}");
+    }
+
+    impl Rig {
+        /// Connect and start the supervisor.
+        async fn supervised(&self) {
+            self.guard.connect().await.expect("connect");
+            assert!(self.guard.supervise(), "a runtime is current");
+        }
+
+        /// Yield until the guard is in `state`.
+        async fn reaches(&self, state: ConnectionState) {
+            settle(|| self.guard.state() == state, &format!("{state:?}")).await;
+        }
+
+        /// A `ping` whose deadline, 1 s, passes after the frame went out: the stream is
+        /// intact and owes a reply.
+        async fn times_out_at_one_second(&self) {
+            let deadline = self.deadline(1);
+            let asked = self.guard.request(frame(b"ping"), deadline, None);
+            let moved = async {
+                settle(|| !self.sent(0).is_empty(), "the frame went out").await;
+                assert!(self.clock.set(self.at(1_000)), "forward to the deadline");
+            };
+            let (reply, ()) = tokio::join!(asked, moved);
+            assert_eq!(error_of(reply).kind(), ErrorKind::Timeout, "timeout");
+        }
+    }
+
+    // covers: SPEC mandatory-failure-cases / F5 reconnect (device restart)
+    #[tokio::test]
+    async fn a_supervised_guard_notices_a_drop_and_reconnects_without_a_request() {
+        let rig = Rig::new();
+        rig.push(vec![Step::Delay(secs(10)), Step::CloseAt(0)]);
+        rig.push(vec![
+            Step::Expect(wire(b"ping")),
+            Step::Reply(wire(b"pong")),
+        ]);
+        rig.supervised().await;
+        assert!(rig.guard.supervise(), "a second call starts no second task");
+
+        // The peer closes at 10 s while nothing is asked of it.
+        assert!(rig.clock.set(rig.at(10_000)), "forward");
+        rig.reaches(reconnecting(1, rig.at(10_250))).await;
+        assert!(rig.clock.set(rig.at(10_250)), "forward");
+        rig.reaches(ConnectionState::Connected).await;
+        assert_eq!(
+            rig.states(),
+            vec![
+                ConnectionState::Connecting,
+                ConnectionState::Connected,
+                reconnecting(1, rig.at(10_250)),
+                ConnectionState::Connecting,
+                ConnectionState::Connected,
+            ],
+            "every state of the drop and the reconnect, published through the watch"
+        );
+        assert_eq!(rig.factory.opens().len(), 2, "reopened once");
+        assert!(rig.sent(0).is_empty(), "no request ever ran");
+        assert_eq!(rig.guard.stats(), stats(1, 0, 0, 0), "stats");
+
+        // A request takes the slot from the reader and runs on the new transport.
+        let deadline = rig.deadline(5);
+        let reply = rig.guard.request(frame(b"ping"), deadline, None).await;
+        assert_eq!(reply.expect("reply"), b"pong", "reply");
+        rig.guard.close().await.expect("close");
+        assert_eq!(rig.guard.state(), ConnectionState::Closed, "closed");
+        assert_eq!(rig.clock.sleeper_count(), 0, "the reader is gone");
+    }
+
+    // covers: SPEC mandatory-failure-cases / F5 reconnect (exhausted budget)
+    #[tokio::test]
+    async fn background_attempts_follow_the_backoff_and_end_failed_when_the_budget_is_spent() {
+        let rig = Rig::with(4, policy(250, 1000, Some(3)), 0.5);
+        rig.push(vec![Step::CloseAt(0)]);
+        for _ in 0..3 {
+            rig.factory.push_refusal();
+        }
+        rig.supervised().await;
+
+        for (attempt, at) in [(1, 250), (2, 750), (3, 1750)] {
+            rig.reaches(reconnecting(attempt, rig.at(at))).await;
+            assert!(rig.clock.set(rig.at(at)), "forward to the attempt");
+        }
+        rig.reaches(ConnectionState::Failed(ErrorKind::Disconnected))
+            .await;
+        assert_eq!(
+            rig.states(),
+            vec![
+                ConnectionState::Connecting,
+                ConnectionState::Connected,
+                reconnecting(1, rig.at(250)),
+                ConnectionState::Connecting,
+                reconnecting(2, rig.at(750)),
+                ConnectionState::Connecting,
+                reconnecting(3, rig.at(1750)),
+                ConnectionState::Connecting,
+                ConnectionState::Failed(ErrorKind::Disconnected),
+            ],
+            "delays 250, 500 and 1000 ms, then the budget of three retries is spent"
+        );
+        let opened_at: Vec<_> = rig
+            .factory
+            .opens()
+            .iter()
+            .map(|open| open.deadline.instant())
+            .collect();
+        assert_eq!(
+            opened_at,
+            vec![rig.at(2000), rig.at(2250), rig.at(2750), rig.at(3750)],
+            "each open began at its next_at, bounded by timeouts.connect"
+        );
+        settle(|| rig.clock.sleeper_count() == 0, "the task has ended").await;
+        rig.guard
+            .close()
+            .await
+            .expect("closing a failed guard is a no-op");
+        assert_eq!(
+            rig.guard.state(),
+            ConnectionState::Failed(ErrorKind::Disconnected),
+            "terminal"
+        );
+    }
+
+    // covers: SPEC mandatory-failure-cases / F5 reconnect (outage and recovery)
+    #[tokio::test]
+    async fn a_request_during_a_background_reconnect_waits_within_its_deadline() {
+        let rig = Rig::new();
+        rig.push(vec![Step::CloseAt(0)]);
+        rig.push(vec![
+            Step::Expect(wire(b"ping")),
+            Step::Reply(wire(b"pong")),
+        ]);
+        rig.supervised().await;
+        rig.reaches(reconnecting(1, rig.at(250))).await;
+
+        let deadline = rig.deadline(5);
+        let (reply, ()) = tokio::join!(rig.guard.request(frame(b"ping"), deadline, None), async {
+            // The supervisor's backoff, the request's backoff and the request's deadline.
+            settle(|| rig.clock.sleeper_count() == 3, "both wait").await;
+            assert!(rig.clock.set(rig.at(250)), "forward");
+        });
+        assert_eq!(
+            reply.expect("reply"),
+            b"pong",
+            "the request waited, then ran"
+        );
+        assert_eq!(rig.factory.opens().len(), 2, "one reopen between them");
+        assert_eq!(
+            rig.states(),
+            vec![
+                ConnectionState::Connecting,
+                ConnectionState::Connected,
+                reconnecting(1, rig.at(250)),
+                ConnectionState::Connecting,
+                ConnectionState::Connected,
+            ],
+            "state sequence"
+        );
+        rig.guard.close().await.expect("close");
+    }
+
+    // covers: SPEC mandatory-failure-cases / F5 reconnect (outage and recovery)
+    #[tokio::test]
+    async fn a_request_whose_deadline_ends_in_the_backoff_times_out_and_the_reconnect_goes_on() {
+        let rig = Rig::new();
+        rig.push(vec![Step::CloseAt(0)]);
+        rig.push(Vec::new());
+        rig.supervised().await;
+        rig.reaches(reconnecting(1, rig.at(250))).await;
+
+        let deadline = Deadline::after(rig.clock.now(), ms(100)).expect("representable");
+        let (result, ()) = tokio::join!(rig.guard.request(frame(b"x"), deadline, None), async {
+            settle(|| rig.clock.sleeper_count() == 3, "both wait").await;
+            assert!(rig.clock.set(rig.at(100)), "forward to the deadline");
+        });
+        let error = error_of(result);
+        assert_eq!(
+            error.kind(),
+            ErrorKind::Timeout,
+            "the request's own deadline"
+        );
+        assert_eq!(error.diagnostics().latency, Some(ms(100)), "latency");
+        assert_eq!(rig.factory.opens().len(), 1, "nothing was opened for it");
+
+        assert!(rig.clock.set(rig.at(250)), "forward");
+        rig.reaches(ConnectionState::Connected).await;
+        assert_eq!(rig.factory.opens().len(), 2, "the supervisor reopened");
+        rig.guard.close().await.expect("close");
+    }
+
+    // covers: SPEC mandatory-failure-cases / F5 reconnect (shutdown during reconnect)
+    #[tokio::test]
+    async fn close_during_the_background_backoff_stops_and_joins_the_supervisor() {
+        let rig = Rig::new();
+        rig.push(vec![Step::CloseAt(0)]);
+        rig.supervised().await;
+        rig.reaches(reconnecting(1, rig.at(250))).await;
+        settle(|| rig.clock.sleeper_count() == 1, "asleep in the backoff").await;
+
+        rig.guard.close().await.expect("close");
+        assert_eq!(rig.clock.now(), rig.t0, "close took no time on the clock");
+        assert_eq!(
+            rig.clock.sleeper_count(),
+            0,
+            "the backoff sleep is gone: the task was joined"
+        );
+        assert_eq!(
+            rig.states(),
+            vec![
+                ConnectionState::Connecting,
+                ConnectionState::Connected,
+                reconnecting(1, rig.at(250)),
+                ConnectionState::Closing,
+                ConnectionState::Closed,
+            ],
+            "state sequence"
+        );
+        assert!(rig.clock.set(rig.at(10_000)), "forward past the backoff");
+        assert_eq!(rig.factory.opens().len(), 1, "nothing was reopened");
+    }
+
+    // covers: SPEC mandatory-failure-cases / F5 reconnect (shutdown during reconnect)
+    #[tokio::test]
+    async fn close_during_a_background_open_cuts_it_and_joins_the_supervisor() {
+        let rig = Rig::new();
+        rig.push(vec![Step::CloseAt(0)]);
+        rig.factory.push_connect_timeout();
+        rig.supervised().await;
+        rig.reaches(reconnecting(1, rig.at(250))).await;
+        assert!(rig.clock.set(rig.at(250)), "forward");
+        rig.reaches(ConnectionState::Connecting).await;
+
+        rig.guard.close().await.expect("close");
+        assert_eq!(
+            rig.clock.now(),
+            rig.at(250),
+            "close took no time on the clock"
+        );
+        assert_eq!(
+            rig.clock.sleeper_count(),
+            0,
+            "the parked open is gone: the task was joined"
+        );
+        assert_eq!(
+            rig.states(),
+            vec![
+                ConnectionState::Connecting,
+                ConnectionState::Connected,
+                reconnecting(1, rig.at(250)),
+                ConnectionState::Connecting,
+                ConnectionState::Closing,
+                ConnectionState::Closed,
+            ],
+            "state sequence"
+        );
+        assert_eq!(rig.factory.opens().len(), 2, "one open, abandoned");
+    }
+
+    /// The default rig's configuration with an idle bound of 5 s.
+    fn idle_config() -> GuardConfig {
+        let mut config = guard_config(4, policy(250, 30_000, None));
+        config.timeouts.idle = Some(secs(5));
+        config
+    }
+
+    #[tokio::test]
+    async fn an_idle_link_is_closed_after_timeouts_idle_and_the_next_request_reopens_it() {
+        let rig = Rig::with_config(idle_config(), 0.5);
+        rig.push(vec![
+            Step::Expect(wire(b"a")),
+            Step::Reply(wire(b"a")),
+            Step::Expect(wire(b"b")),
+            Step::Reply(wire(b"b")),
+        ]);
+        rig.push(vec![Step::Expect(wire(b"c")), Step::Reply(wire(b"c"))]);
+        rig.supervised().await;
+        let ask = |payload: &'static [u8]| {
+            let deadline = rig.deadline(5);
+            rig.guard.request(frame(payload), deadline, None)
+        };
+
+        ask(b"a").await.expect("a");
+        assert!(rig.clock.set(rig.at(4_000)), "forward");
+        // An exchange at 4 s moves the bound to 9 s.
+        ask(b"b").await.expect("b");
+        settle(|| rig.clock.sleeper_count() == 1, "reading until 9 s").await;
+        assert!(rig.clock.set(rig.at(8_999)), "forward");
+        tokio::task::yield_now().await;
+        assert!(!rig.shut_down(0), "still in use within the bound");
+        assert!(rig.clock.set(rig.at(9_000)), "forward");
+        settle(|| rig.shut_down(0), "the idle link is shut down").await;
+        assert_eq!(
+            rig.guard.state(),
+            ConnectionState::Connected,
+            "the connection stays available"
+        );
+
+        assert!(rig.clock.set(rig.at(20_000)), "forward");
+        assert_eq!(ask(b"c").await.expect("c"), b"c", "reply");
+        let reopen = rig.factory.opens().remove(1);
+        assert_eq!(
+            reopen.deadline.instant(),
+            rig.at(22_000),
+            "reopened at once, bounded by timeouts.connect"
+        );
+        assert_eq!(
+            rig.states(),
+            vec![
+                ConnectionState::Connecting,
+                ConnectionState::Connected,
+                ConnectionState::Connecting,
+                ConnectionState::Connected,
+            ],
+            "the idle close sets no state; the reopen does"
+        );
+        assert_eq!(rig.guard.stats(), stats(1, 0, 3, 0), "stats");
+        rig.guard.close().await.expect("close");
+        assert!(rig.shut_down(1), "the new transport was shut down by close");
+    }
+
+    #[test]
+    fn without_a_supervisor_the_idle_bound_is_not_enforced() {
+        let rig = Rig::with_config(idle_config(), 0.5);
+        rig.push(vec![
+            Step::Expect(wire(b"a")),
+            Step::Reply(wire(b"a")),
+            Step::Expect(wire(b"b")),
+            Step::Reply(wire(b"b")),
+        ]);
+        rig.connect().expect("connect");
+        assert!(!rig.guard.supervise(), "no Tokio runtime is current");
+        rig.request(b"a", 1).expect("a");
+        rig.clock.advance(secs(60));
+        rig.request(b"b", 1).expect("b on the same transport");
+        assert_eq!(rig.factory.opens().len(), 1, "never reopened");
+        assert!(!rig.shut_down(0), "never closed for idleness");
+    }
+
+    // covers: SPEC mandatory-failure-cases / F2 delayed replies after timeout
+    #[tokio::test]
+    async fn a_frame_nobody_asked_for_does_not_answer_the_next_request() {
+        let rig = Rig::new();
+        rig.push(vec![
+            Step::Delay(secs(1)),
+            Step::Reply(wire(b"junk")),
+            Step::Expect(wire(b"ping")),
+            Step::Reply(wire(b"pong")),
+        ]);
+        rig.supervised().await;
+        assert!(rig.clock.set(rig.at(1_000)), "the junk arrives");
+        // The reader holds the slot throughout: yield until it has read and kept the frame.
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+        }
+
+        let deadline = rig.deadline(5);
+        let reply = rig.guard.request(frame(b"ping"), deadline, None).await;
+        assert_eq!(reply.expect("reply"), b"pong", "the junk did not answer it");
+        assert_eq!(rig.guard.stats(), stats(0, 0, 1, 0), "no resync was needed");
+        rig.guard.close().await.expect("close");
+    }
+
+    // covers: SPEC mandatory-failure-cases / F2 delayed replies after timeout
+    #[tokio::test]
+    async fn bytes_the_framer_refuses_while_idle_are_realigned_by_the_reader() {
+        let rig = Rig::new();
+        rig.push(vec![
+            Step::Delay(secs(1)),
+            // An oversized header, then a whole frame the resync locks onto.
+            Step::Reply(vec![0xFF, 0xFF, 0, 1, b'x']),
+            Step::Expect(wire(b"ping")),
+            Step::Reply(wire(b"pong")),
+        ]);
+        rig.supervised().await;
+        assert!(rig.clock.set(rig.at(1_000)), "the bytes arrive");
+        // The reader holds the slot throughout, so there is no state to wait on: yield until
+        // it has taken the bytes (it then waits for the frame boundary they lack).
+        for _ in 0..20 {
+            tokio::task::yield_now().await;
+        }
+
+        let deadline = rig.deadline(5);
+        let reply = rig.guard.request(frame(b"ping"), deadline, None).await;
+        assert_eq!(reply.expect("reply"), b"pong", "reply");
+        assert_eq!(
+            rig.guard.stats(),
+            stats(0, 0, 1, 0),
+            "the reader found the boundary itself: the request had no resync to do"
+        );
+        rig.guard.close().await.expect("close");
+    }
+
+    // covers: SPEC mandatory-failure-cases / F5 reconnect (shutdown during reconnect)
+    #[tokio::test]
+    async fn a_zero_request_timeout_leaves_the_supervisor_waiting_and_close_aborts_it() {
+        let mut config = guard_config(4, policy(250, 30_000, None));
+        config.timeouts.request = Duration::ZERO;
+        let rig = Rig::with_config(config, 0.5);
+        rig.push(Vec::new());
+        rig.supervised().await;
+        settle(
+            || format!("{:?}", rig.guard).contains("Idle"),
+            "the supervisor let go of the slot",
+        )
+        .await;
+        assert_eq!(rig.clock.sleeper_count(), 0, "there is nothing to read for");
+        // The close bound is `timeouts.request` from now, already over before the task
+        // could run: it is aborted and the call says so.
+        let error = error_of(rig.guard.close().await);
+        assert_eq!(error.kind(), ErrorKind::Timeout, "the join was cut off");
+        assert_eq!(
+            rig.guard.state(),
+            ConnectionState::Closed,
+            "closed regardless"
+        );
+    }
+
+    // covers: SPEC mandatory-failure-cases / F5 reconnect (device restart)
+    #[tokio::test]
+    async fn a_drop_after_a_timed_out_request_is_noticed_without_another_request() {
+        let rig = Rig::new();
+        rig.push(vec![
+            Step::Expect(wire(b"ping")),
+            Step::Delay(secs(10)),
+            Step::CloseAt(0),
+        ]);
+        rig.supervised().await;
+
+        // The request times out at 1 s: the stream is intact but owes a reply.
+        let deadline = rig.deadline(1);
+        let asked = rig.guard.request(frame(b"ping"), deadline, None);
+        let moved = async {
+            settle(|| !rig.sent(0).is_empty(), "the frame went out").await;
+            assert!(rig.clock.set(rig.at(1_000)), "forward to the deadline");
+        };
+        let (reply, ()) = tokio::join!(asked, moved);
+        assert_eq!(error_of(reply).kind(), ErrorKind::Timeout, "timeout");
+        assert_eq!(rig.guard.state(), ConnectionState::Connected, "still up");
+
+        // The peer closes at 10 s while nothing is asked of it.
+        assert!(rig.clock.set(rig.at(10_000)), "forward");
+        rig.reaches(reconnecting(1, rig.at(10_250))).await;
+        rig.guard.close().await.expect("close");
+    }
+
+    // covers: SPEC mandatory-failure-cases / F5 reconnect (device restart)
+    #[tokio::test]
+    async fn a_reconnected_link_that_stays_up_for_a_read_starts_the_budget_over() {
+        let rig = Rig::new();
+        rig.push(vec![Step::CloseAt(0)]);
+        rig.push(vec![Step::Delay(secs(5)), Step::CloseAt(0)]);
+        rig.push(Vec::new());
+        rig.supervised().await;
+        rig.reaches(reconnecting(1, rig.at(250))).await;
+        assert!(rig.clock.set(rig.at(250)), "forward to the attempt");
+        rig.reaches(ConnectionState::Connected).await;
+
+        // The new link lives through a whole read (timeouts.request, 3 s)...
+        assert!(rig.clock.set(rig.at(3_250)), "forward past the read");
+        for _ in 0..20 {
+            tokio::task::yield_now().await;
+        }
+        // ...so its later drop is a first failure, not a second.
+        assert!(rig.clock.set(rig.at(5_250)), "forward to the drop");
+        rig.reaches(reconnecting(1, rig.at(5_500))).await;
+        rig.guard.close().await.expect("close");
+    }
+
+    #[tokio::test]
+    async fn a_guard_that_is_closed_starts_no_supervisor() {
+        let rig = Rig::new();
+        rig.push(Vec::new());
+        rig.supervised().await;
+        rig.guard.close().await.expect("close");
+        assert!(!rig.guard.supervise(), "nothing is left to tend");
+    }
+
+    // The request/reader hand-over on real wakers: a request that loses the race for the
+    // slot would wait on a reader with no reason to stop, and the fake clock never fires
+    // its deadline, so the test would hang instead of passing.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn back_to_back_requests_never_wait_behind_the_reader() {
+        let clock = FakeClock::default();
+        let factory = FakeTransportFactory::new(clock.clone());
+        factory.push_script(Script::new(vec![Step::respond(|request| {
+            Some(request.to_vec())
+        })]));
+        let guard: Guard = ConnectionGuard::new(
+            guard_config(8, policy(250, 30_000, None)),
+            Arc::new(factory),
+            Box::new(|| LengthPrefixedFramer::new(64)),
+            Arc::new(clock.clone()),
+        );
+        guard.connect().await.expect("connect");
+        assert!(guard.supervise(), "a runtime is current");
+        let deadline = Deadline::after(clock.now(), secs(5)).expect("representable");
+        for index in 0_u8..=255 {
+            let reply = guard.request(vec![index], deadline, None).await;
+            assert_eq!(reply.expect("reply"), vec![index], "echo");
+        }
+        guard.close().await.expect("close");
+    }
+
+    // A session that reads on after a stale reply is between two guard calls: the reader
+    // must not take the real reply that follows.
+    #[tokio::test]
+    async fn the_reader_keeps_the_reply_a_session_reads_next() {
+        let rig = Rig::new();
+        rig.push(vec![
+            Step::Expect(wire(b"a")),
+            Step::ReplyCoalescedWithNext,
+            Step::Reply(wire(b"stale")),
+            Step::Reply(wire(b"real")),
+        ]);
+        rig.supervised().await;
+        let deadline = rig.deadline(5);
+        let first = rig.guard.request(frame(b"a"), deadline, None).await;
+        assert_eq!(first.expect("first reply"), b"stale");
+        // Give the reader every chance to run before the session reads again.
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+        }
+        let second = rig.guard.next_reply(deadline, None).await;
+        assert_eq!(
+            second.expect("second reply"),
+            b"real",
+            "kept for the session"
+        );
+        rig.guard.close().await.expect("close");
+    }
+
+    #[tokio::test]
+    async fn a_frame_the_reader_kept_is_dropped_by_the_next_request() {
+        let rig = Rig::new();
+        rig.push(vec![
+            Step::Expect(wire(b"a")),
+            Step::ReplyCoalescedWithNext,
+            Step::Reply(wire(b"a")),
+            Step::Reply(wire(b"extra")),
+            Step::Expect(wire(b"b")),
+            Step::Reply(wire(b"b")),
+        ]);
+        rig.supervised().await;
+        let deadline = rig.deadline(5);
+        let first = rig.guard.request(frame(b"a"), deadline, None).await;
+        assert_eq!(first.expect("first reply"), b"a");
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+        }
+        let second = rig.guard.request(frame(b"b"), deadline, None).await;
+        assert_eq!(
+            second.expect("second reply"),
+            b"b",
+            "the extra frame is gone"
+        );
+        rig.guard.close().await.expect("close");
+    }
+
+    // covers: SPEC mandatory-failure-cases / F5 reconnect (device restart)
+    #[tokio::test]
+    async fn a_supervisor_started_before_connect_waits_for_the_connection() {
+        let rig = Rig::new();
+        rig.push(vec![Step::CloseAt(0)]);
+        assert!(rig.guard.supervise(), "a runtime is current");
+        // Hand the thread to the task once: with nothing to tend it waits for news.
+        tokio::task::yield_now().await;
+        assert!(
+            rig.factory.opens().is_empty(),
+            "the supervisor never connects"
+        );
+        rig.guard.connect().await.expect("connect");
+        rig.reaches(reconnecting(1, rig.at(250))).await;
+        rig.guard.close().await.expect("close");
+        assert_eq!(rig.clock.sleeper_count(), 0, "joined");
+    }
+
+    #[tokio::test]
+    async fn a_zero_idle_bound_closes_the_link_after_every_exchange() {
+        let mut config = guard_config(4, policy(250, 30_000, None));
+        config.timeouts.idle = Some(Duration::ZERO);
+        let rig = Rig::with_config(config, 0.5);
+        rig.push(Vec::new());
+        rig.push(vec![Step::Expect(wire(b"a")), Step::Reply(wire(b"a"))]);
+        rig.supervised().await;
+        settle(|| rig.shut_down(0), "closed right after the open").await;
+
+        let deadline = rig.deadline(5);
+        let reply = rig.guard.request(frame(b"a"), deadline, None).await;
+        assert_eq!(reply.expect("reply"), b"a", "reopened for the request");
+        settle(|| rig.shut_down(1), "closed right after the exchange").await;
+        assert_eq!(
+            rig.guard.state(),
+            ConnectionState::Connected,
+            "still available"
+        );
+        assert_eq!(rig.factory.opens().len(), 2, "one open per use");
+        rig.guard.close().await.expect("close");
+    }
+
+    // covers: SPEC mandatory-failure-cases / F2 delayed replies after timeout
+    // The late reply of a timed-out request is dropped by the reader, which reads on: the
+    // idle bound is not suspended by it.
+    #[tokio::test]
+    async fn a_late_reply_the_reader_drops_leaves_the_idle_bound_in_force() {
+        let rig = Rig::with_config(idle_config(), 0.5);
+        rig.push(vec![
+            Step::Expect(wire(b"ping")),
+            Step::Delay(secs(2)),
+            Step::Reply(wire(b"pong")),
+        ]);
+        rig.supervised().await;
+        rig.times_out_at_one_second().await;
+
+        assert!(rig.clock.set(rig.at(2_000)), "the late reply arrives");
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+        }
+        // The timed-out exchange ended at 1 s, so the bound is 6 s.
+        assert!(rig.clock.set(rig.at(5_999)), "forward");
+        tokio::task::yield_now().await;
+        assert!(!rig.shut_down(0), "still within the bound");
+        assert!(rig.clock.set(rig.at(6_000)), "forward to the bound");
+        settle(|| rig.shut_down(0), "the idle link is shut down").await;
+        assert_eq!(
+            rig.guard.state(),
+            ConnectionState::Connected,
+            "still available"
+        );
+        assert_eq!(rig.guard.stats(), stats(0, 0, 1, 1), "stats");
+        rig.guard.close().await.expect("close");
+    }
+
+    // covers: SPEC mandatory-failure-cases / F5 reconnect (device restart)
+    #[tokio::test]
+    async fn a_late_reply_the_reader_drops_leaves_a_later_drop_noticed() {
+        let rig = Rig::with_config(idle_config(), 0.5);
+        rig.push(vec![
+            Step::Expect(wire(b"ping")),
+            Step::Delay(secs(2)),
+            Step::Reply(wire(b"pong")),
+            Step::Delay(secs(1)),
+            Step::CloseAt(0),
+        ]);
+        rig.push(Vec::new());
+        rig.supervised().await;
+        rig.times_out_at_one_second().await;
+
+        assert!(rig.clock.set(rig.at(2_000)), "the late reply arrives");
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+        }
+        assert!(rig.clock.set(rig.at(3_000)), "the peer closes");
+        rig.reaches(reconnecting(1, rig.at(3_250))).await;
+        rig.guard.close().await.expect("close");
+    }
+
+    // A frame kept for `next_reply` does not keep an idle link open; it goes with it.
+    #[tokio::test]
+    async fn a_kept_frame_goes_with_the_idle_close_and_next_reply_is_disconnected() {
+        let rig = Rig::with_config(idle_config(), 0.5);
+        rig.push(vec![Step::Delay(secs(1)), Step::Reply(wire(b"junk"))]);
+        rig.push(vec![Step::Expect(wire(b"c")), Step::Reply(wire(b"c"))]);
+        rig.supervised().await;
+        assert!(rig.clock.set(rig.at(1_000)), "the junk arrives and is kept");
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+        }
+        assert!(rig.clock.set(rig.at(5_000)), "forward to the bound");
+        settle(|| rig.shut_down(0), "the idle link is shut down").await;
+        assert_eq!(
+            rig.guard.state(),
+            ConnectionState::Connected,
+            "still available"
+        );
+
+        let deadline = rig.deadline(5);
+        let error = error_of(rig.guard.next_reply(deadline, None).await);
+        assert_eq!(
+            error.kind(),
+            ErrorKind::Disconnected,
+            "the kept frame went with the transport"
+        );
+        let reply = rig.guard.request(frame(b"c"), deadline, None).await;
+        assert_eq!(reply.expect("reply"), b"c", "reopened for the request");
+        assert_eq!(rig.factory.opens().len(), 2, "one reopen");
+        rig.guard.close().await.expect("close");
+    }
+
+    // covers: SPEC mandatory-failure-cases / F5 reconnect (device restart)
+    #[tokio::test]
+    async fn a_peer_close_behind_a_kept_frame_is_noticed() {
+        let rig = Rig::new();
+        rig.push(vec![
+            Step::Delay(secs(1)),
+            Step::Reply(wire(b"junk")),
+            Step::Delay(secs(1)),
+            Step::CloseAt(0),
+        ]);
+        rig.push(Vec::new());
+        rig.supervised().await;
+        assert!(rig.clock.set(rig.at(1_000)), "the junk arrives and is kept");
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+        }
+        assert!(rig.clock.set(rig.at(2_000)), "the peer closes");
+        rig.reaches(reconnecting(1, rig.at(2_250))).await;
+        rig.guard.close().await.expect("close");
+    }
+
+    // covers: SPEC mandatory-failure-cases / F2 transport (buffer bound)
+    // Behind a kept frame the buffer fills up: the frame is dropped and the reader realigns
+    // the stream, as a request would.
+    #[tokio::test]
+    async fn a_full_buffer_behind_a_kept_frame_is_realigned_by_the_reader() {
+        let rig = Rig::new();
+        let mut flood = vec![0xFF; 1100];
+        flood.extend_from_slice(&wire(b"y"));
+        rig.push(vec![
+            Step::Delay(secs(1)),
+            Step::Reply(wire(b"x")),
+            Step::Reply(flood),
+            Step::Expect(wire(b"ping")),
+            Step::Reply(wire(b"pong")),
+        ]);
+        rig.supervised().await;
+        assert!(
+            rig.clock.set(rig.at(1_000)),
+            "the frame and the flood arrive"
+        );
+        for _ in 0..200 {
+            tokio::task::yield_now().await;
+        }
+
+        let deadline = rig.deadline(5);
+        let reply = rig.guard.request(frame(b"ping"), deadline, None).await;
+        assert_eq!(reply.expect("reply"), b"pong", "reply");
+        assert_eq!(
+            rig.guard.stats(),
+            stats(0, 0, 1, 0),
+            "the reader realigned the stream itself"
+        );
+        assert_eq!(rig.factory.opens().len(), 1, "the link was kept");
+        rig.guard.close().await.expect("close");
+    }
+
+    // A session that correlates replies (a mismatched one, then its own) on a link the
+    // supervisor closes after every exchange: the slot is held from the send to the
+    // accepted reply, so the idle close never comes between two reads. On real threads the
+    // supervisor runs in parallel; with request plus next_reply most rounds lost the reply.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_correlated_exchange_keeps_its_reply_under_a_zero_idle_bound() {
+        const ROUNDS: usize = 300;
+        let clock = FakeClock::default();
+        let factory = FakeTransportFactory::new(clock.clone());
+        // Every peer answers every frame with a stale frame and the real one in one write.
+        // Whether the link is closed between two rounds is the scheduler's choice, so each
+        // peer serves any number of rounds.
+        for _ in 0..=ROUNDS {
+            factory.push_script(Script::new(vec![Step::respond(|_| {
+                let mut bytes = wire(b"stale");
+                bytes.extend_from_slice(&wire(b"real"));
+                Some(bytes)
+            })]));
+        }
+        let mut config = guard_config(4, policy(250, 30_000, None));
+        config.timeouts.idle = Some(Duration::ZERO);
+        let guard: Guard = ConnectionGuard::new(
+            config,
+            Arc::new(factory),
+            Box::new(|| LengthPrefixedFramer::new(64)),
+            Arc::new(clock.clone()),
+        );
+        guard.connect().await.expect("connect");
+        assert!(guard.supervise(), "a runtime is current");
+        let deadline = Deadline::after(clock.now(), secs(5)).expect("representable");
+        for round in 0..ROUNDS {
+            let mut refused = 0_u32;
+            let mut real = |reply: &Vec<u8>| {
+                let wanted = reply.as_slice() == b"real";
+                refused += u32::from(!wanted);
+                wanted
+            };
+            let reply = guard
+                .request_matching(frame(b"a"), deadline, None, &mut real)
+                .await;
+            assert_eq!(reply.expect("reply"), b"real", "round {round}");
+            assert_eq!(refused, 1, "round {round}: the stale frame was refused");
+            tokio::task::yield_now().await;
+        }
+        guard.close().await.expect("close");
+    }
+
+    // covers: SPEC mandatory-failure-cases / F2 delayed replies after timeout
+    #[test]
+    fn a_correlated_exchange_drops_refused_frames_and_times_out_within_its_deadline() {
+        let rig = Rig::new();
+        rig.push(vec![
+            Step::Expect(wire(b"a")),
+            Step::Reply(wire(b"other")),
+            Step::Delay(secs(5)),
+            Step::Reply(wire(b"a")),
+        ]);
+        rig.connect().expect("connect");
+        let deadline = rig.deadline(1);
+        let mut refused = Vec::new();
+        let mut own = |reply: &Vec<u8>| {
+            let wanted = reply.as_slice() == b"a";
+            if !wanted {
+                refused.push(reply.clone());
+            }
+            wanted
+        };
+        let error = error_of(block_on_with(
+            &rig.clock,
+            rig.guard
+                .request_matching(frame(b"a"), deadline, None, &mut own),
+        ));
+        assert_eq!(
+            error.kind(),
+            ErrorKind::Timeout,
+            "one deadline for every read"
+        );
+        assert_eq!(rig.clock.now(), rig.at(1_000), "at the deadline");
+        assert_eq!(refused, vec![b"other".to_vec()], "the refused frame");
+        assert_eq!(
+            rig.guard.stats(),
+            stats(0, 0, 1, 1),
+            "one request, one timeout"
+        );
+        assert_eq!(rig.guard.state(), ConnectionState::Connected, "still up");
+    }
+
+    // A supervisor that ended with the runtime it ran on does not count as running: the
+    // next call starts one on the runtime current then.
+    // covers: SPEC mandatory-failure-cases / F5 reconnect (device restart)
+    #[test]
+    fn a_supervisor_that_ended_with_its_runtime_is_started_again() {
+        let rig = Rig::new();
+        rig.push(vec![Step::Delay(secs(10)), Step::CloseAt(0)]);
+        rig.push(Vec::new());
+        let first = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime");
+        first.block_on(async {
+            rig.supervised().await;
+            tokio::task::yield_now().await;
+        });
+        drop(first);
+
+        let second = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime");
+        second.block_on(async {
+            assert!(rig.guard.supervise(), "a new task on this runtime");
+            assert!(rig.guard.supervise(), "and only one");
+            assert!(rig.clock.set(rig.at(10_000)), "the peer goes away");
+            rig.reaches(reconnecting(1, rig.at(10_250))).await;
+            rig.guard.close().await.expect("close");
+        });
+        assert_eq!(rig.clock.sleeper_count(), 0, "joined");
     }
 }

@@ -55,7 +55,7 @@ hardware record exists.
 | Modbus TCP | per-chunk device exception 02 (illegal data address) | `modbus` | interoperability-tested | `MB-EXC-02` | `interop_read_beyond_map_yields_device_exception` |
 | Modbus TCP | device exception 06 (server device busy) | `modbus` | interoperability-tested | `MB-EXC-06` | libmodbus 3.1.11 sends it at wire address 0x170: `interop_exception_06_is_a_typed_device_exception_and_the_session_goes_on` |
 | Modbus TCP | other device exception codes (01, 03 to 05, 07 to 0B) | `modbus` | simulator-tested | `MB-EXC-01`, `MB-EXC-03` to `MB-EXC-05`, `MB-EXC-07` to `MB-EXC-0B` | unit tests and `FakeTransport`; never seen from an independent server |
-| Modbus TCP | request-driven reconnect with capped jittered backoff | `modbus` | simulator-tested | `MB-READ-RECONNECT` | `FakeTransport` and fake clock; Stonecrab extension, upstream has none |
+| Modbus TCP | reconnect with capped jittered backoff (background when opened in a Tokio runtime, else request-driven) | `modbus` | simulator-tested | `MB-READ-RECONNECT` | `FakeTransport` and fake clock; Stonecrab extension, upstream has none |
 | Modbus TCP | read retry, cancellation, timeout, late-reply discard, resync | `modbus` | simulator-tested | `MB-READ-RETRY`, `MB-READ-TIMEOUT`, `MB-READ-MATCH` | `FakeTransport` and fake clock (D21); the timeout and the late-reply discard are also in the next row |
 | Modbus TCP | timeout and late-reply discard over the system clock, a reply with another transaction id and unit id discarded, a reply sent one byte at a time | `modbus` | interoperability-tested | `MB-READ-TIMEOUT`, `MB-READ-MATCH`, `MB-READ-FRAMING` | libmodbus 3.1.11 at wire addresses 0x171 to 0x173: `interop_a_reply_with_the_wrong_transaction_and_unit_times_out_and_the_session_goes_on`, `interop_a_reply_after_500_ms_is_read_within_a_2_s_deadline`, `interop_a_reply_after_500_ms_misses_a_200_ms_deadline_and_is_discarded_late`, `interop_a_reply_sent_a_byte_at_a_time_is_reassembled` |
 | Modbus TCP | a reply whose byte count does not fit the request | `modbus` | interoperability-tested | `MB-READ-MATCH` | libmodbus 3.1.11 answers any read of two holding registers with one: `MalformedData` for the whole read, no raw bytes kept; `interop_a_short_reply_to_a_two_register_read_is_malformed_data` |
@@ -238,7 +238,7 @@ may appear once and every other key is `InvalidConfig` (upstream warns and ignor
 
 Simulator: `sim://<device>?latency-ms=<n>&seed=<u64>`; `address-convention` is accepted
 and ignored. Core connection defaults (`Timeouts` 5 s connect and 5 s request, `idle`
-unenforced; `ReconnectPolicy` 250 ms initial, 30 s cap, multiplier 2.0, jitter 0.2,
+enforced only with a supervisor (S57); `ReconnectPolicy` 250 ms initial, 30 s cap, multiplier 2.0, jitter 0.2,
 unlimited attempts; `RetryPolicy` one attempt, retrying `Timeout`, `Disconnected` and
 `Backpressure`; `AccessPolicy::ReadOnly`) are rows `CORE-CONFIG-SHAPE`,
 `CORE-RECONNECT-POLICY` and `CORE-RETRY-POLICY`.
@@ -330,7 +330,7 @@ and why.
 | `MB-QUIRK-I` | no polling receive loop |
 | `MB-QUIRK-L` | byte order takes part in address equality |
 
-Other documented differences are not divergences from a defect: request-driven reconnect
+Other documented differences are not divergences from a defect: reconnect
 (`MB-READ-RECONNECT`) and read retry (`MB-READ-RETRY`) have no upstream equivalent,
 `canonical()` renders the long form (`MB-ADDR-SHORT-4X`), the last register at wire address
 65535 is reachable (`MB-LIMIT-SPAN`), and the address-block grammar is stricter about quoted

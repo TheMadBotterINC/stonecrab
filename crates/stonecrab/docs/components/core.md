@@ -32,7 +32,9 @@ too; an unknown write outcome is never collapsed into a rejection or replayed.
 the `sim` driver and the contracts have unit, property and documentation tests;
 `interoperability-tested` means the Modbus driver, built on these contracts, reads from
 an independent server (pymodbus 3.8.6) in the `interop` job. The core itself implements
-no driver. `Timeouts.idle` is recorded and not enforced at the alpha.
+no driver. `Timeouts.idle` is enforced only by a supervised connection guard (S57,
+ADR-0014 addendum): it closes a link no request has used for that long, and the next
+request reopens it; the simulator and an unsupervised guard ignore it.
 
 Read builders require explicit `ResourceLimits`. Duplicate identifiers and over-budget
 requests fail before any transport exists. Response builders reject missing, duplicate

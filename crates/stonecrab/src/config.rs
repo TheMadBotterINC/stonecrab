@@ -64,16 +64,21 @@ impl fmt::Display for Endpoint {
 ///
 /// `connect` and `request` must be positive; [`ConnectionConfigBuilder::build`] checks
 /// it. `request` is the default-deadline source (ADR-0007): a request without a
-/// deadline gets `now + request` from the connection's clock. `idle` is recorded and
-/// unenforced at alpha, because there is no background task to enforce it; setting it
-/// changes no behavior.
+/// deadline gets `now + request` from the connection's clock. `idle` bounds how long a
+/// link may stay open with no request: a connection with a background supervisor (the
+/// Modbus TCP connection opened inside a Tokio runtime) closes its transport once no
+/// request has run for `idle`, stays available, and opens a new transport for the next
+/// request. A zero `idle` closes the transport after every request. A connection without
+/// a supervisor (the simulator, or one driven outside a Tokio runtime) ignores it.
 ///
 /// Defaults: 5 s connect, 5 s request, no idle timeout.
 ///
 /// # Compatibility: docs/parity/core.md#CORE-CONFIG-SHAPE
 /// The 5 s request default matches upstream `request-timeout-ms`
 /// (`docs/parity/modbus.md#MB-CFG-REQUEST-TIMEOUT`). Upstream has no separate connect
-/// timeout or idle timeout in the inventoried Modbus files.
+/// timeout or idle timeout in the inventoried Modbus files; its connection cache closes a
+/// connection nobody has leased for its own `maxIdleTime`, which is what `idle` follows
+/// (`docs/parity/transport.md#TRANSPORT-RECONNECT`).
 ///
 /// # Examples
 /// ```
@@ -91,7 +96,8 @@ pub struct Timeouts {
     pub connect: Duration,
     /// Default bound for one request when the request carries no deadline.
     pub request: Duration,
-    /// Idle bound; recorded and unenforced at alpha.
+    /// How long a link may stay open with no request before a supervised connection
+    /// closes it; `None` keeps it open.
     pub idle: Option<Duration>,
 }
 

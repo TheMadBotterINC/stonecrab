@@ -65,6 +65,28 @@ placeholder.
   `Requires::Subscribe` and six subscription cases (33); the unsupported-subscribe case is
   skipped by name for both drivers. Behavior change: `Capabilities::subscribe` of both
   drivers is `Polling` instead of `Unsupported`.
+- Eager background reconnect and `Timeouts.idle` (ADR-0014 addendum S57; additive):
+  `ConnectionGuard::supervise` starts one task, owned by the guard, on the current Tokio
+  runtime. It notices a peer that closes while nothing is asked of it, reopens the
+  transport when the reconnect backoff passes without waiting for a request (attempt after
+  attempt, ending `Failed` when `ReconnectPolicy::max_attempts` is spent), and publishes
+  every state through `watch_state`. `close` stops and joins it within `timeouts.request`;
+  dropping the guard aborts it, and a task that ended with its runtime is replaced by the
+  next call. The reader runs in every state of a live link: the late reply of a timed-out
+  request is dropped and a drop that follows is noticed; a reconnected link that stays up
+  for a whole read resets the attempt count; a frame it reads while nothing is owed is
+  kept for `next_reply` and dropped by the next request, and behind it the reader still
+  notices a peer close. With a supervisor, `Timeouts.idle` is enforced: a link no request
+  has used for that long is shut down (with a kept frame, if any), the state stays
+  `Connected`, the next request opens a new one, and `next_reply` fails `Disconnected`.
+  `ConnectionGuard::request_matching(frame, deadline, token, accept)` keeps the in-flight
+  slot from the send to the first reply `accept` takes; the Modbus session now correlates
+  with it, so neither the supervisor nor the idle bound can come between a discarded reply
+  and the real one. `ModbusConnection::open` starts the
+  supervisor when it runs inside a Tokio runtime; outside one (the testkit's
+  `block_on_with`) reconnect stays request-driven and `idle` is ignored, as before.
+  `GuardStats::reconnects` now also counts reopens by the supervisor and after an idle
+  close.
 - Subscription types and a bounded event queue (ADR-0020; additive): `SubscribeRequest`
   and its builder, `SubscriptionKind` (cyclic, change-of-state, event), `QueuePolicy`
   (backpressure, latest-value coalescing, drop-oldest), `LossCounters`, `Subscription`
