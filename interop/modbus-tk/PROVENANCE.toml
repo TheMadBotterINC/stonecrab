@@ -1,0 +1,55 @@
+# Provenance of the first-party files under interop/modbus-tk (CODING_STANDARDS 13.6).
+#
+# A separate file for the reason given in interop/pymodbus/PROVENANCE.toml: the loader
+# (stonecrab::testkit::load_provenance) reads only files below the directory of the provenance
+# file, and these files are outside fixtures/modbus. Same schema, no [[vector]].
+#
+# The peer's library is not in this repository. The Dockerfile installs it from PyPI:
+#
+#   base image   python:3.12-slim, the multi-architecture index digest
+#                sha256:12316debbfb86890f6b2d825820612741ba527ad5a44e3902759141d572bfe8f
+#                (the digest interop/pymodbus/Dockerfile pins, pulled on 2026-10-27)
+#   library      modbus-tk 1.1.5 from PyPI (https://pypi.org/project/modbus-tk/):
+#                LGPL-2.1-or-later (its package metadata), used as a Python library of the
+#                image and not copied
+#   dependency   pyserial 3.5 (BSD-3-Clause), which modbus-tk requires; installed from PyPI,
+#                no serial port is opened
+#
+# server.py is first-party. It is written from the modbus-tk 1.1.5 API and from the unit
+# maps in its own header; nothing of modbus-tk and nothing of Apache PLC4X is copied into it.
+
+[[file]]
+path = "server.py"
+origin = "Authored for S52c from the modbus-tk 1.1.5 API (modbus_tcp.TcpServer, Slave.add_block, Slave.set_values, the modbus.Server.on_exception hook) and the unit maps in its header (docs/POST_ALPHA_PLAN.md, Until hardware arrives)"
+license = "Apache-2.0"
+note = "First-party. Serves units 1, 2 and 247, each with a map of its own, and answers no other unit. Supports interoperability-tested at most."
+
+[[file]]
+path = "Dockerfile"
+origin = "Authored for S52c from the pinned base image python:3.12-slim, in the shape of interop/pymodbus/Dockerfile"
+license = "Apache-2.0"
+note = "First-party. The base image is pinned by digest; modbus-tk and pyserial are pinned in requirements.txt."
+
+[[file]]
+path = "Dockerfile.dockerignore"
+origin = "Authored for S52c"
+license = "Apache-2.0"
+note = "First-party. Keeps the build context to the two files the Dockerfile copies."
+
+[[file]]
+path = "requirements.txt"
+origin = "Authored for S52c; modbus-tk 1.1.5 is the version the plan names, pyserial 3.5 the release that satisfies its pyserial>=3.1 requirement"
+license = "Apache-2.0"
+note = "First-party. Two pinned requirements."
+
+[[file]]
+path = "interop.sh"
+origin = "Authored for S52c, in the shape of interop/libmodbus/interop.sh"
+license = "Apache-2.0"
+note = "First-party. Build, run, probe, test and collect evidence; shared by the CI job and mise run interop."
+
+[[file]]
+path = "README.md"
+origin = "Authored for S52c"
+license = "Apache-2.0"
+note = "First-party."

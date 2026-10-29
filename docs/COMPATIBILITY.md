@@ -34,7 +34,7 @@ tests while its status in `docs/parity/` stays `implemented`; this table names t
 | --- | --- |
 | `build-tested` | compiles on the platform, with unit and documentation tests; no peer involved |
 | `simulator-tested` | exercised against the in-process simulator, the in-memory `FakeTransport` with a fake clock, or a loopback `ScriptedPeer` |
-| `interoperability-tested` | exercised against an independent implementation: pymodbus 3.8.6 in the `interop` CI job, libmodbus 3.1.11 in the `interop-libmodbus` job |
+| `interoperability-tested` | exercised against an independent implementation: pymodbus 3.8.6 in the `interop` CI job, libmodbus 3.1.11 in the `interop-libmodbus` job, and, for unit-ID correlation, a first-party multi-unit script on modbus-tk 1.1.5 in the `interop-modbus-tk` job |
 | `hardware-verified` | exercised against a physical device, with a record from `docs/hardware/TEMPLATE.md` |
 | `planned` | not shipped; the owner is named where one is known (hardware evidence: milestone M2S) |
 | `not supported` | not shipped and rejected with a typed error rather than ignored |
@@ -59,6 +59,7 @@ hardware record exists.
 | Modbus TCP | read retry, cancellation, timeout, late-reply discard, resync | `modbus` | simulator-tested | `MB-READ-RETRY`, `MB-READ-TIMEOUT`, `MB-READ-MATCH` | `FakeTransport` and fake clock (D21); the timeout and the late-reply discard are also in the next row |
 | Modbus TCP | timeout and late-reply discard over the system clock, a reply with another transaction id and unit id discarded, a reply sent one byte at a time | `modbus` | interoperability-tested | `MB-READ-TIMEOUT`, `MB-READ-MATCH`, `MB-READ-FRAMING` | libmodbus 3.1.11 at wire addresses 0x171 to 0x173: `interop_a_reply_with_the_wrong_transaction_and_unit_times_out_and_the_session_goes_on`, `interop_a_reply_after_500_ms_is_read_within_a_2_s_deadline`, `interop_a_reply_after_500_ms_misses_a_200_ms_deadline_and_is_discarded_late`, `interop_a_reply_sent_a_byte_at_a_time_is_reassembled` |
 | Modbus TCP | a reply whose byte count does not fit the request | `modbus` | interoperability-tested | `MB-READ-MATCH` | libmodbus 3.1.11 answers any read of two holding registers with one: `MalformedData` for the whole read, no raw bytes kept; `interop_a_short_reply_to_a_two_register_read_is_malformed_data` |
+| Modbus TCP | unit-ID correlation: a separate map per unit on one connection, tags of several units in one batch, the unit in the address block over `default-unit-identifier`, silence from an unknown unit ending in `Timeout` at the deadline | `modbus` | interoperability-tested | `MB-READ-MATCH`, `MB-READ-TIMEOUT`, `MB-READ-MERGE`, `MB-CFG-UNIT-ID`, `MB-ADDR-CONFIG-BLOCK` | first-party multi-unit server on modbus-tk 1.1.5 (units 1, 2 and 247; every other unit is silent), job `interop-modbus-tk`: `interop_each_unit_on_one_connection_answers_with_its_own_map`, `interop_one_batch_across_units_gets_each_tag_its_own_units_value`, `interop_requests_to_alternating_units_and_functions_get_the_right_answers`, `interop_an_unknown_unit_times_out_at_the_deadline_and_the_connection_goes_on`, `interop_a_batch_with_an_unknown_unit_ends_in_the_timeout`, `interop_the_unit_in_the_address_block_overrides_the_default_unit_identifier`; a first-party peer, so this level at most |
 | Modbus TCP | write coils (FC15) and holding registers (FC06, FC16); FC05 is never sent | `modbus` | interoperability-tested | `MB-TCP-WRITE`, `MB-CFG-ACCESS`, `MB-WRITE-ACCESS`, `MB-WRITE-UNKNOWN`, `MB-WRITE-HALT`, `MB-WRITE-ECHO` | `Capabilities.write = true`; refused before any I/O unless the connection string says `access=read-write`; one request per item, as upstream; an echo is `Confirmed`, an exception `Rejected`, a request that went out without a usable answer `Unknown` and never replayed; pymodbus 3.8.6 via the `interop` job (`interop_writes_*`); the 29 upstream write exchanges Stonecrab can address replay byte for byte |
 | Modbus TCP | subscriptions by polling: cyclic and change-of-state (1000 ms), event refused | `modbus` | simulator-tested | `MB-TCP-SUBSCRIBE` | `Capabilities.subscribe = Polling` (S55); `FakeTransport` and fake clock, the six subscription contract cases, `a_polling_read_and_a_user_read_never_run_together`; the event refusal and the close of a subscription also run against pymodbus 3.8.6 in the `interop` job's contract run, the timed cases do not (D21) |
 | Any physical device | everything | none yet | planned | none | milestone M2S (board adapters, hardware runner, hardware records); no record exists |
@@ -249,6 +250,7 @@ unlimited attempts; `RetryPolicy` one attempt, retrying `Timeout`, `Disconnected
 | --- | --- | --- | --- |
 | pymodbus 3.8.6 on `python:3.12-slim` (pinned by digest), first-party `server.py` over the register map in `fixtures/modbus/interop/register-map.toml`, TCP port 5020 | fifteen `interop_` tests (writes of a holding register, a coil and the multi-register types, read back, included), the `modbus_tcp_read` example, `profile_read --expect-good` for each `modbus-tcp` synthetic profile, the common driver contract suite (15 passed, 11 skipped by name) | the CI job `interop` (ubuntu, every push and pull request) and `mise run interop` | `interoperability-tested` |
 | libmodbus 3.1.11 `unit-test-server` (C, Debian trixie package 3.1.11-2 on `debian:trixie-slim`, pinned by digest), built from the test source the package ships, TCP port 1502, restarted after each connection | ten `interop_` tests: the input bits and input register of `unit-test.h`, coils and holding registers written and read back (FC15, FC06, FC16, a REAL in the four word orders), exception 06, a reply with the wrong transaction id and unit id, a 500 ms delayed reply inside and beyond a deadline, a reply sent one byte at a time, and a short reply to a two-register read | the CI job `interop-libmodbus` (ubuntu, every push and pull request) and `mise run interop` | `interoperability-tested` |
+| modbus-tk 1.1.5 (LGPL-2.1-or-later) running the first-party `interop/modbus-tk/server.py` on `python:3.12-slim` (pinned by digest), units 1, 2 and 247 with a map each, TCP port 5030 | eight `interop_` tests: each unit's map on one connection, one batch across the three units, alternating units and function codes, a unit with a shorter map refusing an address (exception 02), an unknown unit (9, 255) timing out at the deadline with the connection still good, a batch with an unknown unit, the address block's unit over `default-unit-identifier`, and a write to one unit | the CI job `interop-modbus-tk` (ubuntu, every push and pull request) and `mise run interop` | `interoperability-tested` (the server is first-party code, so no named device profile rests on it) |
 | the in-process simulator (`sim`) | the driver contract suite (29 passed, 4 skipped since S55), `sim_read`, `profile_read` on the `sim` profiles | `cargo test --all-features`, CI jobs `test` and `examples` | `simulator-tested` |
 | loopback `ScriptedPeer` (testkit) | a holding-register read over real sockets and the contract suite (20 passed, 6 skipped) | `cargo test --all-features` | `simulator-tested` |
 | `FakeTransport` with a first-party MBAP responder and `FakeClock` | the contract suite (24 passed, 2 skipped), timing, retry, reconnect, cancellation and write-outcome tests | `cargo test --all-features` | `simulator-tested` |
@@ -257,9 +259,11 @@ pymodbus 3.8.6 is the peer the upstream project's own Docker test uses; the Ston
 server is written independently and reproduces only the documented fixture values plus one
 little-endian region. libmodbus is a C stack that shares no code with Stonecrab or
 pymodbus; its `unit-test-server` serves one connection and exits, so the image restarts it
-and the tests run one at a time. What the two runs do not verify: dropped links (pymodbus has
-no fault hooks and libmodbus has none for links), a server that refuses a unit id (both
-answer the id they are sent), the raw bytes of a reply whose byte count does not fit (the
+and the tests run one at a time. The modbus-tk peer is a short script of ours over the
+modbus-tk 1.1.5 library: three units with a map each, and silence for any other. What the
+runs do not verify: dropped links (pymodbus has no fault hooks and libmodbus has none for
+links), a third-party server that refuses a unit id (pymodbus and libmodbus answer the id
+they are sent), the raw bytes of a reply whose byte count does not fit (the
 failure is `MalformedData` for the whole read), and any other Modbus server. Timing over a
 real clock is verified for a 500 ms reply, a timeout and a late reply against libmodbus
 only. No physical device has been tried.
@@ -268,7 +272,7 @@ only. No physical device has been tried.
 
 | Platform | Toolchains | What CI does | Level |
 | --- | --- | --- | --- |
-| Linux x86_64 (`ubuntu-latest`) | 1.97.1 and 1.99.1 | build, nextest, `cargo test` with doctests; the quality, coverage, interop, interop-libmodbus, examples and fuzz-smoke jobs | `build-tested`; Modbus rows as above |
+| Linux x86_64 (`ubuntu-latest`) | 1.97.1 and 1.99.1 | build, nextest, `cargo test` with doctests; the quality, coverage, interop, interop-libmodbus, interop-modbus-tk, examples and fuzz-smoke jobs | `build-tested`; Modbus rows as above |
 | macOS (`macos-latest`) | 1.97.1 and 1.99.1 | build, nextest, `cargo test` | `build-tested` |
 | Windows (`windows-latest`) | 1.97.1 and 1.99.1 | build, nextest, `cargo test` | `build-tested` |
 | `aarch64-unknown-linux-gnu` | 1.99.1 | `cargo check --workspace --all-features` only (the `cross` job) | `build-tested` (compile check, no tests) |

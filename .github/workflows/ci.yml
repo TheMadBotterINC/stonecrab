@@ -245,6 +245,43 @@ jobs:
           path: target/interop-evidence/libmodbus/
       - run: interop/libmodbus/interop.sh stop
         if: ${{ always() }}
+  interop-modbus-tk:
+    # The driver against a scripted multi-unit server: modbus-tk 1.1.5 in Docker, a first-party
+    # script built from interop/modbus-tk/ on the python:3.12-slim image pinned by digest (slice
+    # S52c). It serves units 1, 2 and 247, each with its own map, and answers no other unit.
+    # Its own job so that a failure of any peer does not hide another's result. The steps are
+    # the subcommands of interop/modbus-tk/interop.sh, which `mise run interop-modbus-tk` also
+    # runs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
+        with:
+          toolchain: "1.99.1"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.148
+      # docker build -f interop/modbus-tk/Dockerfile -t stonecrab-interop-modbus-tk:local .
+      - run: interop/modbus-tk/interop.sh build
+      # docker run -d on 127.0.0.1:5030
+      - run: interop/modbus-tk/interop.sh start
+      # Probe until 60 s have elapsed (a real Modbus read, see interop.sh).
+      - run: interop/modbus-tk/interop.sh wait
+      # cargo nextest run --locked -p stonecrab --all-features --run-ignored ignored-only
+      #   -E 'binary(modbus_interop_modbus_tk) & test(/^tests::interop_/)'
+      # The step fails when the filter does not select exactly EXPECTED_TESTS (in interop.sh)
+      # tests.
+      - run: interop/modbus-tk/interop.sh tests
+      # Image id, pip freeze and server log next to the test output.
+      - run: interop/modbus-tk/interop.sh evidence
+        if: ${{ always() }}
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: interop-modbus-tk-evidence
+          path: target/interop-evidence/modbus-tk/
+      - run: interop/modbus-tk/interop.sh stop
+        if: ${{ always() }}
   machete:
     runs-on: ubuntu-latest
     steps:

@@ -1,0 +1,4 @@
+# Only what the Dockerfile copies reaches the build context.
+*
+!interop/modbus-tk/requirements.txt
+!interop/modbus-tk/server.py

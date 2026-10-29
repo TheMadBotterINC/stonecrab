@@ -115,6 +115,16 @@ placeholder.
   `block_on_with`) reconnect stays request-driven and `idle` is ignored, as before.
   `GuardStats::reconnects` now also counts reopens by the supervisor and after an idle
   close.
+- Interop (no crate API change): unit-ID correlation against a scripted multi-unit server, a
+  short first-party script on modbus-tk 1.1.5 (LGPL-2.1-or-later, installed from PyPI into a
+  `python:3.12-slim` image pinned by digest) that serves units 1, 2 and 247 with a map each
+  and does not answer any other unit, in the new `interop-modbus-tk` CI job and `mise run
+  interop`. Eight tests in `tests/modbus_interop_modbus_tk.rs` cover each unit's map on one
+  connection, one batch across units, alternating units and function codes, a unit that
+  refuses an address the others serve (exception 02), an unknown unit ending in `Timeout`
+  at the deadline with the connection still good, a batch with an unknown unit, the unit in
+  the address block over `default-unit-identifier`, and a write to one unit. The server is
+  first-party code, so the evidence is `interoperability-tested` at most.
 - Subscription types and a bounded event queue (ADR-0020; additive): `SubscribeRequest`
   and its builder, `SubscriptionKind` (cyclic, change-of-state, event), `QueuePolicy`
   (backpressure, latest-value coalescing, drop-oldest), `LossCounters`, `Subscription`
