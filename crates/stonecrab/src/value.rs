@@ -3,11 +3,12 @@ use std::time::Duration;
 
 use crate::{ErrorKind, PlcError, Result};
 
-/// The exact scalar representation of a [`PlcValue`].
+/// The exact representation of a [`PlcValue`].
 ///
-/// Byte-buffer and recursive collection representations are deferred; they will not be
-/// silently substituted with strings or floating-point numbers. Calendar values have the
-/// four representations of ADR-0021.
+/// Byte-buffer and structured representations are deferred; they will not be silently
+/// substituted with strings or floating-point numbers. Calendar values have the four
+/// representations of ADR-0021 and a list of elements has [`List`](Self::List)
+/// (ADR-0022), whatever its elements are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum PlcValueType {
@@ -50,9 +51,12 @@ pub enum PlcValueType {
     /// Date and time of day without a time zone: `DATE_AND_TIME`, `DATE_AND_LTIME` and
     /// `LDATE_AND_TIME`.
     DateTime,
+    /// An ordered list of values, such as the elements of an array selection (ADR-0022).
+    /// The element type is the tag's, not part of this one.
+    List,
 }
 
-/// Exact-width scalar data, independent of a protocol, sensor or runtime.
+/// Exact-width scalar data, and lists of it, independent of a protocol, sensor or runtime.
 ///
 /// Float bit patterns, including non-finite values, are retained for diagnosis.
 /// Sensor quality validation must reject non-finite scaled results at its boundary.
@@ -109,6 +113,28 @@ pub enum PlcValue {
     /// Date and time of day without a time zone: `DATE_AND_TIME`, `DATE_AND_LTIME` and
     /// `LDATE_AND_TIME` (ADR-0021).
     DateTime(PlcDateTime),
+    /// An ordered list of values, in element order: what an array selection such as the
+    /// Modbus `holding-register:1[0..3]:INT` reads and writes (ADR-0022).
+    ///
+    /// A driver fills it with elements of the tag's one element type, and a one-element
+    /// range is still a list. Equality compares the elements in order, so a list holding a
+    /// NaN is not equal to itself, as `F32` and `F64` are not; there is no ordering and no
+    /// coercion to a scalar.
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab::{PlcValue, PlcValueType};
+    /// let readings = PlcValue::List(vec![PlcValue::I16(-1), PlcValue::I16(7)]);
+    /// assert_eq!(readings.value_type(), PlcValueType::List);
+    /// assert_eq!(readings.as_i64(), None);
+    /// if let PlcValue::List(elements) = &readings {
+    ///     assert_eq!(elements.get(1).and_then(PlcValue::as_i64), Some(7));
+    /// }
+    /// ```
+    ///
+    /// # Compatibility: docs/parity/core.md#CORE-VALUE-LIST
+    /// Upstream `PlcList` holds a `java.util.List<PlcValue>` and reports `PlcValueType.List`.
+    List(Vec<Self>),
 }
 
 impl PlcValue {
@@ -135,6 +161,7 @@ impl PlcValue {
             Self::Date(_) => PlcValueType::Date,
             Self::TimeOfDay(_) => PlcValueType::TimeOfDay,
             Self::DateTime(_) => PlcValueType::DateTime,
+            Self::List(_) => PlcValueType::List,
         }
     }
 
@@ -172,7 +199,8 @@ impl PlcValue {
             | Self::SignedDuration(_)
             | Self::Date(_)
             | Self::TimeOfDay(_)
-            | Self::DateTime(_) => None,
+            | Self::DateTime(_)
+            | Self::List(_) => None,
         }
     }
 
@@ -200,7 +228,8 @@ impl PlcValue {
             | Self::SignedDuration(_)
             | Self::Date(_)
             | Self::TimeOfDay(_)
-            | Self::DateTime(_) => None,
+            | Self::DateTime(_)
+            | Self::List(_) => None,
         }
     }
 
@@ -229,7 +258,8 @@ impl PlcValue {
             | Self::SignedDuration(_)
             | Self::Date(_)
             | Self::TimeOfDay(_)
-            | Self::DateTime(_) => None,
+            | Self::DateTime(_)
+            | Self::List(_) => None,
         }
     }
 }
@@ -741,6 +771,7 @@ mod tests {
             PlcValueType::Date,
             PlcValueType::TimeOfDay,
             PlcValueType::DateTime,
+            PlcValueType::List,
         ];
         let mut reversed = declared;
         reversed.reverse();
@@ -801,6 +832,11 @@ mod tests {
                 )),
                 PlcValueType::DateTime,
             ),
+            (PlcValue::List(Vec::new()), PlcValueType::List),
+            (
+                PlcValue::List(vec![PlcValue::Bool(true), PlcValue::Bool(false)]),
+                PlcValueType::List,
+            ),
         ] {
             assert_eq!(value.value_type(), kind, "no implicit widening");
             assert_eq!(
@@ -808,6 +844,38 @@ mod tests {
                 value,
                 "clone retains value and representation"
             );
+        }
+    }
+
+    // covers: CORE-VALUE-LIST / element-wise equality, no coercion to a scalar
+    #[test]
+    fn lists_compare_element_by_element_and_are_never_coerced() {
+        let list =
+            |values: &[i16]| PlcValue::List(values.iter().copied().map(PlcValue::I16).collect());
+        assert_eq!(list(&[1, 2]), list(&[1, 2]), "same elements, same order");
+        assert_ne!(list(&[1, 2]), list(&[2, 1]), "order matters");
+        assert_ne!(list(&[1]), list(&[1, 1]), "length matters");
+        assert_ne!(
+            list(&[7]),
+            PlcValue::I16(7),
+            "a list of one is not its element"
+        );
+        assert_ne!(
+            PlcValue::List(vec![PlcValue::U16(1)]),
+            list(&[1]),
+            "the element representation takes part"
+        );
+        let nan = PlcValue::List(vec![PlcValue::F32(f32::NAN)]);
+        assert_ne!(
+            nan,
+            nan.clone(),
+            "a NaN element is unequal, as a NaN scalar is"
+        );
+        for value in [list(&[1]), PlcValue::List(vec![PlcValue::Bool(true)])] {
+            assert_eq!(value.as_bool(), None, "no truthiness");
+            assert_eq!(value.as_i64(), None, "no first-element funnel");
+            assert_eq!(value.as_u64(), None, "no first-element funnel");
+            assert_eq!(value.as_f64(), None, "no float funnel");
         }
     }
 

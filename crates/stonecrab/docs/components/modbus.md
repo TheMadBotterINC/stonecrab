@@ -146,6 +146,7 @@ device has been tried.
 | Capability | Support level |
 | --- | --- |
 | Read: coils, discrete inputs, holding registers and input registers (function codes 01 to 04) as the 15 numeric and bit types | interoperability-tested |
+| Array selections `[i]`, `[lo..hi]` and `;base`: a range read and written as one `PlcValue::List` | simulator-tested |
 | Ping: one read of `ping-address` (`Connection::ping`) | interoperability-tested |
 | Write: coils and holding registers (function codes 15, 06 and 16), `Unknown` after a request that went out unanswered | interoperability-tested |
 | Subscribe by polling: cyclic and change-of-state, event refused (`Connection::subscribe`) | simulator-tested |
@@ -183,8 +184,8 @@ error rather than ignoring it; operations that have no API at all do not exist:
 - browse and discovery (`MB-TCP-BROWSE`, `MB-TCP-DISCOVER`): these operations do not
   exist in the API; subscriptions poll since S55 (`MB-TCP-SUBSCRIBE`, see "Connection");
 - extended registers (FC20 and FC21, `extended-register`, `6x`), `STRING`, `WSTRING`,
-  `CHAR`, `WCHAR`, the `TIME` and `DATE` family, array selections and the legacy array
-  form (`MB-ADDR-*`, `MB-TYPE-*`);
+  `CHAR`, `WCHAR`, the `TIME` and `DATE` family, a selection of more than one dimension and
+  the legacy array form (`MB-ADDR-*`, `MB-TYPE-*`);
 - UDP, TLS and TLS-PSK transports (`MB-TCP-TRANSPORTS-*`); RTU and ASCII framing are
   milestone M2 (no row yet);
 - the upstream gap-filling read optimizer, by decision (S51, ADR-0015 addendum): Stonecrab
@@ -349,6 +350,24 @@ Stonecrab turns what would be a silently dropped pair into an error. Either key,
 any order, or an empty block `{}` are accepted; spaces around keys, colons, values and
 commas are ignored; unknown or repeated keys are errors.
 
+Every form may carry a selection between the number and the type, in the upstream array
+notation (`MB-ADDR-SELECTION`, ADR-0022): `[i]` names element `i` and reads a scalar,
+`[lo..hi]` names elements `lo` to `hi` inclusive and reads one `PlcValue::List`, even
+`[4..4]`, and `;base` inside either states the lower bound the indices count from
+(default 0, so `[4..7;1]` is the elements at offsets 3 to 6). Element `k` starts `k` bits
+after the address on a coil or discrete input and `k` times the type's register count
+after it on a register area: `holding-register:1[4]:DINT` is wire offset 8 and the same
+address as `holding-register:9:DINT`. A range is one address whose `elements()` is its
+count; it renders canonically as `holding-register:1[0..1]:REAL`, the logical number of
+its first element followed by `[0..N-1]`. The whole range must end at or before wire
+address 65535 and fit one read, 2000 bits or 125 registers (63 `DINT`s are 126 registers
+and are refused). Each element has the layout it has alone, so an 8-bit or `BOOL` element
+on a register area takes a register of its own (upstream packs them, a recorded
+divergence), and byte and word order apply to each element. A range is one tag to the
+batcher: it merges with adjacent tags, counts whole against `max-registers-per-request` or
+`max-coils-per-request` and gives one read item; a write takes a `PlcValue::List` of
+exactly its count (see "Connection").
+
 Rejected with `ErrorKind::InvalidAddress`, each message naming the reason:
 
 - empty input, input over 256 bytes, control characters, and any text no form matches;
@@ -358,17 +377,23 @@ Rejected with `ErrorKind::InvalidAddress`, each message naming the reason:
 - lowercase or unknown type names (`holding-register:16:i16`);
 - a type other than `BOOL` on a coil or discrete input (upstream fails these only at read
   time);
-- a span past wire address 65535;
-- the features deferred past the alpha: array selections `[n]` and `[a..b]`, `STRING`,
-  `WSTRING`, `CHAR`, `WCHAR` and `STRING(n)`, the `TIME` and `DATE` family,
-  `extended-register`, `6x` and the bare `6` prefix, and the legacy `AREA:N:INT[4]` form
-  (the message gives the replacement `AREA:N[0..3]:INT`);
+- a span past wire address 65535, a selection that starts or ends past it, and a range
+  wider than one read (2001 bits, 126 registers);
+- a selection that is not `[i]` or `[lo..hi]` with an optional `;base` in decimal digits,
+  has a second dimension (`[0..1][2]`, `[1,2]`), an upper bound below its lower bound, an
+  index below its base or a number beyond `u32`;
+- the legacy `AREA:N:INT[4]` and `AREA:N:INT:4` forms (the message gives the replacement
+  `AREA:N[0..3]:INT`, `[0]` for a count of 1, and only when that replacement parses;
+  otherwise the general example);
+- the features deferred past the alpha: `STRING`, `WSTRING`, `CHAR`, `WCHAR` and
+  `STRING(n)`, the `TIME` and `DATE` family, `extended-register`, `6x` and the bare `6`
+  prefix;
 - a malformed config block: unterminated, unknown or repeated key, `unit-id` outside
   0..=255, unquoted or unknown `byte-order`.
 
 Error messages echo at most 32 control-free characters of the input. The row ids behind
 each rule are in the parity record, `MB-ADDR-*`, `MB-LIMIT-ADDR`, `MB-LIMIT-SPAN`,
-`MB-LIMIT-DIGITS` and `MB-CFG-UNIT-ID`.
+`MB-LIMIT-COILS`, `MB-LIMIT-REGISTERS`, `MB-LIMIT-DIGITS` and `MB-CFG-UNIT-ID`.
 
 ```rust
 use stonecrab::{AddressOptions, ProtocolAddress};
@@ -647,8 +672,9 @@ events.
 `read` checks the request before any I/O, in this order: the connection is not `Closing`,
 `Closed` or `Failed` (`Disconnected`), the token is not cancelled (`Cancelled`), every
 tag's address is a `ModbusAddress` (`InvalidAddress`, naming the tag and never the
-address), no tag has an element count above one (`InvalidConfig`: array selections are
-deferred) and the request fits `max_items_per_request` (`ResourceLimit`). Then one read runs
+address), no tag has an element count above one (`InvalidConfig`: several elements are a
+range selection in the address) and the request fits `max_items_per_request`
+(`ResourceLimit`). Then one read runs
 at a time (a concurrent read or ping is `Backpressure`) and an expired request deadline is
 `Timeout`. The tags are planned into chunks by `Batcher::plan` and the chunks run one
 after another:
@@ -687,8 +713,14 @@ outcome:
   tag, else of the address block, else of `ConnectionDefaults`; a coil takes a `BOOL`; the
   request is function 15 for a coil (even one), 06 for a holding-register payload of
   exactly 2 bytes and 16 for any other;
-- a discrete input or an input register, and a value that does not fit its address, is
-  `Rejected` with no request, and the other items go on;
+- a range selection takes a `PlcValue::List` of exactly its element count, each element
+  encoded as it would be alone, in one request (function 15 for coils, 16 for holding
+  registers, 06 for a one-element list of a one-register type); a scalar written to a
+  range, or a list to one element, is refused by the request builder with `InvalidConfig`;
+- a discrete input or an input register, a value that does not fit its address (a list
+  of another length or with an element of another representation included, with
+  `InvalidConfig`), and a list wider than one write carries (124 registers, 1969 coils,
+  with `ResourceLimit`) are `Rejected` with no request, and the other items go on;
 - an echo that repeats the request is `Confirmed`; a device exception is `Rejected`, with
   the exception as the item error and its code as the protocol status;
 - a request that went out and got no usable answer (the deadline passed, the link was

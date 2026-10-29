@@ -166,7 +166,8 @@ impl Default for BatchLimits {
 ///
 /// `offset` counts registers (register areas) or bits (bit areas) from the chunk's
 /// `start`, so a member occupies `offset..offset + width` of the chunk's data, where the
-/// width is `data_type.register_size()` on register areas and 1 on bit areas.
+/// width of one element is `data_type.register_size()` on register areas and 1 on bit
+/// areas, times `elements` for a list.
 ///
 /// # Compatibility: docs/parity/modbus.md#MB-BYTEORDER-PRECEDENCE
 /// `byte_order` and `word_order` are each resolved tag field over address block; a field
@@ -187,6 +188,10 @@ pub struct Member {
     /// Word order from the tag field over the address block, `None` to defer to the
     /// connection default.
     pub word_order: Option<WordOrder>,
+    /// The number of elements of a list ([`ModbusAddress::elements`]), decoded one after
+    /// another into a [`PlcValue::List`](crate::PlcValue::List); `None` for one element,
+    /// decoded as a scalar.
+    pub elements: Option<NonZeroU16>,
 }
 
 /// One contiguous wire read covering one or more tags of the same unit and area.
@@ -269,7 +274,8 @@ impl Batcher {
     /// whole plan is refused above that count. Chunks are ordered by (unit identifier, area,
     /// start), members by offset; tags with equal offsets keep their input order. Every
     /// input [`TagId`] appears in exactly one member. A bit area tag occupies one bit; a
-    /// register area tag occupies `data_type.register_size()` registers.
+    /// register area tag occupies `data_type.register_size()` registers; a list
+    /// ([`ModbusAddress::elements`]) is one tag that occupies that many times as much.
     ///
     /// # Examples
     /// ```
@@ -288,8 +294,8 @@ impl Batcher {
     /// - [`ErrorKind::ResourceLimit`] when `tags.len()` exceeds `limits.max_items()` (checked
     ///   before any planning) or a single tag is wider than the area's bound.
     /// - [`ErrorKind::InvalidAddress`] when a tag's address is not a [`ModbusAddress`].
-    /// - [`ErrorKind::InvalidConfig`] when a tag's `count()` is not 1 (Modbus element counts
-    ///   above one need array selections, which are deferred).
+    /// - [`ErrorKind::InvalidConfig`] when a tag's `count()` is not 1 (Modbus reads several
+    ///   elements through a range selection in the address, not a count).
     ///
     /// # Compatibility: docs/parity/modbus.md#MB-READ-MERGE
     /// Counterpart of upstream `ModbusReadOptimizer` (docs/parity/modbus.md#MB-READ-MERGE).
@@ -317,12 +323,17 @@ impl Batcher {
         let mut open: Option<Open> = None;
         for entry in &entries {
             let limit = limits.limit_for(entry.area);
-            // Only a multi-register tag can be wider than a bound, and bit tags are 1 wide.
+            // A multi-register tag or a list can be wider than a configured bound.
             if entry.width > limit {
+                let unit = if entry.area.is_bit_area() {
+                    "bits"
+                } else {
+                    "registers"
+                };
                 return Err(PlcError::new(
                     ErrorKind::ResourceLimit,
                     format!(
-                        "tag {} needs {} registers but a request carries at most {limit}",
+                        "tag {} needs {} {unit} but a request carries at most {limit}",
                         entry.tag.id(),
                         entry.width,
                     ),
@@ -400,6 +411,7 @@ impl Entry<'_> {
             data_type: self.address.data_type(),
             byte_order,
             word_order,
+            elements: self.address.elements(),
         }
     }
 }
@@ -410,8 +422,8 @@ fn entry(tag: &Tag) -> Result<Entry<'_>> {
         return Err(PlcError::new(
             ErrorKind::InvalidConfig,
             format!(
-                "tag {} has element count {}: Modbus element counts above one need array \
-                 selections, which are not supported yet",
+                "tag {} has element count {}: Modbus reads several elements through a \
+                 range selection in the address, for example holding-register:1[0..3]:INT",
                 tag.id(),
                 tag.count()
             ),

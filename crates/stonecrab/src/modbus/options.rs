@@ -66,7 +66,8 @@ const KEY_ECHO_LIMIT: usize = 32;
 ///
 /// `request_timeout` is also stored in the configuration's `Timeouts.request`, which is
 /// what the connection enforces. The `ping_address` is what
-/// [`Connection::ping`](crate::Connection::ping) reads once (`MB-TCP-PING`).
+/// [`Connection::ping`](crate::Connection::ping) reads once (`MB-TCP-PING`); an address
+/// with a range selection is read whole, every element in one request, as upstream does.
 ///
 /// The struct is `#[non_exhaustive]`; start from [`Default`] and assign the fields. Its
 /// `Debug` output carries no secrets (it has none to carry), as [`DriverOptions`] requires.

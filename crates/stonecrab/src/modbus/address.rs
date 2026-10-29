@@ -10,7 +10,9 @@
 //! input.
 
 use std::fmt;
+use std::num::NonZeroU16;
 
+use crate::modbus::{MAX_READ_BITS, MAX_READ_REGISTERS};
 use crate::{
     AddressOptions, ByteOrder, ErrorKind, PlcError, PlcValueType, ProtocolAddress, Result,
     WordOrder,
@@ -558,7 +560,8 @@ impl AddressConvention {
     }
 }
 
-/// A validated Modbus read address: unit, area, wire offset, type and byte order.
+/// A validated Modbus address: unit, area, wire offset, type, byte order and, for a range
+/// selection, the number of elements.
 ///
 /// The `offset` is the zero-based wire address, the number that goes into the PDU. The
 /// one-based logical address people write (`holding-register:16`, `4x00016`) is
@@ -570,9 +573,18 @@ impl AddressConvention {
 /// Equality, hashing and `Clone` cover every field, including the byte order: two
 /// addresses that differ only in `byte-order` are different values.
 ///
+/// An address names one element, or with [`elements`](Self::elements) a list of
+/// consecutive elements of its type that is read and written as one
+/// [`PlcValue::List`](crate::PlcValue::List): what the range selection `[lo..hi]` of the
+/// text grammar produces. A list takes `elements` times the element's width, one bit on a
+/// coil or discrete input and [`ModbusDataType::register_size`] registers on a register
+/// area, and each element has the layout it has alone (ADR-0022).
+///
 /// # Canonical text
 /// [`ProtocolAddress::canonical`] renders the unambiguous long form
-/// `AREA:LOGICAL:TYPE`, for example `holding-register:16:INT`, followed by an address
+/// `AREA:LOGICAL:TYPE`, for example `holding-register:16:INT`, with the range
+/// `[0..N-1]` after the number for a list of `N` elements
+/// (`holding-register:16[0..3]:INT`), followed by an address
 /// block only when something is set: `{unit-id: 10}`, `{byte-order: 'LITTLE_ENDIAN'}` or
 /// both as `{unit-id: 10, byte-order: 'LITTLE_ENDIAN'}`. The block has no space before
 /// the opening brace, keys come in that order and enum values are single-quoted, as in
@@ -616,7 +628,8 @@ impl AddressConvention {
 /// (docs/parity/modbus.md#MB-BYTEORDER-PRECEDENCE): the tag field wins over it and it
 /// wins over the connection default. Byte order takes part in equality, which upstream's
 /// `equals` does not do (docs/parity/modbus.md#MB-QUIRK-L). The offset and span bounds are
-/// docs/parity/modbus.md#MB-LIMIT-ADDR and docs/parity/modbus.md#MB-LIMIT-SPAN.
+/// docs/parity/modbus.md#MB-LIMIT-ADDR and docs/parity/modbus.md#MB-LIMIT-SPAN. A list
+/// is the range selection of docs/parity/modbus.md#MB-ADDR-SELECTION.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ModbusAddress {
     unit_id: Option<UnitId>,
@@ -625,6 +638,7 @@ pub struct ModbusAddress {
     data_type: ModbusDataType,
     byte_order: Option<(ByteOrder, WordOrder)>,
     convention: AddressConvention,
+    elements: Option<NonZeroU16>,
 }
 
 impl ModbusAddress {
@@ -638,12 +652,14 @@ impl ModbusAddress {
         data_type: ModbusDataType::Bool,
         byte_order: None,
         convention: AddressConvention::Plc4xCompatible,
+        elements: None,
     };
 
     /// Start building an address at a zero-based wire `offset` of `area`.
     ///
     /// Defaults, documented on [`ModbusAddressBuilder`]: the area's default data type, no
-    /// unit identifier, no byte order and [`AddressConvention::Plc4xCompatible`].
+    /// unit identifier, no byte order, [`AddressConvention::Plc4xCompatible`] and one
+    /// element.
     ///
     /// # Examples
     /// ```
@@ -661,6 +677,7 @@ impl ModbusAddress {
             data_type: None,
             byte_order: None,
             convention: AddressConvention::Plc4xCompatible,
+            elements: None,
         }
     }
 
@@ -687,19 +704,48 @@ impl ModbusAddress {
         self.area
     }
 
-    /// The zero-based wire address that goes into the request PDU.
+    /// The zero-based wire address that goes into the request PDU; for a list, the wire
+    /// address of its first element.
     #[must_use]
     pub const fn offset(&self) -> u16 {
         self.offset
     }
 
-    /// How many registers or bits a read of the address covers: one bit, or the data type's
-    /// register count.
+    /// The number of elements of a list, `None` for an address that names one element.
+    ///
+    /// A list of one (`[4..4]` in the text) is `Some(1)`: it reads and writes a
+    /// [`PlcValue::List`](crate::PlcValue::List), where the index `[4]` names one element
+    /// and reads a scalar.
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab::AddressOptions;
+    /// use stonecrab::modbus::ModbusAddress;
+    ///
+    /// let none = AddressOptions::default();
+    /// let range = ModbusAddress::parse("holding-register:1[4..7]:DINT", &none)?;
+    /// assert_eq!(range.elements().map(|count| count.get()), Some(4));
+    /// let index = ModbusAddress::parse("holding-register:1[4]:DINT", &none)?;
+    /// assert_eq!(index.elements(), None);
+    /// # Ok::<(), stonecrab::PlcError>(())
+    /// ```
+    ///
+    /// # Compatibility: docs/parity/modbus.md#MB-ADDR-SELECTION
+    /// Upstream carries the count and an `explicitRange` flag, which this `Option` folds
+    /// into one value.
+    #[must_use]
+    pub const fn elements(&self) -> Option<NonZeroU16> {
+        self.elements
+    }
+
+    /// How many registers or bits a read of the address covers: the element count times
+    /// one bit, or times the data type's register count.
     pub(crate) const fn width(&self) -> u16 {
-        if self.area.is_bit_area() {
-            1
-        } else {
-            self.data_type.register_size()
+        let element = element_width(self.area, self.data_type);
+        // `build` bounded the product by the per-request maximum.
+        match self.elements {
+            Some(count) => element.saturating_mul(count.get()),
+            None => element,
         }
     }
 
@@ -744,8 +790,12 @@ impl ProtocolAddress for ModbusAddress {
     }
 
     fn canonical(&self) -> String {
+        let range = self
+            .elements
+            .map(|count| format!("[0..{}]", count.get().saturating_sub(1)))
+            .unwrap_or_default();
         let base = format!(
-            "{}:{}:{}",
+            "{}:{}{range}:{}",
             self.area.long_name(),
             self.logical_address(),
             self.data_type.upstream_name()
@@ -764,8 +814,14 @@ impl ProtocolAddress for ModbusAddress {
         }
     }
 
+    // A list's own type: a write of a scalar to it, or of a list to one element, is then
+    // refused by the request builder before any I/O (ADR-0022).
     fn value_type_hint(&self) -> Option<PlcValueType> {
-        Some(self.data_type.value_type())
+        Some(if self.elements.is_some() {
+            PlcValueType::List
+        } else {
+            self.data_type.value_type()
+        })
     }
 
     // True for every data type wider than one 16-bit register (`register_size`).
@@ -778,9 +834,9 @@ impl ProtocolAddress for ModbusAddress {
 ///
 /// Defaults: the data type is [`ModbusArea::default_data_type`] of the area (`BOOL` for
 /// bit areas, `INT` for register areas), there is no unit identifier and no byte order,
-/// and the convention is [`AddressConvention::Plc4xCompatible`]. Setters take effect in
-/// any order and the last call for a field wins. [`build`](Self::build) is the only place
-/// validation happens.
+/// the convention is [`AddressConvention::Plc4xCompatible`] and the address names one
+/// element. Setters take effect in any order and the last call for a field wins.
+/// [`build`](Self::build) is the only place validation happens.
 ///
 /// # Examples
 /// ```
@@ -804,6 +860,7 @@ pub struct ModbusAddressBuilder {
     data_type: Option<ModbusDataType>,
     byte_order: Option<(ByteOrder, WordOrder)>,
     convention: AddressConvention,
+    elements: Option<NonZeroU16>,
 }
 
 impl ModbusAddressBuilder {
@@ -841,17 +898,44 @@ impl ModbusAddressBuilder {
         self
     }
 
+    /// Make the address a list of `count` consecutive elements starting at the offset, as
+    /// the range selection `[0..count-1]` does; a count of one is a list of one.
+    ///
+    /// # Examples
+    /// ```
+    /// use std::num::NonZeroU16;
+    /// use stonecrab::ProtocolAddress;
+    /// use stonecrab::modbus::{ModbusAddress, ModbusArea, ModbusDataType};
+    ///
+    /// let count = NonZeroU16::new(2).ok_or("two")?;
+    /// let address = ModbusAddress::builder(ModbusArea::HoldingRegister, 0)
+    ///     .data_type(ModbusDataType::Real)
+    ///     .elements(count)
+    ///     .build()?;
+    /// assert_eq!(address.canonical(), "holding-register:1[0..1]:REAL");
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    ///
+    /// # Compatibility: docs/parity/modbus.md#MB-ADDR-SELECTION
+    /// The range of the upstream array notation, counted from the offset.
+    pub const fn elements(mut self, count: NonZeroU16) -> Self {
+        self.elements = Some(count);
+        self
+    }
+
     /// Validate the parts and create the address.
     ///
-    /// Two checks run: the data type must fit the area, and the elements it occupies must
-    /// end at or before the last wire address 65535. Nothing else is checked; in
-    /// particular the unit identifier and byte order are always valid.
+    /// Three checks run: the data type must fit the area, the registers or bits the address
+    /// occupies must end at or before the last wire address 65535, and a list must fit one
+    /// read request (2000 bits or 125 registers). Nothing else is checked; in particular
+    /// the unit identifier and byte order are always valid.
     ///
     /// # Errors
     /// Returns [`ErrorKind::InvalidAddress`] when a bit area (coil or discrete input) is
-    /// given any type other than `BOOL`, or when `offset` plus the type's
-    /// [`register_size`](ModbusDataType::register_size) passes the end of the 65536-address
-    /// map (for example `REAL` at wire offset 65535, or `LREAL` at 65533).
+    /// given any type other than `BOOL`, when `offset` plus the width passes the end of the
+    /// 65536-address map (for example `REAL` at wire offset 65535, `LREAL` at 65533, or
+    /// two `INT`s at 65535), or when a list is wider than one read carries (2001 coils, 63
+    /// `DINT`s).
     ///
     /// # Examples
     /// ```
@@ -876,7 +960,9 @@ impl ModbusAddressBuilder {
     /// register is 65535 or lower, so wire address 65535 is reachable. Bit areas reject
     /// non-`BOOL` types here instead of at read time
     /// (docs/parity/modbus.md#MB-ADDR-BIT-TYPES). An offset above 65535 cannot be
-    /// expressed (docs/parity/modbus.md#MB-LIMIT-ADDR).
+    /// expressed (docs/parity/modbus.md#MB-LIMIT-ADDR). The width of a list is measured in
+    /// bits or registers, as upstream measures it at parse time
+    /// (docs/parity/modbus.md#MB-LIMIT-COILS, docs/parity/modbus.md#MB-LIMIT-REGISTERS).
     pub fn build(self) -> Result<ModbusAddress> {
         let data_type = self
             .data_type
@@ -889,15 +975,32 @@ impl ModbusAddressBuilder {
                 self.area.long_name()
             )));
         }
-        let size = data_type.register_size();
-        let end = u32::from(self.offset).saturating_add(u32::from(size));
+        let element = element_width(self.area, data_type);
+        let (unit, limit, row) = if self.area.is_bit_area() {
+            ("bit", MAX_READ_BITS, "MB-LIMIT-COILS")
+        } else {
+            ("register", MAX_READ_REGISTERS, "MB-LIMIT-REGISTERS")
+        };
+        let (count, what) = match self.elements {
+            Some(count) => (
+                count.get(),
+                format!("a list of {count} {}", data_type.upstream_name()),
+            ),
+            None => (1, data_type.upstream_name().to_owned()),
+        };
+        let size = u32::from(element).saturating_mul(u32::from(count));
+        let end = u32::from(self.offset).saturating_add(size);
         if end > ADDRESS_SPACE {
             return Err(invalid_address(format!(
-                "{} at wire offset {} spans {} register(s) and passes the last address \
+                "{what} at wire offset {} spans {size} {unit}(s) and passes the last address \
                  65535 (docs/parity/modbus.md#MB-LIMIT-SPAN)",
-                data_type.upstream_name(),
                 self.offset,
-                size
+            )));
+        }
+        if size > u32::from(limit) {
+            return Err(invalid_address(format!(
+                "{what} spans {size} {unit}s, more than the {limit} one read carries \
+                 (docs/parity/modbus.md#{row})"
             )));
         }
         Ok(ModbusAddress {
@@ -907,7 +1010,22 @@ impl ModbusAddressBuilder {
             data_type,
             byte_order: self.byte_order,
             convention: self.convention,
+            elements: self.elements,
         })
+    }
+}
+
+/// The bits or registers one element of `data_type` occupies in `area`: one bit on a bit
+/// area, the type's register count on a register area.
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "unreachable_pub forbids plain pub in a private module"
+)]
+pub(crate) const fn element_width(area: ModbusArea, data_type: ModbusDataType) -> u16 {
+    if area.is_bit_area() {
+        1
+    } else {
+        data_type.register_size()
     }
 }
 
@@ -971,6 +1089,24 @@ impl ModbusAddress {
     /// | prefixed short, `0x`, `1x`, `3x`, `4x` plus 4 or 5 digits | `4x00016:INT` | no |
     /// | bare short, prefix digit `0`, `1`, `3`, `4` plus 4 or 5 digits | `40016:INT` | yes |
     ///
+    /// Every form may carry a selection between the number and the type, in the upstream
+    /// array notation (ADR-0022):
+    ///
+    /// | Selection | Example | Reads |
+    /// | --- | --- | --- |
+    /// | `[i]` | `holding-register:1[4]:DINT` | element `i`, a scalar |
+    /// | `[lo..hi]`, inclusive | `holding-register:1[0..3]:INT` | elements `lo` to `hi`, a list, even for `[4..4]` |
+    /// | `;base` inside either | `holding-register:1[4..7;1]:INT` | indices counted from a declared lower bound, default 0 |
+    ///
+    /// The number names element 0 (with `;base`, element `base`), and element `k` starts
+    /// `k` bits further on a coil or discrete input and `k` times
+    /// [`ModbusDataType::register_size`] registers further on a register area; so
+    /// `holding-register:1[4]:DINT` is wire offset 8 and `[4..7;1]` reads the elements at
+    /// offsets 3 to 6. A range is one address with [`elements`](Self::elements) set: it is
+    /// read and written as one [`PlcValue::List`](crate::PlcValue::List), must end at or
+    /// before wire address 65535 and must fit one read (2000 bits or 125 registers). An
+    /// index is resolved here and gives the same address as the element's own number.
+    ///
     /// `AREA` is `coil`, `discrete-input`, `holding-register` or `input-register`; the
     /// long form takes 1 to 9 digits. With no convention, `plc4x` or `one-based-40001`
     /// the number is the one-based logical address: the wire offset is the number minus
@@ -1011,11 +1147,16 @@ impl ModbusAddress {
     /// other than 4 or 5 in a short form) or hexadecimal number; logical address 0 or
     /// above 65536 (wire offset above 65535), or under `zero-based` a number above 65535;
     /// a lowercase or unknown type name; any type other than `BOOL` on a coil or discrete
-    /// input; a span that passes wire address 65535 (`LREAL` at logical 65534); array
-    /// selections `[n]` and `[a..b]`; `STRING`, `WSTRING`, `CHAR`, `WCHAR`, a
+    /// input; a span that passes wire address 65535 (`LREAL` at logical 65534, or a
+    /// selection whose first or last element lies past it); a selection that is not one
+    /// `[index]` or `[lo..hi]` with an optional `;base` in decimal digits, has a second
+    /// dimension (a second bracket group or a comma), an upper bound below its lower bound,
+    /// an index below its base or a number beyond `u32`, or a range wider than one read
+    /// carries (2001 bits, 126 registers); `STRING`, `WSTRING`, `CHAR`, `WCHAR`, a
     /// parenthesised length and the `TIME` and `DATE`
     /// family; `extended-register`, `6x` and the bare `6` prefix; the legacy
-    /// `AREA:N:TYPE[n]` form (the message gives the replacement spelling); and a
+    /// `AREA:N:TYPE[n]` and `AREA:N:TYPE:n` forms (the message gives the replacement
+    /// spelling when it parses, otherwise a general example); and a
     /// malformed address block (unterminated, unknown or repeated key, `unit-id` that is
     /// not an integer from 0 to 255, unquoted or unknown `byte-order`).
     ///
@@ -1041,6 +1182,13 @@ impl ModbusAddress {
     /// assert_eq!(refused.map_err(|e| e.kind()), Err(ErrorKind::InvalidAddress));
     /// let plc4x = AddressOptions::builder().convention("plc4x").build()?;
     /// assert_eq!(ModbusAddress::parse("40016", &plc4x)?, short);
+    ///
+    /// // A range is a list; an index is the element's own address.
+    /// let range = ModbusAddress::parse("holding-register:1[0..1]:REAL", &none)?;
+    /// assert_eq!(range.elements().map(|count| count.get()), Some(2));
+    /// assert_eq!(range.canonical(), "holding-register:1[0..1]:REAL");
+    /// let index = ModbusAddress::parse("4x00001[4]:DINT", &none)?;
+    /// assert_eq!(index, ModbusAddress::parse("holding-register:9:DINT", &none)?);
     /// # Ok::<(), stonecrab::PlcError>(())
     /// ```
     ///
@@ -1051,9 +1199,10 @@ impl ModbusAddress {
     /// here rather than at read time (docs/parity/modbus.md#MB-ADDR-BIT-TYPES), a
     /// `unit-id` outside 0..=255 is rejected (docs/parity/modbus.md#MB-CFG-UNIT-ID),
     /// `4x:INT` is a typed error (docs/parity/modbus.md#MB-QUIRK-G) and the deferred
-    /// forms are typed rejections (docs/parity/modbus.md#MB-ADDR-SELECTION,
-    /// docs/parity/modbus.md#MB-ADDR-STRING, docs/parity/modbus.md#MB-ADDR-EXTENDED,
-    /// docs/parity/modbus.md#MB-ADDR-LEGACY-ARRAY, docs/parity/modbus.md#MB-TYPE-TIME).
+    /// forms are typed rejections (docs/parity/modbus.md#MB-ADDR-STRING,
+    /// docs/parity/modbus.md#MB-ADDR-EXTENDED, docs/parity/modbus.md#MB-TYPE-TIME). The
+    /// selection is docs/parity/modbus.md#MB-ADDR-SELECTION and the legacy array forms
+    /// docs/parity/modbus.md#MB-ADDR-LEGACY-ARRAY.
     /// Limits: docs/parity/modbus.md#MB-LIMIT-ADDR, docs/parity/modbus.md#MB-LIMIT-SPAN
     /// and docs/parity/modbus.md#MB-LIMIT-DIGITS. Quoting of the enum value follows the
     /// upstream value pattern and the whitespace rules inside the block are a Stonecrab
@@ -1089,11 +1238,19 @@ impl ModbusAddress {
             ));
         }
         let (area, number, rest) = locate(head, convention.is_some())?;
-        let data_type = parse_type(head, rest, area)?;
+        let (selection, rest) = split_selection(rest)?;
+        let data_type = parse_type(head, rest, area, selection.is_none(), options)?;
         let offset = wire_offset(number, convention.unwrap_or_default())?;
+        let (offset, elements) = match selection {
+            Some(selection) => selection.resolve(offset, element_width(area, data_type))?,
+            None => (offset, None),
+        };
         let mut builder = Self::builder(area, offset)
             .data_type(data_type)
             .convention(AddressConvention::Plc4xCompatible);
+        if let Some(count) = elements {
+            builder = builder.elements(count);
+        }
         if let Some(body) = block {
             let block = parse_block(body)?;
             if let Some(unit_id) = block.unit_id {
@@ -1304,20 +1461,21 @@ fn wire_offset(number: u32, convention: AddressConvention) -> Result<u16> {
     Ok(u16::try_from(offset).unwrap_or(u16::MAX))
 }
 
-/// Parse what follows the number: nothing, or `:TYPE`.
+/// Parse what follows the number and the selection: nothing, or `:TYPE`.
 ///
 /// `head` is the whole head, used to spell the legacy-form replacement; `rest` is its
-/// unparsed suffix.
-fn parse_type(head: &str, rest: &str, area: ModbusArea) -> Result<ModbusDataType> {
+/// unparsed suffix. `legacy` is false when a selection was written, so a count after the
+/// type is plain unexpected text rather than the legacy form. `options` are the caller's,
+/// under which a legacy-form replacement must parse before the message offers it.
+fn parse_type(
+    head: &str,
+    rest: &str,
+    area: ModbusArea,
+    legacy: bool,
+    options: &AddressOptions,
+) -> Result<ModbusDataType> {
     if rest.is_empty() {
         return Ok(area.default_data_type());
-    }
-    if rest.starts_with('[') {
-        return Err(invalid_address(
-            "array selections ([n] and [a..b]) are not supported in the alpha: read one \
-             element per tag (docs/parity/modbus.md#MB-ADDR-SELECTION)"
-                .to_owned(),
-        ));
     }
     let Some(after) = rest.strip_prefix(':') else {
         return Err(unexpected(rest));
@@ -1337,31 +1495,162 @@ fn parse_type(head: &str, rest: &str, area: ModbusArea) -> Result<ModbusDataType
              both are deferred (docs/parity/modbus.md#MB-ADDR-STRING)"
                 .to_owned(),
         ))
-    } else if tail.starts_with('[') || tail.strip_prefix(':').is_some_and(starts_with_digit) {
-        Err(legacy_array(head, rest, token, tail))
+    } else if legacy
+        && (tail.starts_with('[') || tail.strip_prefix(':').is_some_and(starts_with_digit))
+    {
+        Err(legacy_array(head, rest, token, tail, options))
     } else {
         Err(unexpected(tail))
     }
 }
 
-/// The legacy `AREA:N:TYPE[n]` or `AREA:N:TYPE:n` form, with the migration hint.
-fn legacy_array(head: &str, rest: &str, token: &str, tail: &str) -> PlcError {
+/// The legacy `AREA:N:TYPE[n]` or `AREA:N:TYPE:n` form, with the migration hint: the
+/// selection moved before the type and the count `n` became the range `[0..n-1]`, `[0]`
+/// for a count of 0 or 1 as upstream writes it. The replacement is offered only when it
+/// parses under the caller's `options`; a count that is not 1 to 9 digits, or a range that
+/// is wider than one read or passes wire address 65535, gets the general example instead.
+fn legacy_array(
+    head: &str,
+    rest: &str,
+    token: &str,
+    tail: &str,
+    options: &AddressOptions,
+) -> PlcError {
     let spelled = head.strip_suffix(rest).unwrap_or(head);
     let count = tail.trim_start_matches(['[', ':']).trim_end_matches(']');
-    let last = if !count.is_empty()
+    let replacement = (!count.is_empty()
         && count.len() <= MAX_LONG_DIGITS
-        && count.bytes().all(|b| b.is_ascii_digit())
-        && decimal_value(count) > 0
-    {
-        decimal_value(count).saturating_sub(1).to_string()
-    } else {
-        "N-1".to_owned()
+        && count.bytes().all(|b| b.is_ascii_digit()))
+    .then(|| {
+        let range = match decimal_value(count) {
+            0 | 1 => "[0]".to_owned(),
+            elements => format!("[0..{}]", elements.saturating_sub(1)),
+        };
+        format!("{spelled}{range}:{token}")
+    })
+    .filter(|replacement| ModbusAddress::parse(replacement, options).is_ok());
+    let hint = match replacement {
+        Some(replacement) => format!("so this address is now written '{replacement}'"),
+        None => "for example 'holding-register:1[0..3]:INT'".to_owned(),
     };
     invalid_address(format!(
-        "legacy array form '{spelled}:{token}{}' is not supported; upstream replaced it with \
-         the selection notation, for example '{spelled}[0..{last}]:{token}', and the alpha \
-         defers array selections (docs/parity/modbus.md#MB-ADDR-LEGACY-ARRAY)",
+        "legacy array form '{spelled}:{token}{}' is not supported: the array notation moved \
+         before the type and a count became a range, {hint} \
+         (docs/parity/modbus.md#MB-ADDR-LEGACY-ARRAY)",
         excerpt(tail)
+    ))
+}
+
+/// A selection as written: how many elements after the address it starts (the index
+/// minus the declared base) and, for a range, how many elements it holds.
+struct Selection {
+    first: u32,
+    count: Option<u64>,
+}
+
+impl Selection {
+    /// The wire offset of the first element and, for a range, the element count, from the
+    /// wire offset of the address and the width of one element.
+    fn resolve(self, offset: u16, width: u16) -> Result<(u16, Option<NonZeroU16>)> {
+        let start = u64::from(self.first)
+            .saturating_mul(u64::from(width))
+            .saturating_add(u64::from(offset));
+        let Ok(start) = u16::try_from(start) else {
+            return Err(invalid_address(format!(
+                "the selection starts at wire offset {start}, past the last address 65535 \
+                 (docs/parity/modbus.md#MB-LIMIT-SPAN)"
+            )));
+        };
+        let count = match self.count {
+            Some(count) => Some(
+                u16::try_from(count)
+                    .ok()
+                    .and_then(NonZeroU16::new)
+                    .ok_or_else(|| {
+                        invalid_address(format!(
+                            "the selection holds {count} elements, more than one read \
+                             carries: at most 2000 bits or 125 registers \
+                             (docs/parity/modbus.md#MB-ADDR-SELECTION)"
+                        ))
+                    })?,
+            ),
+            None => None,
+        };
+        Ok((start, count))
+    }
+}
+
+/// Split a leading selection off `rest`: `[index]` or the inclusive `[lo..hi]`, either
+/// with `;base`, the declared lower bound (default 0). Anything else in brackets, a second
+/// bracket group or a comma (a second dimension), a range whose upper bound is below its
+/// lower bound, an index below the base and a number beyond `u32` are rejected.
+fn split_selection(rest: &str) -> Result<(Option<Selection>, &str)> {
+    let Some(inside) = rest.strip_prefix('[') else {
+        return Ok((None, rest));
+    };
+    let Some((body, after)) = inside.split_once(']') else {
+        return Err(malformed_selection(rest));
+    };
+    if after.starts_with('[') || body.contains(',') {
+        return Err(invalid_address(format!(
+            "'{}' selects more than one dimension: a Modbus area is linear, so an address \
+             takes one [index] or [lo..hi] (docs/parity/modbus.md#MB-ADDR-SELECTION)",
+            excerpt(rest)
+        )));
+    }
+    let (bounds, base) = match body.split_once(';') {
+        Some((bounds, base)) => (bounds, selection_number(base, rest)?),
+        None => (body, 0),
+    };
+    let (lo, hi) = match bounds.split_once("..") {
+        Some((lo, hi)) => (
+            selection_number(lo, rest)?,
+            Some(selection_number(hi, rest)?),
+        ),
+        None => (selection_number(bounds, rest)?, None),
+    };
+    if let Some(hi) = hi.filter(|hi| *hi < lo) {
+        return Err(invalid_address(format!(
+            "the selection's upper bound {hi} is below its lower bound {lo} \
+             (docs/parity/modbus.md#MB-ADDR-SELECTION)"
+        )));
+    }
+    let Some(first) = lo.checked_sub(base) else {
+        return Err(invalid_address(format!(
+            "index {lo} lies below the declared lower bound {base} \
+             (docs/parity/modbus.md#MB-ADDR-SELECTION)"
+        )));
+    };
+    let count = hi.map(|hi| u64::from(hi.saturating_sub(lo)).saturating_add(1));
+    Ok((Some(Selection { first, count }), after))
+}
+
+/// One number of a selection: ASCII digits whose value fits a `u32`.
+fn selection_number(digits: &str, selection: &str) -> Result<u32> {
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(malformed_selection(selection));
+    }
+    digits
+        .bytes()
+        .try_fold(0_u32, |value, digit| {
+            value
+                .checked_mul(10)?
+                .checked_add(u32::from(digit.saturating_sub(b'0')))
+        })
+        .ok_or_else(|| {
+            invalid_address(
+                "a selection number is too large to address \
+                 (docs/parity/modbus.md#MB-LIMIT-DIGITS)"
+                    .to_owned(),
+            )
+        })
+}
+
+fn malformed_selection(selection: &str) -> PlcError {
+    invalid_address(format!(
+        "invalid selection '{}': expected [index] or [lo..hi], either with ;base, in decimal \
+         digits (docs/parity/modbus.md#MB-ADDR-SELECTION)",
+        excerpt(selection)
     ))
 }
 

@@ -75,7 +75,8 @@ changes no level). Nothing is `hardware-verified`.
 | Modbus TCP | ping (one read of the configured `ping-address`) | interoperability-tested | `MB-TCP-PING`; `interop_ping_reads_each_configured_area_and_succeeds`, `interop_ping_of_an_address_the_server_refuses_still_answers` |
 | Modbus TCP | browse, discover | not supported | `MB-TCP-BROWSE`, `MB-TCP-DISCOVER` (deferred) |
 | Modbus TCP | RTU, ASCII, UDP, TLS | not supported | `MB-TCP-TRANSPORTS-*` (deferred); the parser rejects them |
-| Modbus TCP | extended registers (FC20/21), strings, calendar types, array selections | not supported | `MB-ADDR-EXTENDED`, `MB-ADDR-STRING`, `MB-TYPE-TIME`, `MB-ADDR-SELECTION` (rejected with typed errors) |
+| Modbus TCP | array selections `[i]`, `[lo..hi]`, `;base`: a range read and written as one `PlcValue::List` | simulator-tested | `MB-ADDR-SELECTION`; fake transport, including the upstream array read and write exchanges |
+| Modbus TCP | extended registers (FC20/21), strings, calendar types | not supported | `MB-ADDR-EXTENDED`, `MB-ADDR-STRING`, `MB-TYPE-TIME` (rejected with typed errors) |
 | Simulator (`sim`) | read, write, scripted failures, bounded read retry | simulator-tested | driver contract suite; `docs/parity/sim.md` |
 | Sensor profiles | load, validate, build tags, scale and grade measurements | simulator-tested | synthetic `sim` profiles, `profile_read` in the `examples` job |
 | Sensor profiles | the same synthetic profiles against a Modbus TCP server | interoperability-tested | synthetic `modbus-tcp` profiles, `profile_read` in the `interop` job; green on the hosted runner for S30 (the `profiles` step, run 40548582722) |

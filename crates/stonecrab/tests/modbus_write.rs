@@ -481,7 +481,8 @@ mod tests {
         assert_eq!(error.kind(), ErrorKind::InvalidAddress, "foreign address");
         assert_eq!(error.diagnostics().operation, Some(Operation::Write));
 
-        // An element count above one needs array selections.
+        // An element count above one is refused: a range selection in the address reads
+        // several elements.
         let many = tag("m", "holding-register:1:UINT").with_count(NonZeroU32::new(2).expect("two"));
         let error = error_of(rig.write(vec![(many, PlcValue::U16(1))]));
         assert_eq!(error.kind(), ErrorKind::InvalidConfig, "element count");

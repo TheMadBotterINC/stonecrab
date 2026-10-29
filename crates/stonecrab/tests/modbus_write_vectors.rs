@@ -59,7 +59,7 @@ mod tests {
         byte_order: String,
         address: String,
         data_type: String,
-        value: String,
+        values: Vec<String>,
         request: GoldenVector,
         response: GoldenVector,
     }
@@ -108,18 +108,23 @@ mod tests {
                     .and_then(|expected| expected.pointer("/upstream/values"))
                     .and_then(Value::as_array)
                     .unwrap_or_else(|| panic!("{}: the values written", request.name));
-                let first = values
-                    .first()
-                    .and_then(|value| value.get("text"))
-                    .and_then(Value::as_str)
-                    .unwrap_or_else(|| panic!("{}: a value text", request.name));
+                let values = values
+                    .iter()
+                    .map(|value| {
+                        value
+                            .get("text")
+                            .and_then(Value::as_str)
+                            .unwrap_or_else(|| panic!("{}: a value text", request.name))
+                            .to_owned()
+                    })
+                    .collect();
                 Exchange {
                     file: upstream(&["upstream", "file"]),
                     case: upstream(&["upstream", "case"]),
                     byte_order: upstream(&["upstream", "byte_order"]),
                     address: upstream(&["upstream", "tag", "address"]),
                     data_type: upstream(&["upstream", "tag", "data_type"]),
-                    value: first.to_owned(),
+                    values,
                     request: request.clone(),
                     response: response.clone(),
                 }
@@ -224,8 +229,9 @@ mod tests {
         (verdict, sent)
     }
 
-    // covers: MB-TCP-WRITE, MB-BYTEORDER-BE, MB-BYTEORDER-LE, MB-WRITE-ECHO / Stonecrab writes
-    // the bytes upstream's own driver suites expect, for the tag and the value they name
+    // covers: MB-TCP-WRITE, MB-BYTEORDER-BE, MB-BYTEORDER-LE, MB-WRITE-ECHO, MB-ADDR-SELECTION /
+    // Stonecrab writes the bytes upstream's own driver suites expect, for the tag and the
+    // value they name
     #[test]
     fn stonecrab_sends_the_request_bytes_of_every_upstream_write_it_can_address() {
         let all = exchanges();
@@ -234,18 +240,20 @@ mod tests {
             30,
             "2 + 14 + 14 write exchanges in the three files"
         );
-        let (mut replayed, mut quirks, mut skipped) = (0, 0, 0);
+        let (mut replayed, mut quirks, mut lists) = (0, 0, 0);
         for exchange in &all {
-            // The array selection `[0..1]` is S48; the exchange stays a vector.
-            if exchange.address.contains('[') {
-                skipped += 1;
-                continue;
-            }
             let address = ModbusAddress::parse(&exchange.address, &AddressOptions::default())
                 .unwrap_or_else(|error| panic!("{}: {error}", exchange.address));
             let data_type = ModbusDataType::from_upstream_name(&exchange.data_type)
                 .unwrap_or_else(|error| panic!("{}: {error}", exchange.data_type));
-            let value = value_of(data_type, &exchange.value);
+            let mut values = exchange.values.iter().map(|text| value_of(data_type, text));
+            // An array selection writes the list of the values the XML gives (S48).
+            let value = if address.elements().is_some() {
+                lists += 1;
+                PlcValue::List(values.collect())
+            } else {
+                values.next().expect("one value")
+            };
             let name = format!("{} / {}", exchange.file, exchange.case);
 
             // Stonecrab expects the echo of the function it sent. Where the file pairs the
@@ -285,8 +293,8 @@ mod tests {
             }
             replayed += 1;
         }
-        assert_eq!(skipped, 1, "the one array selection of DriverTestsuite.xml");
-        assert_eq!(replayed, 29, "every other exchange");
+        assert_eq!(lists, 1, "the one array selection of DriverTestsuite.xml");
+        assert_eq!(replayed, 30, "every exchange");
         assert_eq!(
             quirks, 14,
             "seven 16-bit writes in each all-datatypes file are FC06 requests answered as FC16"

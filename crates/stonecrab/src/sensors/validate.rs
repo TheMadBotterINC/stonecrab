@@ -398,7 +398,8 @@ const fn bit_width(value_type: PlcValueType) -> Option<u8> {
         | PlcValueType::SignedDuration
         | PlcValueType::Date
         | PlcValueType::TimeOfDay
-        | PlcValueType::DateTime => None,
+        | PlcValueType::DateTime
+        | PlcValueType::List => None,
     }
 }
 

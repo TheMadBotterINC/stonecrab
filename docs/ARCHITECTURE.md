@@ -558,18 +558,20 @@ accessors (`id`, `address`, `value_type`, `count`, `byte_order`, `word_order`) a
 builders `with_type` (checked against the address's hint), `with_count`, `with_byte_order`
 and `with_word_order`; the last two are optional and never inferred. `count` is set after
 parsing, invisible to `parse_address`, and the Modbus connection rejects a count other
-than 1 before any I/O (array selections are M2).
+than 1 before any I/O: several elements are a range selection in the address
+(`holding-register:1[0..3]:INT`, ADR-0022).
 
 `ProtocolAddress` is `Any + Debug + Send + Sync` with `protocol()`, `canonical()` and
 `value_type_hint()`; a driver downcasts its own addresses through trait upcasting.
 
 `PlcValue` ships `Null`, `Bool`, `I8` to `I64`, `U8` to `U64`, `F32`, `F64`, `Char`,
 `String` and `Duration`, with `value_type()`, `as_bool`, `as_i64`, `as_u64` and `as_f64`
-(integer access never silently widens a counter to floating point). **Deferred:**
-`Bytes`, `Date`, `Time`, `DateTime`, `List`, `Struct` and `Raw` (and `RawValue` with them):
-ADR-0006 keeps the unscaled typed value in `Measurement.raw` and the received register
-bytes on a decode failure's `ProtocolStatus` instead, and the calendar and structured
-values wait for an ADR before their first consumer (section 11). `ByteOrder` and
+(integer access never silently widens a counter to floating point); `SignedDuration`,
+`Date`, `TimeOfDay` and `DateTime` follow (ADR-0021), then `List(Vec<PlcValue>)`, the
+value of a Modbus range selection (ADR-0022). **Deferred:** `Bytes`, `Struct` and `Raw`
+(and `RawValue` with them): ADR-0006 keeps the unscaled typed value in `Measurement.raw`
+and the received register bytes on a decode failure's `ProtocolStatus` instead, and the
+structured values wait for an ADR before their first consumer (section 11). `ByteOrder` and
 `WordOrder` are exhaustive two-variant enums. The diagram is not redrawn.
 
 ### 3.3 Requests, responses, and errors
@@ -1414,9 +1416,9 @@ never inferred.
   and `WriteOutcome::Unknown` on the wire (first post-alpha slices, M1 completion, D3);
 - browse and discovery (M3 or the parity backlog); polling subscriptions shipped in S55
   and ping in S47;
-- extended registers (FC20 and FC21), `STRING`, `WSTRING`, `CHAR`, `WCHAR`, the `TIME` and
-  `DATE` family and array selections: the parser rejects each with a typed error (M2; the
-  calendar types wait for an ADR);
+- extended registers (FC20 and FC21), `STRING`, `WSTRING`, `CHAR`, `WCHAR` and the `TIME`
+  and `DATE` family: the parser rejects each with a typed error (M2; the calendar types
+  wait for an ADR); array selections shipped in S48 (ADR-0022);
 - `ModbusRtuDriver`, `RtuFramer`, `Crc16Modbus`, the `Framing` enum and the serial
   transport (M2); UDP, TLS and TLS-PSK transports (M3 or the parity backlog);
 - the upstream gap-filling read optimizer (the batcher never reads a gap, divergence

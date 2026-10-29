@@ -664,7 +664,7 @@ mod tests {
             format!("{address:?}"),
             "ModbusAddress { unit_id: Some(UnitId(10)), area: HoldingRegister, offset: 15, \
              data_type: Int, byte_order: Some((LittleEndian, LowWordFirst)), \
-             convention: Plc4xCompatible }",
+             convention: Plc4xCompatible, elements: None }",
             "derived Debug text"
         );
         let bare = ModbusAddress::builder(ModbusArea::Coil, 0)

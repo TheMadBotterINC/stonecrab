@@ -194,9 +194,12 @@ Registers are 16 bits. A multi-register value is laid out by the byte-order mode
 Not supported, and rejected at parse time with `InvalidAddress`: a type other than `BOOL`
 on a bit area (`MB-ADDR-BIT-TYPES`), `STRING`, `WSTRING`, `CHAR`, `WCHAR`
 (`MB-ADDR-STRING`), the `TIME`, `LTIME`, `DATE`, `LDATE`, `TIME_OF_DAY`, `LTIME_OF_DAY`,
-`DATE_AND_TIME` and `LDATE_AND_TIME` names (`MB-TYPE-TIME`), array selections
-(`MB-ADDR-SELECTION`) and `extended-register` (`MB-ADDR-EXTENDED`). Core has no `Bytes`,
-`List`, `Struct`, `Raw` or calendar value variants (ADR-0006).
+`DATE_AND_TIME` and `LDATE_AND_TIME` names (`MB-TYPE-TIME`) and `extended-register`
+(`MB-ADDR-EXTENDED`). An array selection, `[i]` or `[lo..hi]` with an optional `;base`
+between the number and the type, is accepted (`MB-ADDR-SELECTION`, ADR-0022): an index
+is the element's own address and reads a scalar, a range reads and writes one
+`PlcValue::List`. Core has `List` (ADR-0022) and the calendar value variants (ADR-0021),
+which no Modbus type maps to yet, and no `Bytes`, `Struct` or `Raw` variant (ADR-0006).
 
 Address text: the long form `holding-register:16:INT` and the prefixed short form
 `4x00016:INT` are always accepted; the bare short forms (`40001`) are accepted only when
@@ -330,7 +333,8 @@ and why.
 | `MB-EXC-03` | exception 3 is `DeviceException` with the raw code, not `INVALID_DATA` |
 | `MB-EXC-05` | exception 5 (ACKNOWLEDGE) is `DeviceException`, never success |
 | `MB-EXC-UNKNOWN` | an exception code outside the ten defined ones is refused as malformed |
-| `MB-ADDR-SELECTION`, `MB-ADDR-STRING`, `MB-TYPE-TIME`, `MB-ADDR-EXTENDED` | deferred address features are typed `InvalidAddress` rejections |
+| `MB-ADDR-STRING`, `MB-TYPE-TIME`, `MB-ADDR-EXTENDED` | deferred address features are typed `InvalidAddress` rejections |
+| `MB-ADDR-SELECTION` | every element of a range takes the registers it takes alone (no packing of 8-bit and `BOOL` elements), `[4..4]` is a list of one, and a list wider than one write PDU is refused with no request |
 | `MB-READ-GAP` | no gap reads: only adjacent or overlapping tags merge (decided S51: a hole in a device map would fail the whole merged request) |
 | `MB-LIMIT-ADU` | the MBAP length is bounded (2..=254, ADU at most 260 bytes) before the body is read |
 | `MB-QUIRK-A`, `MB-QUIRK-B`, `MB-QUIRK-C` | the bogus `UDPTransport` import, the split FC20 second-item loss and the dead FC05 branch are not ported |

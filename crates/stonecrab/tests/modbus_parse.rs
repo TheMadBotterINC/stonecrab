@@ -635,44 +635,16 @@ mod tests {
 
     // covers: SPEC mandatory-failure-cases / F3 invalid register
     #[test]
-    fn selection_range_is_rejected_at_parse_time() {
-        for text in [
-            "holding-register:1[0..1]:REAL",
-            "holding-register:1[0..7]:SINT{unit-id: 10}",
-            "4x00001[0..1]:REAL",
-            "40001[0..1]",
-            "coil:1[1..3]",
-        ] {
-            let error = reject_with(text, &plc4x());
-            assert!(
-                error.to_string().contains("array selections"),
-                "{text}: {error}"
-            );
-        }
-    }
-
-    // covers: SPEC mandatory-failure-cases / F3 invalid register
-    #[test]
-    fn selection_index_is_rejected_at_parse_time() {
-        for text in [
-            "holding-register:1[3]:INT",
-            "holding-register:1[3]",
-            "coil:1[0]",
-            "4x00001[0]",
-        ] {
-            assert_rejected_naming(text, "array selections");
-        }
-    }
-
-    // covers: SPEC mandatory-failure-cases / F3 invalid register
-    #[test]
     fn string_type_is_rejected_at_parse_time() {
         assert_rejected_naming("holding-register:1:STRING", "string and character types");
         assert_rejected_naming(
             "holding-register:1:STRING(20)",
             "string and character types",
         );
-        assert_rejected_naming("holding-register:1[0..2]:STRING(20)", "array selections");
+        assert_rejected_naming(
+            "holding-register:1[0..2]:STRING(20)",
+            "string and character types",
+        );
     }
 
     // covers: SPEC mandatory-failure-cases / F3 invalid register
@@ -765,13 +737,26 @@ mod tests {
             "names the form: {error}"
         );
         assert_rejected_naming("holding-register:1:INT:4", "holding-register:1[0..3]:INT");
-        assert_rejected_naming("4x00001:REAL[1]", "4x00001[0..0]:REAL");
+        // A count of one or none is the index [0], as upstream writes it (ANP:120-123).
+        assert_rejected_naming("4x00001:REAL[1]", "4x00001[0]:REAL");
+        assert_rejected_naming("holding-register:1:INT[0]", "holding-register:1[0]:INT");
         assert_rejected_naming("coil:5:BOOL[16]", "coil:5[0..15]:BOOL");
-        // Counts the hint cannot compute fall back to a generic spelling.
-        assert_rejected_naming("holding-register:1:INT[0]", "[0..N-1]:INT");
-        assert_rejected_naming("holding-register:1:INT[x]", "[0..N-1]:INT");
-        assert_rejected_naming("holding-register:1:INT[0..3]", "[0..N-1]:INT");
-        assert_rejected_naming("holding-register:1:INT[12345678901]", "[0..N-1]:INT");
+        // Counts the hint cannot compute get the general example, which parses.
+        for text in [
+            "holding-register:1:INT[x]",
+            "holding-register:1:INT[0..3]",
+            "holding-register:1:INT[12345678901]",
+        ] {
+            let message = reject(text);
+            assert!(
+                message.contains("for example 'holding-register:1[0..3]:INT'"),
+                "{text}: {message}"
+            );
+            assert!(!message.contains("now written"), "{text}: no replacement");
+        }
+        // After a selection, a count behind the type is not the legacy form.
+        assert_rejected_naming("holding-register:1[0..3]:INT[4]", "unexpected text '[4]'");
+        assert_rejected_naming("holding-register:1[0]:INT:4", "unexpected text ':4'");
     }
 
     // covers: SPEC mandatory-failure-cases / F3 invalid register

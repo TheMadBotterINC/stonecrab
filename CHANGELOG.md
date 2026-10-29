@@ -5,6 +5,28 @@ as `stonecrab` 0.2.0 (2026-10-27); `stonecrab` 0.1.0 is the specification-stage
 placeholder.
 
 ## Unreleased
+- Lists and Modbus array selections (ADR-0022; additive): `PlcValue::List(Vec<PlcValue>)`
+  and `PlcValueType::List`, appended after `DateTime`; equality compares the elements in
+  order, and nothing is coerced. Modbus addresses take the upstream array notation on every
+  form: `[i]` reads element `i` as a scalar, `[lo..hi]` (inclusive) reads one `List`, even
+  `[4..4]`, and `;base` states the declared lower bound (`holding-register:1[4..7;1]:INT` is
+  the elements at offsets 3 to 6). Offsets count elements of the type (`[4]:DINT` is eight
+  registers along). A selection of more than one dimension, a reversed range, an index
+  below its base, a number beyond `u32`, a span past wire address 65535 and a range wider
+  than one read (2000 bits, 125 registers) are `InvalidAddress` at parse time. New
+  `ModbusAddress::elements` and `ModbusAddressBuilder::elements`, and an `elements` field
+  on the batcher's `Member`. A range is one tag to the batcher and one read item, each
+  element decoded as it would be alone in its byte and word order; a `BOOL`, `BYTE`,
+  `SINT` or `USINT` element takes a register of its own, where upstream packs them (a
+  recorded divergence). Writes take a `List` of exactly the element count: function 15 for
+  coils, 16 for holding registers, 06 for a one-register payload; a scalar to a range or a
+  list to an index is refused by the request builder, a list of another length is the
+  item's `InvalidConfig` rejection and a list wider than one write (124 registers, 1969
+  coils) its `ResourceLimit` rejection, with no request. The legacy-form hint now gives
+  `[0]` for a count of 1, as upstream, and offers a replacement only when it parses
+  (none for a range wider than one read or past wire address 65535). The two
+  upstream array exchanges of `DriverTestsuite.xml` replay byte for byte. Parity rows
+  `MB-ADDR-SELECTION` (implemented) and `CORE-VALUE-LIST` (new).
 - Calendar values (ADR-0021; additive): `PlcValue` and `PlcValueType` gain
   `SignedDuration`, `Date`, `TimeOfDay` and `DateTime` after `Duration`, holding the new
   root types `PlcSignedDuration` (an `i64` nanosecond count; IEC `TIME` and `LTIME`),

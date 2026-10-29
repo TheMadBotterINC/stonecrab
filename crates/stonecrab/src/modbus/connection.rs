@@ -19,6 +19,7 @@ use crate::{
 };
 use tracing::Instrument;
 
+use crate::modbus::address::element_width;
 use crate::modbus::batch::resolve_order;
 use crate::modbus::session::exception_error;
 use crate::modbus::{
@@ -640,25 +641,47 @@ impl Link {
                 word_order.unwrap_or(self.defaults.word_order),
             )
         };
-        let registers = TypedDecoder::encode_registers(
-            item.value(),
-            address.data_type(),
-            byte_order,
-            word_order,
-        )
-        .map_err(refuse)?;
-        let (quantity, payload) = if area.is_bit_area() {
-            let bit = registers.first().is_some_and(|word| word & 1 == 1);
-            (1, pack_bits_lsb_first(&[bit]))
-        } else {
-            let payload = registers
+        // A list goes out element after element, each laid out as it would be alone.
+        let elements = match (address.elements(), item.value()) {
+            (None, value) => std::slice::from_ref(value),
+            (Some(count), PlcValue::List(elements))
+                if elements.len() == usize::from(count.get()) =>
+            {
+                elements.as_slice()
+            }
+            (Some(count), _) => {
+                return Err(refuse(PlcError::new(
+                    ErrorKind::InvalidConfig,
+                    format!(
+                        "tag {} selects a list of {count} elements; the value must be a list of \
+                         exactly {count} (docs/parity/modbus.md#MB-ADDR-SELECTION)",
+                        item.tag().id()
+                    ),
+                )));
+            }
+        };
+        let registers = elements
+            .iter()
+            .map(|value| {
+                TypedDecoder::encode_registers(value, address.data_type(), byte_order, word_order)
+            })
+            .collect::<Result<Vec<_>>>()
+            .map_err(refuse)?;
+        let payload = if area.is_bit_area() {
+            let bits: Vec<bool> = registers
                 .iter()
+                .map(|element| element.first().is_some_and(|word| word & 1 == 1))
+                .collect();
+            pack_bits_lsb_first(&bits)
+        } else {
+            registers
+                .iter()
+                .flatten()
                 .copied()
                 .flat_map(u16::to_be_bytes)
-                .collect();
-            (address.width(), payload)
+                .collect()
         };
-        ModbusPdu::write_request(area, address.offset(), quantity, &payload)
+        ModbusPdu::write_request(area, address.offset(), address.width(), &payload)
             .map(|pdu| Planned {
                 unit_id: address.unit_id().unwrap_or(self.defaults.unit_id),
                 pdu,
@@ -967,8 +990,8 @@ fn addresses_of<'t>(op: &Op<'_>, tags: &[&'t Tag]) -> Result<Vec<&'t ModbusAddre
             return Err(op.reject(
                 ErrorKind::InvalidConfig,
                 format!(
-                    "tag {} has element count {}: Modbus element counts above one need \
-                     array selections, which are not supported yet",
+                    "tag {} has element count {}: Modbus reads several elements through a \
+                     range selection in the address, for example holding-register:1[0..3]:INT",
                     tag.id(),
                     tag.count()
                 ),
@@ -1048,15 +1071,15 @@ fn decode_member(
             "the reply does not have the shape of the area that was read",
         ))
     };
-    let offset = usize::from(member.offset);
-    match reply {
+    // The value of the element at `offset` registers or bits into the reply.
+    let element = |offset: usize| match reply {
         ModbusPdu::Exception { function, code } => Err(exception_item_error(*function, *code)),
         ModbusPdu::ReadBitsResponse { bytes, .. } if area.is_bit_area() => {
             TypedDecoder::decode_bits(bytes, offset, member.data_type, RAW_BUDGET)
         }
         ModbusPdu::ReadRegistersResponse { registers, .. } if !area.is_bit_area() => {
             let end = offset.saturating_add(usize::from(member.data_type.register_size()));
-            // A reply too short for the member decodes as the wrong register count, which
+            // A reply too short for the element decodes as the wrong register count, which
             // keeps the bytes that did arrive.
             let words = registers.get(offset..end).unwrap_or(&[]);
             TypedDecoder::decode_registers(
@@ -1078,6 +1101,19 @@ fn decode_member(
         | ModbusPdu::WriteMultipleRegisters { .. }
         | ModbusPdu::WriteSingleRegisterResponse { .. }
         | ModbusPdu::WriteMultipleResponse { .. } => Err(mismatch()),
+    };
+    let first = usize::from(member.offset);
+    match member.elements {
+        None => element(first),
+        // A list is its elements one width apart, each decoded as it would be alone; the
+        // first element that fails fails the item.
+        Some(count) => {
+            let width = usize::from(element_width(area, member.data_type));
+            (0..usize::from(count.get()))
+                .map(|index| element(first.saturating_add(index.saturating_mul(width))))
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map(PlcValue::List)
+        }
     }
 }
 
@@ -1194,7 +1230,9 @@ impl Connection for ModbusConnection {
     /// - [`ErrorKind::InvalidAddress`] if a tag's address is not a Modbus address.
     /// - [`ErrorKind::InvalidConfig`] if a tag's element count is not 1.
     /// - [`ErrorKind::ResourceLimit`] if the request has more items than
-    ///   `max_items_per_request`.
+    ///   `max_items_per_request`, or one tag (a range selection, a list of
+    ///   [`ModbusAddress::elements`]) is wider than `max-registers-per-request` or
+    ///   `max-coils-per-request`.
     /// - [`ErrorKind::Backpressure`] if another read or a ping is in flight; nothing was
     ///   sent.
     /// - [`ErrorKind::Timeout`] if the request deadline had passed, or a chunk's deadline
@@ -1227,9 +1265,12 @@ impl Connection for ModbusConnection {
     /// of the tag, else of the address, else of [`ConnectionDefaults`]; a coil takes a
     /// `BOOL`; the request is function 15 for a coil (even one), function 06 for a holding
     /// register payload of exactly 2 bytes and function 16 for any other
-    /// ([`ModbusPdu::write_request`]). An item that cannot be laid out, a discrete input or
-    /// an input register among them, is `Rejected` without a request and does not stop the
-    /// others. Then one operation runs at a time, the request deadline is checked, and
+    /// ([`ModbusPdu::write_request`]). A range selection ([`ModbusAddress::elements`])
+    /// takes a [`PlcValue::List`] of exactly its element count, each element laid out as it
+    /// would be alone, in one request. An item that cannot be laid out (a discrete input or
+    /// an input register, a value or a list that does not fit its address, which is
+    /// `InvalidConfig`, or a list wider than one request carries, which is `ResourceLimit`)
+    /// is `Rejected` without a request and does not stop the others. Then one operation runs at a time, the request deadline is checked, and
     /// the requests go out in order, each under `min(request deadline, now +
     /// timeouts.request)` taken when it starts.
     ///
@@ -1258,7 +1299,9 @@ impl Connection for ModbusConnection {
     /// The counterpart of upstream `ModbusTcpConnection.onWrite`: one PDU per tag, chained
     /// sequentially, coils through function 15, a 2-byte holding-register payload through
     /// function 06 and any other through function 16, discrete inputs and input registers
-    /// refused (`MB-TCP-WRITE`). Stonecrab refuses a write while the access policy is
+    /// refused (`MB-TCP-WRITE`). A list is written element by element as upstream does,
+    /// except that an element narrower than a register keeps a register of its own
+    /// (docs/parity/modbus.md#MB-ADDR-SELECTION). Stonecrab refuses a write while the access policy is
     /// read-only (`MB-WRITE-ACCESS`), reports a write with no usable answer as `Unknown`
     /// where upstream reports an error code and goes on (`MB-WRITE-UNKNOWN`), and requires
     /// the reply to echo the function code of the request (`MB-WRITE-ECHO`).
@@ -1559,6 +1602,7 @@ mod tests {
             data_type,
             byte_order: None,
             word_order: None,
+            elements: None,
         }
     }
 
