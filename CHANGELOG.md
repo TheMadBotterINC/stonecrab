@@ -79,6 +79,29 @@ placeholder.
   - Build, the `modbus` feature enables `serial` (S59, E10), so a build with Modbus TCP only
     also compiles the `serial2` dependency. A build with `default-features = false` and
     without `modbus` is unchanged.
+- Object PLC Mapping, the third PLC4X tool (ADR-0033, slice S72, decisions E6 and E11;
+  additive, no feature, no dependency, no proc-macro crate): `PlcEntity`, `EntityField`,
+  `FieldValue`, `EntityManager` and `ConnectedEntity` at the crate root and the declarative
+  macro `stonecrab::plc_entity!`, built under every feature set. A type implements
+  `PlcEntity` to list its mapped fields (`EntityField`: name, address or alias `${name}`,
+  optional cache duration) and convert each by name from and to `PlcValue`; `plc_entity!`
+  writes the struct and that implementation, a field followed by `=> "address"` (and
+  optionally `(cache = <const Duration>)`) being mapped. `FieldValue` converts `bool`, the
+  integer types (from any integer whose value fits), `f32`, `f64`, `char`, `String`,
+  `Duration`, the calendar types, `Vec<T>` and `PlcValue`; a value a field cannot hold is
+  `InvalidConfig` naming the field, and a field type without `FieldValue`, a non-literal
+  address, a non-constant cache duration or a generic struct do not compile.
+  `EntityManager::new(cache, registry, clock)` parses addresses with the connection
+  string's driver, with `with_alias` and `with_request_timeout` (default 1 s, reads and
+  writes); `read` fills a `Default` entity in one read, `write` writes every mapped field in
+  one write and returns the `WriteResponse`, `connect` and `merge` keep the entity attached
+  as a `ConnectedEntity`, whose `refresh` reads in one request only the fields whose cache
+  duration has passed on the injected clock (no duration: every refresh, upstream's -1; at
+  exactly the duration a field is still fresh), and `disconnect` gives it back. Every request
+  takes a lease from the `ConnectionCache` and gives it back; nothing is spawned. The runtime
+  proxy is not ported (`TOOL-OPM-PROXY`, deferred). Simulator-tested: 21 cases on the fake
+  clock against the simulator and Modbus TCP over the fake transport, and `compile_fail`
+  doctests of the macro.
 - TLS transport and Modbus TCP over TLS (ADR-0032, slice S71, decision E11; additive, behind
   the new opt-in `tls` feature, which is not in `default` or `full`). `stonecrab::transport::TlsFactory`
   and `TlsSettings`: rustls 0.23 on the ring provider (with `tokio-rustls` 0.26), TLS 1.3 and

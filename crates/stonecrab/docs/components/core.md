@@ -28,6 +28,7 @@ too; an unknown write outcome is never collapsed into a rejection or replayed.
 | Polling subscriptions: the shared producer behind `Connection::subscribe` of the simulator and `modbus` | simulator-tested |
 | Connection cache: `ConnectionCache`, `LeasedConnection` (ADR-0030) | simulator-tested (the simulator and Modbus TCP over the fake transport, on the fake clock) |
 | Event pump: `EventPump`, `TagBatch`, `BatchEvent` (ADR-0031): timer batches on connections or cache leases; no subscription trigger, configuration files or value transformations | simulator-tested (the simulator and Modbus TCP over the fake transport, on the fake clock) |
+| Object PLC Mapping: `PlcEntity`, `EntityField`, `FieldValue`, `plc_entity!`, `EntityManager`, `ConnectedEntity` (ADR-0033): entities read, written, connected and merged through cache leases, per-field cache durations, aliases; no runtime proxy | simulator-tested (the simulator and Modbus TCP over the fake transport, on the fake clock) |
 | Browse and discover | not supported |
 | Calendar values: `PlcSignedDuration`, `PlcDate`, `PlcTimeOfDay`, `PlcDateTime` (ADR-0021) | build-tested (unit and property tests); no driver decodes them yet |
 | Lists: `PlcValue::List`, `PlcValueType::List` (ADR-0022) | simulator-tested (unit tests; the Modbus driver reads and writes them through array selections over the fake transport) |
@@ -190,6 +191,70 @@ let next = block_on_with(&clock, pump.recv())?.ok_or("the batch runs")?;
 assert!(next.outcome.is_ok());
 assert_eq!((next.skipped, clock.now() - start), (1, Duration::from_millis(6250)));
 pump.close();
+# Ok(())
+# }
+# #[cfg(not(all(feature = "sim", feature = "testkit")))]
+# fn main() {}
+```
+
+## Object PLC Mapping
+Object PLC Mapping is the third PLC4X tool in Stonecrab (ADR-0033; upstream's
+`PlcEntityManager` with `@PlcEntity` types). A type implements `PlcEntity` to map its fields
+to tags: a table of `EntityField`s (the field's name, its address or an alias `${name}`, and
+an optional cache duration) and the conversion of each field from and to a `PlcValue`
+through `FieldValue`. The declarative macro `plc_entity!` writes the struct and that
+implementation, a field followed by `=> "address"` being mapped; a type the macro cannot
+express implements the trait by hand. A mapped field whose type has no `FieldValue` does not
+compile, and a value a field cannot hold is `InvalidConfig` naming the field.
+
+`EntityManager` parses each address with the connection string's driver and sends every
+request on a lease from a `ConnectionCache`, given back after it, with a request timeout of
+one second by default. `read` fills a new entity in one read and `write` writes all its
+fields in one write; `connect` and `merge` do the same and keep the entity attached as a
+`ConnectedEntity`, whose `refresh` reads again, in one request, only the fields whose cache
+duration has passed on the injected `Clock`. A field without a cache duration (upstream's
+-1) is read at every refresh. `disconnect` gives the entity back. Nothing is spawned and a
+connected entity holds no lease.
+
+```rust
+# #[cfg(all(feature = "sim", feature = "testkit"))]
+# fn main() -> Result<(), stonecrab::PlcError> {
+use std::sync::Arc;
+use std::time::Duration;
+use stonecrab::sim::{SimDevice, SimDriver, SimTag};
+use stonecrab::testkit::{FakeClock, block_on_with};
+use stonecrab::{ConnectionCache, DriverRegistry, EntityManager, PlcValue};
+
+stonecrab::plc_entity! {
+    #[derive(Debug, Default)]
+    struct Tank {
+        level: u16 => "STATE/level:u16",
+        setpoint: i16 => "${setpoint}" (cache = Duration::from_secs(5)),
+        label: String,
+    }
+}
+
+let clock = FakeClock::default();
+let device = SimDevice::new();
+device.set("level", SimTag::new(PlcValue::U16(840)))?;
+device.set("setpoint", SimTag::new(PlcValue::I16(900)))?;
+let mut registry = DriverRegistry::new();
+registry.register(Arc::new(
+    SimDriver::new().with_clock(Arc::new(clock.clone())).with_device("bench", device)?,
+))?;
+let registry = Arc::new(registry);
+let cache = ConnectionCache::builder(Arc::clone(&registry), Arc::new(clock.clone())).build()?;
+let manager = EntityManager::new(&cache, &registry, &clock)
+    .with_alias("setpoint", "STATE/setpoint:i16");
+
+let mut tank = block_on_with(&clock, manager.connect::<Tank>("sim://bench"))?;
+assert_eq!((tank.entity().level, tank.entity().setpoint), (840, 900));
+assert_eq!(block_on_with(&clock, tank.refresh())?, 1, "only the level: the setpoint is fresh");
+let mut tank = tank.disconnect();
+tank.setpoint = 950;
+let response = block_on_with(&clock, manager.write("sim://bench", &tank))?;
+assert_eq!(response.confirmed_count(), 2);
+assert_eq!(cache.active_leases(), 0);
 # Ok(())
 # }
 # #[cfg(not(all(feature = "sim", feature = "testkit")))]

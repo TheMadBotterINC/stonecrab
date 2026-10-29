@@ -62,6 +62,7 @@ operations.
 | Subscribe by polling (`sim` and `modbus`): cyclic and change-of-state, event refused; on a clock that never sleeps (the simulator's default) change-of-state is refused and the interval paces nothing | simulator-tested |
 | Connection cache (`ConnectionCache`, always built): one lease at a time per connection string, waiters in order, lease, wait, idle, ping and close bounds on the injected clock, `remove` and `close`; subscriptions are not restored on a replacement connection | simulator-tested |
 | Event pump (`EventPump`, always built): named batches of tags read at an interval after an initial delay, on a connection or a cache lease, skipped ticks counted, a pause after failed fetches, delivered through `recv` with no spawned task; no subscription trigger, configuration files or value transformations | simulator-tested |
+| Object PLC Mapping (`PlcEntity`, `plc_entity!`, `EntityManager`, always built): a struct mapped to tags by a declarative macro or by hand, read, written, connected and merged through cache leases, per-field cache durations, aliases; no runtime proxy | simulator-tested |
 | Browse and discover | not supported |
 | `sensors`: synthetic profiles against the simulator | simulator-tested |
 | `sensors`: synthetic profiles against a Modbus TCP server | interoperability-tested |

@@ -31,6 +31,8 @@ src/connection.rs
 src/connection_cache.rs
 src/deadline.rs
 src/driver.rs
+src/entity.rs
+src/entity_manager.rs
 src/error.rs
 src/event_pump.rs
 src/future.rs
