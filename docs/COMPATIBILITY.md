@@ -16,8 +16,10 @@ Upstream baseline: Apache PLC4X v1.0.0, tag object
 incomplete (`inventory_complete = false`); the source-release signature was verified in S32
 (`signature_verified = true`: good signature, key not certified by a trust path; the archive
 contents were not inventoried against the pinned commit, see
-[`evidence/alpha.md`](evidence/alpha.md)); only the Modbus TCP subset is inventoried, in
-[`parity/modbus.md`](parity/modbus.md). Stonecrab is an independent port: it is not
+[`evidence/alpha.md`](evidence/alpha.md)); the Modbus TCP subset is the only one
+implemented, in [`parity/modbus.md`](parity/modbus.md), and slice S43 added a parity record
+for every other upstream driver, transport and tool (see
+[Upstream drivers, transports, tools and integrations](#upstream-drivers-transports-tools-and-integrations)). Stonecrab is an independent port: it is not
 affiliated with the Apache Software Foundation or Apache PLC4X, and no Apache PLC4X source
 file is copied into this repository.
 
@@ -61,17 +63,101 @@ hardware record exists.
 | Modbus TCP | ping | `modbus` | interoperability-tested | `MB-TCP-PING`, `MB-CFG-PING-ADDRESS`, `MB-QUIRK-D` | one read of `ping-address`; any correlated reply, an exception included, is success as upstream's; pymodbus 3.8.6 via the `interop` job |
 | Modbus TCP | UDP, TLS, TLS-PSK, `test` transports | `modbus` | not supported | `MB-TCP-TRANSPORTS-*` | deferred; `InvalidConfig` |
 | Modbus TCP | extended registers (FC20, FC21) | `modbus` | not supported | `MB-ADDR-EXTENDED` | deferred, M2; `InvalidAddress` |
-| Modbus RTU, ASCII | everything | none yet | planned | none yet | milestone M2 |
+| Modbus RTU, ASCII | everything | none yet | planned | `MBS-*` in [`parity/modbus-serial.md`](parity/modbus-serial.md) | milestone M2 |
 | Simulator (`sim`) | connect, read, write, scripted failures, bounded read retry | `sim` | simulator-tested | `SIM-DRIVER`, `SIM-CONNECTION`, `SIM-FAILURE-SCRIPT` | driver contract suite (22 passed, 1 named skip) |
 | Sensor profiles | load, validate, build tags, scale and grade measurements | `sensors`, `sim` | simulator-tested | `SENSORS-*` | `sim` profiles through `profile_read` in the `examples` job |
 | Sensor profiles | the same, with the `modbus-tcp` synthetic profiles | `sensors`, `modbus` | interoperability-tested | `SENSORS-SYNTHETIC-PROFILES` | `profile_read --expect-good` in the `interop` job; green on the hosted runner for S30 (the `profiles` step, run 40548582722) |
-| OPC UA, EtherNet/IP, S7, other baseline drivers | everything | none yet | planned | none yet | milestones M3 to M5 |
+| OPC UA, EtherNet/IP, S7, other baseline drivers | everything | none yet | planned | one record per driver, listed in the matrix below | milestones M3 to M5 |
 | Direct bench adapters (MAX31855, ADXL345) | everything | none yet | planned | none | milestone M2S |
 
 The driver boundary itself (`DriverRegistry`, `Driver`, `Connection`, configuration,
 address options, cancellation, the state watch, diagnostics) is `simulator-tested` through
 the common driver contract suite and `interoperability-tested` on a wire through the
 Modbus driver (`CORE-DRIVER-TRAIT`, `CORE-CONNECTION-TRAIT`, `CORE-REGISTRY`).
+
+## Upstream drivers, transports, tools and integrations
+
+This is the release matrix of slice S43: every upstream protocol driver, transport, tool
+and integration of the pinned baseline by name, with Stonecrab's support level today and a
+pointer to its parity record and milestone, so that no upstream capability is a hidden
+omission. `not supported` means not shipped; a driver that names a transport or option that
+is not shipped is refused with a typed error (`InvalidConfig`), never ignored. A row's
+milestone is the plan's, from [`POST_ALPHA_PLAN.md`](POST_ALPHA_PLAN.md) section 4. Every
+row of the records named below is `planned` or `deferred` (none is `implemented`), except
+where this table says otherwise. Counts of rows per record are in the records themselves.
+
+### Protocol drivers
+
+| Upstream driver (code) | Stonecrab support | Level | Parity record | Milestone |
+| --- | --- | --- | --- | --- |
+| Modbus TCP (`modbus-tcp`) | `modbus` feature | see the operations table above | [`parity/modbus.md`](parity/modbus.md) | M1 (read path and ping shipped); writes, subscriptions, extended registers, UDP and TLS per the table above |
+| Modbus RTU (`modbus-rtu`), Modbus ASCII (`modbus-ascii`) | none | not supported | [`parity/modbus-serial.md`](parity/modbus-serial.md) | M2 (S58 to S60, HW2) |
+| OPC UA (`opcua`) | none | not supported | [`parity/opcua.md`](parity/opcua.md) | M3 |
+| S7 (`s7`) | none | not supported | [`parity/s7.md`](parity/s7.md) | M4 |
+| EtherNet/IP (`eip`), Logix (`logix`) | none | not supported | [`parity/eip.md`](parity/eip.md) | M4 |
+| Beckhoff ADS/AMS (`ads`) | none | not supported | [`parity/ads.md`](parity/ads.md) | M5 |
+| Mitsubishi SLMP (`slmp`) | none | not supported | [`parity/slmp.md`](parity/slmp.md) | M5 |
+| Schneider UMAS (`umas`) | none | not supported | [`parity/umas.md`](parity/umas.md) | M5 |
+| PROFINET (`profinet`, legacy and next-generation models) | none | not supported | [`parity/profinet.md`](parity/profinet.md) | M5 |
+| Allen-Bradley Ethernet (`ab-eth`) | none | not supported | [`parity/ab-eth.md`](parity/ab-eth.md) | M5 |
+| BACnet/IP (`bacnet-ip`) | none | not supported | [`parity/bacnet.md`](parity/bacnet.md) | M5 for the Java behavior (passive COV subscribe); the Go read, write and discovery are non-Java backlog |
+| KNXnet/IP (`knxnet-ip`) | none | not supported | [`parity/knxnetip.md`](parity/knxnetip.md) | M5 (corrected in S43: a working Java driver exists; the Go and C# extras stay in the backlog) |
+| C-Bus (`c-bus`) | none | not supported | [`parity/cbus.md`](parity/cbus.md) | non-Java backlog, no milestone assigned |
+| CANopen (`canopen`) | none | not supported | [`parity/canopen.md`](parity/canopen.md) | M5 |
+| Generic CAN (`genericcan`) | none | not supported | [`parity/can.md`](parity/can.md) | M5 |
+| IEC 60870-5-104 (`iec-60870-5-104`) | none | not supported | [`parity/iec-60870.md`](parity/iec-60870.md) | M5 |
+| Firmata (`firmata`) | none | not supported | [`parity/firmata.md`](parity/firmata.md) | M5 |
+| Open Protocol (`open-protocol`) | none | not supported | [`parity/open-protocol.md`](parity/open-protocol.md) | deferred: an upstream placeholder, not an obligation |
+| ctrlX Data Layer (`ctrlx`) | none | not supported | [`parity/ctrlx.md`](parity/ctrlx.md) | M5 for ping and connect; the rest is an upstream placeholder |
+| DF1 (`df1`, a wire specification and not a driver in any language) | none | not supported | [`parity/open-protocol.md`](parity/open-protocol.md), section "Specification-only protocols" | deferred: recorded so the omission is visible |
+| PLC4X proxy client (`plc4x`) | none | not supported | [`parity/plc4x-proxy.md`](parity/plc4x-proxy.md) | M5 |
+| Simulated (`simulated`), mock (`mock`) | the first-party simulator, `sim://` | simulator-tested | [`parity/sim.md`](parity/sim.md) | Stonecrab-owned; no upstream parity claim, the upstream test doubles are not ported |
+
+### Transports
+
+| Upstream transport (code) | Stonecrab support | Level | Parity record | Milestone |
+| --- | --- | --- | --- | --- |
+| TCP (`tcp`) | `TcpFactory` | interoperability-tested through Modbus TCP | [`parity/transport.md`](parity/transport.md): `TRANSPORT-TCP-CONNECT`, `UTR-TCP`, `UTR-TCP-OPTIONS` | shipped; the upstream option names are planned for M5 |
+| UDP (`udp`) | none | not supported | [`parity/transport.md`](parity/transport.md): `UTR-UDP` | M2 (S61) |
+| TLS (`tls`), TLS-PSK (`tls-psk`) | none | not supported | [`parity/transport.md`](parity/transport.md): `UTR-TLS`, `UTR-TLS-PSK` | M3 |
+| COTP (`cotp`) | none | not supported | [`parity/transport.md`](parity/transport.md): `UTR-COTP`; wire rows in [`parity/s7.md`](parity/s7.md) | M4 with S7 |
+| Serial (`serial`) | none | not supported | [`parity/transport.md`](parity/transport.md): `UTR-SERIAL` | M2 (S58) |
+| Raw socket (`raw-socket`) | none | not supported | [`parity/transport.md`](parity/transport.md): `UTR-RAW-SOCKET` | M5 |
+| PCAP replay (`pcap-replay`) | none | not supported | [`parity/transport.md`](parity/transport.md): `UTR-PCAP-REPLAY` | M5 |
+| SocketCAN (`can-socketcan`), Virtual CAN (`can-virtualcan`); the CAN support library is not a transport | none | not supported | [`parity/transport.md`](parity/transport.md): `UTR-CAN-LIB`, `UTR-CAN-SOCKETCAN`, `UTR-CAN-VIRTUALCAN`; [`parity/can.md`](parity/can.md) | M5 |
+| Test (`test`) | `FakeTransport` and the loopback `ScriptedPeer` in the `testkit` feature | simulator-tested; the code `test` is refused with `InvalidConfig` | [`parity/transport.md`](parity/transport.md): `UTR-TEST` | first-party equivalent, no port |
+
+### Tools
+
+Decision E6: PLC4X tools count toward parity, starting with the connection cache and
+Object PLC Mapping (milestone M5, "in the order E6 sets").
+
+| Upstream tool | Stonecrab support | Level | Parity record | Milestone |
+| --- | --- | --- | --- | --- |
+| Connection cache | none | not supported | [`parity/tools.md`](parity/tools.md): `TOOL-CC-*` | M5, first |
+| Object PLC Mapping (OPM) | none | not supported | [`parity/tools.md`](parity/tools.md): `TOOL-OPM-*` | M5, second, as a derive macro |
+| Event pump | none | not supported | [`parity/tools.md`](parity/tools.md): `TOOL-EP-*` | M5 for the timer batch reader; file formats and transformers deferred |
+| Capture replay | none | not supported | [`parity/tools.md`](parity/tools.md): `TOOL-CR-*` | deferred, after the first three tools |
+| Driver test-suite runner and parser-serializer runners (`test-utils`) | the Modbus subset through the S04b `fixtures` adapter | simulator-tested for the Modbus vectors only | [`parity/tools.md`](parity/tools.md): `TOOL-TU-*` | M3 and M5 |
+| OPC UA server, PLC4X server, `plc4xbrowser`, `plc4xpcapanalyzer` (plc4x-extras, outside the pinned baseline) | none | not supported | [`parity/tools.md`](parity/tools.md): `TOOL-X-*` | deferred (outside the pinned baseline) |
+
+### Integrations
+
+The tracked integrations list of decision E6, in [`parity/integrations.md`](parity/integrations.md).
+Each is built on demand; none is planned for a milestone.
+
+| Integration | Where it lives | Level | Parity record |
+| --- | --- | --- | --- |
+| Apache Calcite | plc4x-extras `v1.0.0` | not supported | `INTEG-CALCITE` |
+| Apache Camel | the Apache Camel repository, `components/camel-plc4x` | not supported | `INTEG-CAMEL` |
+| Apache IoTDB | an example application in plc4x-extras, not a connector | not supported | `INTEG-IOTDB` |
+| Apache Kafka Connect | plc4x-extras `v1.0.0` | not supported | `INTEG-KAFKA` |
+| Apache NiFi | plc4x-extras `v1.0.0` | not supported | `INTEG-NIFI` |
+| Apache StreamPipes | the StreamPipes repository (pins PLC4X 0.13.1) | not supported | `INTEG-STREAMPIPES` |
+| Eclipse Ditto | a third-party example repository only | not supported | `INTEG-DITTO` |
+
+Karaf, which the upstream README names, and the Scraper utility were not found in the
+pinned baseline or in plc4x-extras `v1.0.0`; they are rows `INTEG-KARAF` and `TOOL-X-SCRAPER`.
 
 ## Data types
 

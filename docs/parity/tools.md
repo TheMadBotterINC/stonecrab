@@ -1,0 +1,178 @@
+# Tools parity record
+Baseline: `upstream/manifest.toml`, Apache PLC4X v1.0.0 (tag `v1.0.0`),
+commit `ea229918f5d07700e04d7d69ab1645da679cb700`.
+
+State (slice S43): nothing in this record is implemented. Decision E6 of
+`docs/POST_ALPHA_PLAN.md` (accepted 2026-10-28) makes the PLC4X tools count toward
+parity, starting with the connection cache and Object PLC Mapping (OPM), in milestone M5
+("Tools in the order E6 sets"). Every row is `planned` for a milestone or `deferred` with
+its reason. The tools that live outside the pinned baseline are pointer rows only. The
+integrations (Calcite, Camel, IoTDB, Kafka, NiFi, StreamPipes, Eclipse Ditto) are not tools;
+they are tracked in `docs/parity/integrations.md`. Test ids are `planned:` names, not
+existing tests.
+
+Status vocabulary, as used in the Status column:
+
+- `planned (Mn)`: Stonecrab will port the behavior in milestone Mn. The Test ids column
+  names at least one planned test, prefixed `planned:`.
+- `deferred (<reason>)`: recorded so the omission is visible; Stonecrab does not port it
+  now. `deferred (upstream placeholder)` marks a stub that throws or does nothing upstream,
+  which does not become an obligation (SPEC, "Compatibility baseline").
+  `deferred (outside the pinned baseline)` marks a tool that is not in apache/plc4x at the
+  pinned commit; it needs its own tag and commit pinned before any row depends on it.
+- No row is `implemented`, `automated-verified` or `hardware-verified`, so
+  `scripts/parity-check.sh` does not require these ids to appear in code.
+
+## File key
+Citations use the manifest key and `file:lines` of the cited entry. Paths are relative to
+the repository root of apache/plc4x at the pinned commit. `T` abbreviates `plc4j/tools`.
+
+| Key | Path |
+| --- | --- |
+| CC (`tool_connection_cache`) | `T/connection-cache/` `README.md`, `src/main/java/.../cache/PlcConnectionCache.java` and its five sibling classes |
+| OPM (`tool_opm`) | `T/opm/src/main/java/org/apache/plc4x/java/opm/` `PlcEntityManager.java`, `PlcEntityInterceptor.java`, `PlcTag.java`, `PlcEntity.java`, `AliasRegistry.java` |
+| EP (`tool_event_pump`) | `T/event-pump/` `README.md`, `EventPump.java`, `TagBatch.java`, `EventPumpFactory.java`, `triggers/`, `transform/` |
+| CR (`tool_capture_replay`) | `T/capture-replay/` `README.adoc`, `CliOptions.java`, `CaptureReplay.java` |
+| TU (`util_test_utils`) | `plc4j/utils/test-utils/` `DriverTestsuiteRunner.java`, `SequentialTestRunner.java`, `StepType.java`, `ParserSerializerTestsuiteRunner.java`, `ParserTruncationTestsuiteRunner.java`, `PcapRoundTripTestRunner.java` |
+| SE (`util_subscription_emulation`) | `plc4j/utils/subscription-emulation/` `PollingSubscriptionConnectionBase.java` |
+| AL (`util_audit_log`) | `plc4j/utils/audit-log/` `AuditLog.java`, `AuditLogImpl.java`, `AuditLogEventType.java` |
+| RS (`util_raw_sockets`) | `plc4j/utils/raw-sockets/` `ArpUtils.java` |
+| TG (`util_test_generator`) | `plc4j/utils/test-generator/` `ParserSerializerTestsuiteGenerator.groovy` |
+| EX (`extras_outside_baseline`) | `README.md` of apache/plc4x, lines 30-93; the repository apache/plc4x-extras |
+
+## Connection cache
+Manifest `inventory.tool_connection_cache`. A library, not a driver: `PlcConnectionCache`
+implements `PlcConnectionManager`, wraps a connection factory and hands out one lease at a
+time per connection string, with queued waiters (CC `cache_class`, PlcConnectionCache.java:77).
+It provides none of the six protocol operations. Decision E6 names it first, so every
+behavior below is `planned (M5)` except what the manifest records as unread.
+
+| Row id | Upstream behavior (manifest key, file:lines) | Planned Stonecrab behavior | Status | Test ids |
+| --- | --- | --- | --- | --- |
+| TOOL-CC-CACHE | `PlcConnectionCache` wraps a `PlcConnectionFactory`, does not create connections itself and gives the connection back instead of closing it (README.md:29-33; `readme_intro`). | A `ConnectionCache` over the `DriverRegistry` that leases connections by connection string and returns them on drop. It composes with any `Driver`; it adds no driver. | planned (M5) | `planned:connection_cache_returns_the_same_connection_for_the_same_string`, `planned:connection_cache_creates_one_connection_per_connection_string` |
+| TOOL-CC-LEASE | One `ConnectionContainer` per connection string holds the connection, the current lease and a queue of lease requests; a `LeasedPlcConnection` is invalidated on close or after `maxLeaseTime` (README.md:35-55; `readme_arch`). | One lease at a time per string; a lease is a guard that returns the connection on drop and is invalidated after the maximum lease time. | planned (M5) | `planned:connection_cache_grants_one_lease_at_a_time_per_string`, `planned:connection_cache_lease_is_invalidated_after_the_maximum_lease_time`, `planned:connection_cache_dropping_a_lease_returns_the_connection` |
+| TOOL-CC-QUEUE | `getConnection(string[, authentication])` computes the container, blocks up to `maxWaitTime` plus a grace margin and wraps failures in `PlcConnectionException` (PlcConnectionCache.java:133-180; `get_connection`). | Waiters queue in arrival order, bounded by `ResourceLimits::max_pending_requests`; a wait past `max_wait_time` is `Timeout`; cancellation of a waiter is clean (`TRANSPORT-QUEUE` is the model). | planned (M5) | `planned:connection_cache_waiters_are_served_in_arrival_order`, `planned:connection_cache_wait_past_the_maximum_is_a_timeout`, `planned:connection_cache_a_cancelled_waiter_leaves_the_queue` |
+| TOOL-CC-CLOSED | `getConnection` throws `PlcConnectionCacheClosedException` once the cache is closed (PlcConnectionCache.java:133-180; the exception class is the sixth source file). | `get` after `close` fails with a typed `Disconnected` error naming the cache. | planned (M5) | `planned:connection_cache_get_after_close_is_a_typed_error` |
+| TOOL-CC-IDLE-PING | An idle connection is validated with `ping()` before reuse once `idlePingThreshold` has passed and replaced if that fails (README.md:35-55; `readme_arch`). | The same rule through `Connection::ping`; a driver without ping (`Capabilities.ping = false`) is reused without a ping and a failure on first use replaces it. | planned (M5) | `planned:connection_cache_pings_an_idle_connection_before_reuse`, `planned:connection_cache_replaces_a_connection_whose_ping_fails`, `planned:connection_cache_skips_the_ping_for_a_driver_without_ping` |
+| TOOL-CC-TIMEOUTS | Idle, lease and wait timeouts on a `ScheduledExecutorService`; `connectBounded` and `closeBounded` (README.md:57-80; `readme_timeouts`). The default values of the timeouts were not read (UNCERTAIN in the manifest). | Timeouts on the injected `Clock`, so tests run on the fake clock; connect and close are bounded by the connect and close deadlines. Defaults are chosen when the slice is cut. | planned (M5) | `planned:connection_cache_idle_timeout_closes_an_unused_connection`, `planned:connection_cache_connect_is_bounded_by_the_connect_timeout`, `planned:connection_cache_close_is_bounded_by_the_close_timeout` |
+| TOOL-CC-RESTORE | `ConnectionStateTracker` keeps `SubscriptionRecord` entries and restores subscriptions after a reconnect (README.md:57-80; `readme_timeouts`). | Subscription restore after a reconnect, once the subscription API (S54, S55) exists. | planned (M5) | `planned:connection_cache_restores_a_subscription_after_a_reconnect`, `planned:connection_cache_does_not_restore_a_cancelled_subscription` |
+| TOOL-CC-BUILDER | `Builder` with `withConnectionFactory`, `withScheduler`, `withMaxIdleTime`, `withMaxLeaseTime`, `withPingTimeout`, `withMaxWaitTime`, `withIdlePingThreshold`, `withCloseTimeout` (PlcConnectionCache.java:289-471; method names from a grep, bodies not read). | A builder with the same eight settings under Rust names; the scheduler is the injected `Clock`. | planned (M5) | `planned:connection_cache_builder_rejects_a_zero_lease_time`, `planned:connection_cache_builder_applies_every_setting` |
+| TOOL-CC-ADMIN | `getCachedConnectionCount`, `getActiveLeaseCount`, `getCachedConnections`, `removeCachedConnection` (force-closes) (PlcConnectionCache.java:222-263, from a grep). | The same four operations as `len`, `active_leases`, `connection_strings` and `remove`. | planned (M5) | `planned:connection_cache_counts_cached_connections_and_active_leases`, `planned:connection_cache_remove_force_closes_the_connection` |
+| TOOL-CC-OPERATIONS | The cache provides no read, write, subscribe, browse or discover; a lease passes them through to the wrapped connection. It consumes `ping` and the subscription builders (`operations`). | A lease derefs to `dyn Connection`; there is no operation of its own. | planned (M5) | `planned:connection_cache_lease_passes_a_read_through_to_the_connection` |
+
+## Object PLC Mapping (OPM)
+Manifest `inventory.tool_opm`. A Java-specific library: `@PlcEntity` types with
+`@PlcTag(address, cacheDurationMillis)` fields are subclassed at runtime with ByteBuddy and
+their getters and setters are intercepted into reads and writes. Reflection and bytecode
+generation have no Rust equivalent; the idea maps to a derive macro, which is the planned
+shape. Decision E6 names OPM second.
+
+| Row id | Upstream behavior (manifest key, file:lines) | Planned Stonecrab behavior | Status | Test ids |
+| --- | --- | --- | --- | --- |
+| TOOL-OPM-ENTITY | `@PlcEntity` marks a type and `@PlcTag` marks a field with `String value()` (a tag address or an alias) and `long cacheDurationMillis()` default -1 (PlcTag.java:29-33; PlcEntity.java:29-32). | A derive macro on a struct with a per-field attribute carrying the address or alias and an optional cache duration. A field whose type cannot hold the tag's value is a compile error where it can be and a typed decode error otherwise. | planned (M5) | `planned:opm_derive_maps_a_field_to_its_tag_address`, `planned:opm_field_with_an_incompatible_type_is_a_typed_decode_error` |
+| TOOL-OPM-MANAGER | `PlcEntityManager` offers `read(Class, address)`, `write(Class, address, T)`, `connect(Class, address)`, `merge(Class, address, instance)` and `disconnect(Object)` (PlcEntityManager.java:113-150, 238-249; signatures from a grep). | An `EntityManager` over the connection cache (`TOOL-CC-CACHE`) with `read`, `write`, `connect`, `merge` and `disconnect`. | planned (M5) | `planned:opm_read_fills_every_tagged_field_in_one_request`, `planned:opm_write_sends_every_tagged_field_in_one_request`, `planned:opm_merge_writes_only_the_fields_that_changed`, `planned:opm_disconnect_returns_the_connection_to_the_cache` |
+| TOOL-OPM-PROXY | The manager builds a ByteBuddy subclass with private fields `_plcAddress`, the connection factory, the alias registry, `_lastFetched` and `_lastWritten`; every non-Object method is delegated to `PlcEntityInterceptor` (PlcEntityManager.java:195-210). | Not ported. A live proxy that reads on every getter call has no Rust analogue; the derive macro generates explicit `fetch` and `store` methods and the connected form is `connect`, which returns a handle that refreshes on demand. | deferred (Java-specific mechanism: runtime proxies; the derive macro replaces it) | none |
+| TOOL-OPM-CACHE | The interceptor builds `readRequestBuilder()` (line 228) and `writeRequestBuilder()` (line 284); `needsToBeSynced` honours `cacheDurationMillis` (PlcEntityInterceptor.java:210-300, 331-340). | A field is re-read only when its cache duration has elapsed on the injected `Clock`; a duration of -1 means "no cache duration set". The meaning of -1 (always read or never expire) is UNVERIFIED in the manifest. | planned (M5) | `planned:opm_field_is_not_re_read_within_its_cache_duration`, `planned:opm_field_is_re_read_after_its_cache_duration`, `planned:opm_default_cache_duration_follows_the_upstream_meaning_of_minus_one` |
+| TOOL-OPM-TIMEOUT | Read timeout default 1000 ms through the system property `org.apache.plc4x.java.opm.entity_manager.read_timeout` (PlcEntityInterceptor.java:72). | A per-manager `read_timeout` setting defaulting to 1000 ms. A process-wide system property is not ported. | planned (M5) | `planned:opm_read_timeout_defaults_to_one_second`, `planned:opm_read_timeout_is_a_timeout_error_past_the_limit` |
+| TOOL-OPM-ALIAS | `AliasRegistry` interface and `SimpleAliasRegistry` implementation map a name used in `@PlcTag` to a tag address (AliasRegistry.java:19-47; the implementation was not read). | An alias map checked when the entity is registered; semantics are UNVERIFIED until `SimpleAliasRegistry` is read. | planned (M5) | `planned:opm_alias_resolves_to_a_tag_address`, `planned:opm_unknown_alias_is_a_typed_error` |
+| TOOL-OPM-OPERATIONS | Read and write only; no subscribe, browse, discover or ping (`operations`). | The same: read and write only. | planned (M5) | `planned:opm_uses_no_operation_besides_read_and_write` |
+
+## Event pump
+Manifest `inventory.tool_event_pump`. A library: batches of named tags on one or more
+connections are read when a trigger fires and delivered to listeners, with optional value
+transformation. Only the `TimerTrigger` works; the subscription trigger throws.
+
+| Row id | Upstream behavior (manifest key, file:lines) | Planned Stonecrab behavior | Status | Test ids |
+| --- | --- | --- | --- | --- |
+| TOOL-EP-PUMP | `EventPump`: `addBatch`, `removeBatch`, `getBatch`, `startBatch`, `stopBatch`, `startAll`, `stopAll`, `close`; `AutoCloseable` (EventPump.java:73-312; from a grep). | An `EventPump` owning named batches with start, stop and close; close stops every batch. | planned (M5) | `planned:event_pump_starts_and_stops_a_batch_by_name`, `planned:event_pump_close_stops_every_batch` |
+| TOOL-EP-TIMER | `TimerTrigger`: a fixed interval with an initial delay on a `java.util.Timer`; listeners run on a single-thread daemon executor with a `DiscardPolicy` (TimerTrigger.java:31-60, 115-122). Fixed rate versus fixed delay, and the behavior when a poll outlasts the interval, were not read. | An interval trigger on the injected `Clock`. A tick that falls due while a poll is still running is skipped and counted, as S55 does for polling subscriptions. The upstream choice is UNVERIFIED. | planned (M5) | `planned:event_pump_timer_fires_at_the_interval_after_the_initial_delay`, `planned:event_pump_timer_skips_a_tick_while_a_poll_is_running` |
+| TOOL-EP-READ | A batch fetch builds a `PlcReadRequest` with `readRequestBuilder()` and executes it (TagBatch.java:535-547; the surrounding body was not read in full). | A batch fetch is one `read` on its connection with the batch's tags. | planned (M5) | `planned:event_pump_batch_fetch_issues_one_read_with_all_batch_tags`, `planned:event_pump_delivers_the_response_to_every_listener` |
+| TOOL-EP-MULTI | Batches on several connections; thread-safe (README.md:22-38; `readme`). | Several batches may name different connections or leases from the connection cache. | planned (M5) | `planned:event_pump_batches_on_different_connections_run_independently` |
+| TOOL-EP-SUBSCRIPTION | `SubscriptionTrigger.start()` throws `UnsupportedOperationException`: "SubscriptionTrigger is not yet fully implemented. Use TimerTrigger for polling-based data collection." The README still lists it and its YAML sample uses `type: subscription` (SubscriptionTrigger.java:71-76; README.md:34, 127). | Not ported: a placeholder upstream. A configuration naming a subscription trigger is `InvalidConfig`. | deferred (upstream placeholder) | none |
+| TOOL-EP-CONFIG | `EventPumpFactory.fromYaml`, `fromJson` and `fromXml` take a file, a connection factory and a default listener (EventPumpFactory.java:218-306; signatures from a grep). Which trigger types the factory maps from configuration was not read. | A typed builder first. File formats come after the builder and the cache are proven; the first format is chosen by an ADR. | deferred (config file formats wait for the batch API; E6 order) | none |
+| TOOL-EP-TRANSFORM | `ValueTransformer.transform(expression, Map<String, PlcValue>)` and `supports(expression)`; `SimpleExpressionEvaluator` evaluates basic arithmetic and comparison; SpEL is named in the javadoc only (ValueTransformer.java:22-60). | A `ValueTransformer` trait and a small arithmetic evaluator, after the batch API. | deferred (after the batch API; E6 order) | none |
+| TOOL-EP-OPERATIONS | Read is used; write, browse, discover and ping are not used; subscribe does not work (`operations`). | Read only. | planned (M5) | `planned:event_pump_issues_no_operation_besides_read` |
+| TOOL-EP-POLLING-BASE | The same pump powers `PollingSubscriptionConnectionBase` for every driver without native subscriptions (`util_subscription_emulation.scope`). | Stonecrab does not depend on the pump for polling subscriptions; S55 implements them in the core. See `TOOL-SE-POLLING`. | deferred (first-party equivalent: the S55 polling subscription) | none |
+
+## Capture replay
+Manifest `inventory.tool_capture_replay`. A command line tool, not a driver: it replays a
+recorded PCAPNG capture onto a live network device so passive-mode drivers can be exercised
+without the plant. It needs libpcap or Npcap and a real or virtual NIC.
+
+| Row id | Upstream behavior (manifest key, file:lines) | Planned Stonecrab behavior | Status | Test ids |
+| --- | --- | --- | --- | --- |
+| TOOL-CR-REPLAY | Opens the file offline with nanosecond precision and the device live (promiscuous, snaplen 65536), sleeps by the inter-packet delta times `replaySpeed` when the speed is above 0 and a packet precedes, then sends each packet unmodified (CaptureReplay.java:47-90; no TCP state, no MAC or IP rewriting). | A Rust replay tool on a pcap binding, tested on loopback or a veth pair. It follows the raw-socket and PCAP replay transports (`UTR-RAW-SOCKET`, `UTR-PCAP-REPLAY` in `docs/parity/transport.md`) and the first passive-mode driver that needs it. | deferred (after the connection cache, OPM and the event pump in E6 order; needs libpcap and a NIC) | none |
+| TOOL-CR-OPTIONS | `--input-file`, `--output-device` (required), `--replay-speed` (1 real time, 0 as fast as possible, 0.5 half, 2 double; default 1) and `--loop` (default false); `main` exits 1 with help on bad arguments and replays again in a do-while while `--loop` is set (CliOptions.java:27-88; CaptureReplay.java:100-112). | The same four options when the tool is built. | deferred (with TOOL-CR-REPLAY) | none |
+| TOOL-CR-QUIRK-TIMING | The sleep is `(curPacket.getNanos() - lastPacket.getNanos()) * replaySpeed`, cast to int. `getNanos()` is the nanosecond-of-second field only, so the difference wraps at each second boundary and can be negative (no sleep). Multiplying by the speed means 2 doubles the sleep and 0.5 halves it, the opposite of the README (CaptureReplay.java:66-70, 85-90). Derived from reading only; the tool was not run. | Not ported. A Rust tool computes the delta from full timestamps and divides by the speed. | deferred (upstream defect not reproduced; tool deferred) | none |
+
+## Test-suite runner
+Manifest `inventory.util_test_utils`: the driver test-suite runner and the
+parser-serializer test runners. Stonecrab already reads the Modbus driver-suite XML through
+the `fixtures` adapter of slice S04b (`fixtures/modbus/upstream/`, `docs/parity/modbus.md`
+rows `MB-BYTEORDER-BE` and `MB-BYTEORDER-LE`); the rows below cover the rest of the runner.
+The JUnit condition annotations (Jenkins, Docker, Parallels, internet) are not worth
+porting (`scope`).
+
+| Row id | Upstream behavior (manifest key, file:lines) | Planned Stonecrab behavior | Status | Test ids |
+| --- | --- | --- | --- | --- |
+| TOOL-TU-DRIVER-RUNNER | `DriverTestsuiteRunner`: an abstract JUnit 5 runner taking a testsuite path, a base package, an auto-migrate flag and ignored cases; one dynamic test per testcase, each with its own connection (DriverTestsuiteRunner.java:40-139). The XSD `driver-testsuite.xsd` was located, not read. | A runner in the `testkit` feature that loads the same XML suites through the S04b adapter and drives a `Driver` over `FakeTransport`, one connection per case. The Modbus subset exists as vectors; the runner is the generalization. | planned (M5) | `planned:driver_suite_runner_replays_a_testcase_over_a_fake_transport`, `planned:driver_suite_runner_gives_every_testcase_its_own_connection`, `planned:driver_suite_runner_skips_a_named_ignored_case` |
+| TOOL-TU-STEPS | The step vocabulary: `OUTGOING_PLC_MESSAGE`, `OUTGOING_PLC_BYTES`, `INCOMING_PLC_MESSAGE`, `INCOMING_PLC_BYTES`, `API_REQUEST`, `API_RESPONSE`, `API_EVENT`, `DELAY`, `TERMINATE` (StepType.java:24-43). How an `API_REQUEST` XML maps to a request was not read. | The same nine step types, each a variant of a step enum. The API mapping is decided when the first non-Modbus suite is loaded. | planned (M5) | `planned:driver_suite_step_types_cover_the_nine_upstream_steps`, `planned:driver_suite_unknown_step_type_is_a_typed_error` |
+| TOOL-TU-SEQUENTIAL | Sequential mode: the first case connects and handshakes, later cases reuse the connection, teardown follows the last, `TERMINATE` ends a case; for audit-log suites whose protocol counters advance across the session (SequentialTestRunner.java:30-219). | A sequential mode with a shared connection across the cases of one suite. | planned (M5) | `planned:driver_suite_sequential_mode_shares_one_connection`, `planned:driver_suite_terminate_ends_a_case_without_closing_the_connection` |
+| TOOL-TU-PARSER-SERIALIZER | `ParserSerializerTestsuiteRunner`: per testcase parse the raw bytes, serialize the message to XML and compare with the reference (failing when the reference is missing or has more than one root), serialize back to bytes and require equality, with a hex diff on failure (ParserSerializerTestsuiteRunner.java:60-179; `parser-serializer-testsuite.xsd` located, not read). | A round-trip runner over the generated codec of Phase G (S66) and its vector corpus: parse, compare to the reference model, serialize, compare bytes. The XML comparison needs the generated message models, so it follows each protocol's generated codec. | planned (M3) | `planned:parser_serializer_runner_round_trips_every_reference_message`, `planned:parser_serializer_runner_reports_a_hex_diff_on_a_byte_mismatch`, `planned:parser_serializer_runner_fails_on_a_missing_reference` |
+| TOOL-TU-TRUNCATION | `ParserTruncationTestsuiteRunner` parses every prefix of every reference message and requires any failure to be a `BufferException`, not an unchecked exception; the outcome of parsing is left open (ParserTruncationTestsuiteRunner.java:57-100). | Every proper prefix of every reference message either decodes or fails with a typed `MalformedData`; no panic. This is the F1 case of `SPEC.md` applied to the whole corpus. | planned (M3) | `planned:truncation_runner_decodes_or_rejects_every_prefix_without_panicking`, `planned:truncation_runner_treats_a_panic_as_a_failure` |
+| TOOL-TU-PCAP-ROUND-TRIP | `PcapRoundTripTestRunner` reads a pcap, reassembles and frames messages (`FramingSpec`, `TcpStreamReassembler`), parses with the generated `staticParse`, re-serializes and compares bytes; parse failures are skipped rather than failed; configured by `PcapRoundTripConfig` for TCP, UDP or Ethernet (PcapRoundTripTestRunner.java:43-80). | Not planned before a pcap reader and a TCP reassembler exist; revisit with the raw-socket and PCAP replay transports. | deferred (needs a pcap reader and a TCP reassembler, M5 transports) | none |
+| TOOL-TU-HELPERS | `XmlComparator` with the xmlunit skip filters, `HexDiff`, `MessageValidatorAndMigrator` and `TestCasePatcher` (auto-migrate of reference XML), the dom4j `LocationAware*` classes and `ConnectionManager` and `TestContext` for the driver runner (`notes`). | `HexDiff` is a first-party test helper; the auto-migrate of reference XML is not ported, because Stonecrab does not rewrite vendored vectors (`fixtures/modbus/PROVENANCE.toml`). | deferred (auto-migrate rewrites vendored vectors; helpers are first-party) | none |
+| TOOL-TU-ANNOTATIONS | `RequirePcap`, `RequirePcapNg`, `RequireInternetConnection`, `DisableInDockerFlag` and the other condition annotations only gate JUnit execution (`notes`). | Rust `#[ignore]` attributes and cargo features do the same job. | deferred (JUnit-specific) | none |
+
+## Utilities and support libraries
+The manifest also inventories four utilities that support drivers and tests. They are not
+tools in the sense of decision E6 but they are upstream capabilities, so each has a row.
+
+| Row id | Upstream behavior (manifest key, file:lines) | Planned Stonecrab behavior | Status | Test ids |
+| --- | --- | --- | --- | --- |
+| TOOL-SE-POLLING | `PollingSubscriptionConnectionBase` implements subscribe, unsubscribe and consumer registration by polling the driver's own `read()`, grouping tags by (type, interval); CYCLIC always fires, CHANGE_OF_STATE fires on the first value or a change (`Objects.equals`), EVENT throws, default interval 1000 ms (PollingSubscriptionConnectionBase.java:101-173, 258-387). Seven Java drivers extend it. | Recorded per driver, for Modbus as `MB-TCP-SUBSCRIBE` and `MB-QUIRK-I` in `docs/parity/modbus.md` (slice S55), and for the other drivers in their own `*-OP-SUBSCRIBE` rows. No separate row is owed. | deferred (covered by the per-driver subscribe rows and slice S55) | none |
+| TOOL-AL-AUDIT | `AuditLog` with a no-op fallback and a Logback `AuditLogImpl`; enabled by `log.audit-log-file`; event types `CONFIG`, `SYSTEM`, `CONNECT`, `OUTGOING_BYTES`, `OUTGOING_MESSAGE`, `INCOMING_BYTES`, `INCOMING_MESSAGE`, `API_REQUEST`, `API_RESPONSE`, `API_EVENT`, `CLOSE`, `ERROR`; rolling gzip files at 10 MB, 30 days, 1 GB cap (AuditLog.java:41-222; AuditLogImpl.java:47-169; AuditLogEventType.java:25-86). Not an operation. | Stonecrab's diagnostics and `tracing` spans (`CORE-*` rows in `docs/parity/core.md`) are the first-party equivalent. A file audit log in this format is not planned. The upstream rule that each configuration masks its own secrets in `toString()` is not enforced upstream (`util_audit_log.notes`); Stonecrab redacts secrets in every `Debug` output instead (`UTR-TLS-TRUST`). | deferred (first-party equivalent: diagnostics; a debugging facility, not a protocol feature) | none |
+| TOOL-RS-ARP | `ArpUtils.scanNetworkDevice` and `resolveMacAddress` over Pcap4J; the only caller is the Modbus discoverer (ArpUtils.java:43-68, 225-226). | Recorded with Modbus discovery (`MB-TCP-DISCOVER`) and the discovery slices of M3 to M5. | deferred (with the discover rows; M3 to M5) | none |
+| TOOL-TG-GENERATOR | `test-generator` (`pstg`): a Groovy tool that turns a pcap and `tshark` labels into a parser-serializer testsuite XML for a root message class (ParserSerializerTestsuiteGenerator.groovy:35-217). | Not ported; Stonecrab vectors are serialized from vendored upstream XML (S04b), not generated from captures. | deferred (Groovy tool needing tshark; overlaps TOOL-TU-PARSER-SERIALIZER) | none |
+
+## Tools outside the pinned baseline
+These tools live in the apache/plc4x-extras repository (release tag `v1.0.0`, commit
+`ed67ec04efe852e6802b6ab1a6a9fd2276956e09`), not in apache/plc4x at the pinned commit.
+Nothing outside apache/plc4x was read beyond directory listings and a few README files
+(`extras_outside_baseline`). A row that depends on any of them must pin the other
+repository's tag and commit first.
+
+| Row id | Upstream behavior (manifest key, file:lines) | Planned Stonecrab behavior | Status | Test ids |
+| --- | --- | --- | --- | --- |
+| TOOL-X-OPCUA-SERVER | `tool_opcua_server`: `plc4j/tools/opcua-server` in plc4x-extras exposes devices reachable through PLC4X as an OPC UA server. Source not read. Not the Eclipse Milo server in the OPC UA driver's test resources. | None. A Stonecrab OPC UA server would also need the M3 server-side codec; see the OPC UA record. | deferred (outside the pinned baseline) | none |
+| TOOL-X-PLC4X-SERVER | `tool_plc4x_server`: `plc4j/tools/plc4x-server` in plc4x-extras, a relay for the PLC4X proxy protocol; clients using the `plc4x` driver connect to it and it forwards reads and writes (README.md:20-30). The wire format was not read. The 128-line C stub in `plc4c/tools/plc4x-server` is not this server (see `TOOL-C-PLC4X-SERVER`). | None. The client side is recorded in `docs/parity/plc4x-proxy.md`. | deferred (outside the pinned baseline) | none |
+| TOOL-X-PLC4X-BROWSER | `tool_plc4x_browser`: `plc4go/tools/plc4xbrowser` in plc4x-extras, a Go terminal tool that connects, browses tags, reads, writes and subscribes; `--demo` runs against simulated devices (README.md:18-40). | None. | deferred (outside the pinned baseline) | none |
+| TOOL-X-PCAP-ANALYZER | `tool_plc4x_pcap_analyzer`: `plc4go/tools/plc4xpcapanalyzer` in plc4x-extras, which runs captured traffic through the codecs and reports parse failures, reserialize failures and reserialize-to-different-bytes. The same job as `PcapRoundTripTestRunner` as a standalone tool. | None. The nearest planned work is `TOOL-TU-PCAP-ROUND-TRIP`. | deferred (outside the pinned baseline) | none |
+| TOOL-X-SCRAPER | The README of apache/plc4x lists a Scraper utility among the Java tools (README.md:79-82). There is no scraper directory in the checkout or in plc4x-extras `plc4j/tools`; the Scraper was not found (`extras_outside_baseline.notes`). | None. The omission is recorded so it is not mistaken for a missed tool. | deferred (not found in the pinned baseline) | none |
+
+## Non-Java tools
+Manifest entries `go_tool_plc4xGenerator`, `go_tool_plc4xLicencer` and
+`c_tool_plc4x_server`. They are build or stub tools of other implementations.
+
+| Row id | Upstream behavior (manifest key, file:lines) | Planned Stonecrab behavior | Status | Test ids |
+| --- | --- | --- | --- | --- |
+| TOOL-GO-GENERATOR | `plc4xGenerator` writes `<type>_plc4xgen.go` with `Serialize()`, `SerializeWithWriteBuffer()` and `String()` for named Go structs, honouring the struct tags `ignore`, `stringer`, `hasLocker`, `asPtr`, `directSerialize` and `secret` (main.go:40-50, 225-260, 598, 649-691, 766-779). The manifest records that derive macros cover the same need for Rust. | None. | deferred (non-Java build tool, no Rust relevance) | none |
+| TOOL-GO-LICENCER | `plc4xLicencer` prepends the licence header file to a generated Go file (main.go:33-39, 83-100). | None; licence headers are repository policy (`scripts/`), not runtime behavior. | deferred (non-Java build tool, no Rust relevance) | none |
+| TOOL-C-PLC4X-SERVER | `plc4c/tools/plc4x-server/src/plc4x_server.c` is a 128-line BSD socket chat stub on the generated PLC4X default TCP port. It does not speak the proxy protocol and has memory-safety defects: an unbounded `getchar` loop with no EOF check and an unsigned `connFd` that never detects a failed accept (plc4x_server.c:35-128). | None. An upstream placeholder with defects; not an obligation. | deferred (upstream placeholder) | none |
+
+## Backlog from other languages
+No `[[backlog]]` row in `upstream/manifest.toml` names a tool, so none is cited. The
+non-Java tool entries above are recorded as rows of their own.
+
+| Row id | Upstream behavior (manifest key, file:lines) | Planned Stonecrab behavior | Status | Test ids |
+| --- | --- | --- | --- | --- |
+| TOOL-BACKLOG-NONE | No backlog row names a tool (`[[backlog]]` has no `tool_*` driver). | None. | deferred (no backlog row exists) | none |
+
+## UNVERIFIED
+- The default values of the connection cache timeouts, the meaning of `cacheDurationMillis`
+  of -1, the semantics of `SimpleAliasRegistry`, which trigger types the event pump factory
+  maps from configuration, and how an `API_REQUEST` step maps to a request were not read.
+  The rows that depend on them say so.
+- `TOOL-CR-QUIRK-TIMING` comes from reading `CaptureReplay.java` only; the tool was not run.
+- Nothing in plc4x-extras was read beyond listings and README files. The extras tag and
+  commit are recorded in `extras_outside_baseline`.

@@ -44,7 +44,6 @@ subscription_emulation = "plc4j/utils/subscription-emulation"
 
 [pending]
 items = [
-  "Map every required behavior to a planned test ID",
   "Review all configuration and address aliases before implementation",
   "Inspect the generated DataItem behavior for the TIME/DATE family (generated code is not in the repository)",
   "Read the test transport internals of the upstream driver test-suite runner (which XML each Modbus IT loads was settled in S04b)",
@@ -122,7 +121,7 @@ ping = "Yes: canPing true, onPing"
 title = "PLC4J API (plc4j/api): PlcConnection, PlcDriver, driver manager, request/response and value model"
 kind = "api"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/core.md"
 scope = """\
   The public interfaces a PLC4J client programs against at v1.0.0. PlcConnection offers connect, isConnected, close, parseTagAddress, parseTagValue, getMetadata, ping() and five request \
   builders (read, write, subscription, unsubscription, browse). PlcDriver adds connection-string connect, prepareTag and discoveryRequestBuilder. Discovery lives on the driver, not the \
@@ -276,7 +275,7 @@ ping = """\
 title = "PLC4J driver SPI (plc4j/spi/drivers and plc4j/spi/config): DriverBase, ConnectionBase, request/response defaults, configuration parsing"
 kind = "spi"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/core.md"
 scope = """\
   The base classes every native PLC4J driver extends. DriverBase parses the connection string, picks and validates the transport, builds the protocol and transport configurations, creates the \
   audit log and asks the driver for a ConnectionBase. ConnectionBase maps the PlcConnection API onto protected on* hooks that default to a failed future. spi/config provides the \
@@ -472,7 +471,7 @@ ping = """\
 title = "Modbus RTU driver (PLC4J)"
 kind = "driver"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/modbus-serial.md"
 scope = "plc4j/drivers/modbus rtu package: serial-line Modbus (address + PDU + CRC16) with read, write and ping; subscriptions are polling emulation."
 protocol_code = "modbus-rtu"
 driver = { path = "plc4j/drivers/modbus/src/main/java/org/apache/plc4x/java/modbus/rtu/ModbusRtuDriver.java", lines = "44-122", note = """\
@@ -544,7 +543,7 @@ ping = "Supported: canPing true; onPing sends a read of the configured ping-addr
 title = "Modbus ASCII driver (PLC4J)"
 kind = "driver"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/modbus-serial.md"
 scope = "plc4j/drivers/modbus ascii package: ':' hex-encoded frames with LRC; read, write and ping; polling subscriptions."
 protocol_code = "modbus-ascii"
 driver = { path = "plc4j/drivers/modbus/src/main/java/org/apache/plc4x/java/modbus/ascii/ModbusAsciiDriver.java", lines = "44-122", note = """\
@@ -589,7 +588,7 @@ ping = "Supported: reads ping-address (default 4x00001:BOOL)."
 title = "Siemens S7 (S7Comm over ISO-on-TCP/COTP), with S7H dual-path mode"
 kind = "driver"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/s7.md"
 scope = """\
   plc4j/drivers/s7. One driver class S7Driver, protocol code s7. No separate S7 variant driver or protocol code exists here (the class doc says it replaces the old Netty s7 and s7-light \
   drivers). S7H redundant-pair mode is selected by the URL syntax s7://primary/secondary and is implemented by S7HCotpConnection wrapping two S7CotpConnections."""
@@ -672,7 +671,7 @@ ping = "Supported (canPing true). No dedicated S7 ping: onPing sends a one-byte 
 title = "EtherNet/IP (CIP) driver"
 kind = "driver"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/eip.md"
 scope = "plc4j/drivers/eip, protocol code eip. TCP 44818 EIP encapsulation, CIP Read/Write Tag, UDP broadcast ListIdentity discovery."
 protocol_code = "eip"
 driver = { path = "plc4j/drivers/eip/src/main/java/org/apache/plc4x/java/eip/base/EIPDriver.java", lines = "41-114", note = """\
@@ -721,7 +720,7 @@ ping = "Not implemented (no canPing, no onPing)."
 title = "Logix CIP driver (alias over EIP)"
 kind = "driver"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/eip.md"
 scope = "plc4j/drivers/eip/.../logix/LogixDriver.java, protocol code logix. Its own DriverBase subclass with the same connection class as eip."
 protocol_code = "logix"
 driver = { path = "plc4j/drivers/eip/src/main/java/org/apache/plc4x/java/eip/logix/LogixDriver.java", lines = "39-111", note = """\
@@ -748,7 +747,7 @@ ping = "Not implemented."
 title = "Beckhoff TwinCAT ADS/AMS driver"
 kind = "driver"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/ads.md"
 scope = "plc4j/drivers/ads, protocol code ads, ADS over AMS/TCP (port Constants.ADSTCPDEFAULTPORT), UDP discovery."
 protocol_code = "ads"
 driver = { path = "plc4j/drivers/ads/src/main/java/org/apache/plc4x/java/ads/AdsPlcDriver.java", lines = "46-139", note = """\
@@ -790,7 +789,7 @@ ping = "Yes. onPing sends AdsReadDeviceInfoRequest and answers OK on response."
 title = "SLMP (MELSEC) 3E driver"
 kind = "driver"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/slmp.md"
 scope = "plc4j/drivers/slmp, protocol code slmp, 3E binary frame over TCP, default port 5007, word devices only."
 protocol_code = "slmp"
 driver = { path = "plc4j/drivers/slmp/src/main/java/org/apache/plc4x/java/slmp/SlmpDriver.java", lines = "38-101", note = "Code 'slmp' 41-44; tcp default 63-66; tcp+test 68-71; default port 5007 at 73-79; canRead/canWrite only 93-101." }
@@ -824,7 +823,7 @@ ping = "Not implemented."
 title = "UMAS (Schneider Modicon) driver"
 kind = "driver"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/umas.md"
 scope = "plc4j/drivers/umas, protocol code umas, UMAS tunneled in Modbus/TCP function code 0x5A, symbolic tags only."
 protocol_code = "umas"
 driver = { path = "plc4j/drivers/umas/src/main/java/org/apache/plc4x/java/umas/UmasDriver.java", lines = "44-118", note = """\
@@ -860,7 +859,7 @@ ping = "Yes. onPing sends UmasPDUPlcStatusRequest; failure maps to REMOTE_ERROR.
 title = "OPC UA client driver (PLC4J, protocol code opcua)"
 kind = "driver"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/opcua.md"
 scope = """\
   plc4j/drivers/opcua hand-written classes: OpcuaPlcDriver, OpcuaConnection, OpcuaMessageCodec, context/*, security/*, config/*, protocol/*, tag/*. Generated readwrite code skipped; the wire \
   model is cited from protocols/opcua opc-manual.mspec (itself under src/main/generated, produced from the NodeSet by XSLT)."""
@@ -1134,7 +1133,7 @@ ping = "Not supported (canPing is the DriverBase default false; ConnectionBase.o
 title = "PROFINET IO controller (legacy driver)"
 kind = "driver"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/profinet.md"
 scope = "plc4j/drivers/profinet. Protocol code profinet. Acts as a PROFINET IO controller over a raw Ethernet (pcap4j) transport plus UDP/DCE-RPC. The profinet-ng module declares the same protocol code."
 protocol_code = "profinet"
 driver = { path = "plc4j/drivers/profinet/src/main/java/org/apache/plc4x/java/profinet/ProfinetDriver.java", lines = "42-105", note = "Protocol code, raw-socket, canSubscribe, canBrowse, canDiscover; no canRead/canWrite/canPing." }
@@ -1186,7 +1185,7 @@ ping = "None ('Ping not supported'); canPing not overridden."
 title = "PROFINET IO controller (next-generation port)"
 kind = "driver"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/profinet.md"
 scope = "plc4j/drivers/profinet-ng. Protocol code profinet (same as the legacy module). A port of the legacy driver onto the ConnectionBase SPI with a frame-level conversation model, a single device per connection and GSDML-driven browse."
 protocol_code = "profinet"
 driver = { path = "plc4j/drivers/profinet-ng/src/main/java/org/apache/plc4x/java/profinet/ProfinetDriver.java", lines = "42-109", note = "Protocol code, raw-socket, canSubscribe/canBrowse/canDiscover; no canRead/canWrite/canPing." }
@@ -1238,7 +1237,7 @@ ping = "None."
 title = "Allen-Bradley ETH (DF1 over CIP encapsulation) driver"
 kind = "driver"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/ab-eth.md"
 scope = "Read-only driver for legacy AB PLC-5/SLC style 'N-file' addressing over an Ethernet encapsulation (port 2222)."
 protocol_code = "ab-eth"
 driver = { path = "plc4j/drivers/ab-eth/src/main/java/org/apache/plc4x/java/abeth/AbEthDriver.java", lines = "37-97", note = "Code 41-44, transports 64-72, port 74-80, only canRead at 82-85." }
@@ -1282,7 +1281,7 @@ ping = "Not supported: no canPing and no onPing override (the base fails with 'P
 title = "BACnet/IP (PLC4J)"
 kind = "driver"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/bacnet.md"
 scope = "plc4j/drivers/bacnet"
 protocol_code = "bacnet-ip"
 driver = { path = "plc4j/drivers/bacnet/src/main/java/org/apache/plc4x/java/bacnetip/BacNetIpDriver.java", lines = "36-79", note = "Protocol code bacnet-ip, default transport udp, supported udp and test, only canSubscribe overridden." }
@@ -1333,7 +1332,7 @@ ping = "Unsupported. canPing is not overridden (false) and onPing is not overrid
 title = "KNXnet/IP (PLC4J)"
 kind = "driver"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/knxnetip.md"
 scope = "plc4j/drivers/knxnetip"
 protocol_code = "knxnet-ip"
 driver = { path = "plc4j/drivers/knxnetip/src/main/java/org/apache/plc4x/java/knxnetip/KnxNetIpDriver.java", lines = "43-141", note = """\
@@ -1392,7 +1391,7 @@ ping = "Supported. canPing is true. onPing sends a ConnectionStateRequest, OK if
 title = "Clipsal C-Bus (PLC4J)"
 kind = "driver"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/cbus.md"
 scope = "plc4j/drivers/c-bus"
 protocol_code = "c-bus"
 driver = { path = "plc4j/drivers/c-bus/src/main/java/org/apache/plc4x/java/cbus/CBusDriver.java", lines = "37-90", note = "Protocol code c-bus, tcp default, only canRead overridden to true, default ports." }
@@ -1433,7 +1432,7 @@ ping = "Unsupported (canPing false, no onPing)."
 title = "CANopen (PLC4J)"
 kind = "driver"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/canopen.md"
 scope = "plc4j/drivers/canopen; wire model protocols/canopen canopen.mspec"
 protocol_code = "canopen"
 driver_caps = { path = "plc4j/drivers/canopen/src/main/java/org/apache/plc4x/java/canopen/CANOpenDriver.java", lines = "35-73", note = "Protocol code, default and supported transports, canRead/canWrite/canSubscribe true." }
@@ -1471,7 +1470,7 @@ ping = "Not supported (canPing default false; onPing default fails)."
 title = "Generic CAN (PLC4J)"
 kind = "driver"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/can.md"
 scope = "plc4j/drivers/can; wire model protocols/genericcan genericcan.mspec; frame transport via socketcan/virtualcan"
 protocol_code = "genericcan"
 driver_caps = { path = "plc4j/drivers/can/src/main/java/org/apache/plc4x/java/can/generic/GenericCANDriver.java", lines = "40-75", note = "Code 'genericcan', transports, canSubscribe and canWrite only." }
@@ -1503,7 +1502,7 @@ ping = "Not supported."
 title = "IEC 60870-5-104 (PLC4J)"
 kind = "driver"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/iec-60870.md"
 scope = "plc4j/drivers/iec-60870; wire model protocols/iec-60870 iec-60870-5-104.mspec"
 protocol_code = "iec-60870-5-104"
 driver_caps = { path = "plc4j/drivers/iec-60870/src/main/java/org/apache/plc4x/java/iec608705104/Iec60870514PlcDriver.java", lines = "41-85", note = "Code, tcp default, defaultPorts via Constants.DEFAULTPORT, canSubscribe only." }
@@ -1535,7 +1534,7 @@ ping = "Not supported (no canPing; connect does TestFrame handshake only)."
 title = "Firmata (PLC4J)"
 kind = "driver"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/firmata.md"
 scope = "plc4j/drivers/firmata; wire model protocols/firmata firmata.mspec"
 protocol_code = "firmata"
 driver_caps = { path = "plc4j/drivers/firmata/src/main/java/org/apache/plc4x/java/firmata/FirmataDriver.java", lines = "64-87", note = "Serial default; serial, tcp, test; canWrite and canSubscribe only." }
@@ -1572,7 +1571,7 @@ ping = "Not supported."
 title = "Open Protocol (PLC4J)"
 kind = "driver"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/open-protocol.md"
 scope = "plc4j/drivers/open-protocol; wire model protocols/open-protocol open-protocol.mspec"
 protocol_code = "open-protocol"
 driver_caps = { path = "plc4j/drivers/open-protocol/src/main/java/org/apache/plc4x/java/openprotocol/OpenProtocolDriver.java", lines = "63-89", note = "Tcp default, canRead and canWrite true, default port from Constants.TCPDEFAULTPORT." }
@@ -1604,7 +1603,7 @@ ping = "Not supported."
 title = "Bosch Rexroth ctrlX Data Layer (PLC4J)"
 kind = "driver"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/ctrlx.md"
 scope = "plc4j/drivers/ctrlx; REST/HTTPS client over generated OpenAPI datalayer client (rest/datalayer, not driver logic); no mspec"
 protocol_code = "ctrlx"
 driver = { path = "plc4j/drivers/ctrlx/src/main/java/org/apache/plc4x/java/ctrlx/readwrite/CtrlXDriver.java", lines = "38-112", note = """\
@@ -1643,7 +1642,7 @@ ping = "Works: reads datalayer/server/settings via NodesApi and completes with O
 title = "DF1 (Allen-Bradley serial framing): spec only"
 kind = "spec_only"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/open-protocol.md"
 scope = "protocols/df1 mspec plus Go generated model; no driver in plc4j, plc4go, plc4c, plc4net or plc4py"
 protocol_code = "df1"
 mspec = { path = "protocols/df1/src/main/resources/protocols/df1/df1.mspec", lines = "20-52", note = """\
@@ -1680,7 +1679,7 @@ supported = []
 title = "PLC4X proxy driver (client side)"
 kind = "driver"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/plc4x-proxy.md"
 scope = "Client for the PLC4X proxy protocol: authenticates to a PLC4X proxy server, asks it to open a remote connection string, then forwards reads and writes."
 protocol_code = "plc4x"
 driver = { path = "plc4j/drivers/plc4x/src/main/java/org/apache/plc4x/java/plc4x/Plc4xDriver.java", lines = "35-91", note = "Code 37-45, default tls 63-69, transports 71-74, canRead/canWrite 76-84." }
@@ -1724,7 +1723,7 @@ ping = "Not supported: no onPing override (the base returns a failed 'Ping not s
 title = "Simulated in-memory test driver"
 kind = "driver"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/sim.md"
 scope = "In-process device with RANDOM, STATE and STDOUT tags; no transport. URL form simulated:<device_name>."
 protocol_code = "simulated"
 driver = { path = "plc4j/drivers/simulated/src/main/java/org/apache/plc4x/java/simulated/SimulatedDriver.java", lines = "34-129", note = "Code 46-49, can* flags 61-79, URL parsing and bypass of transports 81-124." }
@@ -1762,7 +1761,7 @@ ping = "Supported: always OK."
 title = "Mock test driver"
 kind = "driver"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/sim.md"
 scope = "In-process driver that delegates every operation to a user-supplied MockDevice; for unit tests of other modules. URL form mock:<device_name>."
 protocol_code = "mock"
 driver = { path = "plc4j/drivers/mock/src/main/java/org/apache/plc4x/java/mock/MockDriver.java", lines = "36-130", note = "Code 53-56, can* flags 68-91, connection cache and URL parsing 93-125." }
@@ -1793,7 +1792,7 @@ ping = "Supported: always OK."
 title = "Transport API (plc4j-transports-api)"
 kind = "spi"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/transport.md"
 scope = "plc4j/transports/api: the Transport / TransportInstance contracts every transport implements, plus discovery of transports by code."
 protocol_code = "n/a"
 transport_iface = { path = "plc4j/transports/api/src/main/java/org/apache/plc4x/java/spi/transports/api/Transport.java", lines = "26-57", note = """\
@@ -1826,7 +1825,7 @@ registry = "ServiceLoader (DefaultTransportManager) or OSGi (OsgiTransportManage
 title = "TCP transport"
 kind = "transport"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/transport.md"
 scope = "plc4j/transports/tcp: client-side TCP stream over a java.nio SocketChannel."
 protocol_code = "n/a (transport code: tcp)"
 code = { path = "plc4j/transports/tcp/src/main/java/org/apache/plc4x/java/transport/tcp/TcpTransport.java", lines = "39-46", note = "address regex (IPv4 or hostname, optional :port, trailing driverConfig) and code 'tcp'" }
@@ -1860,7 +1859,7 @@ async = "yes (data and disconnect listeners)"
 title = "UDP transport"
 kind = "transport"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/transport.md"
 scope = "plc4j/transports/udp: connected-peer UDP over NIO DatagramChannel, with optional socket sharing."
 protocol_code = "n/a (transport code: udp)"
 code = { path = "plc4j/transports/udp/src/main/java/org/apache/plc4x/java/transport/udp/UdpTransport.java", lines = "39-52", note = "address regex (no driverConfig group, trailing .* discarded) and code 'udp'" }
@@ -1893,7 +1892,7 @@ async = "yes (data and disconnect listeners)"
 title = "TLS transport (certificate based)"
 kind = "transport"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/transport.md"
 scope = "plc4j/transports/tls, class TlsTransport / TlsTransportInstance: TLS over a blocking JSSE SSLSocket."
 protocol_code = "n/a (transport code: tls)"
 code = { path = "plc4j/transports/tls/src/main/java/org/apache/plc4x/java/transport/tls/TlsTransport.java", lines = "44-55", note = "address regex with driverConfig group; code 'tls', name 'TLS'" }
@@ -1932,7 +1931,7 @@ layers_on = "tcp configuration options (inherited), JSSE SSLSocket"
 title = "TLS-PSK transport (pre-shared key)"
 kind = "transport"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/transport.md"
 scope = "plc4j/transports/tls, class PskTlsTransport / PskTlsTransportInstance: TLS-PSK via Bouncy Castle. Lives in the same module as the TLS transport."
 protocol_code = "n/a (transport code: tls-psk)"
 code = { path = "plc4j/transports/tls/src/main/java/org/apache/plc4x/java/transport/tls/PskTlsTransport.java", lines = "44-55", note = """\
@@ -1966,7 +1965,7 @@ layers_on = "tcp configuration options (inherited), Bouncy Castle TLS-PSK"
 title = "COTP transport (ISO 8073 over TPKT over TCP)"
 kind = "transport"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/transport.md"
 scope = "plc4j/transports/cotp: wraps TcpTransportInstance, performs COTP connect, frames TPKT/COTP, hands the DT payload up. Generated TPKT/COTP classes under src/main/generated come from protocols/cotp."
 protocol_code = "n/a (transport code: cotp)"
 code = { path = "plc4j/transports/cotp/src/main/java/org/apache/plc4x/java/transport/cotp/CotpTransport.java", lines = "53-64", note = "address regex (no driverConfig); code 'cotp', name 'COTP'" }
@@ -2008,7 +2007,7 @@ layers_on = "tcp (TcpTransportInstance), framed as TPKT and COTP"
 title = "Serial transport"
 kind = "transport"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/transport.md"
 scope = "plc4j/transports/serial: serial port via jSerialComm, optionally shared between connections."
 protocol_code = "n/a (transport code: serial)"
 code = { path = "plc4j/transports/serial/src/main/java/org/apache/plc4x/java/transport/serial/SerialTransport.java", lines = "34-61", note = """\
@@ -2041,7 +2040,7 @@ library = "jSerialComm"
 title = "Raw socket (Ethernet) transport"
 kind = "transport"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/transport.md"
 scope = "plc4j/transports/raw-socket: Layer-2 Ethernet send and capture through Pcap4J / libpcap."
 protocol_code = "n/a (transport code: raw-socket)"
 code = { path = "plc4j/transports/raw-socket/src/main/java/org/apache/plc4x/java/transport/rawsocket/RawSocketTransport.java", lines = "34-61", note = """\
@@ -2083,7 +2082,7 @@ library = "Pcap4J / libpcap"
 title = "PCAP replay transport"
 kind = "transport"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/transport.md"
 scope = "plc4j/transports/pcap-replay: replays packets from a capture file as if a device were sending them. Read-only."
 protocol_code = "n/a (transport code: pcap-replay)"
 code = { path = "plc4j/transports/pcap-replay/src/main/java/org/apache/plc4x/java/transport/pcapreplay/PcapReplayTransport.java", lines = "31-59", note = "code 'pcap-replay', name 'PCAP Replay'; no address parsing" }
@@ -2124,7 +2123,7 @@ library = "Pcap4J / libpcap"
 title = "CAN support library (no transport of its own)"
 kind = "util"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/can.md"
 scope = "plc4j/transports/can: shared CAN frame value type, ID filter and base configuration used by the SocketCAN and Virtual CAN transports. It does not register a Transport."
 protocol_code = "n/a"
 config = { path = "plc4j/transports/can/src/main/java/org/apache/plc4x/java/transport/can/config/CanTransportConfiguration.java", lines = "36-117", note = """\
@@ -2145,7 +2144,7 @@ notes = [
 title = "SocketCAN transport (Linux)"
 kind = "transport"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/can.md"
 scope = "plc4j/transports/can-socketcan: Linux kernel SocketCAN raw channel through javacan."
 protocol_code = "n/a (transport code: can-socketcan)"
 code = { path = "plc4j/transports/can-socketcan/src/main/java/org/apache/plc4x/java/transport/can/socketcan/SocketCanTransport.java", lines = "40-59", note = """\
@@ -2180,7 +2179,7 @@ library = "javacan"
 title = "Virtual CAN transport (in-memory bus)"
 kind = "transport"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/can.md"
 scope = "plc4j/transports/can-virtualcan: pure-Java in-memory CAN bus for testing."
 protocol_code = "n/a (transport code: can-virtualcan)"
 code = { path = "plc4j/transports/can-virtualcan/src/main/java/org/apache/plc4x/java/transport/can/virtualcan/VirtualCanTransport.java", lines = "30-49", note = """\
@@ -2207,7 +2206,7 @@ role = "in-memory bus inside one JVM, for tests"
 title = "Test transport (in-memory)"
 kind = "transport"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/transport.md"
 scope = "plc4j/transports/test: in-memory transport for driver unit tests. Not part of the PLC4X documented list."
 protocol_code = "n/a (transport code: test)"
 code = { path = "plc4j/transports/test/src/main/java/org/apache/plc4x/java/transport/test/TestTransport.java", lines = "35-66", note = "code 'test', name 'Test Transport'; URL ignored" }
@@ -2229,7 +2228,7 @@ role = "in-memory test double"
 title = "Capture Replay (PCAP/PCAPNG replayer onto a network device)"
 kind = "tool"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/tools.md"
 scope = """\
   plc4j/tools/capture-replay. Not a PLC driver: no read/write/subscribe/browse/ping. Replays a recorded capture onto a live network interface so passive-mode drivers can be exercised without the real \
   plant. Needs libpcap/Npcap plus a real or virtual NIC, so a port can only test it against loopback or veth."""
@@ -2255,7 +2254,7 @@ notes = [
 title = "Connection Cache (leased, shared PLC connections)"
 kind = "tool"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/tools.md"
 scope = """\
   plc4j/tools/connection-cache. Library, not a driver. PlcConnectionCache implements PlcConnectionManager and wraps a PlcConnectionFactory; hands out LeasedPlcConnection objects, one lease at a time per \
   connection string, with queued waiters. Pure logic, fully portable and testable without hardware."""
@@ -2293,7 +2292,7 @@ ping = "Used internally: an idle connection is validated with ping() before reus
 title = "Event Pump (trigger-driven batched tag fetching)"
 kind = "tool"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/tools.md"
 scope = """\
   plc4j/tools/event-pump. Library, not a driver. Batches of named tags on one or more connections are read when a trigger fires and delivered to listeners, with optional value transformation. Config \
   from XML, JSON or YAML. Uses read requests only. Subscription trigger is a stub that throws."""
@@ -2331,7 +2330,7 @@ ping = "Not used."
 title = "OPM: Object PLC Mapping (annotated POJO proxies)"
 kind = "tool"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/tools.md"
 scope = """\
   plc4j/tools/opm. Java-specific library. @PlcEntity types with @PlcTag(address, cacheDurationMillis) fields are subclassed at runtime with ByteBuddy; getters and setters are intercepted into PLC reads \
   and writes. Uses read and write request builders only; no subscription. Reflection and bytecode generation make a direct Rust port meaningless; the idea maps to a derive macro."""
@@ -2362,7 +2361,7 @@ ping = "Not used."
 title = "Polling subscription emulation (plc4j/utils/subscription-emulation): PollingSubscriptionConnectionBase"
 kind = "util"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/core.md"
 scope = """\
   An intermediate ConnectionBase subclass that implements subscribe, unsubscribe and consumer registration by polling the driver's own read(), using the EventPump tool (plc4j-tools-event-pump, \
   TagBatch with TimerTrigger). Drivers without native subscriptions extend it. Its onSubscribe override is what makes ConnectionBase.getMetadata() report subscribe supported. This is polling, \
@@ -2444,7 +2443,7 @@ ping = "Not provided; the internal wrapper delegates ping() to the real connecti
 title = "Audit log (plc4j/utils/audit-log): AuditLog API with optional Logback file implementation"
 kind = "util"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/tools.md"
 scope = """\
   A debugging and test-capture facility, not a protocol feature. The api module defines AuditLog (abstract), AuditLogProvider, AuditLogEventType and AuditLogConfiguration (one option, \
   audit-log-file). The impl module provides AuditLogImpl, found by class name at runtime. DriverBase builds one AuditLog per connection from the 'log.audit-log-file' connection-string \
@@ -2494,7 +2493,7 @@ notes = [
 title = "Raw-sockets utility (ARP scan and MAC resolution)"
 kind = "util"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/tools.md"
 scope = "plc4j/utils/raw-sockets: one class, ArpUtils, built on Pcap4J. Despite the pom description (a Netty channel for protocols below TCP/UDP) no Netty channel is in this tree."
 protocol_code = "n/a"
 pom = { path = "plc4j/utils/raw-sockets/pom.xml", lines = "28-32", note = "artifact plc4j-utils-raw-sockets; description still mentions a Netty Channel" }
@@ -2513,7 +2512,7 @@ notes = [
 title = "test-generator: pcap to parser-serializer testsuite XML (Groovy)"
 kind = "util"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/tools.md"
 scope = """\
   plc4j/utils/test-generator. A Groovy command-line tool (class ParserSerializerTestsuiteGenerator, command name pstg, picocli, version 0.1-Alpha) that turns a pcap into a parser-serializer testsuite \
   XML for a root message class. The module has no Java sources, only three .groovy files. It needs a shell and tshark."""
@@ -2540,7 +2539,7 @@ notes = [
 title = "test-utils: driver test-suite runner and parser-serializer test runner"
 kind = "util"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/tools.md"
 scope = """\
   plc4j/utils/test-utils. What a port should reuse: (1) the XML driver-testsuite format and runner, (2) the XML parser-serializer testsuite format with its parse, compare-XML, serialize, compare-bytes \
   cycle and truncation checks, (3) the pcap round-trip runner. Skip the JUnit condition annotations (Jenkins, Docker, Parallels, internet)."""
@@ -2577,7 +2576,7 @@ notes = [
 title = "Tools, servers and integrations that live outside apache/plc4x (repository pointer)"
 kind = "outside_baseline"
 verified_against = "README files of the sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S41; the other repositories were located by GitHub API listing the same day"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/tools.md"
 scope = """\
   Where the material named in the v1.0.0 README of apache/plc4x but absent from the checkout lives. This entry points at repositories; the individual items have their own entries (tool_opcua_server, \
   tool_plc4x_server, tool_plc4x_browser, tool_plc4x_pcap_analyzer, integration_calcite, integration_kafka, integration_nifi, integration_iotdb, integration_camel, integration_streampipes, \
@@ -2605,7 +2604,7 @@ notes = [
 title = "OPC UA Server (PLC4X-backed, in plc4x-extras)"
 kind = "tool"
 verified_against = "apache/plc4x-extras tag v1.0.0 (commit ed67ec04efe852e6802b6ab1a6a9fd2276956e09), directory listing via the GitHub API on 2026-10-28; source not read; outside the pinned baseline"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/tools.md"
 scope = "Not in apache/plc4x v1.0.0. Lives in repository apache/plc4x-extras at plc4j/tools/opcua-server (pom.xml and src/main/{java,resources}). Exposes devices reachable through PLC4X as an OPC UA server."
 extras_listing = { path = "apache/plc4x-extras:plc4j/tools/opcua-server", lines = "n/a (located by listing)", note = """\
   gh api repos/apache/plc4x-extras/contents/plc4j/tools?ref=v1.0.0 shows dirs opcua-server and plc4x-server; opcua-server contains pom.xml and src""" }
@@ -2623,7 +2622,7 @@ notes = [
 title = "PLC4X Server (proxy relay, in plc4x-extras)"
 kind = "tool"
 verified_against = "apache/plc4x-extras tag v1.0.0 (commit ed67ec04efe852e6802b6ab1a6a9fd2276956e09), directory listing via the GitHub API on 2026-10-28; source not read; outside the pinned baseline"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/tools.md"
 scope = """\
   Not in apache/plc4x v1.0.0. Repository apache/plc4x-extras, path plc4j/tools/plc4x-server (README.md, pom.xml, src). A relay speaking the PLC4X proxy protocol: clients using the plc4x driver connect \
   to it and it opens the real PLC connection and forwards reads and writes."""
@@ -2640,7 +2639,7 @@ notes = [
 title = "plc4xbrowser (terminal tag browser, Go, in plc4x-extras)"
 kind = "tool"
 verified_against = "apache/plc4x-extras tag v1.0.0 (commit ed67ec04efe852e6802b6ab1a6a9fd2276956e09), directory listing via the GitHub API on 2026-10-28; source not read; outside the pinned baseline"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/tools.md"
 scope = """\
   Not in apache/plc4x v1.0.0 (no plc4xbrowser under plc4go/tools there: that dir has common, plc4xGenerator, plc4xLicencer). Lives in apache/plc4x-extras at plc4go/tools/plc4xbrowser. Terminal tool: \
   connect, browse tags, read, write and subscribe; --demo runs against simulated devices without hardware. This is a Go tool, so S42 owns the detail."""
@@ -2655,7 +2654,7 @@ notes = [
 title = "plc4xpcapanalyzer (PCAP codec checker, Go, in plc4x-extras)"
 kind = "tool"
 verified_against = "apache/plc4x-extras tag v1.0.0 (commit ed67ec04efe852e6802b6ab1a6a9fd2276956e09), directory listing via the GitHub API on 2026-10-28; source not read; outside the pinned baseline"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/tools.md"
 scope = """\
   Not in apache/plc4x v1.0.0. Lives in apache/plc4x-extras at plc4go/tools/plc4xpcapanalyzer (cmd, config, doc.go, internal, main.go, ui). Runs captured protocol traffic through plc4x codecs and reports \
   parse failures, reserialize failures, and reserialize-to-different-bytes. Go tool; S42 owns the detail."""
@@ -2670,7 +2669,7 @@ notes = [
 title = "Apache Calcite integration (plc4x-extras)"
 kind = "integration"
 verified_against = "apache/plc4x-extras tag v1.0.0 (commit ed67ec04efe852e6802b6ab1a6a9fd2276956e09), directory listing via the GitHub API on 2026-10-28; source not read; outside the pinned baseline"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/integrations.md"
 scope = "Repository apache/plc4x-extras, path plc4j/integrations/apache-calcite (pom.xml, src). Not in apache/plc4x v1.0.0."
 extras_listing = { path = "apache/plc4x-extras:plc4j/integrations/apache-calcite", lines = "n/a (located by listing)", note = "contains pom.xml and src" }
 notes = [
@@ -2682,7 +2681,7 @@ notes = [
 title = "Apache Kafka Connect integration (plc4x-extras)"
 kind = "integration"
 verified_against = "apache/plc4x-extras tag v1.0.0 (commit ed67ec04efe852e6802b6ab1a6a9fd2276956e09), directory listing via the GitHub API on 2026-10-28; source not read; outside the pinned baseline"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/integrations.md"
 scope = "Repository apache/plc4x-extras, path plc4j/integrations/apache-kafka (README.md, config, pom.xml, src). Kafka Connect source and sink connectors passing data between Kafka and PLCs."
 extras_listing = { path = "apache/plc4x-extras:plc4j/integrations/apache-kafka", lines = "n/a (located by listing)", note = "contains README.md, config, pom.xml, src" }
 extras_readme = { path = "apache/plc4x-extras:plc4j/integrations/apache-kafka/README.md", lines = "20-36 (fetched via gh api at v1.0.0)", note = """\
@@ -2695,7 +2694,7 @@ notes = [
 title = "Apache NiFi integration (plc4x-extras)"
 kind = "integration"
 verified_against = "apache/plc4x-extras tag v1.0.0 (commit ed67ec04efe852e6802b6ab1a6a9fd2276956e09), directory listing via the GitHub API on 2026-10-28; source not read; outside the pinned baseline"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/integrations.md"
 scope = "Repository apache/plc4x-extras, path plc4j/integrations/apache-nifi with separate nifi-1 and nifi-2 modules (plus README.md, pom.xml)."
 extras_listing = { path = "apache/plc4x-extras:plc4j/integrations/apache-nifi", lines = "n/a (located by listing)", note = "contains nifi-1, nifi-2, README.md, pom.xml, .gitignore" }
 notes = [
@@ -2707,7 +2706,7 @@ notes = [
 title = "Apache IoTDB (example only, in plc4x-extras)"
 kind = "integration"
 verified_against = "apache/plc4x-extras tag v1.0.0 (commit ed67ec04efe852e6802b6ab1a6a9fd2276956e09), directory listing via the GitHub API on 2026-10-28; source not read; outside the pinned baseline"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/integrations.md"
 scope = """\
   No IoTDB integration module was found. The only item is the example plc4j/examples/hello-integration-iotdb in apache/plc4x-extras ('Application outputting PLC data into IoTDB', depends on plc4j-api \
   and iotdb-jdbc, iotdb-session, tsfile). A code search of apache/iotdb for plc4x returned no paths."""
@@ -2722,7 +2721,7 @@ notes = [
 title = "Apache Camel camel-plc4x component (in apache/camel)"
 kind = "integration"
 verified_against = "listing of apache/camel (default branch) via the GitHub API on 2026-10-28, source not read; outside the pinned baseline"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/integrations.md"
 scope = """\
   Not in apache/plc4x or plc4x-extras. Lives in the Apache Camel repository, apache/camel, at components/camel-plc4x (pom.xml, src), depending on org.apache.plc4x artifacts. No PLC4X release tag \
   applies; it is versioned with Camel."""
@@ -2738,7 +2737,7 @@ notes = [
 title = "Apache StreamPipes PLC connectors (in apache/streampipes)"
 kind = "integration"
 verified_against = "listing of apache/streampipes (default branch) via the GitHub API on 2026-10-28, source not read; outside the pinned baseline"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/integrations.md"
 scope = "Lives in apache/streampipes at streampipes-extensions/streampipes-connectors-plc (pom.xml, src); depends on org.apache.plc4x artifacts. Not in plc4x or plc4x-extras."
 sp_listing = { path = "apache/streampipes:streampipes-extensions/streampipes-connectors-plc", lines = "n/a (located by listing)", note = "contains pom.xml and src" }
 sp_version = { path = "apache/streampipes:pom.xml", lines = "43, 88 (fetched via gh api at default branch)", note = "plc4x.version is 0.13.1, so it has not moved to 1.0.0" }
@@ -2750,7 +2749,7 @@ notes = [
 title = "Eclipse Ditto (third-party example only)"
 kind = "integration"
 verified_against = "search and metadata of the third-party repository JulianFeinauer/ditto-plc4x-example via the GitHub API on 2026-10-28, source not read; outside the pinned baseline"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/integrations.md"
 scope = """\
   No Ditto integration in apache/plc4x or apache/plc4x-extras. The only match is the third-party example repository JulianFeinauer/ditto-plc4x-example ('Simple Example of how to use Apache PLC4X and \
   Eclipse Ditto'), last pushed 2020-04-08. No release tag looked at."""
@@ -2769,7 +2768,7 @@ title = "PLC4Go SPI: driver and connection bases, polling subscriber, driver man
 kind = "spi"
 language = "go"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/core.md"
 scope = """\
   plc4go/spi (default/, options/, transactions/, interceptors/, tracer/, the transports contract) plus the plc4go/pkg/api manager, registration helpers and connection cache that wire drivers to \
   transports. Generated *_plc4xgen.go files, spi/model, spi/values, spi/pool and spi/utils were not read beyond the cited ranges."""
@@ -2867,7 +2866,7 @@ title = "TCP transport (code tcp)"
 kind = "transport"
 language = "go"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/transport.md"
 scope = "plc4go/spi/transports/tcp: client-side TCP stream over net.Dialer with a bufio reader, plus the shared buffered-instance helpers in spi/transports/utils. deadline_reader.go and the tests were not read."
 protocol_code = "n/a (transport code: tcp)"
 code = { path = "plc4go/spi/transports/tcp/Transport.go", lines = "50-56", note = "code 'tcp', name 'TCP/IP Socket Transport'" }
@@ -2909,7 +2908,7 @@ title = "UDP transport (code udp)"
 kind = "transport"
 language = "go"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/transport.md"
 scope = "plc4go/spi/transports/udp: UDP datagrams exposed as a byte stream over a net.UDPConn and a bufio reader, either connected to a remote peer or listening only."
 protocol_code = "n/a (transport code: udp)"
 code = { path = "plc4go/spi/transports/udp/Transport.go", lines = "49-59", note = "code 'udp'; CreateTransportInstance delegates to CreateTransportInstanceForLocalAddress with no local address" }
@@ -2947,7 +2946,7 @@ title = "Serial transport (code serial)"
 kind = "transport"
 language = "go"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/transport.md"
 scope = "plc4go/spi/transports/serial and its serialport subpackage: RS-232/RS-485 ports through an in-tree serialport implementation, with optional shared ports and write pacing. Platform files under serialport/ were listed, not read."
 protocol_code = "n/a (transport code: serial)"
 code_and_create = { path = "plc4go/spi/transports/serial/Transport.go", lines = "47-68", note = "code 'serial', name 'Serial Transport'; the port name is the path of the transport URL; options parsed by parseSerialOptions" }
@@ -2995,7 +2994,7 @@ title = "PCAP playback transport (code pcap)"
 kind = "transport"
 language = "go"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/transport.md"
 scope = "plc4go/spi/transports/pcap: replays TCP or UDP payload from a pcap or pcapng file as an incoming byte stream; read-only. Built with libpcap only when cgo is on or on Windows, otherwise a stub."
 protocol_code = "n/a (transport code: pcap)"
 build_tag_real = { path = "plc4go/spi/transports/pcap/Transport.go", lines = "1", note = "go:build cgo || windows" }
@@ -3038,7 +3037,7 @@ title = "Test transport (code test)"
 kind = "transport"
 language = "go"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/transport.md"
 scope = "plc4go/spi/transports/test: in-memory transport for driver tests with injectable latency, write interception and pre-registered instances."
 protocol_code = "n/a (transport code: test)"
 create_and_options = { path = "plc4go/spi/transports/test/Transport.go", lines = "49-83", note = "code 'test'; option failTestTransport makes creation fail; simulatedLatency (default 10 ms); a pre-registered instance keyed by the transport URL wins" }
@@ -3065,7 +3064,7 @@ title = "Modbus TCP, RTU and ASCII drivers (plc4go/internal/modbus)"
 kind = "driver"
 language = "go"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/modbus.md; docs/parity/modbus-serial.md"
 scope = """\
   One Go package serves three protocol codes through a 'flavor' on a shared Connection, Reader and Writer: modbus-tcp, modbus-rtu and modbus-ascii. Generated readwrite model code (including the \
   CRC and LRC checksum fields) is not driver logic and was not read."""
@@ -3177,7 +3176,7 @@ title = "Siemens S7 driver (plc4go/internal/s7, protocol code s7)"
 kind = "driver"
 language = "go"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/s7.md"
 scope = """\
   S7Comm over COTP over TCP port 102, implemented entirely in the driver (COTP is not a separate transport here). Reader.go, Writer.go, Subscriber.go and UserDataService.go were read only at \
   the cited ranges; generated readwrite code is not driver logic."""
@@ -3266,7 +3265,7 @@ title = "OPC UA client driver (plc4go/internal/opcua, protocol code opcua)"
 kind = "driver"
 language = "go"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/opcua.md"
 scope = """\
   Hand-written OPC UA binary client over opc.tcp: Driver, Configuration, Connection, SecureChannel, EncryptionHandler, Reader, Writer, Subscriber, SubscriptionHandle, TagHandler, MessageCodec. \
   Generated readwrite code is not driver logic. SecureChannel.go (1576 lines) was read only at the cited ranges."""
@@ -3434,7 +3433,7 @@ title = "BACnet/IP (PLC4Go)"
 kind = "driver"
 language = "go"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/bacnet.md"
 scope = """\
   plc4go/internal/bacnetip, protocol code bacnet-ip, BACnet/IP over UDP (BVLC/NPDU/APDU), wire model generated from protocols/bacnetip (not driver logic). Compared with manifest \
   inventory.bacnet."""
@@ -3529,7 +3528,7 @@ title = "Clipsal C-Bus (PLC4Go)"
 kind = "driver"
 language = "go"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/cbus.md"
 scope = """\
   plc4go/internal/cbus, protocol code c-bus, C-Bus (CNI over TCP) with SAL, CAL and MMI handling. Wire model generated from protocols/c-bus (not driver logic). Compared with manifest \
   inventory.c_bus."""
@@ -3609,7 +3608,7 @@ title = "KNXnet/IP (PLC4Go)"
 kind = "driver"
 language = "go"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/knxnetip.md"
 scope = """\
   plc4go/internal/knxnetip, protocol code knxnet-ip, KNXnet/IP tunneling over UDP (port 3671) with group-address and device-level access. Wire model generated from protocols/knxnetip (not \
   driver logic). Compared with manifest inventory.knxnetip."""
@@ -3713,7 +3712,7 @@ title = "Beckhoff TwinCAT ADS (PLC4Go)"
 kind = "driver"
 language = "go"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/ads.md"
 scope = """\
   plc4go/internal/ads, protocol code ads, ADS over AMS/TCP (default port ADSTCPDEFAULTPORT) and UDP discovery. Wire models generated from protocols/ads (not driver logic). Compared with manifest \
   inventory.ads."""
@@ -3826,7 +3825,7 @@ title = "EtherNet/IP (CIP) driver with Logix alias (plc4go/internal/eip)"
 kind = "driver"
 language = "go"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/eip.md"
 scope = "plc4go/internal/eip. Protocol code 'eip' (NewDriver) and 'logix' (NewLogixDriver, same Driver struct with forceLittleEndian). TCP 44818 EIP encapsulation, CIP Read/Write Tag, UDP broadcast ListIdentity discovery."
 protocol_code = "eip (alias: logix)"
 go_ctor = { path = "plc4go/internal/eip/Driver.go", lines = "51-64", note = "NewDriver registers 'eip', 'EthernetIP', default transport tcp" }
@@ -3917,7 +3916,7 @@ title = "Allen-Bradley ETH (DF1 over CIP encapsulation) driver (plc4go/internal/
 kind = "driver"
 language = "go"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/ab-eth.md"
 scope = "plc4go/internal/abeth. Read-only legacy AB PLC-5/SLC 'N-file' addressing, CIP encapsulation over TCP port 2222."
 protocol_code = "ab-eth"
 go_driver_consts = { path = "plc4go/internal/abeth/Driver.go", lines = "39-57", note = "port 2222, concurrency 1, tcp+test" }
@@ -3988,7 +3987,7 @@ title = "Firmata driver (plc4go/internal/firmata)"
 kind = "driver"
 language = "go"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/firmata.md"
 scope = "plc4go/internal/firmata. Firmata over serial (default), TCP (default port 3030) or test transport. Digital write and push subscriptions only."
 protocol_code = "firmata"
 go_driver = { path = "plc4go/internal/firmata/Driver.go", lines = "36-53", note = "serial default, port 3030, serial+tcp+test" }
@@ -4043,7 +4042,7 @@ title = "IEC 60870-5-104 driver (plc4go/internal/iec608705104)"
 kind = "driver"
 language = "go"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/iec-60870.md"
 scope = "plc4go/internal/iec608705104. Controlling station over TCP (port 2404); subscribe-only, receives unsolicited I-format ASDUs."
 protocol_code = "iec-60870-5-104"
 go_driver = { path = "plc4go/internal/iec608705104/Driver.go", lines = "38-49", note = "tcp default, tcp+test" }
@@ -4117,7 +4116,7 @@ title = "Simulated in-memory test driver (plc4go/internal/simulated)"
 kind = "driver"
 language = "go"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/sim.md"
 scope = "plc4go/internal/simulated. In-process device with RANDOM, STATE and STDOUT tags, no transport; Go's own simulator, distinct from Stonecrab's."
 protocol_code = "simulated"
 go_ctor = { path = "plc4go/internal/simulated/Driver.go", lines = "51-51", note = "code 'simulated', transport 'none'" }
@@ -4169,7 +4168,7 @@ title = "SLMP (MELSEC) 3E driver (plc4go/internal/slmp)"
 kind = "driver"
 language = "go"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/slmp.md"
 scope = "plc4go/internal/slmp. 3E binary frame over TCP (default port 5007), word devices D, W, R only, Batch Read 0x0401 and Batch Write 0x1401 in word units."
 protocol_code = "slmp"
 go_port = { path = "plc4go/internal/slmp/Driver.go", lines = "50-60", note = "SlmpPort, tcp+test" }
@@ -4225,7 +4224,7 @@ title = "UMAS (Schneider Modicon) driver (plc4go/internal/umas)"
 kind = "driver"
 language = "go"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/umas.md"
 scope = "plc4go/internal/umas. UMAS tunnelled in Modbus/TCP function code 0x5A (default port 502), symbolic tags, data-dictionary browse."
 protocol_code = "umas"
 go_driver = { path = "plc4go/internal/umas/Driver.go", lines = "40-58", note = "tcp default, UmasPort 502, tcp+test" }
@@ -4291,7 +4290,7 @@ title = "plc4xGenerator (Go code generator for Serialize and String methods)"
 kind = "tool"
 language = "go"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/tools.md"
 scope = """\
   plc4go/tools/plc4xGenerator. A go:generate/`go tool` command, registered in go.mod as a tool. It parses a Go package with golang.org/x/tools/go/packages and, for each named struct type \
   (-type), writes <type>_plc4xgen.go with Serialize(), SerializeWithWriteBuffer() and String() methods that emit the struct's fields through plc4x's WriteBuffer, honouring struct tags ignore, \
@@ -4315,7 +4314,7 @@ title = "plc4xLicencer (prepends the Apache licence header to a generated file)"
 kind = "tool"
 language = "go"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/tools.md"
 scope = """\
   plc4go/tools/plc4xLicencer. A small command that reads the existing output file (default <dir>/<type>_string.go, lower-cased), prepends the contents of the licence header file found by \
   searching upward from the working directory (-licenseFile, default .plc4xLicencer.header) and writes the file back, printing 'Fixed plc4x license of <file>'. Its usage text and log prefix \
@@ -4334,7 +4333,7 @@ title = "plc4c driver base and API (plc4c/api, plc4c/spi)"
 kind = "spi"
 language = "c"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/core.md"
 scope = """\
   C API headers (plc4c/api/include/plc4c) and SPI sources (plc4c/spi/src): system, connection, read/write/subscribe request plumbing, driver and transport vtables, parse \
   context. Generated model code, the bit-level write buffers and plc4c_data were not read in depth."""
@@ -4406,7 +4405,7 @@ title = "plc4c Modbus TCP driver"
 kind = "driver"
 language = "c"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/modbus.md"
 scope = "plc4c/drivers/modbus: Modbus TCP only (protocol code modbus-tcp). RTU and ASCII are not driver code here; the generated ADU model can express them but the driver always parses MODBUS_TCP."
 protocol_code = "modbus-tcp"
 driver_create = { path = "plc4c/drivers/modbus/src/driver_modbus.c", lines = "24-62", note = """\
@@ -4479,7 +4478,7 @@ title = "plc4c Siemens S7 driver"
 kind = "driver"
 language = "c"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/s7.md"
 scope = "plc4c/drivers/s7: S7Comm over COTP over TPKT on a tcp transport; read and write only. Protocol code s7. No S7H mode."
 protocol_code = "s7"
 driver_create = { path = "plc4c/drivers/s7/src/driver_s7.c", lines = "25-68", note = """\
@@ -4559,7 +4558,7 @@ title = "plc4c PLC4X proxy-protocol client driver"
 kind = "driver"
 language = "c"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/plc4x-proxy.md"
 scope = "plc4c/drivers/plc4x: skeleton client for the PLC4X proxy protocol. The connect path only partly works; read and write are not usable."
 protocol_code = "plc4c (the code string in driver_create; the Java driver uses 'plc4x')"
 driver_create = { path = "plc4c/drivers/plc4x/src/driver_plc4x.c", lines = "25-62", note = """\
@@ -4616,7 +4615,7 @@ title = "plc4c simulated driver"
 kind = "driver"
 language = "c"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/sim.md"
 scope = "plc4c/drivers/simulated: in-process stub driver (single source file) over the dummy transport."
 protocol_code = "simulated"
 driver_create = { path = "plc4c/drivers/simulated/src/driver_simulated.c", lines = "411-433", note = """\
@@ -4665,7 +4664,7 @@ title = "plc4c TCP transport (BSD sockets / WinSock)"
 kind = "transport"
 language = "c"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/transport.md"
 scope = "plc4c/transports/tcp: client TCP."
 protocol_code = "n/a (transport code: tcp)"
 config_struct = { path = "plc4c/transports/tcp/include/plc4c/transport_tcp.h", lines = "28-34", note = "address, uint16 port, unsigned int sockfd." }
@@ -4708,7 +4707,7 @@ title = "plc4c serial transport (stub)"
 kind = "transport"
 language = "c"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/transport.md"
 scope = "plc4c/transports/serial: placeholder; every function returns OK."
 protocol_code = "n/a (transport code: serial)"
 stub = { path = "plc4c/transports/serial/src/transport_serial.c", lines = "24-41", note = "open, close, send_message, select_message all return OK without doing anything; select_message leaves *message unset." }
@@ -4732,7 +4731,7 @@ title = "plc4c dummy transport (no I/O)"
 kind = "transport"
 language = "c"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/transport.md"
 scope = "plc4c/transports/dummy: used as the simulated driver's default transport."
 protocol_code = "n/a (transport code: dummy)"
 create = { path = "plc4c/transports/dummy/src/transport_dummy.c", lines = "24-34", note = "open, close, send_message and select_message are NULL; configure is never assigned." }
@@ -4751,7 +4750,7 @@ title = "plc4c plc4x-server (socket chat stub)"
 kind = "tool"
 language = "c"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/tools.md"
 scope = "plc4c/tools/plc4x-server/src/plc4x_server.c, 128 lines. Listens on the generated PLC4X default TCP port constant, accepts one client and runs a line chat with stdin. It does not speak the PLC4X proxy protocol."
 protocol_code = "n/a"
 chat_loop = { path = "plc4c/tools/plc4x-server/src/plc4x_server.c", lines = "35-70", note = """\
@@ -4770,7 +4769,7 @@ title = "PLC4Net KNXnet/IP (generated model only, no hand-written driver)"
 kind = "driver"
 language = "csharp"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/knxnetip.md"
 scope = "plc4net/drivers/knxnetip and plc4net/drivers/knxnetip-test at v1.0.0."
 protocol_code = "none (no C# class declares a protocol code; only the Java entry has one)"
 driver_dir_is_generated_only = { path = "plc4net/drivers/knxnetip/src/drivers/knxnetip/readwrite/model/KnxDatapoint.cs", lines = "20-22", note = """\
@@ -4817,7 +4816,7 @@ title = "PLC4Net api and spi (interfaces, buffers and values only; no driver bas
 kind = "spi"
 language = "csharp"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/core.md"
 scope = "plc4net/api and plc4net/spi at v1.0.0."
 protocol_code = "n/a"
 driver_iface = { path = "plc4net/api/api/IPlcDriver.cs", lines = "28-56", note = "IPlcDriver: ProtocolCode, ProtocolName, ConnectAsync(connectionString[, authentication]) only. No capability flags, no discovery builder, no prepareTag." }
@@ -4859,7 +4858,7 @@ title = "PLC4Py api and spi (asyncio, pluggy plugin loading)"
 kind = "spi"
 language = "python"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/core.md"
 scope = "plc4py/plc4py/{api,spi,utils,PlcDriverManager.py,drivers/PlcDriverLoader.py} at v1.0.0."
 protocol_code = "n/a"
 driver_api = { path = "plc4py/plc4py/api/PlcDriver.py", lines = "28-70", note = "PlcDriverMetaData(can_discover=False); PlcDriver.get_connection(url, authentication) abstract; discovery_request_builder raises PlcNotImplementedException." }
@@ -4923,7 +4922,7 @@ title = "PLC4Py mock driver"
 kind = "driver"
 language = "python"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/sim.md"
 scope = "plc4py/plc4py/drivers/mock."
 protocol_code = "mock"
 device = { path = "plc4py/plc4py/drivers/mock/MockConnection.py", lines = "51-71", note = "MockDevice.read: BOOL -> PlcBOOL(False), INT -> PlcINT(0), else raise PlcFieldParseException." }
@@ -4960,7 +4959,7 @@ title = "PLC4Py Modbus TCP driver"
 kind = "driver"
 language = "python"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/modbus.md"
 scope = "plc4py/plc4py/drivers/modbus; the PDU/ADU model is generated under plc4py/plc4py/protocols/modbus/readwrite."
 protocol_code = "modbus-tcp (ModbusDriver.protocol_code, line 153); the pluggy loader key is 'modbus' (line 209), so the two disagree"
 driver_and_connection = { path = "plc4py/plc4py/drivers/modbus/ModbusConnection.py", lines = "52-209", note = """\
@@ -5024,7 +5023,7 @@ title = "PLC4Py UMAS (Schneider) driver"
 kind = "driver"
 language = "python"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/umas.md"
 scope = "plc4py/plc4py/drivers/umas; the UMAS PDUs are generated under plc4py/plc4py/protocols/umas/readwrite."
 protocol_code = "umas"
 connection = { path = "plc4py/plc4py/drivers/umas/UmasConnection.py", lines = "58-188", note = """\
@@ -5086,7 +5085,7 @@ title = "PLC4Py TCP transport"
 kind = "transport"
 language = "python"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/transport.md"
 scope = "plc4py/plc4py/spi/transport/TCPTransport.py and Plc4xBaseTransport.py."
 protocol_code = "n/a (transport code: tcp)"
 tcp = { path = "plc4py/plc4py/spi/transport/TCPTransport.py", lines = "29-64", note = """\
@@ -5112,7 +5111,7 @@ title = "PLC4Py mock transport"
 kind = "transport"
 language = "python"
 verified_against = "sparse checkout of commit ea229918f5d07700e04d7d69ab1645da679cb700 (tag v1.0.0), read 2026-10-28 for S42"
-parity_record = "none yet (S43)"
+parity_record = "docs/parity/transport.md"
 scope = "plc4py/plc4py/spi/transport/MockTransport.py."
 protocol_code = "n/a (transport code: mock)"
 mock_transport = { path = "plc4py/plc4py/spi/transport/MockTransport.py", lines = "32-67", note = """\

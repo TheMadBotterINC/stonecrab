@@ -350,6 +350,7 @@ commit; gates named were run locally before that commit.
 | S47 | 2026-10-28 | Modbus ping: the connection overrides `Connection::ping` with one read of the configured `ping-address` (default `4x00001:BOOL`, its area's function code and width, the address's unit id) through the read slot and session, bounded by `timeouts.request`, no retry; `Capabilities.ping` is true. Quirk (d) decided: matched upstream, so any correlated reply, an exception PDU included, is success; silence is `Timeout`, a closed connection `Disconnected`, other failures keep their kinds (MB-QUIRK-D reproduced; MB-TCP-PING automated-verified, including a pymodbus case where a refused read still answers the ping). The contract suite has 26 cases (new: a supported ping answers and changes no state; a silent device makes it a Timeout), the interop job expects 12 tests, COMPATIBILITY splits ping from discover | check, coverage, lint-attrs, parity, examples, interop |
 | S36, S45 (fix) | 2026-10-29 | The blocking `semver` job failed on run 40793164568: S45 inserted the write variants and S36 `InvalidRange` in the middle of the published `ModbusPdu` and `ProfileError` enums, shifting implicit discriminants (`enum_no_repr_variant_discriminant_changed`). The new variants now follow the published ones (no behavior change); CODING_STANDARDS 9.10 says so, and cargo-semver-checks 0.51.0 is pinned in mise with a `semver` task so the check runs before a push | check, coverage, semver (local, cargo-semver-checks 0.51.0) |
 | S42 | 2026-10-29 | Non-Java inventory of PLC4X v1.0.0 from the pinned checkout: 39 more `[inventory.*]` entries (22 Go: the SPI, five transports, 14 drivers, two tools; 9 C: SPI, four drivers, three transports, the plc4x-server stub; 2 C#: generated KNXnet/IP model only, no driver; 6 Python: SPI, mock, Modbus, UMAS, two transports), each compared with its Java entry, and a `[[backlog]]` table of 52 capabilities that exist outside Java and are absent or weaker in Java (for example Go BACnet/IP read, write, discovery and COV, Go C-Bus, Python UMAS system-bit addresses). Pending item "non-Java implementations" closed; the plan's section 4 cells that waited on S42 are filled; S41's plc4x-server citation corrected; docs only | TOML parse, ASCII check, 90 spot checks (three Go claims dropped, one citation corrected) |
+| S43 | 2026-10-29 | One parity record per upstream protocol from the S41 and S42 inventory: 19 protocol files (S7, PROFINET, EtherNet/IP with Logix, ADS, AB-ETH, OPC UA, Modbus RTU and ASCII, SLMP, UMAS, the PLC4X proxy, BACnet/IP, KNXnet/IP, C-Bus, CANopen, generic CAN, IEC 60870-5-104, Firmata, Open-Protocol with DF1, ctrlX) plus `tools.md` and `integrations.md` (E6's tracked list), upstream transport rows in `transport.md`, and the release matrix in `docs/COMPATIBILITY.md`; rows are planned (milestone) or deferred (reason), and every planned row names a `planned:` test id (pending item "Map every required behavior" closed). KNXnet/IP moved to M5 because a working Java driver exists (the plan's "Non-Java backlog" came from the corrected website lead); every manifest entry now names its parity record; docs only | parity (and its self-test), TOML parse, row-shape and unique-id checks |
 
 ## Verified evidence and reproduction
 
@@ -565,15 +566,14 @@ in its S31 addendum, the parity gate.
   (fingerprint, SHA-512 and the trust caveat are in the manifest's `[signature]` table);
   the archive contents were not inventoried against the pinned commit.
 - `inventory_complete = false`: S41 (2026-10-28) closed the source inventory and the
-  Modbus RTU/ASCII item, S04b the step-format comparison and S42 the non-Java inventory;
-  the open items in the manifest `[pending]` table are:
-  1. Map every required behavior to a planned test ID (S43).
-  2. Review all configuration and address aliases before implementation.
-  3. Inspect the generated `DataItem` behavior for the TIME/DATE family (generated code
+  Modbus RTU/ASCII item, S04b the step-format comparison, S42 the non-Java inventory and
+  S43 the behavior-to-test mapping; the open items in the manifest `[pending]` table are:
+  1. Review all configuration and address aliases before implementation.
+  2. Inspect the generated `DataItem` behavior for the TIME/DATE family (generated code
      is not in the repository).
-  4. Read the test transport internals of the upstream driver test-suite runner (S04b
+  3. Read the test transport internals of the upstream driver test-suite runner (S04b
      settled which XML each Modbus IT loads).
-  5. Check the Modbus Application Protocol V1.1b section numbers cited in
+  4. Check the Modbus Application Protocol V1.1b section numbers cited in
      `docs/parity/modbus.md` against a retained copy.
 
 **M0 is not complete.** The manifest holds 101 `[inventory.*]` entries with file and line
@@ -582,10 +582,13 @@ evidence at the pinned commit: from S41 the Java API and SPI, every PLC4J driver
 and pointers to the tools and integrations outside `apache/plc4x` (`apache/plc4x-extras`
 v1.0.0, `apache/camel`, `apache/streampipes`); from S42 the Go, C, C# and Python
 implementations. Its `[[backlog]]` table (52 rows) lists what exists outside Java and is
-absent or weaker in Java. Only the Modbus TCP subset has a parity record:
-`docs/parity/modbus.md` carries stable row ids with test ids, a divergence table with
-references and an UNVERIFIED list (S43 adds the other records). None of the open items
-gates the alpha. Every divergence row now cites a protocol section, a drafted upstream
+absent or weaker in Java, and every entry names its parity record. Since S43 every
+upstream protocol has one under `docs/parity/` (21 new records, planned or deferred rows,
+every planned row naming a `planned:` test id), with `tools.md`, `integrations.md` (the
+tracked list of decision E6) and upstream transport rows in `transport.md`;
+`docs/COMPATIBILITY.md` lists every upstream driver, transport, tool and integration with
+its support level. Only Modbus TCP is implemented. None of the open items gates the
+alpha. Every divergence row now cites a protocol section, a drafted upstream
 issue (`docs/evidence/upstream-issues/`, not filed: filing needs the maintainer's
 approval) or the reason none was drafted.
 
