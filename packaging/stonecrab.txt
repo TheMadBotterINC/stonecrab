@@ -44,6 +44,7 @@ src/modbus/pdu.rs
 src/modbus/session.rs
 src/modbus.rs
 src/order.rs
+src/polling.rs
 src/read_response.rs
 src/registry.rs
 src/request.rs

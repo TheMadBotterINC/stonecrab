@@ -82,15 +82,20 @@ mod tests {
             "write is claimed at the simulator level"
         );
 
-        let rest = level_of("Subscribe, browse and discover");
+        let subscribe = level_of("Subscribe");
         assert_eq!(
-            rest, "not supported",
-            "the README says they are not supported"
+            subscribe, "simulator-tested",
+            "polling subscriptions are claimed at the simulator level (S55)"
         );
         assert_eq!(
             capabilities.subscribe,
-            SubscriptionMode::Unsupported,
+            SubscriptionMode::Polling,
             "subscribe"
+        );
+        let rest = level_of("Browse and discover");
+        assert_eq!(
+            rest, "not supported",
+            "the README says they are not supported"
         );
         assert!(!capabilities.browse, "browse");
         assert!(!capabilities.discover, "discover");

@@ -206,7 +206,11 @@ No Tokio, executor or network dependency.
   (`Backpressure`, `CoalesceLatest`, `DropOldest`), the `Subscription` handle and event
   stream with `LossCounters`, the producer side `SubscriptionSender`, a queue bounded by
   `ResourceLimits::max_queued_events` (G10), and a provided `Connection::subscribe` that
-  returns `Unsupported(Subscribe)` until a driver overrides it (polling comes in S55).
+  returns `Unsupported(Subscribe)` until a driver overrides it. Since S55 the simulator and
+  Modbus subscribe by polling (private `polling` module): the subscription samples its tags
+  through the driver's own read path while its consumer waits in `recv`, skips and counts
+  ticks it could not take (`LossCounters::skipped`), and refuses Event, and change-of-state
+  on a clock that never sleeps, before any I/O.
 
 ### `stonecrab::codec`, always built
 
@@ -276,7 +280,7 @@ Driver)` (declared convention passed as `AddressOptions`), and
 `ScriptedPeer`, `ScriptedPeerFactory`, `FakeTransport`, `FakeTransportFactory`,
 `CountingFactory`, `LengthPrefixedFramer` (the sanctioned doubles of CODING_STANDARDS
 13.5), the golden-vector loader and `InteropMap`, and the
-`ContractSuite` every driver runs (27 cases since S54; skips are named, never silent), which driver
+`ContractSuite` every driver runs (33 cases since S55; skips are named, never silent), which driver
 authors can run against their own driver. Contract
 results: simulator 22 passed and 1 skip; Modbus over the fake transport 21 and 2; over
 loopback `ScriptedPeer` 18 and 5; against pymodbus 14 and 9.
@@ -378,6 +382,7 @@ commit; gates named were run locally before that commit.
 | S51 | 2026-10-29 | The gap question and two address conventions: MB-READ-GAP decided as a divergence with evidence (upstream merges unconditionally while the span fits, reading the holes between tags, with no option of its own; matching it would turn a hole in a device map into exception 02 for every tag of the merged request), so the batcher keeps adjacent-or-overlapping merging and a new test pins that a hole is never read; `AddressConvention` gains `ZeroBased` and `OneBased40001` (exact definitions in the ADR-0015 addendum; `OneBased40001` reads numbers as the plc4x convention does), accepted by the address grammar, the connection string and sensor profiles; the address fuzz target reads every input under each convention, with five new seeds | check, coverage, lint-attrs, parity, examples, semver, fuzz_modbus_address 20 s |
 | S52a | 2026-10-29 | A second independent interop peer: libmodbus 3.1.11's `unit-test-server`, built in a two-stage image from the sources Debian's `libmodbus-dev` 3.1.11-2 ships (base `debian:trixie-slim` pinned by digest, the two source files checked by sha256, non-root, port 1502, restarted after every connection by `serve.sh`); nothing of libmodbus is copied, the `unit-test.h` constants are transcribed with their BSD-3-Clause source. Ten tests (`modbus_interop_libmodbus.rs`, a new CI job `interop-libmodbus` and `mise run interop` for both peers): reads at unit 17, FC15, FC06 and FC16 writes read back (REAL under all four byte orders), exception 06 at 0x170, the wrong-TID-and-unit reply at 0x171 discarded with the session usable, the 500 ms reply within and beyond a deadline, a byte-at-a-time reply reassembled, and the short FC03 reply as `MalformedData` (without raw bytes: a recorded gap); the shared `Peer` helper moved to `tests/support/interop.rs` | check, coverage, lint-attrs, parity, semver, interop for both peers (80 of 80 repeated local runs) |
 | S58 (fix) | 2026-10-29 | The first hosted run with S58 (40806708069) failed in its Linux-only by-name test: it asked a pseudo-terminal for 7E2, and Linux's pty driver forces eight data bits and no parity (`pty_set_termios`), so serial2 reported "failed to apply some or all settings". Checked with termios in a Linux container: a pty keeps the baud rate, two stop bits and XON/XOFF. The test now opens 19200 8N2 XON/XOFF, and a new test pins that a setting the port refuses fails the open as `Disconnected` | fmt; clippy of the Linux-only tests with their cfg widened on macOS; the termios behavior checked in a Linux container |
+| S55 | 2026-10-29 | Polling subscriptions for the simulator and Modbus (`SubscriptionMode::Polling`): a private `polling` module plans the subscription before any I/O (Event refused; ChangeOfState refused on a clock that never sleeps; cyclic at the request's interval, change-of-state at upstream's 1000 ms) and the `Subscription` drives its producer while its consumer waits in `recv` (no spawned task: the core has no executor and the contract suite runs on `block_on_with`). Ticks sample on a grid through the connection's read path and skip, counted in `LossCounters::skipped`, when the slot is busy, the link is being reopened or nobody waits; `recv` takes `&mut self` (two pending receives do not compile); a panic in the producer ends it without aborting. Both connections hold their state in a private `Arc<Link>` so the producer never outlives them. Six contract cases (33); ADR-0020 addendum; the verification pass found a change-of-state spin, lost wakeups between concurrent receives and doc overstatements, all fixed | check, coverage (core, modbus and sim 100%), lint-attrs, parity, examples, semver, package list, interop; an independent verification pass (concurrency and design lenses), a fix round and a recheck |
 
 ## Verified evidence and reproduction
 

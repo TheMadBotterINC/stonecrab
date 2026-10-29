@@ -61,7 +61,15 @@ parity with it. Stonecrab-owned rows and divergences are recorded in the
   addresses; one operation in flight at a time (a second one fails with `Backpressure`,
   there is no wait queue); deadlines and cancellation honored on the connection's clock;
   whole-request read retry under the configured `RetryPolicy`; `Diagnostics` on every
-  error; `tracing` spans.
+  error; `tracing` spans; polling subscriptions (S55, `SIM-SUBSCRIBE`): `subscribe` refuses
+  an event subscription and polls cyclic and change-of-state ones with the producer the
+  Modbus driver uses, one read per tick on the connection's clock while
+  `Subscription::recv` waits, skipped ticks counted in `LossCounters::skipped`, and the
+  subscription ends when the connection closes or a scripted disconnect fails it. On the
+  default `RealtimeClock`, whose sleeps resolve at once, a tick is due whenever `recv`
+  asks, so the disclosed interval paces nothing and each `recv` of a cyclic subscription
+  takes one fresh sample, and a change-of-state subscription is refused with
+  `Unsupported(Subscribe)`; inject a `FakeClock` to see ticks on the interval.
 - `FailureScript` and `FailureStep` (slice S12): a bounded queue of scripted faults on the
   device that connections consume one per operation. See "Failure script" below.
 - `RealtimeClock`: a `std`-only `Clock` whose `now()` is `Instant::now()`, whose
@@ -86,7 +94,8 @@ in the connection's `Capabilities` and enforced: the simulator never splits a ba
 | Connect, close and connection state | simulator-tested |
 | Read, including `RANDOM` and ramps | simulator-tested |
 | Write, including `SINK` | simulator-tested |
-| Subscribe, browse and discover | not supported |
+| Subscribe by polling: cyclic and change-of-state, event refused; on the default `RealtimeClock` the interval is not paced and change-of-state is refused | simulator-tested |
+| Browse and discover | not supported |
 | Scripted acquisition failures (delay, timeout, disconnect, device exception) | simulator-tested |
 | Bounded read retry | simulator-tested |
 | Common driver contract suite | simulator-tested |

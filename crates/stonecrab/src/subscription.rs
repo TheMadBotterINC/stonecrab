@@ -1,9 +1,17 @@
+//! The bounded event queue of a subscription and its two ends (ADR-0020).
+//!
+//! Two locks live here: the queue's, which both ends share, and the poller's, which only a
+//! [`Subscription`] that drives its own producer has (ADR-0020, addendum S55). The poller's
+//! lock is always taken first: the producer it guards takes the queue's lock while it is
+//! polled, and nothing takes the poller's lock while it holds the queue's.
+
 use std::collections::VecDeque;
 use std::fmt;
 use std::num::NonZeroUsize;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::task::{Context, Poll};
+use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use crate::future::{WakerSlots, wake_all};
@@ -16,7 +24,8 @@ use crate::{
 /// A snapshot: the counters only grow while the subscription lives, and
 /// [`Subscription::unsubscribe`] returns the final values. Which counter a policy feeds is
 /// documented on [`QueuePolicy`]; [`QueuePolicy::Backpressure`] loses nothing and leaves
-/// both at zero.
+/// `dropped` and `coalesced` at zero. `skipped` counts samples a polling subscription did
+/// not take, whatever the policy.
 ///
 /// # Compatibility: docs/parity/core.md#CORE-SUBSCRIPTION
 /// A Stonecrab addition: upstream counts no lost events.
@@ -34,9 +43,15 @@ pub struct LossCounters {
     pub dropped: u64,
     /// Pending events replaced by a newer event for the same tag.
     pub coalesced: u64,
+    /// Ticks of a polling subscription that came due and were not sampled: the previous
+    /// read was still running, the consumer was not waiting for an event, the connection's
+    /// single in-flight slot was taken, or the link was being re-established. A skipped
+    /// tick is never made up later (SPEC.md: skip missed ticks instead of flooding a
+    /// recovering device).
+    pub skipped: u64,
 }
 
-/// The queue both ends share, guarded by one mutex (the only lock of this module).
+/// The queue both ends share, guarded by its own mutex (see the module documentation).
 struct Queue {
     items: VecDeque<ReadItem>,
     capacity: NonZeroUsize,
@@ -97,6 +112,69 @@ struct Shared {
     queue: Mutex<Queue>,
 }
 
+/// A producer that a [`Subscription`] drives itself from [`Subscription::recv`]: the polling
+/// producer future of a driver without an executor of its own (ADR-0020, addendum S55).
+type Poller = Pin<Box<dyn Future<Output = ()> + Send>>;
+
+/// A driven producer and the gate it shares with the `recv` that drives it.
+struct Driven {
+    running: Poller,
+    gate: Arc<Gate>,
+}
+
+/// What a polling producer and the `recv` that drives it tell each other: the producer
+/// says whether a read is in flight, and a `recv` dropped while it is says to cancel it.
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "unreachable_pub forbids plain pub in a private module"
+)]
+///
+/// Both flags are `Relaxed`: they gate no other data. The producer touches them only while
+/// it is polled, which happens under the subscription's poller lock, and the `recv` side
+/// touches them only under that lock too, so the lock orders every access.
+pub(crate) struct Gate {
+    /// The producer's read is in flight: set when it starts, cleared when it ends.
+    reading: AtomicBool,
+    /// A dropped `recv` asks the producer to drop its read in flight; the producer clears it.
+    abandon: AtomicBool,
+}
+
+#[cfg(any(feature = "sim", feature = "modbus"))]
+impl Gate {
+    pub(crate) fn new() -> Arc<Self> {
+        Arc::new(Self {
+            reading: AtomicBool::new(false),
+            abandon: AtomicBool::new(false),
+        })
+    }
+
+    /// A read starts.
+    pub(crate) fn begin(&self) {
+        self.reading.store(true, Ordering::Relaxed);
+    }
+
+    /// The read ended or was cancelled.
+    pub(crate) fn end(&self) {
+        self.reading.store(false, Ordering::Relaxed);
+    }
+
+    /// Whether the read in flight must be cancelled; asking clears the request.
+    pub(crate) fn abandoned(&self) -> bool {
+        self.abandon.swap(false, Ordering::Relaxed)
+    }
+}
+
+impl Gate {
+    /// Ask for the read in flight to be cancelled; false when none is in flight.
+    fn cancel(&self) -> bool {
+        let reading = self.reading.load(Ordering::Relaxed);
+        if reading {
+            self.abandon.store(true, Ordering::Relaxed);
+        }
+        reading
+    }
+}
+
 impl Shared {
     /// Lock the queue. A poisoned lock is recovered: the critical sections move items,
     /// bump counters and move wakers, so a panic elsewhere leaves nothing half-written.
@@ -120,6 +198,31 @@ impl Shared {
 /// queued event before it reports the end with `None`; the reason is the connection's
 /// state. A reconnect does not end it (ADR-0020 decision 6).
 ///
+/// # Polling
+/// A polling subscription that a driver of this crate returns owns its producer future:
+/// nothing is spawned, because the core has no executor (`CODING_STANDARDS` 8.1). The
+/// producer runs while [`recv`](Self::recv) waits on an empty queue, so it samples while
+/// the consumer is ready for an event, and dropping or unsubscribing the subscription drops
+/// the producer with it. Ticks that come due while nobody waits are skipped and counted in
+/// [`LossCounters::skipped`], never made up in a burst. Because a sample starts only on an
+/// empty queue, a slow consumer meets its [`QueuePolicy`] only when one sample has more tags
+/// than [`ResourceLimits::max_queued_events`] ([`QueuePolicy::DropOldest`] drops, and
+/// [`QueuePolicy::Backpressure`] stalls the polling until the consumer takes an event);
+/// otherwise it sees the latest sample and the ticks it missed in `skipped`, which is the
+/// slow-consumer counter of a polling subscription. `recv` takes `&mut self`, so only one
+/// `recv` can be pending, and dropping it cancels a read it left in flight. A `recv`
+/// that is dropped more often than a read takes, for example one wrapped in a timeout
+/// shorter than the device latency, cancels every read before it ends: the subscription
+/// then delivers nothing and `skipped` grows by one per cancelled `recv`. Keep a single
+/// `recv` pending for as long as the device needs, or wait without a short timeout. A
+/// producer that panicked (a broken clock, `tracing` layer or driver) is never polled
+/// again: the panic reaches the caller of `recv` and the subscription ends; so does a
+/// `recv` with a read in flight that is dropped while its thread unwinds from a panic.
+/// On a clock whose sleeps resolve at once, such as the simulator's `RealtimeClock`, the
+/// [`interval`](Self::interval) is disclosed but paces nothing: every tick is due as soon
+/// as `recv` asks, so each `recv` of a cyclic subscription takes one fresh sample, and the
+/// drivers refuse a change-of-state subscription on such a clock.
+///
 /// # Compatibility: docs/parity/core.md#CORE-SUBSCRIPTION
 /// Corresponds to the upstream `PlcSubscriptionResponse`, its handles and the
 /// `PlcSubscriptionEvent`s their consumers receive: one handle for the whole request
@@ -138,7 +241,8 @@ impl Shared {
 ///
 /// let limits = ResourceLimits::builder().build()?;
 /// let interval = Duration::from_secs(1);
-/// let (sender, subscription) = SubscriptionSender::polling(interval, QueuePolicy::DropOldest, limits);
+/// let (sender, mut subscription) =
+///     SubscriptionSender::polling(interval, QueuePolicy::DropOldest, limits);
 /// assert_eq!(subscription.mode(), SubscriptionMode::Polling);
 /// assert_eq!(subscription.interval(), Some(interval));
 ///
@@ -158,6 +262,8 @@ pub struct Subscription {
     shared: Arc<Shared>,
     mode: SubscriptionMode,
     interval: Option<Duration>,
+    /// The producer this subscription drives, if it drives one; `None` once it ended.
+    poller: Mutex<Option<Driven>>,
 }
 
 impl Subscription {
@@ -170,6 +276,11 @@ impl Subscription {
 
     /// The sampling interval the driver actually uses; always present for a polling
     /// subscription.
+    ///
+    /// The interval paces the ticks on a clock that sleeps. On a clock whose sleeps resolve
+    /// at once (the simulator's default `RealtimeClock`) it is disclosed but paces nothing:
+    /// each `recv` of a cyclic subscription takes one fresh sample (see `# Polling` in the
+    /// type documentation).
     #[must_use]
     pub const fn interval(&self) -> Option<Duration> {
         self.interval
@@ -189,18 +300,26 @@ impl Subscription {
     /// Taking an event makes room for a producer that waits under
     /// [`QueuePolicy::Backpressure`].
     ///
+    /// It takes `&mut self`: one `recv` at a time drives a polling subscription's producer,
+    /// so no wake-up can go to a future that is no longer waiting.
+    ///
     /// # Cancel safety
-    /// Cancel-safe. An event is taken from the queue only when the future returns it, so
-    /// dropping a pending future loses nothing.
+    /// Cancel-safe for the queue. An event is taken from the queue only when the future
+    /// returns it, so dropping a pending future loses no event. On a polling subscription
+    /// the pending future may be reading the device; dropping it cancels that read, frees
+    /// the connection's in-flight slot and counts the tick in [`LossCounters::skipped`], so
+    /// that sample is lost.
     ///
     /// # Wire effects
-    /// None. Receiving touches no transport; the producer acquires the events.
+    /// None for a subscription with a producer of its own. On a polling subscription,
+    /// waiting on an empty queue sends the tick's read request, through the connection's
+    /// read path and so its single in-flight slot, deadline and retry policy.
     ///
     /// # Examples
     /// ```
     /// use stonecrab::{Result, Subscription};
     ///
-    /// async fn count(subscription: &Subscription) -> Result<usize> {
+    /// async fn count(subscription: &mut Subscription) -> Result<usize> {
     ///     let mut events = 0;
     ///     while subscription.recv().await?.is_some() {
     ///         events += 1;
@@ -208,11 +327,67 @@ impl Subscription {
     ///     Ok(events)
     /// }
     /// ```
-    pub fn recv(&self) -> OpFuture<'_, Option<ReadItem>> {
+    ///
+    /// Two pending `recv` futures on one subscription do not compile (E0499).
+    /// ```compile_fail,E0499
+    /// use stonecrab::Subscription;
+    ///
+    /// fn both(subscription: &mut Subscription) {
+    ///     let first = subscription.recv();
+    ///     let second = subscription.recv();
+    ///     drop((first, second));
+    /// }
+    /// ```
+    pub fn recv(&mut self) -> OpFuture<'_, Option<ReadItem>> {
         Box::pin(Recv {
-            shared: &self.shared,
+            subscription: self,
             slot: None,
+            finished: false,
         })
+    }
+
+    /// Make this subscription drive `poller`, its producer, from [`recv`](Self::recv).
+    #[cfg(any(feature = "sim", feature = "modbus"))]
+    pub(crate) fn driven_by(self, running: Poller, gate: Arc<Gate>) -> Self {
+        *self.lock_poller() = Some(Driven { running, gate });
+        self
+    }
+
+    /// Lock the poller. The lock is poisoned only by a producer that panicked while it was
+    /// polled; such a producer is dropped here, never polled again (polling a future after
+    /// its panic panics again, which aborts the process from a destructor), and dropping it
+    /// drops its sender, which ends the stream after the queue.
+    fn lock_poller(&self) -> MutexGuard<'_, Option<Driven>> {
+        self.poller.lock().unwrap_or_else(|poisoned| {
+            let mut poller = poisoned.into_inner();
+            *poller = None;
+            self.poller.clear_poison();
+            poller
+        })
+    }
+
+    /// Poll the producer once, if this subscription drives one; a producer that finished
+    /// is dropped, and with it its sender, which ends the stream after the queue.
+    fn drive(&self, cx: &mut Context<'_>) {
+        poll_driven(&mut self.lock_poller(), cx);
+    }
+
+    /// A `recv` that was waiting is gone: cancel the read it left in flight, if any. The
+    /// producer drops the read at its next poll and stops at its yield after the tick, so
+    /// this poll starts no other read. While the thread unwinds from a panic the producer
+    /// is dropped instead of polled, so no code of it runs during the unwinding.
+    fn abandon(&self) {
+        let mut poller = self.lock_poller();
+        if !poller.as_ref().is_some_and(|driven| driven.gate.cancel()) {
+            return;
+        }
+        if std::thread::panicking() {
+            let producer = poller.take();
+            drop(poller);
+            drop(producer);
+        } else {
+            poll_driven(&mut poller, &mut Context::from_waker(Waker::noop()));
+        }
     }
 
     /// End the subscription now and return the final loss counters.
@@ -241,6 +416,15 @@ impl Subscription {
     }
 }
 
+/// Poll the producer once; one that finished is dropped, and with it its sender.
+fn poll_driven(poller: &mut Option<Driven>, cx: &mut Context<'_>) {
+    if let Some(driven) = poller.as_mut()
+        && driven.running.as_mut().poll(cx).is_ready()
+    {
+        *poller = None;
+    }
+}
+
 impl Drop for Subscription {
     fn drop(&mut self) {
         self.close();
@@ -249,10 +433,17 @@ impl Drop for Subscription {
 
 impl fmt::Debug for Subscription {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The poller's lock first, as everywhere (module documentation).
+        let polling = self
+            .poller
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_some();
         let queue = self.shared.lock();
         f.debug_struct("Subscription")
             .field("mode", &self.mode)
             .field("interval", &self.interval)
+            .field("polling", &polling)
             .field("policy", &queue.policy)
             .field("capacity", &queue.capacity)
             .field("queued", &queue.items.len())
@@ -317,6 +508,7 @@ impl SubscriptionSender {
             shared: Arc::clone(&shared),
             mode: SubscriptionMode::Polling,
             interval: Some(interval),
+            poller: Mutex::new(None),
         };
         (Self { shared }, subscription)
     }
@@ -368,6 +560,18 @@ impl SubscriptionSender {
     pub fn is_closed(&self) -> bool {
         self.shared.lock().receiver_gone
     }
+
+    /// Count `ticks` samples that a polling producer did not take, in
+    /// [`LossCounters::skipped`].
+    ///
+    /// A polling producer calls it for every tick that came due while it could not sample:
+    /// its previous read was still running, its consumer was not waiting, or the
+    /// connection could not serve the read. The tick is not made up later.
+    #[cfg(any(feature = "sim", feature = "modbus"))]
+    pub(crate) fn count_skipped(&self, ticks: u64) {
+        let mut queue = self.shared.lock();
+        queue.loss.skipped = queue.loss.skipped.saturating_add(ticks);
+    }
 }
 
 impl Drop for SubscriptionSender {
@@ -395,22 +599,24 @@ impl fmt::Debug for SubscriptionSender {
 
 /// Future behind [`Subscription::recv`]; `slot` is its parked-waker id.
 struct Recv<'a> {
-    shared: &'a Shared,
+    /// Borrowed mutably so that no other `recv` can be pending (see `Subscription::recv`).
+    subscription: &'a mut Subscription,
     slot: Option<u64>,
+    /// Resolved: dropping it cancels nothing.
+    finished: bool,
 }
 
-impl Future for Recv<'_> {
-    type Output = Result<Option<ReadItem>>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = &mut *self;
-        let mut queue = this.shared.lock();
+impl Recv<'_> {
+    /// The next event or the end, if either is ready; otherwise park `cx` when given.
+    fn next(&mut self, park: Option<&Context<'_>>) -> Poll<Result<Option<ReadItem>>> {
+        let mut queue = self.subscription.shared.lock();
         let (outcome, wakers, displaced) = if let Some(item) = queue.items.pop_front() {
             (Poll::Ready(Ok(Some(item))), queue.producers.drain(), None)
         } else if queue.sender_gone {
             (Poll::Ready(Ok(None)), Vec::new(), None)
         } else {
-            let displaced = queue.consumers.register(&mut this.slot, cx.waker());
+            let displaced =
+                park.and_then(|cx| queue.consumers.register(&mut self.slot, cx.waker()));
             (Poll::Pending, Vec::new(), displaced)
         };
         // Dropped and woken after the lock: a waker may call back into the queue.
@@ -421,10 +627,31 @@ impl Future for Recv<'_> {
     }
 }
 
+impl Future for Recv<'_> {
+    type Output = Result<Option<ReadItem>>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = &mut *self;
+        // A queued event goes first; the producer samples only for a consumer that waits.
+        let outcome = match this.next(None) {
+            ready @ Poll::Ready(_) => ready,
+            Poll::Pending => {
+                this.subscription.drive(cx);
+                this.next(Some(cx))
+            }
+        };
+        this.finished = outcome.is_ready();
+        outcome
+    }
+}
+
 impl Drop for Recv<'_> {
     fn drop(&mut self) {
+        if self.slot.is_some() && !self.finished {
+            self.subscription.abandon();
+        }
         if let Some(slot) = self.slot {
-            let removed = self.shared.lock().consumers.release(slot);
+            let removed = self.subscription.shared.lock().consumers.release(slot);
             drop(removed);
         }
     }
@@ -544,13 +771,13 @@ mod tests {
 
     /// The next event when one is ready; `Ready(None)` is the end of the stream (`recv`
     /// never fails, so no error can hide behind it).
-    fn received(subscription: &Subscription) -> Poll<Option<(String, u32)>> {
+    fn received(subscription: &mut Subscription) -> Poll<Option<(String, u32)>> {
         poll(&mut subscription.recv(), Waker::noop())
             .map(|outcome| outcome.ok().flatten().as_ref().map(value))
     }
 
     /// Take the next event, which must be ready, into `delivered`.
-    fn take(subscription: &Subscription, delivered: &mut Vec<(String, u32)>) {
+    fn take(subscription: &mut Subscription, delivered: &mut Vec<(String, u32)>) {
         let next = received(subscription);
         assert!(matches!(next, Poll::Ready(Some(_))), "an event is ready");
         if let Poll::Ready(Some(item)) = next {
@@ -569,7 +796,7 @@ mod tests {
     // covers: SPEC mandatory-failure-cases / F6 queue exhaustion, slow consumer
     #[test]
     fn backpressure_holds_a_full_queue_until_the_consumer_takes_an_event() {
-        let (sender, subscription) = pair(QueuePolicy::Backpressure, 2);
+        let (sender, mut subscription) = pair(QueuePolicy::Backpressure, 2);
         sent(&sender, event("a", 1));
         sent(&sender, event("a", 2));
         let (wakes, waker) = counting();
@@ -578,7 +805,7 @@ mod tests {
         assert!(poll(&mut third, &waker).is_pending(), "and keeps waiting");
         assert_eq!(queued(&subscription).len(), 2, "never above capacity");
         assert_eq!(
-            received(&subscription),
+            received(&mut subscription),
             Poll::Ready(Some(entry("a", 1))),
             "oldest first"
         );
@@ -621,12 +848,13 @@ mod tests {
 
     #[test]
     fn dropping_a_waiting_send_or_recv_releases_its_waker_slot() {
-        let (sender, subscription) = pair(QueuePolicy::Backpressure, 1);
+        let (sender, mut subscription) = pair(QueuePolicy::Backpressure, 1);
+        let shared = Arc::clone(&subscription.shared);
         let mut waiting = subscription.recv();
         assert!(poll(&mut waiting, Waker::noop()).is_pending(), "empty");
-        assert_eq!(subscription.shared.lock().consumers.len(), 1, "parked");
+        assert_eq!(shared.lock().consumers.len(), 1, "parked");
         drop(waiting);
-        assert_eq!(subscription.shared.lock().consumers.len(), 0, "released");
+        assert_eq!(shared.lock().consumers.len(), 0, "released");
         sent(&sender, event("a", 1));
         let mut blocked = sender.send(event("a", 2));
         assert!(poll(&mut blocked, Waker::noop()).is_pending(), "full");
@@ -643,7 +871,7 @@ mod tests {
     // covers: SPEC mandatory-failure-cases / F6 slow consumer (latest-value coalescing)
     #[test]
     fn coalescing_replaces_the_pending_event_of_a_tag_in_place_and_counts_it() {
-        let (sender, subscription) = pair(QueuePolicy::CoalesceLatest, 4);
+        let (sender, mut subscription) = pair(QueuePolicy::CoalesceLatest, 4);
         sent(&sender, event("a", 1));
         sent(&sender, event("b", 1));
         sent(&sender, event("a", 2));
@@ -656,7 +884,7 @@ mod tests {
         assert_eq!(subscription.loss().coalesced, 2, "two replaced values");
         assert_eq!(subscription.loss().dropped, 0, "nothing dropped");
         assert_eq!(
-            received(&subscription),
+            received(&mut subscription),
             Poll::Ready(Some(entry("a", 3))),
             "latest a"
         );
@@ -699,7 +927,8 @@ mod tests {
             subscription.loss(),
             LossCounters {
                 dropped: 3,
-                coalesced: 0
+                coalesced: 0,
+                skipped: 0,
             },
             "every discarded event is counted"
         );
@@ -707,7 +936,7 @@ mod tests {
 
     #[test]
     fn an_event_and_the_end_of_the_producer_each_wake_a_waiting_consumer() {
-        let (sender, subscription) = pair(QueuePolicy::DropOldest, 4);
+        let (sender, mut subscription) = pair(QueuePolicy::DropOldest, 4);
         let (wakes, waker) = counting();
         let mut waiting = subscription.recv();
         assert!(poll(&mut waiting, &waker).is_pending(), "nothing yet");
@@ -730,23 +959,27 @@ mod tests {
 
     #[test]
     fn the_end_of_the_producer_delivers_the_queue_then_none_forever() {
-        let (sender, subscription) = pair(QueuePolicy::DropOldest, 4);
+        let (sender, mut subscription) = pair(QueuePolicy::DropOldest, 4);
         sent(&sender, event("a", 1));
         sent(&sender, event("b", 2));
         drop(sender);
         assert_eq!(
-            received(&subscription),
+            received(&mut subscription),
             Poll::Ready(Some(entry("a", 1))),
             "queued first"
         );
         assert_eq!(
-            received(&subscription),
+            received(&mut subscription),
             Poll::Ready(Some(entry("b", 2))),
             "queued second"
         );
-        assert_eq!(received(&subscription), Poll::Ready(None), "then the end");
         assert_eq!(
-            received(&subscription),
+            received(&mut subscription),
+            Poll::Ready(None),
+            "then the end"
+        );
+        assert_eq!(
+            received(&mut subscription),
             Poll::Ready(None),
             "and it stays ended"
         );
@@ -832,7 +1065,7 @@ mod tests {
         capacity: usize,
         ops: &[Op],
     ) -> (Vec<(String, u32)>, LossCounters, u64) {
-        let (sender, subscription) = pair(policy, capacity);
+        let (sender, mut subscription) = pair(policy, capacity);
         let mut delivered = Vec::new();
         let mut sends = 0_u32;
         for op in ops {
@@ -843,7 +1076,7 @@ mod tests {
                     if poll(&mut send, Waker::noop()).is_pending() {
                         // Backpressure: the consumer makes room, then the event goes in.
                         assert_eq!(policy, QueuePolicy::Backpressure, "only backpressure waits");
-                        take(&subscription, &mut delivered);
+                        take(&mut subscription, &mut delivered);
                         assert!(
                             matches!(poll(&mut send, Waker::noop()), Poll::Ready(Ok(()))),
                             "room lets the waiting event in"
@@ -852,7 +1085,7 @@ mod tests {
                 }
                 Op::Recv => {
                     if !subscription.shared.lock().items.is_empty() {
-                        take(&subscription, &mut delivered);
+                        take(&mut subscription, &mut delivered);
                     }
                 }
             }
@@ -862,11 +1095,11 @@ mod tests {
             );
         }
         drop(sender);
-        while let Poll::Ready(Some(item)) = received(&subscription) {
+        while let Poll::Ready(Some(item)) = received(&mut subscription) {
             delivered.push(item);
         }
         assert_eq!(
-            received(&subscription),
+            received(&mut subscription),
             Poll::Ready(None),
             "drained to the end"
         );
@@ -915,7 +1148,7 @@ mod tests {
             capacity in 4_usize..8,
             ops in ops(4),
         ) {
-            let (sender, subscription) = pair(QueuePolicy::CoalesceLatest, capacity);
+            let (sender, mut subscription) = pair(QueuePolicy::CoalesceLatest, capacity);
             let mut latest = BTreeMap::new();
             let mut sends = 0_u32;
             let mut delivered = Vec::new();
@@ -929,7 +1162,7 @@ mod tests {
                     }
                     Op::Recv => {
                         if !subscription.shared.lock().items.is_empty() {
-                            take(&subscription, &mut delivered);
+                            take(&mut subscription, &mut delivered);
                         }
                     }
                 }
@@ -945,7 +1178,7 @@ mod tests {
                 }
             }
             drop(sender);
-            while let Poll::Ready(Some(item)) = received(&subscription) {
+            while let Poll::Ready(Some(item)) = received(&mut subscription) {
                 delivered.push(item);
             }
             let loss = subscription.unsubscribe();

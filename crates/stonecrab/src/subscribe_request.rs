@@ -56,11 +56,18 @@ pub enum SubscriptionKind {
 #[non_exhaustive]
 pub enum QueuePolicy {
     /// Lose nothing: a full queue makes the producer wait until the consumer takes an
-    /// event, so a polling producer stops reading the device meanwhile.
+    /// event. A polling subscription samples only while its consumer waits in
+    /// [`Subscription::recv`](crate::Subscription::recv), so a slow consumer of one meets
+    /// skipped ticks, counted in [`LossCounters::skipped`](crate::LossCounters::skipped),
+    /// and this policy (or [`DropOldest`](Self::DropOldest)) engages only when one sample
+    /// holds more tags than `max_queued_events`; see the `# Polling` section of
+    /// [`Subscription`](crate::Subscription).
     Backpressure,
     /// Keep at most one pending event per tag, the latest: a newer event for a tag
     /// replaces the pending one in place and counts in
-    /// [`LossCounters::coalesced`](crate::LossCounters::coalesced).
+    /// [`LossCounters::coalesced`](crate::LossCounters::coalesced). A polling
+    /// subscription never queues two samples of one tag, so this policy does not engage
+    /// there.
     CoalesceLatest,
     /// Make room by discarding the oldest pending event, counted in
     /// [`LossCounters::dropped`](crate::LossCounters::dropped).

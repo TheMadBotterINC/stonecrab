@@ -43,6 +43,28 @@ placeholder.
   500 ms reply inside and past a deadline, a reply sent one byte at a time and a short reply
   to a two-register read (`MalformedData`, no raw bytes). The pymodbus tests share their
   `Peer` helper with the new ones through `tests/support/interop.rs`.
+- Polling subscriptions (slice S55, ADR-0020 addendum; additive): the simulator and
+  `modbus-tcp` override `Connection::subscribe` and report `SubscriptionMode::Polling`.
+  Cyclic subscriptions poll at their interval and deliver every reading; change-of-state
+  ones poll every 1000 ms (upstream's default, disclosed through `Subscription::interval`)
+  and deliver a tag's first outcome and each change; `Event` is refused with
+  `Unsupported(Subscribe)` before any I/O. Each tick is one read through the connection's
+  own read path (deadline, retry, batching, the single in-flight slot), the first at once
+  and then on a grid of the interval, run while `Subscription::recv` waits: no task is
+  spawned. Dropping a waiting `recv` cancels the read it left in flight. Ticks that come
+  due during a read, while nobody waits, while the slot is taken or while the link is
+  re-established are skipped, never made up, and counted in the new
+  `LossCounters::skipped`, which the polling producer bumps. Closing the connection, or
+  its terminal failure, ends a subscription after its queued events, and dropping the
+  connection without `close` ends a wait for the next tick at once. A change-of-state
+  subscription on a clock whose sleeps resolve at once (the simulator's default
+  `RealtimeClock`) is refused with `Unsupported(Subscribe)`, because its polling would
+  never pause; a cyclic one there takes one fresh sample per `recv`. `Subscription::recv`
+  now takes `&mut self`, so only one `recv` can be pending (the type is unreleased), and a
+  producer that panicked is dropped instead of polled again. The contract suite gains
+  `Requires::Subscribe` and six subscription cases (33); the unsupported-subscribe case is
+  skipped by name for both drivers. Behavior change: `Capabilities::subscribe` of both
+  drivers is `Polling` instead of `Unsupported`.
 - Subscription types and a bounded event queue (ADR-0020; additive): `SubscribeRequest`
   and its builder, `SubscriptionKind` (cyclic, change-of-state, event), `QueuePolicy`
   (backpressure, latest-value coalescing, drop-oldest), `LossCounters`, `Subscription`

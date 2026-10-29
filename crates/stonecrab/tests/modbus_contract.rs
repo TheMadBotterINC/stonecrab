@@ -65,6 +65,16 @@ mod tests {
     const UNSUPPORTED_SUBSCRIBE: &str =
         "an unsupported subscribe performs no I/O and changes no state";
 
+    /// The subscription cases (S55): the driver polls, on the fake clock.
+    const SUBSCRIPTION_CASES: [&str; 6] = [
+        "a cyclic subscription delivers one event per tick and discloses its interval",
+        "a change-of-state subscription delivers a first value and then only changes",
+        "a polling driver refuses an event subscription with no I/O",
+        "unsubscribing stops the polling reads",
+        "closing the connection ends its subscriptions after the queued events",
+        "a stalled polling read skips the ticks that came due and never bursts",
+    ];
+
     fn register_map() -> InteropMap {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../fixtures/modbus/interop/register-map.toml");
@@ -190,8 +200,9 @@ mod tests {
         );
         assert_eq!(
             report.skipped(),
-            2,
-            "exactly the unsupported-write and the unsupported-ping skips:\n{report}"
+            3,
+            "exactly the unsupported-write, the unsupported-ping and the unsupported-subscribe \
+             skips:\n{report}"
         );
         // The driver supports ping, so the unsupported-ping case has nothing to prove here
         // and the two cases of a supported ping run.
@@ -209,12 +220,22 @@ mod tests {
                 "{name} ran and passed:\n{report}"
             );
         }
-        // The driver does not subscribe yet (S55), so every queue policy meets the refusal.
+        // The driver subscribes by polling (S55): the refusal case has nothing to prove, and
+        // the subscription cases run on the fake clock (the timeout hook is there).
         assert_eq!(
             report.outcome(UNSUPPORTED_SUBSCRIBE),
-            Some(&CaseOutcome::Passed),
-            "the unsupported-subscribe case ran and passed:\n{report}"
+            Some(&CaseOutcome::Skipped(
+                "driver reports subscribe supported; the case needs it unsupported".to_owned()
+            )),
+            "the unsupported-subscribe case is skipped by name:\n{report}"
         );
+        for name in SUBSCRIPTION_CASES {
+            assert_eq!(
+                report.outcome(name),
+                Some(&CaseOutcome::Passed),
+                "{name} ran and passed:\n{report}"
+            );
+        }
         // The write cases need a driver that supports write, and this one does: the
         // read-only policy is refused with no I/O, and a write whose confirmation is lost
         // (the device applied it, the reply is swallowed) is Unknown and applied once.

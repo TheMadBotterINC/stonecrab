@@ -148,7 +148,7 @@ mod tests {
             .max_queued_events(1)
             .build()
             .expect("valid budgets");
-        let (sender, subscription) =
+        let (sender, mut subscription) =
             SubscriptionSender::polling(Duration::from_secs(1), QueuePolicy::DropOldest, limits);
         let tag = TagId::new("level").expect("valid identity");
         for value in [1, 2] {

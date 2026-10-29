@@ -14,11 +14,12 @@ use crate::{
     ConnectionState, Deadline, Diagnostics, ErrorKind, FailureCategory, ItemError, OpFuture,
     Operation, PlcError, PlcValue, ProtocolStatus, ReadItem, ReadRequest, ReadResponse,
     ReadResponseBuilder, ResourceLimits, Result, RetryPolicy, StateCell, StateWatch,
-    SubscriptionMode, Tag, TagId, Timeouts, UnknownReason, WriteItem, WriteOutcome, WriteRequest,
-    WriteResponse, WriteResponseBuilder, WriteResult,
+    SubscribeRequest, Subscription, SubscriptionMode, Tag, TagId, Timeouts, UnknownReason,
+    WriteItem, WriteOutcome, WriteRequest, WriteResponse, WriteResponseBuilder, WriteResult,
 };
 use tracing::Instrument;
 
+use crate::polling::{Lifeline, Plan};
 use crate::sim::{FailureStep, SimAddress, SimArea, SimDevice};
 
 /// The status code of a simulated device that has no tag of the requested name (the
@@ -75,10 +76,14 @@ pub(crate) struct Target {
 ///   rejection before the exchange begins, `Protocol` for what the device refused,
 ///   `Transport` for `Timeout` and `Disconnected`, `Internal` for the rest, a
 ///   cancellation while waiting among them).
-/// - **`tracing` spans** named `connect`, `read`, `write` and `close` with the fields
-///   `scheme`, `endpoint` (the device name; nothing else is in it), `op` and `request_id`
-///   (a per-connection counter that starts at 0 for `connect` and increases by one per
-///   span).
+/// - **Polling subscriptions** (ADR-0020, addendum S55): every tick reads the
+///   subscription's tags through [`Connection::read`], so it takes a step of the failure
+///   script and the single in-flight slot like any read. See
+///   [`subscribe`](Connection::subscribe).
+/// - **`tracing` spans** named `connect`, `read`, `write`, `close` and `subscribe` with the
+///   fields `scheme`, `endpoint` (the device name; nothing else is in it), `op` and
+///   `request_id` (a per-connection counter that starts at 0 for `connect` and increases by
+///   one per span).
 ///
 /// # Reads
 /// Each tag is served on its own: `STATE` reads call [`SimDevice::serve_read`], `RANDOM`
@@ -147,6 +152,13 @@ pub(crate) struct Target {
 /// # fn main() {}
 /// ```
 pub struct SimConnection {
+    /// Everything the connection is, shared with the polling producer of each subscription.
+    link: Arc<Link>,
+}
+
+/// The state of one connection: what a [`SimConnection`] owns, and what its polling
+/// subscriptions read through, holding it weakly so they never keep it alive.
+struct Link {
     clock: Arc<dyn Clock>,
     device: Arc<SimDevice>,
     name: String,
@@ -163,14 +175,16 @@ pub struct SimConnection {
     /// True while a read or write is in flight; see [`Slot`].
     in_flight: AtomicBool,
     next_request_id: AtomicU64,
+    /// Ends the polling subscriptions' wait for a tick when the connection is dropped.
+    lifeline: Lifeline,
 }
 
 impl fmt::Debug for SimConnection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SimConnection")
-            .field("device", &self.name)
-            .field("state", &self.state.current())
-            .field("latency", &self.latency)
+            .field("device", &self.link.name)
+            .field("state", &self.link.state.current())
+            .field("latency", &self.link.latency)
             .finish_non_exhaustive()
     }
 }
@@ -178,10 +192,23 @@ impl fmt::Debug for SimConnection {
 impl SimConnection {
     /// A connection in the `Disconnected` state; [`establish`](Self::establish) opens it.
     pub(crate) fn new(clock: Arc<dyn Clock>, target: Target, config: &ConnectionConfig) -> Self {
+        Self {
+            link: Arc::new(Link::new(clock, target, config)),
+        }
+    }
+
+    /// Open the connection; see [`Link::establish`].
+    pub(crate) fn establish(&self) -> OpFuture<'_, ()> {
+        self.link.establish()
+    }
+}
+
+impl Link {
+    fn new(clock: Arc<dyn Clock>, target: Target, config: &ConnectionConfig) -> Self {
         let capabilities = Capabilities {
             read: true,
             write: true,
-            subscribe: SubscriptionMode::Unsupported,
+            subscribe: SubscriptionMode::Polling,
             concurrency: NonZeroUsize::MIN,
             max_items_per_request: target.device.max_items(),
             ..Capabilities::default()
@@ -202,6 +229,7 @@ impl SimConnection {
             shutdown: CancellationToken::new(),
             in_flight: AtomicBool::new(false),
             next_request_id: AtomicU64::new(0),
+            lifeline: Lifeline::new(),
         }
     }
 
@@ -212,7 +240,7 @@ impl SimConnection {
     /// the device's failure script: `Delay` waits first, `Timeout` waits for the connect
     /// deadline and fails, `Disconnect` leaves the connection in `Failed(Disconnected)`,
     /// and any other step is consumed with a warning and has no effect.
-    pub(crate) fn establish(&self) -> OpFuture<'_, ()> {
+    fn establish(&self) -> OpFuture<'_, ()> {
         let request_id = self.next_request_id();
         let span = tracing::info_span!(
             "connect",
@@ -477,6 +505,32 @@ impl SimConnection {
     /// The deadline the request carries, or the connection's default for one without.
     fn deadline_for(&self, op: &Op<'_>, requested: Option<Deadline>) -> Result<Deadline> {
         requested.map_or_else(|| op.after(op.started, self.timeouts.request), Ok)
+    }
+
+    /// The read path of [`Connection::read`], and of every polling tick.
+    fn read(&self, request: ReadRequest) -> OpFuture<'_, ReadResponse> {
+        let request_id = self.next_request_id();
+        let span = tracing::debug_span!(
+            "read",
+            scheme = "sim",
+            endpoint = %self.name,
+            op = "read",
+            request_id
+        );
+        Box::pin(self.read_inner(request).instrument(span))
+    }
+
+    /// Check a subscription as a read is checked, before any I/O, and plan its polling.
+    fn plan_subscription(&self, request: &SubscribeRequest) -> Result<Plan> {
+        let op = self.op(Operation::Subscribe);
+        let plan = op.check(
+            Plan::new(request, self.limits, &*self.clock),
+            FailureCategory::Validation,
+        )?;
+        self.resolve(&op, plan.read().items().iter()).map(drop)?;
+        let deadline = self.deadline_for(&op, request.deadline())?;
+        self.gate(&op, request.cancel(), deadline)?;
+        Ok(plan)
     }
 
     async fn read_inner(&self, request: ReadRequest) -> Result<ReadResponse> {
@@ -799,19 +853,19 @@ const fn step_name(step: &FailureStep) -> &'static str {
 
 impl Connection for SimConnection {
     fn state(&self) -> ConnectionState {
-        self.state.current()
+        self.link.state.current()
     }
 
     fn watch_state(&self) -> StateWatch {
-        self.state.watch()
+        self.link.state.watch()
     }
 
     fn capabilities(&self) -> Capabilities {
-        self.capabilities
+        self.link.capabilities
     }
 
     fn limits(&self) -> ResourceLimits {
-        self.limits
+        self.link.limits
     }
 
     /// Read every tag of `request`; see the type documentation for the per-area rules.
@@ -829,15 +883,7 @@ impl Connection for SimConnection {
     /// None. There is no wire; a read never changes the device except that a ramp steps and
     /// a read counter counts.
     fn read(&self, request: ReadRequest) -> OpFuture<'_, ReadResponse> {
-        let request_id = self.next_request_id();
-        let span = tracing::debug_span!(
-            "read",
-            scheme = "sim",
-            endpoint = %self.name,
-            op = "read",
-            request_id
-        );
-        Box::pin(self.read_inner(request).instrument(span))
+        self.link.read(request)
     }
 
     /// Write every item of `request`; see the type documentation for the per-area rules.
@@ -853,15 +899,15 @@ impl Connection for SimConnection {
     /// None. There is no wire; a confirmed `STATE` write replaces the stored value and a
     /// confirmed `SINK` write is counted and discarded.
     fn write(&self, request: WriteRequest) -> OpFuture<'_, WriteResponse> {
-        let request_id = self.next_request_id();
+        let request_id = self.link.next_request_id();
         let span = tracing::debug_span!(
             "write",
             scheme = "sim",
-            endpoint = %self.name,
+            endpoint = %self.link.name,
             op = "write",
             request_id
         );
-        Box::pin(self.write_inner(request).instrument(span))
+        Box::pin(self.link.write_inner(request).instrument(span))
     }
 
     /// Close the connection: `Closing`, a wait of the device latency (at most
@@ -877,15 +923,133 @@ impl Connection for SimConnection {
     /// # Wire effects
     /// None. There is no wire.
     fn close(&self) -> OpFuture<'_, ()> {
-        let request_id = self.next_request_id();
+        let request_id = self.link.next_request_id();
         let span = tracing::info_span!(
             "close",
             scheme = "sim",
-            endpoint = %self.name,
+            endpoint = %self.link.name,
             op = "close",
             request_id
         );
-        Box::pin(self.close_inner().instrument(span))
+        Box::pin(self.link.close_inner().instrument(span))
+    }
+
+    /// Subscribe by polling: every tick reads the request's tags through
+    /// [`read`](Self::read).
+    ///
+    /// The request is checked before any I/O, in this order: an
+    /// [`SubscriptionKind::Event`](crate::SubscriptionKind::Event) request is refused (the
+    /// simulator raises no events), so is a
+    /// [`ChangeOfState`](crate::SubscriptionKind::ChangeOfState) request on a clock whose
+    /// sleeps resolve at once (see below), the tags must fit the connection's resource
+    /// limits, every tag must be a [`SimAddress`] of one element within the device's item
+    /// limit, the deadline must not have elapsed, the connection must be `Connected` and
+    /// the token not cancelled. The deadline and the token bound this call only; the
+    /// subscription lives until it is unsubscribed or dropped, or the connection closes or
+    /// fails.
+    ///
+    /// The [`Subscription`] reports [`SubscriptionMode::Polling`] and its interval: the
+    /// cyclic interval of the request, or 1000 ms for a change-of-state request, polled on
+    /// the connection's clock from a first tick that is due at once, while
+    /// [`Subscription::recv`] waits (see its `# Polling` section). Each tick is one read:
+    /// it takes a step of the failure script, a ramp steps and a read counter counts. On a
+    /// [`RealtimeClock`](crate::sim::RealtimeClock), the default, whose sleeps resolve at
+    /// once, every tick is due as soon as `recv` asks: each `recv` of a cyclic subscription
+    /// takes one fresh sample and the disclosed interval paces nothing. A change-of-state
+    /// subscription is refused on such a clock, because with no change to deliver its
+    /// producer would read the device at every poll without a pause. A clock that sleeps,
+    /// such as the testkit's `FakeClock`, paces the ticks. A tick that comes due while a
+    /// read runs or while the consumer is not waiting, or whose read finds the in-flight
+    /// slot taken, is skipped and counted in
+    /// [`LossCounters::skipped`](crate::LossCounters::skipped); any other failure of a
+    /// polling read reaches the consumer as an item error for every tag. A scripted
+    /// [`FailureStep::Disconnect`] fails the connection and so ends the subscription, as
+    /// `close` does: `recv` delivers what is queued, then `None`.
+    ///
+    /// # Compatibility: docs/parity/sim.md#SIM-SUBSCRIBE
+    /// Stonecrab-owned: the upstream simulated driver subscribes natively; this one polls
+    /// with the helper the Modbus driver uses.
+    ///
+    /// # Errors
+    /// Every error carries `Diagnostics` with `operation = Subscribe`.
+    /// - [`ErrorKind::Unsupported`] for [`Operation::Subscribe`] for an event subscription,
+    ///   or for a change-of-state subscription on a clock whose sleeps resolve at once.
+    /// - [`ErrorKind::InvalidAddress`] if a tag is not a simulator address of one element.
+    /// - [`ErrorKind::ResourceLimit`] if the request has more items than the device or the
+    ///   connection's limits accept.
+    /// - [`ErrorKind::Disconnected`] if the connection is not `Connected`.
+    /// - [`ErrorKind::Cancelled`] if the request's token was cancelled.
+    /// - [`ErrorKind::Timeout`] if the request's deadline had already elapsed.
+    ///
+    /// # Cancel safety
+    /// Cancel-safe: the call touches neither the device nor the failure script, so a
+    /// dropped future leaves nothing behind. The deadline source is the request's deadline,
+    /// or `timeouts.request`; nothing in the call waits.
+    ///
+    /// # Wire effects
+    /// None. There is no wire; each tick reads the device as [`read`](Self::read) does.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[cfg(feature = "testkit")]
+    /// # fn main() -> Result<(), stonecrab::PlcError> {
+    /// use std::sync::Arc;
+    /// use std::time::Duration;
+    /// use stonecrab::{Clock, DriverRegistry, PlcValue, QueuePolicy, SubscribeRequest, SubscriptionKind, Tag, TagId};
+    /// use stonecrab::sim::{SimAddress, SimDevice, SimDriver};
+    /// use stonecrab::testkit::{FakeClock, block_on_with};
+    ///
+    /// let clock = Arc::new(FakeClock::default());
+    /// let device = SimDevice::new();
+    /// device.ramp("count", PlcValue::U16(0), PlcValue::U16(1))?;
+    /// let mut registry = DriverRegistry::new();
+    /// registry.register(Arc::new(
+    ///     SimDriver::new().with_clock(Arc::<FakeClock>::clone(&clock)).with_device("bench", device)?,
+    /// ))?;
+    /// let connection = block_on_with(&clock, registry.connect("sim://bench"))?;
+    ///
+    /// let tag = Tag::new(TagId::new("count")?, Arc::new(SimAddress::parse("STATE/count:u16")?));
+    /// let every_second = SubscriptionKind::Cyclic(Duration::from_secs(1));
+    /// let request = SubscribeRequest::builder(connection.limits(), every_second, QueuePolicy::Backpressure)
+    ///     .tag(tag)
+    ///     .build()?;
+    /// let mut subscription = block_on_with(&clock, connection.subscribe(request))?;
+    /// let start = clock.now();
+    /// for expected in 0..3_u16 {
+    ///     let event = block_on_with(&*clock, subscription.recv())?.expect("one event per tick");
+    ///     assert_eq!(event.outcome().as_ref().ok(), Some(&PlcValue::U16(expected)));
+    /// }
+    /// assert_eq!(clock.now() - start, Duration::from_secs(2), "ticks at 0 s, 1 s and 2 s");
+    /// block_on_with(&clock, connection.close())?;
+    /// assert!(block_on_with(&*clock, subscription.recv())?.is_none(), "close ends it");
+    /// # Ok::<(), stonecrab::PlcError>(())
+    /// # }
+    /// # #[cfg(not(feature = "testkit"))]
+    /// # fn main() {}
+    /// ```
+    fn subscribe(&self, request: SubscribeRequest) -> OpFuture<'_, Subscription> {
+        let request_id = self.link.next_request_id();
+        let span = tracing::debug_span!(
+            "subscribe",
+            scheme = "sim",
+            endpoint = %self.link.name,
+            op = "subscribe",
+            request_id
+        );
+        Box::pin(
+            async move {
+                let plan = self.link.plan_subscription(&request)?;
+                tracing::debug!("polling subscription started");
+                Ok(plan.start(
+                    Arc::clone(&self.link.clock),
+                    self.link.state.watch(),
+                    &self.link.lifeline,
+                    Arc::downgrade(&self.link),
+                    Link::read,
+                ))
+            }
+            .instrument(span),
+        )
     }
 }
 
@@ -927,7 +1091,7 @@ impl Drop for Slot<'_> {
 /// The context every error of one operation is stamped with.
 #[derive(Clone, Copy)]
 struct Op<'a> {
-    connection: &'a SimConnection,
+    connection: &'a Link,
     operation: Operation,
     /// The clock reading when the operation began, the base of every latency figure.
     started: Instant,
@@ -1138,5 +1302,271 @@ mod tests {
             "close needs no wait without latency"
         );
         assert_eq!(connection.state(), ConnectionState::Closed, "closed");
+    }
+
+    // covers: ADR-0020 addendum S55 / a clock whose sleeps resolve at once gives one sample per recv
+    #[test]
+    fn a_clock_that_never_sleeps_gives_one_sample_per_recv_under_every_policy() {
+        use crate::sim::RealtimeClock;
+        use crate::{QueuePolicy, SubscriptionKind};
+
+        let idle = FakeClock::default();
+        for policy in [
+            QueuePolicy::Backpressure,
+            QueuePolicy::DropOldest,
+            QueuePolicy::CoalesceLatest,
+        ] {
+            let device = Arc::new(SimDevice::new());
+            device
+                .ramp("level", PlcValue::U16(0), PlcValue::U16(1))
+                .expect("ramp");
+            let config = ConnectionConfig::builder("sim", Endpoint::Custom("bench".to_owned()))
+                .build()
+                .expect("config");
+            let target = Target {
+                name: "bench".to_owned(),
+                device,
+                latency: Duration::ZERO,
+                seed: None,
+            };
+            let connection = SimConnection::new(Arc::new(RealtimeClock::new()), target, &config);
+            block_on_with(&idle, connection.establish()).expect("connect");
+            let level = Tag::new(
+                TagId::new("level").expect("id"),
+                Arc::new(SimAddress::parse("STATE/level:u16").expect("address")),
+            );
+            let hourly = SubscriptionKind::Cyclic(Duration::from_secs(3600));
+            let request = SubscribeRequest::builder(connection.limits(), hourly, policy)
+                .tag(level)
+                .build()
+                .expect("request");
+            let mut subscription =
+                block_on_with(&idle, connection.subscribe(request)).expect("subscribe");
+            for expected in 0..3 {
+                let mut waiting = subscription.recv();
+                let polled = poll_once(&mut waiting);
+                assert!(
+                    matches!(
+                        polled,
+                        Poll::Ready(Ok(Some(ref event)))
+                            if event.outcome().as_ref().ok() == Some(&PlcValue::U16(expected))
+                    ),
+                    "{policy:?}: one read per recv, got {polled:?}"
+                );
+            }
+        }
+    }
+
+    // covers: ADR-0020 addendum S55 / change-of-state needs a clock that sleeps
+    #[test]
+    fn change_of_state_on_the_realtime_clock_is_refused_before_any_read() {
+        use std::sync::atomic::Ordering;
+
+        use crate::sim::{RealtimeClock, SimTag};
+        use crate::{QueuePolicy, SubscriptionKind};
+
+        let idle = FakeClock::default();
+        let device = Arc::new(SimDevice::new());
+        let (constant, reads) = SimTag::new(PlcValue::U16(5)).with_read_counter();
+        device.set("level", constant).expect("tag");
+        let config = ConnectionConfig::builder("sim", Endpoint::Custom("bench".to_owned()))
+            .build()
+            .expect("config");
+        let target = Target {
+            name: "bench".to_owned(),
+            device,
+            latency: Duration::ZERO,
+            seed: None,
+        };
+        let connection = SimConnection::new(Arc::new(RealtimeClock::new()), target, &config);
+        block_on_with(&idle, connection.establish()).expect("connect");
+        let level = Tag::new(
+            TagId::new("level").expect("id"),
+            Arc::new(SimAddress::parse("STATE/level:u16").expect("address")),
+        );
+        let request = |kind| {
+            SubscribeRequest::builder(connection.limits(), kind, QueuePolicy::DropOldest)
+                .tag(level.clone())
+                .build()
+                .expect("request")
+        };
+        let refused = block_on_with(
+            &idle,
+            connection.subscribe(request(SubscriptionKind::ChangeOfState)),
+        )
+        .expect_err("a change-of-state producer would read at every poll");
+        assert_eq!(
+            refused.kind(),
+            ErrorKind::Unsupported(Operation::Subscribe),
+            "{refused}"
+        );
+        assert_eq!(
+            refused.diagnostics().operation,
+            Some(Operation::Subscribe),
+            "operation"
+        );
+        assert_eq!(reads.load(Ordering::Relaxed), 0, "nothing was read");
+
+        // A cyclic subscription on the same constant: one read per recv, never more.
+        let hourly = SubscriptionKind::Cyclic(Duration::from_secs(3600));
+        let mut subscription =
+            block_on_with(&idle, connection.subscribe(request(hourly))).expect("subscribe");
+        for recv in 1..=3 {
+            let polled = poll_once(&mut subscription.recv());
+            assert!(matches!(polled, Poll::Ready(Ok(Some(_)))), "{polled:?}");
+            assert_eq!(reads.load(Ordering::Relaxed), recv, "one read per recv");
+        }
+    }
+
+    // covers: ADR-0020 addendum S55 / a dropped connection ends the wait for a tick at once
+    #[test]
+    fn dropping_the_connection_ends_a_wait_for_the_next_tick_at_once() {
+        use crate::{QueuePolicy, SubscriptionKind};
+
+        let clock = Arc::new(FakeClock::default());
+        let device = Arc::new(SimDevice::new());
+        device
+            .ramp("level", PlcValue::U16(0), PlcValue::U16(1))
+            .expect("ramp");
+        let connection = connection_on(&clock, device, Duration::ZERO);
+        block_on_with(&clock, connection.establish()).expect("connect");
+        let level = Tag::new(
+            TagId::new("level").expect("id"),
+            Arc::new(SimAddress::parse("STATE/level:u16").expect("address")),
+        );
+        let hourly = SubscriptionKind::Cyclic(Duration::from_secs(3600));
+        let request =
+            SubscribeRequest::builder(connection.limits(), hourly, QueuePolicy::DropOldest)
+                .tag(level)
+                .build()
+                .expect("request");
+        let mut subscription =
+            block_on_with(&clock, connection.subscribe(request)).expect("subscribe");
+        drop(block_on_with(&clock, subscription.recv()).expect("the first tick"));
+        let mut waiting = subscription.recv();
+        assert!(
+            poll_once(&mut waiting).is_pending(),
+            "waiting for the next tick"
+        );
+        let before = clock.now();
+        drop(connection);
+        assert!(
+            matches!(poll_once(&mut waiting), Poll::Ready(Ok(None))),
+            "the drop ends the subscription"
+        );
+        assert_eq!(clock.now(), before, "without waiting for the tick");
+    }
+
+    // covers: ADR-0020 addendum S55 / a dropped recv does not wedge the connection's slot
+    #[test]
+    fn dropping_a_pending_recv_mid_read_leaves_the_slot_free_for_a_user_read() {
+        use crate::{QueuePolicy, ReadRequest, SubscriptionKind};
+
+        let clock = Arc::new(FakeClock::default());
+        let device = Arc::new(SimDevice::new());
+        device
+            .ramp("level", PlcValue::U16(0), PlcValue::U16(1))
+            .expect("ramp");
+        let connection = connection_on(&clock, device, Duration::from_millis(500));
+        block_on_with(&clock, connection.establish()).expect("connect");
+        let level = Tag::new(
+            TagId::new("level").expect("id"),
+            Arc::new(SimAddress::parse("STATE/level:u16").expect("address")),
+        );
+        let every_second = SubscriptionKind::Cyclic(Duration::from_secs(1));
+        let request =
+            SubscribeRequest::builder(connection.limits(), every_second, QueuePolicy::DropOldest)
+                .tag(level.clone())
+                .build()
+                .expect("request");
+        let mut subscription =
+            block_on_with(&clock, connection.subscribe(request)).expect("subscribe");
+        let mut waiting = subscription.recv();
+        assert!(
+            poll_once(&mut waiting).is_pending(),
+            "the read waits out the latency"
+        );
+        drop(waiting);
+        let user = ReadRequest::builder(connection.limits())
+            .tag(level)
+            .build()
+            .expect("read");
+        drop(block_on_with(&clock, connection.read(user)).expect("the slot is free"));
+        assert_eq!(
+            subscription.loss().skipped,
+            1,
+            "the cancelled tick is counted"
+        );
+    }
+
+    // covers: SPEC mandatory-failure-cases / F5 network outage ends a subscription
+    #[test]
+    fn a_subscription_polls_the_device_until_a_scripted_disconnect_fails_the_link() {
+        use crate::testkit::FixtureAddress;
+        use crate::{QueuePolicy, SubscriptionKind};
+
+        let clock = Arc::new(FakeClock::default());
+        let device = Arc::new(SimDevice::new());
+        device
+            .ramp("level", PlcValue::U16(0), PlcValue::U16(1))
+            .expect("ramp");
+        let connection = connection_on(&clock, Arc::clone(&device), Duration::ZERO);
+        block_on_with(&clock, connection.establish()).expect("connect");
+        let level = Tag::new(
+            TagId::new("level").expect("id"),
+            Arc::new(SimAddress::parse("STATE/level:u16").expect("address")),
+        );
+        let foreign = Tag::new(
+            TagId::new("f").expect("id"),
+            Arc::new(FixtureAddress::new("f", None)),
+        );
+        let every_second = SubscriptionKind::Cyclic(Duration::from_secs(1));
+        let request = |kind, tag| {
+            SubscribeRequest::builder(connection.limits(), kind, QueuePolicy::DropOldest)
+                .tag(tag)
+                .build()
+                .expect("request")
+        };
+        for (refused, kind) in [
+            (
+                request(SubscriptionKind::Event, level.clone()),
+                ErrorKind::Unsupported(Operation::Subscribe),
+            ),
+            (request(every_second, foreign), ErrorKind::InvalidAddress),
+        ] {
+            let error = block_on_with(&clock, connection.subscribe(refused))
+                .expect_err("refused before the device is read");
+            assert_eq!(error.kind(), kind, "{error}");
+            assert_eq!(
+                error.diagnostics().operation,
+                Some(Operation::Subscribe),
+                "operation"
+            );
+        }
+        let mut subscription =
+            block_on_with(&clock, connection.subscribe(request(every_second, level)))
+                .expect("subscribe");
+        for expected in [0, 1] {
+            let event = block_on_with(&clock, subscription.recv())
+                .expect("recv never fails")
+                .expect("an event");
+            assert_eq!(
+                event.outcome().as_ref().ok(),
+                Some(&PlcValue::U16(expected)),
+                "the ramp, one read per tick"
+            );
+        }
+        device
+            .push_failure(FailureStep::Disconnect)
+            .expect("room in script");
+        assert!(
+            matches!(block_on_with(&clock, subscription.recv()), Ok(None)),
+            "the failed link ends the subscription"
+        );
+        assert_eq!(
+            connection.state(),
+            ConnectionState::Failed(ErrorKind::Disconnected),
+            "the reason is the connection's state"
+        );
     }
 }

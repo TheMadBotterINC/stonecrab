@@ -423,7 +423,7 @@ mod tests {
         assert!(capabilities.read && capabilities.write, "read and write");
         assert_eq!(
             capabilities.subscribe,
-            SubscriptionMode::Unsupported,
+            SubscriptionMode::Polling,
             "subscribe"
         );
         assert!(
@@ -1251,8 +1251,8 @@ mod tests {
         assert_eq!(caps.concurrency.get(), 1, "one at a time");
         assert_eq!(
             caps.subscribe,
-            SubscriptionMode::Unsupported,
-            "no subscriptions"
+            SubscriptionMode::Polling,
+            "polling subscriptions"
         );
     }
 

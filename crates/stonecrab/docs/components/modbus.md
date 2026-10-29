@@ -3,9 +3,10 @@ Native Modbus TCP driver for Stonecrab (alpha), `stonecrab::modbus`, behind the 
 feature (on by default). The alpha scope is the function codes 01 (read coils), 02 (read
 discrete inputs), 03 (read holding registers) and 04 (read input registers) over TCP with
 MBAP framing, writes of coils and holding registers (function codes 15, 06 and 16, refused
-unless the connection says `access=read-write`), and a ping that reads one address. RTU,
-ASCII, TLS, UDP, extended registers, string types, subscriptions, browse and discovery are
-out of scope for the alpha and are listed under "Not in the alpha" below.
+unless the connection says `access=read-write`), a ping that reads one address, and
+polling subscriptions (cyclic and change-of-state, since S55). RTU, ASCII, TLS, UDP,
+extended registers, string types, browse and discovery are out of scope for the alpha and
+are listed under "Not in the alpha" below.
 The driver has been checked against an independent server, pymodbus 3.8.6, and no physical
 device.
 
@@ -36,8 +37,8 @@ tests run the driver over an in-memory transport and over loopback sockets.
 - `parse_address` is `ModbusAddress::parse` with the address convention of the options.
   Take the options from the configuration with `config.address_options()` before
   `connect` consumes it.
-- `capabilities` is the value every connection reports: read, write and ping, no
-  subscriptions, browse or discovery, one operation at a time, PDUs up to 253 bytes.
+- `capabilities` is the value every connection reports: read, write, ping and polling
+  subscriptions, no browse or discovery, one operation at a time, PDUs up to 253 bytes.
   Whether a connection may write is its access policy, read-only unless the connection
   string says `access=read-write`.
 
@@ -145,7 +146,8 @@ they exercise read `interoperability-tested`. No physical device has been tried.
 | Read: coils, discrete inputs, holding registers and input registers (function codes 01 to 04) as the 15 numeric and bit types | interoperability-tested |
 | Ping: one read of `ping-address` (`Connection::ping`) | interoperability-tested |
 | Write: coils and holding registers (function codes 15, 06 and 16), `Unknown` after a request that went out unanswered | interoperability-tested |
-| Subscribe, browse and discover | not supported |
+| Subscribe by polling: cyclic and change-of-state, event refused (`Connection::subscribe`) | simulator-tested |
+| Browse and discover | not supported |
 | Connection string and parameters (`parse_config`) | simulator-tested |
 | Connect, close and connection state | interoperability-tested |
 | Request-driven reconnect, read retry, cancellation, timeout and late-reply discard | simulator-tested |
@@ -176,8 +178,8 @@ error rather than ignoring it; operations that have no API at all do not exist:
 - writes of extended registers (FC21, `MB-ADDR-EXTENDED`) and of a coil with function code
   05 (upstream never sends it, `MB-QUIRK-C`); the other writes are in the driver (see
   "Connection");
-- subscriptions, browse and discovery (`MB-TCP-SUBSCRIBE`, `MB-TCP-BROWSE`,
-  `MB-TCP-DISCOVER`): these operations do not exist in the API;
+- browse and discovery (`MB-TCP-BROWSE`, `MB-TCP-DISCOVER`): these operations do not
+  exist in the API; subscriptions poll since S55 (`MB-TCP-SUBSCRIBE`, see "Connection");
 - extended registers (FC20 and FC21, `extended-register`, `6x`), `STRING`, `WSTRING`,
   `CHAR`, `WCHAR`, the `TIME` and `DATE` family, array selections and the legacy array
   form (`MB-ADDR-*`, `MB-TYPE-*`);
@@ -621,8 +623,23 @@ assert_eq!(session.stats().mismatched_replies, 1);
 `ModbusConnection::open(config, factory, clock, defaults)` builds the connection from a
 `ConnectionConfig` for the scheme `modbus-tcp` (any other scheme is `InvalidConfig` before
 a transport is opened), opens it and returns it `Connected`. It implements
-`stonecrab::Connection`; the capabilities are read, write and ping, no subscription, no
-browse, no discovery, 253-byte PDUs and one operation at a time.
+`stonecrab::Connection`; the capabilities are read, write, ping and polling subscriptions,
+no browse, no discovery, 253-byte PDUs and one operation at a time.
+
+`subscribe` (S55, `MB-TCP-SUBSCRIBE`, ADR-0020 addendum) polls. It refuses
+`SubscriptionKind::Event` with `Unsupported(Subscribe)` and then checks the request as a
+read is checked, before any I/O. The `Subscription` reports `SubscriptionMode::Polling`
+and its interval (the cyclic interval, or 1000 ms for change-of-state, upstream's default).
+Each tick is one `read` of the subscription's tags, with the read's batching, deadline,
+retry and span; the first tick is due at once, the next ones on a grid of the interval,
+and the polling runs while `Subscription::recv` waits. Cyclic delivers every item;
+change-of-state a tag's first outcome and then each change. A polling read takes the one
+in-flight slot: a user read that starts meanwhile gets `Backpressure`, and a tick that finds
+the slot taken is skipped, as are ticks that come due while a read runs or while nobody
+waits, and a tick that meets the link being re-established. Every skipped tick counts in
+`LossCounters::skipped`. Any other failure of a tick's read reaches the consumer as an item
+error for every tag. `close`, or a terminal failure, ends the subscription after its queued
+events.
 
 `read` checks the request before any I/O, in this order: the connection is not `Closing`,
 `Closed` or `Failed` (`Disconnected`), the token is not cancelled (`Cancelled`), every

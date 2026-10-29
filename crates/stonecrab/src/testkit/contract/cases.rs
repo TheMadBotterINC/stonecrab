@@ -4,16 +4,18 @@
 //! never panics: it ends at its first broken expectation and the runner records the reason.
 
 use std::fmt;
+use std::future::poll_fn;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::task::Poll;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::{
     AccessPolicy, CancellationToken, Connection, ConnectionConfig, ConnectionState, Deadline,
-    Driver, ErrorKind, FailureCategory, Operation, PlcError, ProtocolAddress, QueuePolicy,
-    ReadRequest, ReadResponse, ResourceLimits, RetryPolicy, SubscribeRequest, SubscriptionKind,
-    Tag, TagId, WriteRequest,
+    Driver, ErrorKind, FailureCategory, ItemError, LossCounters, Operation, PlcError,
+    ProtocolAddress, QueuePolicy, ReadItem, ReadRequest, ReadResponse, ResourceLimits, RetryPolicy,
+    SubscribeRequest, Subscription, SubscriptionKind, SubscriptionMode, Tag, TagId, Timeouts,
+    WriteRequest,
 };
 
 use super::{CaseOutcome, ContractCase, ContractFixture, ContractReport, Fault, Requires};
@@ -27,6 +29,12 @@ const MAX_PROBE_ITEMS: usize = 8_192;
 
 /// Reads the cleanup tries before it gives up on a fault that stays armed.
 const SETTLE_TRIES: u32 = 6;
+
+/// Ticks the subscription cases watch.
+const TICKS: u32 = 4;
+
+/// The interval a polling change-of-state subscription discloses: upstream's default.
+const CHANGE_OF_STATE_INTERVAL: Duration = Duration::from_millis(1000);
 
 const A: &str = "contract-a";
 const B: &str = "contract-b";
@@ -261,6 +269,39 @@ impl Env<'_> {
         (self.fx.io_probe)()
     }
 
+    /// A subscription to the readable address under `ids`.
+    fn subscribe_request(
+        &self,
+        connection: &dyn Connection,
+        ids: &[&str],
+        kind: SubscriptionKind,
+        queue: QueuePolicy,
+    ) -> Step<SubscribeRequest> {
+        self.readable_tags(ids)?
+            .into_iter()
+            .fold(
+                SubscribeRequest::builder(connection.limits(), kind, queue),
+                crate::SubscribeRequestBuilder::tag,
+            )
+            .build()
+            .must("building a subscribe request")
+    }
+
+    /// The configured timeouts and the interval of the cyclic cases: a quarter of the
+    /// request timeout, so a read that waits out its deadline spans four ticks.
+    fn tick(&self) -> Step<(Timeouts, Duration)> {
+        let timeouts = *self.config()?.timeouts();
+        Ok((
+            timeouts,
+            timeouts.request.checked_div(TICKS).unwrap_or_default(),
+        ))
+    }
+
+    /// How long ago `start` was on the fixture clock.
+    fn since(&self, start: Instant) -> Duration {
+        self.fx.clock.now().saturating_duration_since(start)
+    }
+
     fn reads(&self) -> u32 {
         (self.fx.device_reads)()
     }
@@ -303,11 +344,15 @@ impl Env<'_> {
             Requires::Fault(fault) => self
                 .fault_missing(*fault)
                 .then(|| format!("fixture cannot inject {fault}")),
+            Requires::Subscribe if !capabilities.supports(Operation::Subscribe) => {
+                Some("driver reports subscribe unsupported".into())
+            }
             Requires::Read
             | Requires::Write
             | Requires::Ping
             | Requires::WriteUnsupported
-            | Requires::WritableAddress => None,
+            | Requires::WritableAddress
+            | Requires::Subscribe => None,
         })
     }
 
@@ -418,10 +463,16 @@ pub(super) enum Id {
     SupportedPing,
     SilentPing,
     UnsupportedSubscribe,
+    SubscribeCyclic,
+    SubscribeChanges,
+    SubscribeEvent,
+    Unsubscribe,
+    SubscribeClose,
+    SubscribeStall,
 }
 
 impl Id {
-    pub(super) const ALL: [Self; 27] = [
+    pub(super) const ALL: [Self; 33] = [
         Self::Capabilities,
         Self::Lifecycle,
         Self::Correlation,
@@ -449,10 +500,18 @@ impl Id {
         Self::SupportedPing,
         Self::SilentPing,
         Self::UnsupportedSubscribe,
+        Self::SubscribeCyclic,
+        Self::SubscribeChanges,
+        Self::SubscribeEvent,
+        Self::Unsubscribe,
+        Self::SubscribeClose,
+        Self::SubscribeStall,
     ];
 
     pub(super) const fn case(self) -> ContractCase {
         const READ: &[Requires] = &[Requires::Read];
+        // Waiting for ticks needs the fixture's deterministic clock; see `ContractSuite`.
+        const TICKING: &[Requires] = &[Requires::Subscribe, Requires::Fault(Fault::Timeout)];
         match self {
             Self::Capabilities => ContractCase::new(
                 "capabilities match behavior and unsupported operations perform no I/O",
@@ -593,6 +652,37 @@ impl Id {
                 "F3 unsupported capability; ADR-0020 (S54)",
                 &[],
             ),
+            Self::SubscribeCyclic => ContractCase::new(
+                "a cyclic subscription delivers one event per tick and discloses its interval",
+                "SPEC 'Connection and resource behavior' polling interval disclosed; ADR-0020 \
+                 addendum (S55)",
+                TICKING,
+            ),
+            Self::SubscribeChanges => ContractCase::new(
+                "a change-of-state subscription delivers a first value and then only changes",
+                "SPEC 'Public API contract' subscriptions; ADR-0020 addendum (S55)",
+                TICKING,
+            ),
+            Self::SubscribeEvent => ContractCase::new(
+                "a polling driver refuses an event subscription with no I/O",
+                "F3 unsupported capability; ADR-0020 addendum (S55)",
+                &[Requires::Subscribe],
+            ),
+            Self::Unsubscribe => ContractCase::new(
+                "unsubscribing stops the polling reads",
+                "SPEC 'Public API contract' explicit unsubscribe; ADR-0020 addendum (S55)",
+                TICKING,
+            ),
+            Self::SubscribeClose => ContractCase::new(
+                "closing the connection ends its subscriptions after the queued events",
+                "F5 explicit shutdown; ADR-0020 decision 6",
+                &[Requires::Subscribe],
+            ),
+            Self::SubscribeStall => ContractCase::new(
+                "a stalled polling read skips the ticks that came due and never bursts",
+                "SPEC 'Connection and resource behavior' skip missed ticks; F6 dropped events",
+                TICKING,
+            ),
         }
     }
 
@@ -625,6 +715,12 @@ impl Id {
             Self::SupportedPing => supported_ping(env).await,
             Self::SilentPing => silent_ping(env).await,
             Self::UnsupportedSubscribe => unsupported_subscribe(env).await,
+            Self::SubscribeCyclic => subscribe_cyclic(env).await,
+            Self::SubscribeChanges => subscribe_changes(env).await,
+            Self::SubscribeEvent => subscribe_event(env).await,
+            Self::Unsubscribe => unsubscribe(env).await,
+            Self::SubscribeClose => subscribe_close(env).await,
+            Self::SubscribeStall => subscribe_stall(env).await,
         }
     }
 }
@@ -1260,6 +1356,288 @@ async fn unsupported_subscribe(env: &Env<'_>) -> Check {
         state,
         "the state after an unsupported subscribe",
     )?;
+    release(connection).await;
+    Ok(())
+}
+
+/// The next event of `subscription`, which must not have ended.
+async fn next(subscription: &mut Subscription) -> Step<ReadItem> {
+    match subscription.recv().await {
+        Ok(Some(event)) => Ok(event),
+        Ok(None) => fail("the subscription ended while its connection was open"),
+        Err(error) => fail(format!("recv failed: {error}")),
+    }
+}
+
+/// The next event of `subscription`, or `None` once `deadline` passes on the fixture clock.
+/// The deadline is looked at first, so a tick that falls on it is not taken.
+async fn next_before(
+    env: &Env<'_>,
+    subscription: &mut Subscription,
+    deadline: Instant,
+) -> Step<Option<ReadItem>> {
+    let mut timer = env.fx.clock.sleep_until(deadline);
+    let mut event = subscription.recv();
+    let outcome = poll_fn(|cx| {
+        if timer.as_mut().poll(cx).is_ready() {
+            return Poll::Ready(None);
+        }
+        event.as_mut().poll(cx).map(Some)
+    })
+    .await;
+    match outcome {
+        None => Ok(None),
+        Some(Ok(Some(event))) => Ok(Some(event)),
+        Some(Ok(None)) => fail("the subscription ended while its connection was open"),
+        Some(Err(error)) => fail(format!("recv failed: {error}")),
+    }
+}
+
+/// `interval` times `ticks`, as a duration.
+const fn times(interval: Duration, ticks: u32) -> Duration {
+    interval.saturating_mul(ticks)
+}
+
+async fn subscribe_cyclic(env: &Env<'_>) -> Check {
+    let (_, interval) = env.tick()?;
+    let connection = env.open().await?;
+    let kind = SubscriptionKind::Cyclic(interval);
+    let request = env.subscribe_request(&*connection, &[A], kind, QueuePolicy::Backpressure)?;
+    let mut subscription = connection
+        .subscribe(request)
+        .await
+        .must("a cyclic subscribe")?;
+    ensure_eq(subscription.mode(), SubscriptionMode::Polling, "the mode")?;
+    ensure_eq(
+        subscription.interval(),
+        Some(interval),
+        "the disclosed interval",
+    )?;
+    let start = env.fx.clock.now();
+    let before = env.reads();
+    let mut first = start;
+    for tick in 0..TICKS {
+        let event = next(&mut subscription).await?;
+        ensure_eq(event.tag().as_str(), A, "the tag of an event")?;
+        ensure(
+            event.outcome().is_ok(),
+            "an event of a readable address failed",
+        )?;
+        if tick == 0 {
+            // The first tick is due at once; the event follows the device's latency.
+            ensure(
+                env.since(start) < interval,
+                "the first event waited for an interval",
+            )?;
+            first = env.fx.clock.now();
+        }
+        // Every read takes the same latency, so the events keep the ticks' spacing.
+        ensure_eq(
+            env.since(first),
+            times(interval, tick),
+            &format!("the time from the first event to the event of tick {tick}"),
+        )?;
+    }
+    ensure_eq(
+        env.reads().saturating_sub(before),
+        TICKS,
+        "device reads, one per tick",
+    )?;
+    ensure_eq(
+        subscription.unsubscribe(),
+        LossCounters::default(),
+        "nothing lost or skipped",
+    )?;
+    release(connection).await;
+    Ok(())
+}
+
+// A device whose value moves at every read delivers every reading; one whose value holds
+// delivers the first and then nothing, while the reads go on.
+async fn subscribe_changes(env: &Env<'_>) -> Check {
+    let connection = env.open().await?;
+    let kind = SubscriptionKind::ChangeOfState;
+    let request = env.subscribe_request(&*connection, &[A], kind, QueuePolicy::DropOldest)?;
+    let mut subscription = connection
+        .subscribe(request)
+        .await
+        .must("a change-of-state subscribe")?;
+    ensure_eq(
+        subscription.interval(),
+        Some(CHANGE_OF_STATE_INTERVAL),
+        "the disclosed interval of a change-of-state subscription",
+    )?;
+    let start = env.fx.clock.now();
+    let before = env.reads();
+    let Some(deadline) = start.checked_add(times(CHANGE_OF_STATE_INTERVAL, TICKS)) else {
+        return fail("the fixture clock cannot reach the end of the window");
+    };
+    let mut delivered = Vec::new();
+    while let Some(event) = next_before(env, &mut subscription, deadline).await? {
+        delivered.push(event);
+    }
+    ensure_eq(
+        env.reads().saturating_sub(before),
+        TICKS,
+        "device reads, one per tick",
+    )?;
+    ensure(!delivered.is_empty(), "the first value was not delivered")?;
+    for pair in delivered.windows(2) {
+        if let [earlier, later] = pair {
+            ensure(
+                earlier.outcome().as_ref().ok() != later.outcome().as_ref().ok(),
+                "a change-of-state event repeats the value before it",
+            )?;
+        }
+    }
+    drop(subscription);
+    release(connection).await;
+    Ok(())
+}
+
+async fn subscribe_event(env: &Env<'_>) -> Check {
+    let connection = env.open().await?;
+    if connection.capabilities().subscribe != SubscriptionMode::Polling {
+        return skip("the connection does not poll; a native one may deliver events");
+    }
+    let state = connection.state();
+    let before = env.probe();
+    let request = env.subscribe_request(
+        &*connection,
+        &[A],
+        SubscriptionKind::Event,
+        QueuePolicy::DropOldest,
+    )?;
+    let what = "an event subscription on a polling connection";
+    let error = refused(
+        connection.subscribe(request).await,
+        ErrorKind::Unsupported(Operation::Subscribe),
+        what,
+    )?;
+    ensure_eq(
+        error.diagnostics().operation,
+        Some(Operation::Subscribe),
+        &format!("{what}: diagnostics.operation"),
+    )?;
+    ensure_eq(
+        error.diagnostics().category,
+        Some(FailureCategory::Validation),
+        &format!("{what}: diagnostics.category"),
+    )?;
+    env.no_io(before, what)?;
+    ensure_eq(connection.state(), state, "the state after the refusal")?;
+    release(connection).await;
+    Ok(())
+}
+
+async fn unsubscribe(env: &Env<'_>) -> Check {
+    let (_, interval) = env.tick()?;
+    let connection = env.open().await?;
+    let kind = SubscriptionKind::Cyclic(interval);
+    let request = env.subscribe_request(&*connection, &[A], kind, QueuePolicy::DropOldest)?;
+    let mut subscription = connection.subscribe(request).await.must("a subscribe")?;
+    next(&mut subscription).await?;
+    let reads = env.reads();
+    ensure_eq(
+        subscription.unsubscribe(),
+        LossCounters::default(),
+        "the final counters",
+    )?;
+    let Some(later) = env.fx.clock.now().checked_add(times(interval, TICKS)) else {
+        return fail("the fixture clock cannot reach the end of the wait");
+    };
+    env.fx
+        .clock
+        .sleep_until(later)
+        .await
+        .must("waiting on the fixture clock")?;
+    ensure_eq(env.reads(), reads, "device reads after unsubscribe")?;
+    let request = env.readable_request(&*connection, &[A])?;
+    let response = connection
+        .read(request)
+        .await
+        .must("a read after unsubscribe, with the in-flight slot free")?;
+    ensure_eq(
+        response.iter_failed().count(),
+        0,
+        "failed items of a read after unsubscribe",
+    )?;
+    release(connection).await;
+    Ok(())
+}
+
+// Two tags, so one event of the first tick is still queued when the connection closes.
+async fn subscribe_close(env: &Env<'_>) -> Check {
+    let (_, interval) = env.tick()?;
+    let connection = env.open().await?;
+    let kind = SubscriptionKind::Cyclic(interval);
+    let request = env.subscribe_request(&*connection, &[A, B], kind, QueuePolicy::Backpressure)?;
+    let mut subscription = connection.subscribe(request).await.must("a subscribe")?;
+    let first = next(&mut subscription).await?;
+    ensure_eq(first.tag().as_str(), A, "the first event")?;
+    connection.close().await.must("closing the connection")?;
+    let queued = next(&mut subscription).await?;
+    ensure_eq(
+        queued.tag().as_str(),
+        B,
+        "the event queued before the close",
+    )?;
+    for what in ["recv after the close", "recv once the stream has ended"] {
+        ensure(
+            matches!(subscription.recv().await, Ok(None)),
+            &format!("{what} does not report the end"),
+        )?;
+    }
+    Ok(())
+}
+
+// The read of the second tick waits out the request timeout, four intervals: the ticks
+// that come due meanwhile are skipped and counted, the failure reaches the consumer, and
+// the next read waits for the next tick instead of catching up.
+async fn subscribe_stall(env: &Env<'_>) -> Check {
+    let (timeouts, interval) = env.tick()?;
+    let connection = env.open().await?;
+    let kind = SubscriptionKind::Cyclic(interval);
+    let request = env.subscribe_request(&*connection, &[A], kind, QueuePolicy::DropOldest)?;
+    let mut subscription = connection.subscribe(request).await.must("a subscribe")?;
+    let start = env.fx.clock.now();
+    next(&mut subscription).await?;
+    env.inject(Fault::Timeout)?;
+    let stalled = next(&mut subscription).await?;
+    ensure_eq(
+        stalled.outcome().as_ref().err().map(ItemError::kind),
+        Some(ErrorKind::Timeout),
+        "the event of the stalled tick",
+    )?;
+    ensure_eq(
+        env.since(start),
+        interval.saturating_add(timeouts.request),
+        "the end of the stalled read",
+    )?;
+    ensure_eq(
+        subscription.loss().skipped,
+        u64::from(TICKS),
+        "ticks skipped while the read stalled",
+    )?;
+    let stall_end = env.fx.clock.now();
+    let reads = env.reads();
+    let after = next(&mut subscription).await?;
+    ensure(
+        after.outcome().is_ok(),
+        "the first event after the stall failed",
+    )?;
+    // The next tick is one interval after the stall; the event follows the device's latency.
+    let waited = env.since(stall_end);
+    ensure(
+        waited >= interval && waited < times(interval, 2),
+        &format!("the read after the stall did not wait for the next tick: {waited:?}"),
+    )?;
+    ensure_eq(
+        env.reads().saturating_sub(reads),
+        1,
+        "device reads after the stall, before the next event",
+    )?;
+    drop(subscription);
     release(connection).await;
     Ok(())
 }

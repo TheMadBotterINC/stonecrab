@@ -793,7 +793,7 @@ mod tests {
 
     // The suite sentences that cannot run against a server that has no fault hooks, with the
     // reason the report must give for each.
-    const SKIPPED: [(&str, &str); 11] = [
+    const SKIPPED: [(&str, &str); 16] = [
         (
             "an absent deadline uses the connection timeout",
             "fixture cannot inject timeout",
@@ -840,6 +840,29 @@ mod tests {
         (
             "an unknown write outcome is never replayed",
             "fixture cannot inject unknown-after-transmit",
+        ),
+        // The driver subscribes by polling (S55), so the refusal case has nothing to prove.
+        (
+            "an unsupported subscribe performs no I/O and changes no state",
+            "driver reports subscribe supported; the case needs it unsupported",
+        ),
+        // The subscription cases that wait for ticks need the fake clock, which a real
+        // server's fixture does not have; the event refusal and the close still run.
+        (
+            "a cyclic subscription delivers one event per tick and discloses its interval",
+            "fixture cannot inject timeout",
+        ),
+        (
+            "a change-of-state subscription delivers a first value and then only changes",
+            "fixture cannot inject timeout",
+        ),
+        (
+            "unsubscribing stops the polling reads",
+            "fixture cannot inject timeout",
+        ),
+        (
+            "a stalled polling read skips the ticks that came due and never bursts",
+            "fixture cannot inject timeout",
         ),
     ];
 

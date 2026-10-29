@@ -20,8 +20,9 @@ values into scaled sensor measurements that carry a quality grade, using declara
 profiles, write coils and holding registers when a connection is granted write access, and
 run the same code against a built-in simulator with no network and no hardware. It has been
 checked against two independent Modbus servers (pymodbus 3.8.6 and libmodbus 3.1.11) and
-has never touched a physical device. **It is alpha software and is not for production use yet**: it does not
-subscribe, browse, discover or speak Modbus RTU, and its APIs may change before 1.0.
+has never touched a physical device. **It is alpha software and is not for production use
+yet**: it subscribes only by polling, does not browse, discover or speak Modbus RTU, and its
+APIs may change before 1.0.
 
 ## Add it
 ```sh
@@ -69,7 +70,7 @@ the rows that say so). Nothing is `hardware-verified`.
 | Modbus TCP | batched reads with split disclosure (`split_into`) | interoperability-tested | `MB-READ-MERGE`; `interop_split_batch_discloses_chunks` |
 | Modbus TCP | reconnect, read retry, cancellation, timeout, late-reply discard, resync | simulator-tested | `FakeTransport` and fake clock; `MB-READ-RECONNECT`, `MB-READ-TIMEOUT`, `MB-READ-RETRY` |
 | Modbus TCP | write coils (FC15) and holding registers (FC06, FC16), refused unless the connection says `access=read-write`; a write that gets no answer is `Unknown` and is never replayed | interoperability-tested (happy and exception paths; `Unknown` and the halt are simulator-tested) | `MB-TCP-WRITE`; `interop_writes_a_holding_register_and_a_coil_and_reads_them_back`, `interop_writes_multi_register_types_in_the_documented_word_layouts` |
-| Modbus TCP | subscriptions (upstream emulates them by polling) | not supported | `MB-TCP-SUBSCRIBE` (deferred, M2) |
+| Modbus TCP | subscriptions by polling: cyclic and change-of-state, event refused (as upstream's polling emulation) | simulator-tested | `MB-TCP-SUBSCRIBE`; fake transport and fake clock, the six subscription contract cases |
 | Modbus TCP | ping (one read of the configured `ping-address`) | interoperability-tested | `MB-TCP-PING`; `interop_ping_reads_each_configured_area_and_succeeds`, `interop_ping_of_an_address_the_server_refuses_still_answers` |
 | Modbus TCP | browse, discover | not supported | `MB-TCP-BROWSE`, `MB-TCP-DISCOVER` (deferred) |
 | Modbus TCP | RTU, ASCII, UDP, TLS | not supported | `MB-TCP-TRANSPORTS-*` (deferred); the parser rejects them |

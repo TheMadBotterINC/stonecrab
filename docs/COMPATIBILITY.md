@@ -60,7 +60,7 @@ hardware record exists.
 | Modbus TCP | timeout and late-reply discard over the system clock, a reply with another transaction id and unit id discarded, a reply sent one byte at a time | `modbus` | interoperability-tested | `MB-READ-TIMEOUT`, `MB-READ-MATCH`, `MB-READ-FRAMING` | libmodbus 3.1.11 at wire addresses 0x171 to 0x173: `interop_a_reply_with_the_wrong_transaction_and_unit_times_out_and_the_session_goes_on`, `interop_a_reply_after_500_ms_is_read_within_a_2_s_deadline`, `interop_a_reply_after_500_ms_misses_a_200_ms_deadline_and_is_discarded_late`, `interop_a_reply_sent_a_byte_at_a_time_is_reassembled` |
 | Modbus TCP | a reply whose byte count does not fit the request | `modbus` | interoperability-tested | `MB-READ-MATCH` | libmodbus 3.1.11 answers any read of two holding registers with one: `MalformedData` for the whole read, no raw bytes kept; `interop_a_short_reply_to_a_two_register_read_is_malformed_data` |
 | Modbus TCP | write coils (FC15) and holding registers (FC06, FC16); FC05 is never sent | `modbus` | interoperability-tested | `MB-TCP-WRITE`, `MB-CFG-ACCESS`, `MB-WRITE-ACCESS`, `MB-WRITE-UNKNOWN`, `MB-WRITE-HALT`, `MB-WRITE-ECHO` | `Capabilities.write = true`; refused before any I/O unless the connection string says `access=read-write`; one request per item, as upstream; an echo is `Confirmed`, an exception `Rejected`, a request that went out without a usable answer `Unknown` and never replayed; pymodbus 3.8.6 via the `interop` job (`interop_writes_*`); the 29 upstream write exchanges Stonecrab can address replay byte for byte |
-| Modbus TCP | subscriptions (upstream: polling emulation) | `modbus` | not supported | `MB-TCP-SUBSCRIBE` | deferred, M2 |
+| Modbus TCP | subscriptions by polling: cyclic and change-of-state (1000 ms), event refused | `modbus` | simulator-tested | `MB-TCP-SUBSCRIBE` | `Capabilities.subscribe = Polling` (S55); `FakeTransport` and fake clock, the six subscription contract cases, `a_polling_read_and_a_user_read_never_run_together`; the event refusal and the close of a subscription also run against pymodbus 3.8.6 in the `interop` job's contract run, the timed cases do not (D21) |
 | Any physical device | everything | none yet | planned | none | milestone M2S (board adapters, hardware runner, hardware records); no record exists |
 | Modbus TCP | browse | `modbus` | not supported | `MB-TCP-BROWSE` | upstream has no Modbus browse |
 | Modbus TCP | discover | `modbus` | not supported | `MB-TCP-DISCOVER` | deferred |
@@ -68,7 +68,7 @@ hardware record exists.
 | Modbus TCP | UDP, TLS, TLS-PSK, `test` transports | `modbus` | not supported | `MB-TCP-TRANSPORTS-*` | deferred; `InvalidConfig` |
 | Modbus TCP | extended registers (FC20, FC21) | `modbus` | not supported | `MB-ADDR-EXTENDED` | deferred, M2; `InvalidAddress` |
 | Modbus RTU, ASCII | everything | none yet | planned | `MBS-*` in [`parity/modbus-serial.md`](parity/modbus-serial.md) | milestone M2 |
-| Simulator (`sim`) | connect, read, write, scripted failures, bounded read retry | `sim` | simulator-tested | `SIM-DRIVER`, `SIM-CONNECTION`, `SIM-FAILURE-SCRIPT` | driver contract suite (22 passed, 1 named skip) |
+| Simulator (`sim`) | connect, read, write, scripted failures, bounded read retry, polling subscriptions (S55; on the default `RealtimeClock` the interval is disclosed but not paced, and change-of-state is refused) | `sim` | simulator-tested | `SIM-DRIVER`, `SIM-CONNECTION`, `SIM-FAILURE-SCRIPT`, `SIM-SUBSCRIBE` | driver contract suite (29 passed, 4 named skips since S55) |
 | Sensor profiles | load, validate, build tags, scale and grade measurements | `sensors`, `sim` | simulator-tested | `SENSORS-*` | `sim` profiles through `profile_read` in the `examples` job |
 | Sensor profiles | the same, with the `modbus-tcp` synthetic profiles | `sensors`, `modbus` | interoperability-tested | `SENSORS-SYNTHETIC-PROFILES` | `profile_read --expect-good` in the `interop` job; green on the hosted runner for S30 (the `profiles` step, run 40548582722) |
 | OPC UA, EtherNet/IP, S7, other baseline drivers | everything | none yet | planned | one record per driver, listed in the matrix below | milestones M3 to M5 |
@@ -94,7 +94,7 @@ where this table says otherwise. Counts of rows per record are in the records th
 
 | Upstream driver (code) | Stonecrab support | Level | Parity record | Milestone |
 | --- | --- | --- | --- | --- |
-| Modbus TCP (`modbus-tcp`) | `modbus` feature | see the operations table above | [`parity/modbus.md`](parity/modbus.md) | M1 (read path and ping shipped); writes, subscriptions, extended registers, UDP and TLS per the table above |
+| Modbus TCP (`modbus-tcp`) | `modbus` feature | see the operations table above | [`parity/modbus.md`](parity/modbus.md) | M1 (read path and ping shipped); writes, polling subscriptions (S55), extended registers, UDP and TLS per the table above |
 | Modbus RTU (`modbus-rtu`), Modbus ASCII (`modbus-ascii`) | none | not supported | [`parity/modbus-serial.md`](parity/modbus-serial.md) | M2 (S58 to S60, HW2) |
 | OPC UA (`opcua`) | none | not supported | [`parity/opcua.md`](parity/opcua.md) | M3 |
 | S7 (`s7`) | none | not supported | [`parity/s7.md`](parity/s7.md) | M4 |
@@ -249,7 +249,7 @@ unlimited attempts; `RetryPolicy` one attempt, retrying `Timeout`, `Disconnected
 | --- | --- | --- | --- |
 | pymodbus 3.8.6 on `python:3.12-slim` (pinned by digest), first-party `server.py` over the register map in `fixtures/modbus/interop/register-map.toml`, TCP port 5020 | fifteen `interop_` tests (writes of a holding register, a coil and the multi-register types, read back, included), the `modbus_tcp_read` example, `profile_read --expect-good` for each `modbus-tcp` synthetic profile, the common driver contract suite (15 passed, 11 skipped by name) | the CI job `interop` (ubuntu, every push and pull request) and `mise run interop` | `interoperability-tested` |
 | libmodbus 3.1.11 `unit-test-server` (C, Debian trixie package 3.1.11-2 on `debian:trixie-slim`, pinned by digest), built from the test source the package ships, TCP port 1502, restarted after each connection | ten `interop_` tests: the input bits and input register of `unit-test.h`, coils and holding registers written and read back (FC15, FC06, FC16, a REAL in the four word orders), exception 06, a reply with the wrong transaction id and unit id, a 500 ms delayed reply inside and beyond a deadline, a reply sent one byte at a time, and a short reply to a two-register read | the CI job `interop-libmodbus` (ubuntu, every push and pull request) and `mise run interop` | `interoperability-tested` |
-| the in-process simulator (`sim`) | the driver contract suite (23 passed, 3 skipped), `sim_read`, `profile_read` on the `sim` profiles | `cargo test --all-features`, CI jobs `test` and `examples` | `simulator-tested` |
+| the in-process simulator (`sim`) | the driver contract suite (29 passed, 4 skipped since S55), `sim_read`, `profile_read` on the `sim` profiles | `cargo test --all-features`, CI jobs `test` and `examples` | `simulator-tested` |
 | loopback `ScriptedPeer` (testkit) | a holding-register read over real sockets and the contract suite (20 passed, 6 skipped) | `cargo test --all-features` | `simulator-tested` |
 | `FakeTransport` with a first-party MBAP responder and `FakeClock` | the contract suite (24 passed, 2 skipped), timing, retry, reconnect, cancellation and write-outcome tests | `cargo test --all-features` | `simulator-tested` |
 
@@ -296,7 +296,7 @@ order of the SPEC bullets. Counts are the number of tagged tests at S31.
 | F3 | device exception, invalid register, unsupported capability, mixed success within a batch | simulator, Modbus connection, session | 69 |
 | F4 | cancellation while connecting, queued, transmitting and awaiting a response | guard, simulator, Modbus connection; the queued case is exercised on `ConnectionGuard` only, not on the simulator, which has no wait queue | 44 |
 | F5 | device restart, outage, recovery, exhausted retry budget, shutdown during reconnect | guard, Modbus connection, `FakeTransport` | 32 |
-| F6 | queue exhaustion, slow consumer, dropped events, stale last-known values, timestamp absence | queue exhaustion (`Backpressure`) and timestamp absence only; slow consumer, dropped events and stale values need subscriptions and the polling loop (M2) | 4 |
+| F6 | queue exhaustion, slow consumer, dropped events, stale last-known values, timestamp absence | queue exhaustion (`Backpressure`) and timestamp absence at the alpha; since then the subscription queue (S54: slow consumer, dropped events) and polling subscriptions (S55: skipped ticks counted, no burst after a stall); stale values wait for the stale tracker (S56) | 4 |
 | F7 | negative and scaled values, swapped words, integer boundaries, counter rollover, NaN and infinity, incompatible profile version | typed decoder, scaling pipeline, profile loader | 36 |
 
 The RTU, OPC UA and direct-sensor cases of SPEC.md are out of scope for the alpha.
@@ -339,8 +339,8 @@ byte-order names (`MB-ADDR-CONFIG-BLOCK`). Inferences about upstream behavior ar
 
 ## Known gaps
 
-Subscriptions, extended registers (so extended-register writes), strings, calendar types,
-RTU, UDP and TLS, and hardware verification are listed above. Also not done: a mutation
+Extended registers (so extended-register writes), strings, calendar types, RTU, UDP and
+TLS, and hardware verification are listed above; Modbus subscriptions poll since S55. Also not done: a mutation
 threshold as a gate (one recorded run, `docs/evidence/alpha.md`), soak and benchmark
 gates, branch-coverage gating (line coverage per module is gated, ADR-0005), a
 differential test against PLC4J, and a write whose outcome is lost on demand against an

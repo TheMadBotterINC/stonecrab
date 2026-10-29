@@ -23,6 +23,10 @@ mod error;
 mod future;
 mod limits;
 mod order;
+// The polling producer is shared by the drivers that subscribe by polling (ADR-0020,
+// addendum S55); without one of them it has no caller.
+#[cfg(any(feature = "sim", feature = "modbus"))]
+mod polling;
 mod read_response;
 mod registry;
 mod request;

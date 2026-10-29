@@ -25,9 +25,11 @@
 //! - `a timeout carries diagnostics naming operation, state and category`
 //! - `read retry stops after the configured maximum attempts`
 //!
-//! The silent-ping case needs the same hook and is skipped with them. The unsupported-write
-//! case is skipped because the driver writes (S46) and the unsupported-ping case because it
-//! supports ping (S47). The two write cases run: the read-only policy refuses with no I/O,
+//! The silent-ping case needs the same hook and is skipped with them, and so are the four
+//! subscription cases that wait for ticks (S55); the event refusal and the close of a
+//! subscription need no waiting and run. The unsupported-write case is skipped because the
+//! driver writes (S46), the unsupported-ping case because it supports ping (S47) and the
+//! unsupported-subscribe case because it subscribes by polling (S55). The two write cases run: the read-only policy refuses with no I/O,
 //! and a write whose confirmation is lost is `Unknown`. Over a real socket the loss is a
 //! closed connection (`Reaction::Close` after the device applied the write), not a swallowed
 //! reply, because a swallowed reply would wait out a real deadline. The disconnect,
@@ -82,12 +84,23 @@ mod tests {
     const UNKNOWN_NOT_REPLAYED: &str = "an unknown write outcome is never replayed";
     const UNSUPPORTED_WRITE: &str = "an unsupported write performs no I/O";
 
-    /// The cases the fixture cannot run, by name, with the reason the report must give.
-    const TIMING_SKIPS: [&str; 4] = [
+    /// The cases the fixture cannot run, by name, with the reason the report must give: the
+    /// timing cases and the subscription cases that wait for ticks (S55).
+    const TIMING_SKIPS: [&str; 8] = [
         ABSENT_DEADLINE,
         TIMEOUT_DIAGNOSTICS,
         RETRY_STOPS,
         SILENT_PING,
+        "a cyclic subscription delivers one event per tick and discloses its interval",
+        "a change-of-state subscription delivers a first value and then only changes",
+        "unsubscribing stops the polling reads",
+        "a stalled polling read skips the ticks that came due and never bursts",
+    ];
+
+    /// The subscription cases that need no waiting and run over the sockets (S55).
+    const SUBSCRIPTION_RUNS: [&str; 2] = [
+        "a polling driver refuses an event subscription with no I/O",
+        "closing the connection ends its subscriptions after the queued events",
     ];
 
     fn register_map() -> InteropMap {
@@ -173,9 +186,9 @@ mod tests {
         );
         assert_eq!(
             report.skipped(),
-            6,
-            "exactly the four timing skips, the unsupported-write skip and the \
-             unsupported-ping skip:\n{report}"
+            11,
+            "exactly the eight timing skips, the unsupported-write skip, the unsupported-ping \
+             skip and the unsupported-subscribe skip:\n{report}"
         );
         assert_eq!(
             report.outcome(UNSUPPORTED_PING),
@@ -191,9 +204,18 @@ mod tests {
         );
         assert_eq!(
             report.outcome(UNSUPPORTED_SUBSCRIBE),
-            Some(&CaseOutcome::Passed),
-            "a subscribe is refused before any socket I/O:\n{report}"
+            Some(&CaseOutcome::Skipped(
+                "driver reports subscribe supported; the case needs it unsupported".to_owned()
+            )),
+            "the driver subscribes by polling:\n{report}"
         );
+        for name in SUBSCRIPTION_RUNS {
+            assert_eq!(
+                report.outcome(name),
+                Some(&CaseOutcome::Passed),
+                "{name} ran and passed over the sockets:\n{report}"
+            );
+        }
         for name in TIMING_SKIPS {
             assert_eq!(
                 report.outcome(name),

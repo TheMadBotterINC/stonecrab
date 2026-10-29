@@ -30,10 +30,12 @@ use crate::{
 /// argument and documents that it does.
 ///
 /// # What is not here yet
-/// Subscriptions, browsing and discovery are out of the alpha (decision D4). They are
-/// added later as provided methods that return
-/// [`ErrorKind::Unsupported`](crate::ErrorKind::Unsupported), which is additive for
-/// implementors; no empty request or response types ship before then (ADR-0001).
+/// Browsing and discovery are not declared yet. Like
+/// [`Connection::subscribe`](crate::Connection::subscribe) (S54, polling since S55) and
+/// [`Connection::ping`](crate::Connection::ping) (S40), they will be provided methods
+/// that return [`ErrorKind::Unsupported`](crate::ErrorKind::Unsupported), which is
+/// additive for implementors; no empty request or response types ship before then
+/// (ADR-0001).
 ///
 /// # Compatibility: docs/parity/core.md#CORE-DRIVER-TRAIT
 /// Corresponds to the upstream `PlcDriver`. Upstream's driver also creates connections

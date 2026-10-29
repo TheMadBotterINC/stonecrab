@@ -13,8 +13,9 @@ use crate::{
     AccessPolicy, ByteOrder, CancellationToken, Capabilities, Clock, Connection, ConnectionConfig,
     ConnectionState, Deadline, Diagnostics, ErrorKind, FailureCategory, ItemError, OpFuture,
     Operation, PlcError, PlcValue, ReadItem, ReadRequest, ReadResponse, ResourceLimits, Result,
-    RetryPolicy, StateWatch, SubscriptionMode, Tag, Timeouts, UnknownReason, WordOrder, WriteItem,
-    WriteOutcome, WriteRequest, WriteResponse, WriteResponseBuilder, WriteResult,
+    RetryPolicy, StateWatch, SubscribeRequest, Subscription, SubscriptionMode, Tag, Timeouts,
+    UnknownReason, WordOrder, WriteItem, WriteOutcome, WriteRequest, WriteResponse,
+    WriteResponseBuilder, WriteResult,
 };
 use tracing::Instrument;
 
@@ -24,6 +25,7 @@ use crate::modbus::{
     BatchLimits, Batcher, Chunk, MAX_PDU_BYTES, Member, ModbusAddress, ModbusAdu, ModbusArea,
     ModbusOptions, ModbusPdu, ModbusSession, TypedDecoder, UnitId, exception_item_error,
 };
+use crate::polling::{Lifeline, Plan};
 
 /// The only scheme this connection serves.
 const SCHEME: &str = "modbus-tcp";
@@ -34,9 +36,10 @@ const RAW_BUDGET: NonZeroUsize = match NonZeroUsize::new(MAX_PDU_BYTES) {
     None => NonZeroUsize::MIN,
 };
 
-/// The capabilities of the driver and of every connection it opens: read, write and ping, no
-/// subscriptions, browse or discovery, one operation at a time, PDUs up to 253 bytes
-/// (`MB-TCP-CAPABILITIES`). The driver reports the same value before any connection exists.
+/// The capabilities of the driver and of every connection it opens: read, write, ping and
+/// polling subscriptions, no browse or discovery, one operation at a time, PDUs up to 253
+/// bytes (`MB-TCP-CAPABILITIES`). The driver reports the same value before any connection
+/// exists.
 #[expect(
     clippy::redundant_pub_crate,
     reason = "unreachable_pub forbids plain pub in a private module"
@@ -46,7 +49,7 @@ pub(crate) fn driver_capabilities() -> Capabilities {
         read: true,
         write: true,
         ping: true,
-        subscribe: SubscriptionMode::Unsupported,
+        subscribe: SubscriptionMode::Polling,
         max_pdu_bytes: NonZeroUsize::new(MAX_PDU_BYTES),
         concurrency: NonZeroUsize::MIN,
         ..Capabilities::default()
@@ -181,7 +184,13 @@ impl Default for ConnectionDefaults {
 ///   the session's `request` span nests inside it with the `txn` of the chunk in flight.
 ///   `ping` has a `ping` span with `op = "ping"`; its nested `request` span says
 ///   `op = "read"` because a ping is a read on the wire.
-///   `open` and `close` have `info` spans of the same shape.
+///   `open` and `close` have `info` spans of the same shape, and `subscribe` a `debug`
+///   span with `op = "subscribe"`; each polling read has its own `read` span.
+/// - **Subscriptions.** [`subscribe`](Connection::subscribe) polls (ADR-0020, addendum
+///   S55): every tick reads the subscription's tags through [`read`](Connection::read), with
+///   its batching, deadline and retry, so a polling read takes the single in-flight slot
+///   and a user read that starts meanwhile gets [`ErrorKind::Backpressure`], as before. A
+///   tick that finds the slot taken is skipped, never queued.
 ///
 /// # Compatibility: docs/parity/modbus.md#MB-READ-MERGE
 /// The counterpart of upstream `ModbusTcpConnection.onRead`: blocks run one after another
@@ -238,6 +247,13 @@ impl Default for ConnectionDefaults {
 /// # fn main() {}
 /// ```
 pub struct ModbusConnection {
+    /// Everything the connection is, shared with the polling task of each subscription.
+    link: Arc<Link>,
+}
+
+/// The state of one connection: what a [`ModbusConnection`] owns, and what its polling
+/// subscriptions read through, holding it weakly so they never keep it alive.
+struct Link {
     session: ModbusSession,
     clock: Arc<dyn Clock>,
     /// `host:port` of the endpoint, for spans; it carries no credentials.
@@ -254,14 +270,16 @@ pub struct ModbusConnection {
     access: AccessPolicy,
     /// True while a read, write or ping is in flight; see [`Slot`].
     in_flight: AtomicBool,
+    /// Ends the polling subscriptions' wait for a tick when the connection is dropped.
+    lifeline: Lifeline,
 }
 
 /// Shows the endpoint and the state, never a payload.
 impl fmt::Debug for ModbusConnection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ModbusConnection")
-            .field("endpoint", &self.endpoint)
-            .field("state", &self.session.state())
+            .field("endpoint", &self.link.endpoint)
+            .field("state", &self.link.session.state())
             .finish_non_exhaustive()
     }
 }
@@ -361,15 +379,19 @@ impl ModbusConnection {
         );
         Box::pin(
             async move {
-                let connection = Self::build(&config, factory, clock, defaults)?;
-                connection.session.connect().await?;
+                let link = Link::build(&config, factory, clock, defaults)?;
+                link.session.connect().await?;
                 tracing::info!("modbus connection established");
-                Ok(connection)
+                Ok(Self {
+                    link: Arc::new(link),
+                })
             }
             .instrument(span),
         )
     }
+}
 
+impl Link {
     /// The connection in the `Disconnected` state, after checking the configuration.
     fn build(
         config: &ConnectionConfig,
@@ -409,6 +431,7 @@ impl ModbusConnection {
             capabilities: driver_capabilities(),
             access: config.access(),
             in_flight: AtomicBool::new(false),
+            lifeline: Lifeline::new(),
         })
     }
 
@@ -472,6 +495,34 @@ impl ModbusConnection {
             ));
         }
         Ok(())
+    }
+
+    /// The read path of [`Connection::read`], and of every polling tick.
+    fn read(&self, request: ReadRequest) -> OpFuture<'_, ReadResponse> {
+        let span = tracing::debug_span!(
+            "read",
+            scheme = SCHEME,
+            endpoint = %self.endpoint,
+            op = "read",
+            items = request.items().len(),
+            chunks = tracing::field::Empty
+        );
+        Box::pin(self.read_inner(request, span.clone()).instrument(span))
+    }
+
+    /// Check a subscription as a read is checked, before any I/O, and plan its polling.
+    fn plan_subscription(&self, request: &SubscribeRequest) -> Result<Plan> {
+        let op = Op {
+            connection: self,
+            operation: Operation::Subscribe,
+            started: self.clock.now(),
+        };
+        let plan = Plan::new(request, self.limits, &*self.clock)
+            .map_err(|error| op.wrap(error, FailureCategory::Validation))?;
+        self.gate(&op, request.cancel())?;
+        self.plan(&op, plan.read()).map(drop)?;
+        self.ensure_time_left(&op, request.deadline())?;
+        Ok(plan)
     }
 
     async fn read_inner(&self, request: ReadRequest, span: tracing::Span) -> Result<ReadResponse> {
@@ -1043,8 +1094,8 @@ impl Drop for Slot<'_> {
 
 /// The context every error of one read, write or ping is stamped with.
 struct Op<'a> {
-    connection: &'a ModbusConnection,
-    /// What the diagnostics name: `Read`, `Write` or `Ping`.
+    connection: &'a Link,
+    /// What the diagnostics name: `Read`, `Write`, `Ping` or `Subscribe`.
     operation: Operation,
     /// The clock reading when the operation began, the base of every latency figure.
     started: Instant,
@@ -1092,19 +1143,19 @@ impl Op<'_> {
 
 impl Connection for ModbusConnection {
     fn state(&self) -> ConnectionState {
-        self.session.state()
+        self.link.session.state()
     }
 
     fn watch_state(&self) -> StateWatch {
-        self.session.watch_state()
+        self.link.session.watch_state()
     }
 
     fn capabilities(&self) -> Capabilities {
-        self.capabilities
+        self.link.capabilities
     }
 
     fn limits(&self) -> ResourceLimits {
-        self.limits
+        self.link.limits
     }
 
     /// Read every tag of `request` in as few wire requests as the batcher allows.
@@ -1154,15 +1205,7 @@ impl Connection for ModbusConnection {
     /// Transmits one read request frame (function code 01, 02, 03 or 04) per chunk, and
     /// again per retry. Nothing is ever written to the device.
     fn read(&self, request: ReadRequest) -> OpFuture<'_, ReadResponse> {
-        let span = tracing::debug_span!(
-            "read",
-            scheme = SCHEME,
-            endpoint = %self.endpoint,
-            op = "read",
-            items = request.items().len(),
-            chunks = tracing::field::Empty
-        );
-        Box::pin(self.read_inner(request, span.clone()).instrument(span))
+        self.link.read(request)
     }
 
     /// Write every item of `request`, one wire request each, one after another.
@@ -1246,11 +1289,11 @@ impl Connection for ModbusConnection {
         let span = tracing::debug_span!(
             "write",
             scheme = SCHEME,
-            endpoint = %self.endpoint,
+            endpoint = %self.link.endpoint,
             op = "write",
             items = request.items().len()
         );
-        Box::pin(self.write_inner(request).instrument(span))
+        Box::pin(self.link.write_inner(request).instrument(span))
     }
 
     /// Close the connection: `Closing`, then `Closed`.
@@ -1273,10 +1316,10 @@ impl Connection for ModbusConnection {
         let span = tracing::info_span!(
             "close",
             scheme = SCHEME,
-            endpoint = %self.endpoint,
+            endpoint = %self.link.endpoint,
             op = "close"
         );
-        Box::pin(self.session.close().instrument(span))
+        Box::pin(self.link.session.close().instrument(span))
     }
 
     /// Check that the peer answers: one read of `ping-address` through the session.
@@ -1355,10 +1398,138 @@ impl Connection for ModbusConnection {
         let span = tracing::debug_span!(
             "ping",
             scheme = SCHEME,
-            endpoint = %self.endpoint,
+            endpoint = %self.link.endpoint,
             op = "ping"
         );
-        Box::pin(self.ping_inner().instrument(span))
+        Box::pin(self.link.ping_inner().instrument(span))
+    }
+
+    /// Subscribe by polling: every tick reads the request's tags through
+    /// [`read`](Self::read).
+    ///
+    /// The request is checked before any I/O and in this order: an
+    /// [`SubscriptionKind::Event`](crate::SubscriptionKind::Event) request is refused (a
+    /// Modbus device raises no events), so is a change-of-state request on a clock whose
+    /// sleeps resolve at once (its polling would never pause), the request's tags fit the
+    /// connection's resource limits, the connection is open, the token is not cancelled,
+    /// every tag carries a [`ModbusAddress`] with an element count of one, the tags fit
+    /// `max_items_per_request` and the chunk limits, and the deadline has not elapsed. The
+    /// deadline and the token bound this call only; the subscription lives until it is
+    /// unsubscribed or dropped, or the connection closes or fails.
+    ///
+    /// The [`Subscription`] reports [`SubscriptionMode::Polling`] and its interval: the
+    /// cyclic interval of the request, or 1000 ms for a change-of-state request. The first
+    /// tick is due at once and the next ones on a grid of the interval; the polling runs
+    /// while [`Subscription::recv`] waits (see its `# Polling` section). A cyclic
+    /// subscription delivers every reading, a change-of-state one a tag's first outcome and
+    /// then each change. A tick that comes due while a read runs, or while the consumer is
+    /// not waiting, is skipped and counted in
+    /// [`LossCounters::skipped`](crate::LossCounters::skipped); so is a tick whose read
+    /// finds the single in-flight slot taken by another operation, or the link down while
+    /// it is re-established. Any other failure of a polling read reaches the consumer as an
+    /// item error for every tag, and an exception reply as the per-item errors a read
+    /// returns. Closing the connection, or its failure, ends the subscription: `recv`
+    /// delivers what is queued, then `None`.
+    ///
+    /// # Compatibility: docs/parity/modbus.md#MB-TCP-SUBSCRIBE
+    /// The counterpart of upstream's polling subscriptions (`PollingSubscriptionConnectionBase`,
+    /// which `ModbusTcpConnection` extends): cyclic at the request's interval,
+    /// change-of-state at the 1000 ms default, event refused. The first tick is due at once,
+    /// as upstream's timer has no initial delay.
+    ///
+    /// # Errors
+    /// Every error carries `Diagnostics` with `operation = Subscribe`, the connection state,
+    /// the latency and the `Validation` category, except `Disconnected` and `Timeout`, which
+    /// are `Transport`.
+    /// - [`ErrorKind::Unsupported`] for [`Operation::Subscribe`] for an event subscription,
+    ///   or for a change-of-state subscription on a clock whose sleeps resolve at once.
+    /// - [`ErrorKind::Disconnected`] if the connection is `Closing`, `Closed` or `Failed`.
+    /// - [`ErrorKind::Cancelled`] if the request's token was cancelled.
+    /// - [`ErrorKind::InvalidAddress`] if a tag's address is not a Modbus address.
+    /// - [`ErrorKind::InvalidConfig`] if a tag's element count is not 1.
+    /// - [`ErrorKind::ResourceLimit`] if the request has more items than
+    ///   `max_items_per_request`.
+    /// - [`ErrorKind::Timeout`] if the request's deadline had already elapsed.
+    ///
+    /// # Cancel safety
+    /// Cancel-safe: the call performs no I/O, so a dropped future leaves nothing behind.
+    /// The deadline source is the request's deadline; with none, nothing in the call waits.
+    ///
+    /// # Wire effects
+    /// The call sends nothing. The subscription then sends one read per tick while its
+    /// consumer waits, as [`read`](Self::read) does: one read request frame (function code
+    /// 01, 02, 03 or 04) per chunk, and again per retry. Nothing is ever written.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[cfg(feature = "testkit")]
+    /// # fn main() -> Result<(), stonecrab::PlcError> {
+    /// use std::sync::Arc;
+    /// use std::time::Duration;
+    /// use stonecrab::{
+    ///     AddressOptions, Connection, ConnectionConfig, Endpoint, PlcValue, QueuePolicy,
+    ///     SubscribeRequest, SubscriptionKind, SubscriptionMode, Tag, TagId,
+    /// };
+    /// use stonecrab::modbus::{ConnectionDefaults, ModbusAddress, ModbusConnection};
+    /// use stonecrab::testkit::{FakeClock, FakeTransportFactory, Script, Step, block_on_with};
+    ///
+    /// // The first tick reads holding register 108 at once: 555.
+    /// let clock = FakeClock::default();
+    /// let factory = FakeTransportFactory::new(clock.clone());
+    /// factory.push_script(Script::strict(vec![
+    ///     Step::Expect(vec![0, 1, 0, 0, 0, 6, 1, 3, 0x00, 0x6B, 0x00, 0x01]),
+    ///     Step::Reply(vec![0, 1, 0, 0, 0, 5, 1, 3, 2, 0x02, 0x2B]),
+    /// ]));
+    /// let config = ConnectionConfig::builder("modbus-tcp", Endpoint::Custom("fake://plc".to_owned()))
+    ///     .build()?;
+    /// let connection = block_on_with(
+    ///     &clock,
+    ///     ModbusConnection::open(
+    ///         config,
+    ///         Arc::new(factory),
+    ///         Arc::new(clock.clone()),
+    ///         ConnectionDefaults::default(),
+    ///     ),
+    /// )?;
+    /// let address = ModbusAddress::parse("holding-register:108", &AddressOptions::default())?;
+    /// let tag = Tag::new(TagId::new("level")?, Arc::new(address));
+    /// let kind = SubscriptionKind::Cyclic(Duration::from_secs(1));
+    /// let request = SubscribeRequest::builder(connection.limits(), kind, QueuePolicy::DropOldest)
+    ///     .tag(tag)
+    ///     .build()?;
+    /// let mut subscription = block_on_with(&clock, connection.subscribe(request))?;
+    /// assert_eq!(subscription.mode(), SubscriptionMode::Polling);
+    /// assert_eq!(subscription.interval(), Some(Duration::from_secs(1)));
+    /// let event = block_on_with(&clock, subscription.recv())?.expect("the first tick");
+    /// assert_eq!(event.outcome().as_ref().ok(), Some(&PlcValue::I16(555)));
+    /// assert_eq!(subscription.unsubscribe().skipped, 0);
+    /// # Ok::<(), stonecrab::PlcError>(())
+    /// # }
+    /// # #[cfg(not(feature = "testkit"))]
+    /// # fn main() {}
+    /// ```
+    fn subscribe(&self, request: SubscribeRequest) -> OpFuture<'_, Subscription> {
+        let span = tracing::debug_span!(
+            "subscribe",
+            scheme = SCHEME,
+            endpoint = %self.link.endpoint,
+            op = "subscribe",
+            items = request.items().len()
+        );
+        Box::pin(
+            async move {
+                let plan = self.link.plan_subscription(&request)?;
+                tracing::debug!("polling subscription started");
+                Ok(plan.start(
+                    Arc::clone(&self.link.clock),
+                    self.link.session.watch_state(),
+                    &self.link.lifeline,
+                    Arc::downgrade(&self.link),
+                    Link::read,
+                ))
+            }
+            .instrument(span),
+        )
     }
 }
 
@@ -1458,7 +1629,7 @@ mod tests {
             ConnectionConfig::builder("modbus-tcp", Endpoint::Custom("fake://plc".to_owned()))
                 .build()
                 .expect("config");
-        let connection = ModbusConnection::build(
+        let connection = Link::build(
             &config,
             Arc::new(factory),
             Arc::new(clock.clone()),
@@ -1468,7 +1639,7 @@ mod tests {
         let address = ModbusAddress::parse("holding-register:1", &AddressOptions::default())
             .expect("address");
         let tag = Tag::new(TagId::new("a").expect("tag id"), Arc::new(address));
-        let request = ReadRequest::builder(connection.limits())
+        let request = ReadRequest::builder(connection.limits)
             .tag(tag)
             .build()
             .expect("request");
@@ -1501,14 +1672,14 @@ mod tests {
         assert_eq!(response.split_into().get(), 1, "one chunk");
     }
 
-    fn quiet_connection() -> (FakeClock, ModbusConnection) {
+    fn quiet_connection() -> (FakeClock, Link) {
         let clock = FakeClock::default();
         let factory = FakeTransportFactory::new(clock.clone());
         let config =
             ConnectionConfig::builder("modbus-tcp", Endpoint::Custom("fake://plc".to_owned()))
                 .build()
                 .expect("config");
-        let connection = ModbusConnection::build(
+        let connection = Link::build(
             &config,
             Arc::new(factory),
             Arc::new(clock.clone()),
@@ -1674,7 +1845,7 @@ mod tests {
     fn a_write_response_the_builder_refuses_is_an_internal_error() {
         let (clock, connection) = quiet_connection();
         let (item, _) = item("holding-register:1:UINT", PlcValue::U16(1));
-        let request = WriteRequest::builder(connection.limits())
+        let request = WriteRequest::builder(connection.limits)
             .item(item.tag().clone(), PlcValue::U16(1))
             .build()
             .expect("request");

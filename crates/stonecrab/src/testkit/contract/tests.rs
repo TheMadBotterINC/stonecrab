@@ -152,13 +152,13 @@ fn case(name: &'static str) -> ContractCase {
 }
 
 #[test]
-fn the_suite_names_twenty_seven_distinct_cases_each_with_a_coverage_mapping() {
+fn the_suite_names_thirty_three_distinct_cases_each_with_a_coverage_mapping() {
     let cases = ContractSuite::cases();
-    assert_eq!(cases.len(), 27, "the case list");
+    assert_eq!(cases.len(), 33, "the case list");
     let mut names: Vec<&str> = cases.iter().map(|case| case.name).collect();
     names.sort_unstable();
     names.dedup();
-    assert_eq!(names.len(), 27, "every sentence is distinct");
+    assert_eq!(names.len(), 33, "every sentence is distinct");
     assert!(
         cases.iter().all(|case| !case.covers.is_empty()),
         "every case maps to a mandatory case"
@@ -231,6 +231,7 @@ fn faults_and_requirements_print_the_words_the_skip_reasons_use() {
             "fixture names a writable address",
         ),
         (Requires::Fault(Fault::Timeout), "fixture fault: timeout"),
+        (Requires::Subscribe, "driver supports subscribe"),
     ] {
         assert_eq!(need.to_string(), text, "requirement text");
     }
@@ -456,9 +457,21 @@ fn a_driver_with_nothing_passes_the_cases_it_can_and_skips_the_rest_with_reasons
     assert_eq!(report.passed(), 6, "exactly the six:\n{report}");
     assert_eq!(
         report.skipped(),
-        21,
+        27,
         "everything else is skipped:\n{report}"
     );
+    for name in [
+        "a polling driver refuses an event subscription with no I/O",
+        "closing the connection ends its subscriptions after the queued events",
+    ] {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Skipped(
+                "driver reports subscribe unsupported".to_owned()
+            )),
+            "subscription cases:\n{report}"
+        );
+    }
     assert_eq!(
         report.outcome("a partial failure keeps the successes"),
         Some(&CaseOutcome::Skipped(

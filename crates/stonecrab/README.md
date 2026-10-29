@@ -48,7 +48,8 @@ operations.
 | `modbus`: Modbus TCP connect, close and reads of coils, discrete inputs, holding registers and input registers (FC01 to FC04) | interoperability-tested |
 | `modbus`: reconnect, retry, cancellation, timeout, late-reply discard | simulator-tested |
 | `modbus`: write of coils and holding registers (FC15, FC06, FC16), refused unless the connection string says `access=read-write` | interoperability-tested |
-| Subscribe, browse and discover | not supported |
+| Subscribe by polling (`sim` and `modbus`): cyclic and change-of-state, event refused; on a clock that never sleeps (the simulator's default) change-of-state is refused and the interval paces nothing | simulator-tested |
+| Browse and discover | not supported |
 | `sensors`: synthetic profiles against the simulator | simulator-tested |
 | `sensors`: synthetic profiles against a Modbus TCP server | interoperability-tested |
 | Hardware verification | planned |

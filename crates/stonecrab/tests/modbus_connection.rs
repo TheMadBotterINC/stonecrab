@@ -1113,4 +1113,340 @@ mod tests {
             "scheme"
         );
     }
+
+    // covers: MB-TCP-SUBSCRIBE / subscribe has a span of its own, each tick a read span
+    #[test]
+    fn subscribe_has_a_span_and_each_polling_read_has_a_read_span() {
+        let rig = Rig::open(vec![Step::Expect(request(1)), Step::Reply(reply(1, 1))]);
+        let wanted = subscribing(
+            &rig,
+            stonecrab::SubscriptionKind::Cyclic(secs(1)),
+            vec![tag("a", "holding-register:1")],
+        )
+        .build()
+        .expect("request");
+        let (spans, _) = traced(|| {
+            let mut subscription =
+                block_on_with(&rig.clock, rig.connection.subscribe(wanted)).expect("subscribe");
+            drop(next_event(&rig, &mut subscription));
+        });
+        let subscribe = spans
+            .iter()
+            .find(|span| span.name == "subscribe")
+            .expect("a subscribe span");
+        for (field, value) in [
+            ("op", "subscribe"),
+            ("scheme", "modbus-tcp"),
+            ("items", "1"),
+        ] {
+            assert_eq!(
+                subscribe.fields.get(field).map(String::as_str),
+                Some(value),
+                "{field}"
+            );
+        }
+        assert!(
+            spans
+                .iter()
+                .any(|span| span.name == "read" && span.seq > subscribe.seq),
+            "the tick read has its own read span"
+        );
+    }
+
+    /// A subscription request for `tags` under `kind`.
+    fn subscribing(
+        rig: &Rig,
+        kind: stonecrab::SubscriptionKind,
+        tags: Vec<Tag>,
+    ) -> stonecrab::SubscribeRequestBuilder {
+        tags.into_iter().fold(
+            stonecrab::SubscribeRequest::builder(
+                rig.connection.limits(),
+                kind,
+                stonecrab::QueuePolicy::DropOldest,
+            ),
+            stonecrab::SubscribeRequestBuilder::tag,
+        )
+    }
+
+    /// A responder that answers every read of holding register 1 with the next of
+    /// `values`, `None` being exception 02, echoing the transaction id.
+    fn answering(values: Vec<Option<u16>>) -> Step {
+        let mut values = values.into_iter();
+        Step::respond(move |request| {
+            let txn = u16::from_be_bytes(*request.first_chunk::<2>()?);
+            Some(match values.next()? {
+                Some(value) => reply(txn, value),
+                None => adu(txn, &[0x83, 0x02]),
+            })
+        })
+    }
+
+    fn next_event(rig: &Rig, subscription: &mut stonecrab::Subscription) -> stonecrab::ReadItem {
+        block_on_with(&rig.clock, subscription.recv())
+            .expect("recv never fails")
+            .expect("an event")
+    }
+
+    // covers: MB-TCP-SUBSCRIBE / a subscribe is checked like a read, before any I/O
+    #[test]
+    fn a_subscribe_is_refused_before_any_io_for_an_event_a_bad_tag_a_token_or_a_deadline() {
+        let rig = Rig::open(Vec::new());
+        let cyclic = stonecrab::SubscriptionKind::Cyclic(secs(1));
+        let token = CancellationToken::new();
+        token.cancel();
+        let foreign = Tag::new(
+            TagId::new("f").expect("id"),
+            Arc::new(stonecrab::testkit::FixtureAddress::new("f", None)),
+        );
+        let two = tag("two", "holding-register:1").with_count(NonZeroU32::MIN.saturating_add(1));
+        for (request, kind, category) in [
+            (
+                subscribing(
+                    &rig,
+                    stonecrab::SubscriptionKind::Event,
+                    vec![tag("a", "holding-register:1")],
+                ),
+                ErrorKind::Unsupported(Operation::Subscribe),
+                FailureCategory::Validation,
+            ),
+            (
+                subscribing(&rig, cyclic, vec![foreign]),
+                ErrorKind::InvalidAddress,
+                FailureCategory::Validation,
+            ),
+            (
+                subscribing(&rig, cyclic, vec![two]),
+                ErrorKind::InvalidConfig,
+                FailureCategory::Validation,
+            ),
+            (
+                subscribing(&rig, cyclic, vec![tag("a", "holding-register:1")])
+                    .cancel(token.clone()),
+                ErrorKind::Cancelled,
+                FailureCategory::Validation,
+            ),
+            (
+                subscribing(&rig, cyclic, vec![tag("a", "holding-register:1")])
+                    .deadline(Deadline::at(rig.clock.now())),
+                ErrorKind::Timeout,
+                FailureCategory::Transport,
+            ),
+        ] {
+            let wanted = request.build().expect("request");
+            let error = error_of(block_on_with(&rig.clock, rig.connection.subscribe(wanted)));
+            assert_eq!(error.kind(), kind, "{error}");
+            let diagnostics = error.diagnostics();
+            assert_eq!(
+                diagnostics.operation,
+                Some(Operation::Subscribe),
+                "{kind:?}"
+            );
+            assert_eq!(diagnostics.category, Some(category), "{kind:?}");
+        }
+        assert!(rig.sent().is_empty(), "nothing reached the wire");
+        block_on_with(&rig.clock, rig.connection.close()).expect("close");
+        let wanted = subscribing(&rig, cyclic, vec![tag("a", "holding-register:1")])
+            .build()
+            .expect("request");
+        let error = error_of(block_on_with(&rig.clock, rig.connection.subscribe(wanted)));
+        assert_eq!(error.kind(), ErrorKind::Disconnected, "a closed connection");
+    }
+
+    // covers: MB-TCP-SUBSCRIBE / change-of-state at 1000 ms delivers the first value, each
+    // change and an exception once
+    #[test]
+    fn change_of_state_polls_every_second_and_delivers_only_changes() {
+        let rig = Rig::open(vec![answering(vec![
+            Some(5),
+            Some(5),
+            Some(7),
+            None,
+            None,
+            Some(7),
+        ])]);
+        let wanted = subscribing(
+            &rig,
+            stonecrab::SubscriptionKind::ChangeOfState,
+            vec![tag("a", "holding-register:1")],
+        )
+        .build()
+        .expect("request");
+        let mut subscription =
+            block_on_with(&rig.clock, rig.connection.subscribe(wanted)).expect("subscribe");
+        assert_eq!(subscription.interval(), Some(secs(1)), "upstream's default");
+        for (value, at) in [
+            (Some(PlcValue::I16(5)), 0),
+            (Some(PlcValue::I16(7)), 2),
+            (None, 3),
+            (Some(PlcValue::I16(7)), 5),
+        ] {
+            let event = next_event(&rig, &mut subscription);
+            assert_eq!(event.outcome().as_ref().ok(), value.as_ref(), "at {at} s");
+            if value.is_none() {
+                assert_eq!(
+                    event
+                        .outcome()
+                        .as_ref()
+                        .err()
+                        .map(stonecrab::ItemError::kind),
+                    Some(ErrorKind::InvalidAddress),
+                    "exception 02"
+                );
+            }
+            assert_eq!(
+                event.sampled_at().saturating_duration_since(rig.t0),
+                secs(at)
+            );
+        }
+        assert_eq!(rig.sent().len(), 6, "a read every second");
+        assert_eq!(subscription.loss().skipped, 0, "no tick skipped");
+    }
+
+    // covers: MB-TCP-SUBSCRIBE / a polling read and a user read share the one in-flight slot
+    #[test]
+    fn a_polling_read_and_a_user_read_never_run_together() {
+        // A user read while a polling read waits for its reply is refused before any I/O.
+        let rig = Rig::open(vec![
+            Step::Expect(request(1)),
+            Step::Delay(Duration::from_millis(500)),
+            Step::Reply(reply(1, 5)),
+        ]);
+        let wanted = subscribing(
+            &rig,
+            stonecrab::SubscriptionKind::Cyclic(secs(1)),
+            vec![tag("a", "holding-register:1")],
+        )
+        .build()
+        .expect("request");
+        let mut subscription =
+            block_on_with(&rig.clock, rig.connection.subscribe(wanted)).expect("subscribe");
+        let mut polling = subscription.recv();
+        assert!(
+            poll_once(&mut polling).is_pending(),
+            "the polling read waits"
+        );
+        let refused = error_of(rig.read());
+        assert_eq!(refused.kind(), ErrorKind::Backpressure, "the slot is taken");
+        assert_eq!(rig.sent(), vec![request(1)], "the user read sent nothing");
+        let event = block_on_with(&rig.clock, polling)
+            .expect("recv never fails")
+            .expect("an event");
+        assert_eq!(
+            event.outcome().as_ref().ok(),
+            Some(&PlcValue::I16(5)),
+            "value"
+        );
+        drop(subscription);
+
+        // A tick that comes due while a user read holds the slot is skipped.
+        let rig = Rig::open(vec![
+            Step::Expect(request(1)),
+            Step::Delay(Duration::from_millis(2500)),
+            Step::Reply(reply(1, 1)),
+            Step::Expect(request(2)),
+            Step::Reply(reply(2, 2)),
+        ]);
+        let mut user = rig.connection.read(rig.request(None, None));
+        assert!(poll_once(&mut user).is_pending(), "the user read waits");
+        let wanted = subscribing(
+            &rig,
+            stonecrab::SubscriptionKind::Cyclic(secs(1)),
+            vec![tag("a", "holding-register:1")],
+        )
+        .build()
+        .expect("request");
+        let mut subscription =
+            block_on_with(&rig.clock, rig.connection.subscribe(wanted)).expect("subscribe");
+        let mut polling = subscription.recv();
+        assert!(
+            poll_once(&mut polling).is_pending(),
+            "tick 0 found the slot taken"
+        );
+        // No read is in flight, so dropping the recv cancels nothing.
+        drop(polling);
+        assert_eq!(subscription.loss().skipped, 1, "and was skipped");
+        let response = block_on_with(&rig.clock, user).expect("the user read");
+        assert_eq!(value_of(&response), PlcValue::I16(1), "the user's value");
+        let event = block_on_with(&rig.clock, subscription.recv())
+            .expect("recv never fails")
+            .expect("an event");
+        assert_eq!(
+            event.outcome().as_ref().ok(),
+            Some(&PlcValue::I16(2)),
+            "value"
+        );
+        assert_eq!(
+            event.sampled_at().saturating_duration_since(rig.t0),
+            Duration::from_millis(2500),
+            "sampled once the slot was free, late"
+        );
+        assert_eq!(
+            subscription.loss().skipped,
+            2,
+            "tick 1 came due while the user read ran and tick 2 was taken late"
+        );
+    }
+
+    // covers: ADR-0020 addendum S55 / a dropped connection ends the wait for a tick at once
+    #[test]
+    fn dropping_the_connection_ends_a_wait_for_the_next_tick_at_once() {
+        let rig = Rig::open(vec![answering(vec![Some(3)])]);
+        let wanted = subscribing(
+            &rig,
+            stonecrab::SubscriptionKind::Cyclic(secs(3600)),
+            vec![tag("a", "holding-register:1")],
+        )
+        .build()
+        .expect("request");
+        let mut subscription =
+            block_on_with(&rig.clock, rig.connection.subscribe(wanted)).expect("subscribe");
+        drop(next_event(&rig, &mut subscription));
+        let mut waiting = subscription.recv();
+        assert!(
+            poll_once(&mut waiting).is_pending(),
+            "waiting for the next tick"
+        );
+        let Rig {
+            clock, connection, ..
+        } = rig;
+        let before = clock.now();
+        drop(connection);
+        assert!(
+            matches!(poll_once(&mut waiting), Poll::Ready(Ok(None))),
+            "the drop ends the subscription"
+        );
+        assert_eq!(clock.now(), before, "without waiting for the tick");
+    }
+
+    // covers: SPEC mandatory-failure-cases / F5 network outage; a subscription survives a reconnect
+    #[test]
+    fn a_tick_that_finds_the_link_down_is_skipped_and_the_subscription_survives_the_reconnect() {
+        let rig = Rig::open(vec![Step::Expect(request(1)), Step::CloseAt(0)]);
+        rig.factory
+            .push_script(Script::new(vec![answering(vec![Some(9)])]));
+        let wanted = subscribing(
+            &rig,
+            stonecrab::SubscriptionKind::Cyclic(secs(1)),
+            vec![tag("a", "holding-register:1")],
+        )
+        .build()
+        .expect("request");
+        let mut subscription =
+            block_on_with(&rig.clock, rig.connection.subscribe(wanted)).expect("subscribe");
+        let event = next_event(&rig, &mut subscription);
+        assert_eq!(
+            event.outcome().as_ref().ok(),
+            Some(&PlcValue::I16(9)),
+            "value"
+        );
+        assert_eq!(
+            event.sampled_at().saturating_duration_since(rig.t0),
+            secs(1),
+            "tick 1, after the reconnect"
+        );
+        assert_eq!(subscription.loss().skipped, 1, "tick 0 met the lost link");
+        assert_eq!(rig.factory.opens().len(), 2, "one reconnect");
+        assert_eq!(rig.connection.state(), ConnectionState::Connected, "state");
+    }
 }

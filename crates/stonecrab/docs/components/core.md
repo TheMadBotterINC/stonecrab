@@ -22,8 +22,9 @@ too; an unknown write outcome is never collapsed into a rejection or replayed.
 | Driver boundary: `Driver`, `Connection`, `DriverRegistry`, configuration, address options, cancellation, state watch, diagnostics | simulator-tested |
 | Values, tags, read and write batches, errors and correlation | simulator-tested |
 | The same boundary on a real wire, through `stonecrab::modbus` (reads) | interoperability-tested |
-| Subscription types and their bounded event queue: `SubscribeRequest`, `Subscription`, `QueuePolicy`, `LossCounters` | build-tested (unit and property tests); no driver subscribes yet |
-| Subscribing drivers, browse and discover | not supported |
+| Subscription types and their bounded event queue: `SubscribeRequest`, `Subscription`, `QueuePolicy`, `LossCounters` | simulator-tested (unit and property tests; the simulator and `modbus` poll through them since S55) |
+| Polling subscriptions: the shared producer behind `Connection::subscribe` of the simulator and `modbus` | simulator-tested |
+| Browse and discover | not supported |
 | Calendar, byte, list and raw values (`RawValue`) | not supported |
 | Hardware verification | planned |
 
@@ -40,11 +41,16 @@ Cancellation tokens, the injectable `Clock`, `OpFuture` and connection-state obs
 are primitives; the `Driver`, `Connection` and `DriverRegistry` traits define the driver
 boundary, and a connection enforces the token and the default-deadline rule (ADR-0011).
 `Connection::subscribe` is a provided method that answers `Unsupported` until a driver
-overrides it (ADR-0020). A subscription request names its kind and its `QueuePolicy`; the
-`Subscription` it yields discloses whether it polls and at which interval, holds at most
-`ResourceLimits::max_queued_events` events, and counts every event its policy gives up
-in `LossCounters`: backpressure loses none, coalescing keeps the latest value per tag,
-and dropping discards the oldest.
+overrides it (ADR-0020); the simulator and the Modbus driver override it with one polling
+producer (S55, ADR-0020 addendum). A subscription request names its kind and its
+`QueuePolicy`; the `Subscription` it yields discloses whether it polls and at which
+interval, holds at most `ResourceLimits::max_queued_events` events, and counts every event
+its policy gives up in `LossCounters`: backpressure loses none, coalescing keeps the latest
+value per tag, and dropping discards the oldest. A polling subscription owns its producer
+future and polls it while `recv` (which takes `&mut self`) waits on an empty queue, with no
+executor and nothing spawned; ticks it could not sample (a read still running, nobody waiting, the connection's
+in-flight slot taken, the link being re-established) count in `LossCounters::skipped`,
+and none is made up later.
 A driver with options only it understands carries them in the configuration's
 `DriverOptions` slot (ADR-0008), and `Driver::parse_address` takes the caller's
 `AddressOptions` so an address convention is chosen explicitly, never inferred.

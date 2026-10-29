@@ -225,15 +225,15 @@ impl Driver for ModbusTcpDriver {
         SCHEME
     }
 
-    /// Read, write and ping, no subscriptions, browse or discovery, one operation at a
-    /// time, PDUs up to 253 bytes: the value every [`ModbusConnection`] reports.
+    /// Read, write, ping and polling subscriptions, no browse or discovery, one operation
+    /// at a time, PDUs up to 253 bytes: the value every [`ModbusConnection`] reports.
     ///
     /// `write` is true; whether a connection may use it is its access policy, which is
     /// read-only unless the connection string says `access=read-write`.
     ///
     /// # Compatibility: docs/parity/modbus.md#MB-TCP-CAPABILITIES
-    /// The value of `MB-TCP-CAPABILITIES`: subscribe `Unsupported` and discover false differ
-    /// from upstream and are recorded in that row.
+    /// The value of `MB-TCP-CAPABILITIES`: subscribe is `Polling`, as upstream's polling
+    /// subscriptions are; discover false differs from upstream and is recorded in that row.
     fn capabilities(&self) -> Capabilities {
         driver_capabilities()
     }
@@ -679,7 +679,7 @@ mod tests {
             Some(253)
         );
         assert_eq!(capabilities.concurrency.get(), 1);
-        assert!(!capabilities.supports(crate::Operation::Subscribe));
+        assert_eq!(capabilities.subscribe, crate::SubscriptionMode::Polling);
     }
 
     #[test]

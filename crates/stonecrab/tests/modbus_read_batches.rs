@@ -672,7 +672,7 @@ mod tests {
         );
         assert_eq!(
             capabilities.subscribe,
-            SubscriptionMode::Unsupported,
+            SubscriptionMode::Polling,
             "subscribe"
         );
         assert!(

@@ -13,10 +13,14 @@ mod tests {
     use std::fmt;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Arc, Mutex, PoisonError};
+    use std::time::Duration;
 
     use stonecrab::sim::{SimAddress, SimDevice, SimDriver, SimTag};
     use stonecrab::testkit::{FakeClock, block_on_with};
-    use stonecrab::{Connection, DriverRegistry, PlcValue, ReadRequest, Tag, TagId, WriteRequest};
+    use stonecrab::{
+        Connection, DriverRegistry, PlcValue, QueuePolicy, ReadRequest, SubscribeRequest,
+        SubscriptionKind, Tag, TagId, WriteRequest,
+    };
     use tracing::field::{Field, Visit};
     use tracing::span::{Attributes, Id, Record};
     use tracing::{Dispatch, Event, Metadata, Subscriber};
@@ -97,10 +101,23 @@ mod tests {
                 .expect("read");
             drop(block_on_with(&clock, connection.read(read)).expect("read"));
             let write = WriteRequest::builder(connection.limits())
-                .item(setpoint, PlcValue::I16(1))
+                .item(setpoint.clone(), PlcValue::I16(1))
                 .build()
                 .expect("write");
             drop(block_on_with(&clock, connection.write(write)).expect("write"));
+            let every_second = SubscriptionKind::Cyclic(Duration::from_secs(1));
+            let subscribe = SubscribeRequest::builder(
+                connection.limits(),
+                every_second,
+                QueuePolicy::DropOldest,
+            )
+            .tag(setpoint)
+            .build()
+            .expect("subscribe");
+            let mut subscription =
+                block_on_with(&clock, connection.subscribe(subscribe)).expect("subscribes");
+            drop(block_on_with(&clock, subscription.recv()).expect("an event"));
+            drop(subscription);
             block_on_with(&clock, connection.close()).expect("close");
         });
         let recorded = recorder
@@ -127,9 +144,11 @@ mod tests {
                 ("connect", "sim", "bench", "connect", "0"),
                 ("read", "sim", "bench", "read", "1"),
                 ("write", "sim", "bench", "write", "2"),
-                ("close", "sim", "bench", "close", "3"),
+                ("subscribe", "sim", "bench", "subscribe", "3"),
+                ("read", "sim", "bench", "read", "4"),
+                ("close", "sim", "bench", "close", "5"),
             ],
-            "one span per operation, ids counting up per connection"
+            "one span per operation and per polling read, ids counting up per connection"
         );
     }
 }

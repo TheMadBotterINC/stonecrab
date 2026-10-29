@@ -1410,8 +1410,8 @@ never inferred.
 - writes: `WriteSingleCoil`, `WriteSingleRegister`, `WriteMultipleCoils`,
   `WriteMultipleRegisters` and their responses, the upstream FC06-versus-FC16 selection
   and `WriteOutcome::Unknown` on the wire (first post-alpha slices, M1 completion, D3);
-- subscriptions (polling emulation, M2), browse, discovery and ping (M3 or the parity
-  backlog);
+- browse and discovery (M3 or the parity backlog); polling subscriptions shipped in S55
+  and ping in S47;
 - extended registers (FC20 and FC21), `STRING`, `WSTRING`, `CHAR`, `WCHAR`, the `TIME` and
   `DATE` family and array selections: the parser rejects each with a typed error (M2; the
   calendar types wait for an ADR);
@@ -1920,7 +1920,7 @@ the crate because a separate test crate would be a dev-dependency cycle. It ship
 `Script`, `Step` (including `Respond` and `React`), `Reaction`, `ScriptedPeer`,
 `ScriptedPeerFactory`, `FakeTransport`, `FakeTransportFactory`, `CountingFactory` and
 `LengthPrefixedFramer`; the golden-vector loader (`load_dir`, `GoldenVector`,
-`VectorSource`) and `InteropMap`; and `ContractSuite` (27 cases, `ContractFixture`,
+`VectorSource`) and `InteropMap`; and `ContractSuite` (33 cases, `ContractFixture`,
 `ContractReport`) which every driver runs and which driver authors can run against their
 own driver. The loaders and some of its tests read repository files, so they run from a
 checkout. **Deferred:** `DifferentialRunner` and `UpstreamHarness` (M5), the
@@ -2011,10 +2011,11 @@ stateDiagram-v2
 
 **Deferred:** the RTU variant of `Resyncing` ("drain until t3.5 silence", M2); the
 `idle timeout` transition into `Reconnecting` (`Timeouts.idle` is recorded and unenforced,
-M2); "subscriptions receive `Ended`" on close (no subscriptions, M2); pending writes
-resolving to `WriteOutcome::Unknown` on reconnect (the Modbus driver reports an `Unknown` at
-the call instead, and never replays a write); and an eager background reconnect task
-(first M2 slice).
+M2); pending writes resolving to `WriteOutcome::Unknown` on reconnect (the Modbus driver
+reports an `Unknown` at the call instead, and never replays a write); and an eager
+background reconnect task (first M2 slice). Subscriptions receive no `Ended` event: since
+S55 a polling subscription watches the connection's state and ends after its queued events
+when the connection closes or fails, and `recv` then returns `None`.
 
 ### 8.1 Request lifecycle
 
@@ -2050,7 +2051,8 @@ cancelled token (`Cancelled`), a non-Modbus address (`InvalidAddress`), a tag co
 request deadline is `Timeout` before the wire. `Queued` is the guard's admission queue; the
 connections themselves answer a concurrent request with `Backpressure` rather than queueing
 it. The write rows of the diagram apply to the simulator only (Modbus writes follow the
-same rows since S46), and browse and subscribe requests do not exist (M3 and M2). A read that
+same rows since S46), subscribe requests are served by polling since S55, and browse
+requests do not exist (M3). A read that
 times out is retried per `RetryPolicy` (default one attempt), a write never.
 
 ---
@@ -2062,8 +2064,8 @@ times out is retried per `RetryPolicy` (default one attempt), a write never.
 | 9.1 Connect through the registry | shipped | the connection-string parameter is `default-unit-identifier` (corrected in the diagram); the driver is built with its transport factory and clock, `ModbusConnection::open` creates the `ConnectionGuard` |
 | 9.2 Batched read with split and partial failure | shipped | the exception is mapped per D18 (`0x02` is `InvalidAddress`, not `DeviceException`); the Modbus connection runs the chunks one after another |
 | 9.3 Timeout, late reply, resynchronization | shipped for TCP | the guard resyncs before the next send; the RTU variant is deferred (M2); write `Unknown` outcomes are shipped (S46) |
-| 9.4 Reconnect with backoff | shipped, request-driven | no background sleep: the next request waits out the backoff; no `Subscription` participates (M2) |
-| 9.5 Polling subscription | **deferred, M2** | `SubscribeRequest`, `Subscription`, `QueuePolicy`, `LossCounters`, `StaleTracker` and the poll task do not exist |
+| 9.4 Reconnect with backoff | shipped, request-driven | no background sleep: the next request waits out the backoff; no `StateChanged` or `Ended` event reaches a `Subscription`: a Modbus polling tick that meets the link down is skipped and counted, and the next tick's read reconnects (S55) |
+| 9.5 Polling subscription | shipped (S55) as polling driven from `recv`; `StaleTracker` still S56 | no `PollTask` is spawned: the `Subscription` owns the producer future and polls it while `recv` waits on an empty queue (ADR-0020 addendum S55); ticks lie on a grid of the interval and the missed ones count in `LossCounters::skipped`; each tick's read takes the connection's default deadline, not `tick + interval`; events are `ReadItem`s (no `Value` or `Stale` event, no `stale_after`); `CoalesceLatest` never engages for a polling subscription, whose slow consumer sees `skipped` instead |
 | 9.6 Write with an ambiguous outcome | shipped (S46) | the Modbus driver sends one request per item, reports `Unknown` for a request that went out without a usable answer and stops after the first one; the simulator's `UnknownAfterTransmit` step exercises the same |
 | 9.7 Sensor profile to measurement | partly shipped | `tags` and `measurements` exist; `Acquisition` and the polling loop are deferred (M2); a profile declares `plc4x`, `one-based-40001` or `zero-based` (S51) |
 

@@ -68,7 +68,7 @@ assert_eq!(clock.now(), deadline);
 
 ## Driver contract suite
 
-`ContractSuite::run(driver, uri, fixture)` runs one set of 27 cases, named as sentences,
+`ContractSuite::run(driver, uri, fixture)` runs one set of 33 cases, named as sentences,
 against any `Driver` and returns a `ContractReport`. A
 `ContractFixture` is the suite's window into the device: a `readable` address, a
 `rejected` one (parseable, refused by the device), a `foreign` one, an `io_probe` counter
@@ -88,17 +88,24 @@ queued-cancellation case is not part of the suite (it needs a wait queue; see
 `ConnectionGuard`). The full run against the simulator is
 `crates/stonecrab/tests/sim_contract.rs`; ADR-0009's S13 addendum has the details.
 
-At the alpha the suite runs against four fixtures, and every skip is named in the
-report rather than hidden: the simulator (`tests/sim_contract.rs`: 24 passed,
-3 named skips, the unsupported-write case and the two ping cases), the Modbus driver
-over a fake transport with a first-party MBAP responder (25 passed, 2 skipped: the
-unsupported-write and unsupported-ping cases), the Modbus driver over loopback sockets to a
-`ScriptedPeer` (21 passed, 6 skipped: three timing cases and the silent-ping case, the
-unsupported-write case and the unsupported-ping case) and the Modbus driver against
-pymodbus 3.8.6 in the `interop` job (16 passed, 11 skipped: timing, on-demand disconnect
-and device exception, and the write cases). The unsupported-subscribe case (S54) offers
-one request per `QueuePolicy` and passes for every fixture, because no driver subscribes
-yet. The results are in the parity rows `SIM-CONTRACT-SUITE` and `MB-CONTRACT-SUITE`.
+The suite runs against four fixtures, and every skip is named in the report rather than
+hidden: the simulator (`tests/sim_contract.rs`: 29 passed, 4 named skips, the
+unsupported-write case, the two ping cases and the unsupported-subscribe case), the Modbus
+driver over a fake transport with a first-party MBAP responder (30 passed, 3 skipped: the
+unsupported-write, unsupported-ping and unsupported-subscribe cases), the Modbus driver
+over loopback sockets to a `ScriptedPeer` (22 passed, 11 skipped: three timing cases, the
+silent-ping case, the four subscription cases that wait for ticks, and the
+unsupported-write, unsupported-ping and unsupported-subscribe cases) and the Modbus driver
+against pymodbus 3.8.6 in the `interop` job (17 passed, 16 skipped: timing, on-demand
+disconnect and device exception, the write cases and the same subscription cases). The
+unsupported-subscribe case (S54) offers one request per `QueuePolicy`; both drivers
+subscribe by polling since S55, so it is skipped for them by name. The six subscription
+cases (S55) run for a driver that reports subscriptions supported (`Requires::Subscribe`):
+one event per tick with the interval disclosed, change-of-state delivering only changes,
+the event refusal, unsubscribe stopping the reads, close ending the subscription after its
+queued events, and a stalled read skipping ticks without a burst. The four that wait for
+ticks also need the fixture's timeout hook, the suite's signal of a deterministic clock.
+The results are in the parity rows `SIM-CONTRACT-SUITE` and `MB-CONTRACT-SUITE`.
 
 ```rust,no_run
 use stonecrab::Driver;

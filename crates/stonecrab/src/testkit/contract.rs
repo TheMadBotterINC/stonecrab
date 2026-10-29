@@ -75,6 +75,8 @@ pub enum Requires {
     WritableAddress,
     /// The fixture has the hook that arms this fault.
     Fault(Fault),
+    /// The driver reports subscriptions supported (`Capabilities.subscribe`).
+    Subscribe,
 }
 
 impl fmt::Display for Requires {
@@ -86,6 +88,7 @@ impl fmt::Display for Requires {
             Self::Ping => f.write_str("driver supports ping"),
             Self::WritableAddress => f.write_str("fixture names a writable address"),
             Self::Fault(fault) => write!(f, "fixture fault: {fault}"),
+            Self::Subscribe => f.write_str("driver supports subscribe"),
         }
     }
 }
@@ -473,6 +476,11 @@ impl fmt::Debug for ContractFixture {
 
 /// The suite itself: a list of cases and the function that runs them.
 ///
+/// The subscription cases (ADR-0020, addendum S55) run for a driver that reports
+/// subscriptions supported. Those that wait for ticks need a clock that moves only when the
+/// suite waits, so, like the other timing cases, they also need the fixture's timeout hook,
+/// which a fixture on a real clock does not offer.
+///
 /// The queued-cancellation case (F4 queued) is not a suite case. A queue exists only in
 /// drivers that have one, so it is covered on `ConnectionGuard` (slice S19) and the
 /// simulator, which has no wait queue, does not exercise it.
@@ -494,11 +502,11 @@ impl ContractSuite {
     /// use stonecrab::testkit::ContractSuite;
     ///
     /// let cases = ContractSuite::cases();
-    /// assert_eq!(cases.len(), 27);
+    /// assert_eq!(cases.len(), 33);
     /// let mut names: Vec<_> = cases.iter().map(|case| case.name).collect();
     /// names.sort_unstable();
     /// names.dedup();
-    /// assert_eq!(names.len(), 27, "case names are unique");
+    /// assert_eq!(names.len(), 33, "case names are unique");
     /// ```
     #[must_use]
     pub fn cases() -> Vec<ContractCase> {

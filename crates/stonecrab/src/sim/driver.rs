@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use crate::{
     AccessPolicy, AddressOptions, Capabilities, Clock, Connection, ConnectionConfig, ConnectionUri,
-    Driver, Endpoint, ErrorKind, OpFuture, PlcError, ProtocolAddress, Result,
+    Driver, Endpoint, ErrorKind, OpFuture, PlcError, ProtocolAddress, Result, SubscriptionMode,
 };
 
 use crate::sim::connection::Target;
@@ -280,17 +280,19 @@ impl Driver for SimDriver {
         SCHEME
     }
 
-    /// Read and write, no subscriptions, browse or discovery, one operation at a time.
+    /// Read, write and polling subscriptions, no browse or discovery, one operation at a
+    /// time.
     ///
     /// The driver cannot know which device a connection will open, so it advertises no
     /// item limit; a connection reports its device's `max_items` in its own
     /// [`Connection::capabilities`].
     fn capabilities(&self) -> Capabilities {
-        // `subscribe` (Unsupported) and `concurrency` (one) are the defaults, which the
-        // simulator keeps; naming them again produced two equivalent mutants (ADR-0018).
+        // `concurrency` (one) is the default, which the simulator keeps; naming it again
+        // produced an equivalent mutant (ADR-0018).
         Capabilities {
             read: true,
             write: true,
+            subscribe: SubscriptionMode::Polling,
             ..Capabilities::default()
         }
     }

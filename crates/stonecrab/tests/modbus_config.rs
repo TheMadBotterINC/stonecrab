@@ -264,9 +264,10 @@ mod tests {
             "connecting sends no ping"
         );
         assert!(
-            !connection
+            connection
                 .capabilities()
-                .supports(stonecrab::Operation::Subscribe)
+                .supports(stonecrab::Operation::Subscribe),
+            "subscriptions poll (S55) and the ping address does not change that"
         );
         block_on_with(&clock, connection.close()).expect("close");
     }

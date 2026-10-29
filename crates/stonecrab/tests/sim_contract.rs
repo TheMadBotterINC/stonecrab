@@ -94,6 +94,16 @@ mod tests {
 
     const UNSUPPORTED_WRITE: &str = "an unsupported write performs no I/O";
 
+    /// The subscription cases (S55): the simulator polls, on the fake clock.
+    const SUBSCRIPTION_CASES: [&str; 6] = [
+        "a cyclic subscription delivers one event per tick and discloses its interval",
+        "a change-of-state subscription delivers a first value and then only changes",
+        "a polling driver refuses an event subscription with no I/O",
+        "unsubscribing stops the polling reads",
+        "closing the connection ends its subscriptions after the queued events",
+        "a stalled polling read skips the ticks that came due and never bursts",
+    ];
+
     fn assert_clean(report: &ContractReport) {
         assert!(report.is_green(), "the suite is green:\n{report}");
         assert_eq!(report.failed(), 0, "no failures:\n{report}");
@@ -104,8 +114,9 @@ mod tests {
         );
         assert_eq!(
             report.skipped(),
-            3,
-            "only the unsupported-write case and the two supported-ping cases are skipped:\n{report}"
+            4,
+            "only the unsupported-write case, the two supported-ping cases and the \
+             unsupported-subscribe case are skipped:\n{report}"
         );
         for name in [
             "a supported ping answers and changes no state",
@@ -121,9 +132,18 @@ mod tests {
         }
         assert_eq!(
             report.outcome("an unsupported subscribe performs no I/O and changes no state"),
-            Some(&CaseOutcome::Passed),
-            "the sim does not subscribe, so the refusal is checked for every queue policy:\n{report}"
+            Some(&CaseOutcome::Skipped(
+                "driver reports subscribe supported; the case needs it unsupported".to_owned()
+            )),
+            "the sim subscribes by polling, so the unsupported-subscribe case is skipped:\n{report}"
         );
+        for name in SUBSCRIPTION_CASES {
+            assert_eq!(
+                report.outcome(name),
+                Some(&CaseOutcome::Passed),
+                "{name} ran and passed against the sim:\n{report}"
+            );
+        }
         assert!(
             matches!(
                 report.outcome(UNSUPPORTED_WRITE),
