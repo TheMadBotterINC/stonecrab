@@ -1,5 +1,6 @@
-//! Interoperability with pymodbus 3.8.6 (slice S27): the driver reads the register map
-//! from a real Modbus TCP server in a container.
+//! Interoperability with pymodbus 3.8.6 (slices S27 and S46): the driver reads the register
+//! map from a real Modbus TCP server in a container, and writes its write area and reads it
+//! back.
 //!
 //! Every test here is `#[ignore]`d and runs only when `STONECRAB_INTEROP_MODBUS` names the
 //! server (for example `modbus-tcp://127.0.0.1:5020`): `mise run interop` starts the image
@@ -13,8 +14,16 @@
 //! A test therefore fails when the server serves the wrong words, when the driver decodes
 //! them wrongly or when the wire address is off by one.
 //!
-//! Time: every read has a 2 s deadline taken from the clock the driver uses, no test
-//! sleeps, and a failure to connect fails the test with a message that names the variable.
+//! Time: every read and write has a 2 s deadline taken from the clock the driver uses, no
+//! test sleeps, and a failure to connect fails the test with a message that names the
+//! variable.
+//!
+//! # What the write tests touch
+//! The register map documents a holding-register write area at 100 to 200 and a coil write
+//! area at 100 to 120, all zero or false at start. The write tests stay inside them and out
+//! of the registers 1 to 126 that `interop_split_batch_discloses_chunks` compares (nextest
+//! runs the tests in parallel against one server): they use holding registers 130 and up
+//! and coils 100 to 103, each test its own, and put every value back.
 //!
 //! # What the server's blocks hold
 //! `interop/pymodbus/server.py` serves logical addresses `1..=N` for a register block of
@@ -42,7 +51,8 @@ mod tests {
     use stonecrab::transport::TcpFactory;
     use stonecrab::{
         AddressOptions, Clock, Connection, ConnectionConfig, Deadline, Driver, ErrorKind,
-        ItemError, PlcValue, ProtocolStatus, ReadRequest, ReadResponse, ResourceLimits, Tag, TagId,
+        ItemError, Operation, PlcValue, ProtocolStatus, ReadRequest, ReadResponse, ResourceLimits,
+        Tag, TagId, WriteOutcome, WriteRequest, WriteResponse,
     };
 
     /// The environment variable that names the server.
@@ -155,6 +165,21 @@ mod tests {
                 .read(request)
                 .await
                 .expect("the read completes")
+        }
+
+        /// Write the items in one request, with the same 2 s deadline as a read.
+        async fn write(&self, items: Vec<(Tag, PlcValue)>) -> WriteResponse {
+            let deadline = Deadline::after(SystemClock::default().now(), DEADLINE)
+                .expect("a deadline that fits");
+            let mut builder = WriteRequest::builder(self.connection.limits()).deadline(deadline);
+            for (tag, value) in items {
+                builder = builder.item(tag, value);
+            }
+            let request = builder.build().expect("the request is within its budgets");
+            self.connection
+                .write(request)
+                .await
+                .expect("the write completes")
         }
 
         async fn close(self) {
@@ -660,6 +685,219 @@ mod tests {
         peer.close().await;
     }
 
+    /// The words the register map documents for the entry of `data_type` at `address`.
+    fn documented_words(map: &InteropMap, address: u16, data_type: &str) -> Vec<u16> {
+        map.holding_registers
+            .iter()
+            .chain(&map.holding_extension)
+            .find(|entry| entry.address == address && entry.data_type == data_type)
+            .unwrap_or_else(|| panic!("the map has a {data_type} at {address}"))
+            .words
+            .clone()
+    }
+
+    /// Read `count` holding registers from `address` as one UINT tag each: the words the
+    /// server holds, which no decoder under test has touched.
+    async fn words_at(peer: &Peer, address: u16, count: u16) -> Vec<u16> {
+        let tags: Vec<Tag> = (0..count)
+            .map(|offset| {
+                let logical = address.saturating_add(offset);
+                peer.tag(
+                    &format!("w{logical}"),
+                    &format!("holding-register:{logical}:UINT"),
+                )
+            })
+            .collect();
+        let response = peer.read(tags).await;
+        (0..count)
+            .map(|offset| {
+                let logical = address.saturating_add(offset);
+                match value_of(&response, &format!("w{logical}")) {
+                    Some(PlcValue::U16(word)) => word,
+                    other => panic!("register {logical} read as {other:?}"),
+                }
+            })
+            .collect()
+    }
+
+    // covers: SPEC mandatory-failure-cases / F5 Modbus level; MB-TCP-WRITE, MB-TCP-CAPABILITIES
+    #[tokio::test(flavor = "current_thread")]
+    #[ignore = "interop: set STONECRAB_INTEROP_MODBUS"]
+    async fn interop_writes_a_holding_register_and_a_coil_and_reads_them_back() {
+        let peer = Peer::connect("access=read-write").await;
+        assert!(peer.connection.capabilities().write, "the capability");
+
+        // FC06 for the register and FC15 for the coil: two items, two wire requests.
+        let written = peer
+            .write(vec![
+                (
+                    peer.tag("register", "holding-register:130:UINT"),
+                    PlcValue::U16(42_424),
+                ),
+                (peer.tag("coil", "coil:100"), PlcValue::Bool(true)),
+            ])
+            .await;
+        assert_eq!(written.confirmed_count(), 2, "both echoed: {written:?}");
+        let back = peer
+            .read(vec![
+                peer.tag("register", "holding-register:130:UINT"),
+                peer.tag("coil", "coil:100"),
+            ])
+            .await;
+        assert_eq!(
+            value_of(&back, "register"),
+            Some(PlcValue::U16(42_424)),
+            "the register the server now holds"
+        );
+        assert_eq!(
+            value_of(&back, "coil"),
+            Some(PlcValue::Bool(true)),
+            "the coil the server now holds"
+        );
+
+        // Put both back.
+        let restored = peer
+            .write(vec![
+                (
+                    peer.tag("register", "holding-register:130:UINT"),
+                    PlcValue::U16(0),
+                ),
+                (peer.tag("coil", "coil:100"), PlcValue::Bool(false)),
+            ])
+            .await;
+        assert_eq!(restored.confirmed_count(), 2, "restored: {restored:?}");
+        let after = peer
+            .read(vec![
+                peer.tag("register", "holding-register:130:UINT"),
+                peer.tag("coil", "coil:100"),
+            ])
+            .await;
+        assert_eq!(value_of(&after, "register"), Some(PlcValue::U16(0)));
+        assert_eq!(value_of(&after, "coil"), Some(PlcValue::Bool(false)));
+        peer.close().await;
+    }
+
+    // covers: SPEC mandatory-failure-cases / F5 Modbus level; MB-TCP-WRITE, MB-BYTEORDER-BE,
+    // MB-BYTEORDER-LE, MB-INTEROP-HR-05, MB-INTEROP-HR-07, MB-INTEROP-LE
+    #[tokio::test(flavor = "current_thread")]
+    #[ignore = "interop: set STONECRAB_INTEROP_MODBUS"]
+    async fn interop_writes_multi_register_types_in_the_documented_word_layouts() {
+        let map = register_map();
+        let peer = Peer::connect("access=read-write").await;
+
+        // (address text, first register, value, the words the map documents for that value).
+        // The words are not produced by the encoder under test: they are the `words` of the
+        // map entries, and the test reads them back as plain registers.
+        let cases = [
+            (
+                "holding-register:140:DINT",
+                140,
+                PlcValue::I32(-242_442_424),
+                documented_words(&map, 14, "DINT"),
+            ),
+            (
+                "holding-register:142:REAL",
+                142,
+                PlcValue::F32("3.141593".parse().expect("a REAL")),
+                documented_words(&map, 26, "REAL"),
+            ),
+            (
+                "holding-register:144:LREAL",
+                144,
+                PlcValue::F64("2.71828182846".parse().expect("a LREAL")),
+                documented_words(&map, 28, "LREAL"),
+            ),
+            (
+                // The address block overrides the order for this tag alone (MB-INTEROP-LE).
+                "holding-register:150:REAL{byte-order: 'LITTLE_ENDIAN'}",
+                150,
+                PlcValue::F32("3.141593".parse().expect("a REAL")),
+                documented_words(&map, 300, "REAL"),
+            ),
+        ];
+        for (text, first, value, words) in cases {
+            let count = u16::try_from(words.len()).expect("a few registers");
+            let written = peer
+                .write(vec![(peer.tag("typed", text), value.clone())])
+                .await;
+            assert_eq!(written.confirmed_count(), 1, "{text}: {written:?}");
+            assert_eq!(
+                words_at(&peer, first, count).await,
+                words,
+                "{text}: the registers the server holds"
+            );
+            let back = peer.read(vec![peer.tag("typed", text)]).await;
+            assert_eq!(value_of(&back, "typed"), Some(value), "{text}: read back");
+            // Put the registers back.
+            let zeros = (0..count)
+                .map(|offset| {
+                    let register =
+                        format!("holding-register:{}:UINT", first.saturating_add(offset));
+                    (peer.tag("zero", &register), PlcValue::U16(0))
+                })
+                .collect::<Vec<_>>();
+            for zero in zeros {
+                let restored = peer.write(vec![zero]).await;
+                assert_eq!(restored.confirmed_count(), 1, "{text}: restored");
+            }
+        }
+        peer.close().await;
+    }
+
+    // covers: SPEC mandatory-failure-cases / F5 Modbus level; MB-TCP-WRITE, MB-EXC-02
+    #[tokio::test(flavor = "current_thread")]
+    #[ignore = "interop: set STONECRAB_INTEROP_MODBUS"]
+    async fn interop_a_refused_write_is_rejected_and_the_others_still_go() {
+        let peer = Peer::connect("access=read-write").await;
+        let written = peer
+            .write(vec![
+                (peer.tag("first", "coil:101"), PlcValue::Bool(true)),
+                (
+                    // Far outside the 201-register block: the server answers exception 02.
+                    peer.tag("far", "holding-register:60000:UINT"),
+                    PlcValue::U16(1),
+                ),
+                // A discrete input is read-only: refused here, no request is sent.
+                (peer.tag("input", "discrete-input:1"), PlcValue::Bool(true)),
+                (peer.tag("last", "coil:102"), PlcValue::Bool(true)),
+            ])
+            .await;
+        let result = |id: &str| {
+            written
+                .get(&TagId::new(id).expect("tag id"))
+                .unwrap_or_else(|| panic!("a result for {id}"))
+                .outcome()
+        };
+        let rejected = |id: &str| {
+            let found = result(id);
+            let WriteOutcome::Rejected(error) = found else {
+                panic!("{id} was expected to be rejected, got {found:?}");
+            };
+            error
+        };
+        assert!(matches!(result("first"), WriteOutcome::Confirmed), "first");
+        // The server refuses the far address with exception 02.
+        let far = rejected("far");
+        assert_eq!(far.kind(), ErrorKind::InvalidAddress, "exception 02");
+        assert_eq!(far.status().map(ProtocolStatus::code), Some(2));
+        // A discrete input is read-only.
+        assert_eq!(
+            rejected("input").kind(),
+            ErrorKind::Unsupported(Operation::Write)
+        );
+        assert!(matches!(result("last"), WriteOutcome::Confirmed), "last");
+
+        // Put the coils back.
+        let restored = peer
+            .write(vec![
+                (peer.tag("first", "coil:101"), PlcValue::Bool(false)),
+                (peer.tag("last", "coil:102"), PlcValue::Bool(false)),
+            ])
+            .await;
+        assert_eq!(restored.confirmed_count(), 2, "restored: {restored:?}");
+        peer.close().await;
+    }
+
     // The suite sentences that cannot run against a server that has no fault hooks, with the
     // reason the report must give for each.
     const SKIPPED: [(&str, &str); 11] = [
@@ -700,13 +938,15 @@ mod tests {
             "read retry skips non-retryable kinds",
             "fixture cannot inject device exception",
         ),
+        // The driver writes, so the case that needs it unsupported has nothing to prove.
         (
-            "a read-only policy rejects a write with no I/O",
-            "driver reports write unsupported",
+            "an unsupported write performs no I/O",
+            "driver reports write supported; the case needs it unsupported",
         ),
+        // A stock pymodbus cannot apply a write and lose its confirmation on demand.
         (
             "an unknown write outcome is never replayed",
-            "driver reports write unsupported",
+            "fixture cannot inject unknown-after-transmit",
         ),
     ];
 
@@ -749,7 +989,9 @@ mod tests {
         // Reach the server first so a missing one fails with the message naming the variable.
         Peer::connect("").await.close().await;
 
-        let uri = server_url();
+        // Writes are granted, as the suite needs for a driver that supports write: the
+        // capabilities case confirms one write to the fixture's writable register.
+        let uri = url_with("access=read-write");
         let counting = CountingFactory::new(Arc::new(TcpFactory::default()));
         let driver = ModbusTcpDriver::new().with_transport_factory(Arc::new(counting.clone()));
         // The probe moves with every open and every frame the driver sends, so "no I/O"
@@ -766,10 +1008,11 @@ mod tests {
             move || probe.io(),
             move || u32::try_from(frames.frames()).unwrap_or(u32::MAX),
         )
-        // Naming a writable address lets the unsupported-write case run; writes stay refused.
-        .with_writable("holding-register:13:UINT", PlcValue::U16(1));
+        // A holding register of the write area; the read-only case names it and sends nothing.
+        .with_writable("holding-register:190:UINT", PlcValue::U16(1));
         // No fault hooks: the server is a stock pymodbus and cannot drop a link, swallow a
-        // reply or refuse on demand, and timing over a real clock stays unverified (D21).
+        // reply, refuse or lose a write's confirmation on demand, and timing over a real
+        // clock stays unverified (D21).
 
         let report = ContractSuite::run(&driver, &uri, &fixture)
             .await

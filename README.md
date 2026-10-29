@@ -17,11 +17,11 @@ speak Modbus TCP, and hands them to your program as plain, checked numbers. It i
 package with one version, `stonecrab`, written in Rust. Today it can read coils, discrete
 inputs, holding registers and input registers from a Modbus TCP server, turn the raw
 values into scaled sensor measurements that carry a quality grade, using declarative
-profiles, and run the same code against a built-in simulator with no network and no
-hardware. It has been checked against an independent Modbus server (pymodbus 3.8.6) and
-has never touched a physical device. **It is alpha software and is not for production use
-yet**: it does not write, subscribe, browse, discover or speak Modbus RTU, and its APIs may
-change before 1.0.
+profiles, write coils and holding registers when a connection is granted write access, and
+run the same code against a built-in simulator with no network and no hardware. It has been
+checked against an independent Modbus server (pymodbus 3.8.6) and has never touched a
+physical device. **It is alpha software and is not for production use yet**: it does not
+subscribe, browse, discover or speak Modbus RTU, and its APIs may change before 1.0.
 
 ## Add it
 ```sh
@@ -42,7 +42,7 @@ Everything is in the one crate; the features only decide what is compiled in.
 | Feature | What you get | On by default |
 | --- | --- | --- |
 | `sim` | `stonecrab::sim`, the in-process simulator | yes |
-| `modbus` | `stonecrab::modbus`, the Modbus TCP driver (reads only); brings in Tokio | yes |
+| `modbus` | `stonecrab::modbus`, the Modbus TCP driver (reads and writes); brings in Tokio | yes |
 | `sensors` | `stonecrab::sensors`, declarative sensor profiles and the TOML loader | yes |
 | `transport` | `stonecrab::transport`, deadline-bounded transports; the only thing that needs Tokio, and on whenever `modbus` is | no |
 | `testkit` | `stonecrab::testkit`, fakes and the driver contract suite for tests; not for applications | no |
@@ -67,7 +67,7 @@ pymodbus 3.8.6 in the `interop` CI job). Nothing is `hardware-verified`.
 | Modbus TCP | read input registers (FC04) as the 15 numeric and bit types | interoperability-tested | `MB-TCP-READ-IR`; `interop_reads_input_registers_1_to_7` |
 | Modbus TCP | batched reads with split disclosure (`split_into`) | interoperability-tested | `MB-READ-MERGE`; `interop_split_batch_discloses_chunks` |
 | Modbus TCP | reconnect, read retry, cancellation, timeout, late-reply discard, resync | simulator-tested | `FakeTransport` and fake clock; `MB-READ-RECONNECT`, `MB-READ-TIMEOUT`, `MB-READ-RETRY` |
-| Modbus TCP | write | not supported | `MB-TCP-WRITE` (deferred); the driver reports `write: false` and sends nothing |
+| Modbus TCP | write coils (FC15) and holding registers (FC06, FC16), refused unless the connection says `access=read-write`; a write that gets no answer is `Unknown` and is never replayed | interoperability-tested (happy and exception paths; `Unknown` and the halt are simulator-tested) | `MB-TCP-WRITE`; `interop_writes_a_holding_register_and_a_coil_and_reads_them_back`, `interop_writes_multi_register_types_in_the_documented_word_layouts` |
 | Modbus TCP | subscriptions (upstream emulates them by polling) | not supported | `MB-TCP-SUBSCRIBE` (deferred, M2) |
 | Modbus TCP | ping (one read of the configured `ping-address`) | interoperability-tested | `MB-TCP-PING`; `interop_ping_reads_each_configured_area_and_succeeds`, `interop_ping_of_an_address_the_server_refuses_still_answers` |
 | Modbus TCP | browse, discover | not supported | `MB-TCP-BROWSE`, `MB-TCP-DISCOVER` (deferred) |
@@ -136,7 +136,9 @@ See [`STATUS.md`](STATUS.md) for the current engineering handoff, verification
 evidence, known gaps and continuation steps, and
 [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) for what is supported, at which level and
 against which peers. The 0.1.0 package on crates.io is specification-stage only; 0.2.0
-is the alpha. Upstream compatibility is claimed only for the rows of
+is the alpha. This README describes `master`: Modbus writes landed after 0.2.0 (see
+"Unreleased" in [`CHANGELOG.md`](CHANGELOG.md)), so the published 0.2.0 reads only.
+Upstream compatibility is claimed only for the rows of
 [`docs/parity/modbus.md`](docs/parity/modbus.md) that say so, at the support levels above.
 
 The original [project brief](docs/PROJECT_BRIEF.md), [specification](docs/SPEC.md),

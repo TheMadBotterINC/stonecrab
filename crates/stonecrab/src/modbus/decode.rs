@@ -284,8 +284,8 @@ impl TypedDecoder {
     /// # Compatibility: docs/parity/modbus.md#MB-BYTEORDER-BE
     /// The same layouts as decoding: docs/parity/modbus.md#MB-BYTEORDER-BE,
     /// docs/parity/modbus.md#MB-BYTEORDER-LE, docs/parity/modbus.md#MB-BYTEORDER-BE-SWAP
-    /// and docs/parity/modbus.md#MB-BYTEORDER-LE-SWAP. Alpha has no write on the wire
-    /// (docs/parity/modbus.md#MB-TCP-WRITE); this exists for vectors and tests.
+    /// and docs/parity/modbus.md#MB-BYTEORDER-LE-SWAP. The write path of the
+    /// connection uses it (docs/parity/modbus.md#MB-TCP-WRITE).
     pub fn encode_registers(
         value: &PlcValue,
         data_type: ModbusDataType,

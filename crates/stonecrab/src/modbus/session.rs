@@ -25,7 +25,7 @@ use crate::modbus::{
 /// before the next send, so a handful is plenty; the bound keeps the memory fixed.
 const ABANDONED_CAP: usize = 32;
 
-/// The exception code `Unsupported(Operation::Read)` stands for (ILLEGAL FUNCTION).
+/// The exception code `Unsupported` stands for (ILLEGAL FUNCTION).
 const ILLEGAL_FUNCTION: u8 = 0x01;
 
 /// The exception code `InvalidAddress` stands for (ILLEGAL DATA ADDRESS).
@@ -113,9 +113,9 @@ impl Drop for Outstanding<'_> {
 /// A Modbus TCP session: transaction ids, request/reply correlation and the mapping of
 /// device exceptions, over a [`ConnectionGuard`] that owns the connection.
 ///
-/// The session sends one read request at a time ([`request`](Self::request)) and returns
-/// the reply PDU that answers it. A reply is accepted only when its transaction id, its
-/// unit id and its function code (the reply's function with the exception bit cleared)
+/// The session sends one request at a time ([`request`](Self::request), a read or a
+/// write) and returns the reply PDU that answers it. A reply is accepted only when its
+/// transaction id, its unit id and its function code (the reply's function with the exception bit cleared)
 /// all match the request. Anything else is discarded, counted ([`SessionStats`]) and
 /// logged at `warn` level with the expected and the received transaction id, and the
 /// session waits for the next reply within the same deadline. A device exception is an
@@ -153,9 +153,10 @@ impl Drop for Outstanding<'_> {
 /// # Compatibility: docs/parity/modbus.md#MB-READ-MATCH
 /// Upstream matches a reply to its request by transaction id alone, one request in flight
 /// (`MB-READ-INFLIGHT`), and times a request out after `request-timeout-ms`
-/// (`MB-READ-TIMEOUT`). Checking the unit id and function code as well is a divergence
-/// (Modbus Application Protocol V1.1b section 7: a server echoes the unit identifier and
-/// the function code); the transaction counter is `MB-READ-TXN`.
+/// (`MB-READ-TIMEOUT`); writes go through the same exchange (`MB-TCP-WRITE`). Checking the
+/// unit id and function code as well is a divergence (Modbus Application Protocol V1.1b
+/// section 7: a server echoes the unit identifier and the function code); the transaction
+/// counter is `MB-READ-TXN`.
 ///
 /// # Examples
 /// ```
@@ -517,7 +518,8 @@ impl ModbusSession {
         self.guard.close()
     }
 
-    /// Send one read request to `unit_id` and return the reply PDU that answers it.
+    /// Send one request, a read or a write, to `unit_id` and return the reply PDU that
+    /// answers it.
     ///
     /// The request is encoded with [`encode_request`] into a writer bounded by
     /// [`MAX_PDU_BYTES`], framed with the next transaction id and sent through the guard.
@@ -525,17 +527,20 @@ impl ModbusSession {
     /// reply that does not match is discarded, counted and logged (see the type) and the
     /// session waits for the next one within the same `deadline`. The accepted PDU is
     /// decoded with [`decode_response`] and proved against the request with
-    /// [`ModbusPdu::check_reply_to`] (byte count against quantity). The result is a
-    /// [`ModbusPdu::ReadBitsResponse`] or [`ModbusPdu::ReadRegistersResponse`], or
-    /// `Ok(ModbusPdu::Exception { .. })` when the device refused the request: the
-    /// connection stays `Connected` and [`exception_item_error`] gives the per-member
-    /// error.
+    /// [`ModbusPdu::check_reply_to`] (byte count against quantity for a read, the echo of
+    /// address and quantity or value for a write). The result is a
+    /// [`ModbusPdu::ReadBitsResponse`], a [`ModbusPdu::ReadRegistersResponse`] or the echo
+    /// of a write ([`ModbusPdu::WriteSingleRegisterResponse`] or
+    /// [`ModbusPdu::WriteMultipleResponse`]), or `Ok(ModbusPdu::Exception { .. })` when the
+    /// device refused the request: the connection stays `Connected` and
+    /// [`exception_item_error`] gives the per-member error.
     ///
     /// The deadline source is the `deadline` argument and nothing else: queueing, the
     /// backoff, the open, the send, the resync and every wait for a reply (the first and
     /// each after a discard) end at it. `token` is honoured as `ConnectionGuard::request`
     /// documents. A span `request` (debug level) covers the call, with the fields
-    /// `scheme = "modbus-tcp"`, `endpoint` (host and port), `op = "read"` and `txn`.
+    /// `scheme = "modbus-tcp"`, `endpoint` (host and port), `op` (`"read"`, or `"write"`
+    /// for a write request) and `txn`.
     ///
     /// # Compatibility: docs/parity/modbus.md#MB-READ-MATCH
     /// Upstream matches by transaction id only (`MB-READ-MATCH`), keeps one request in
@@ -544,19 +549,19 @@ impl ModbusSession {
     /// byte-count proof are Stonecrab's. Exceptions map per `MB-EXC-01` and its siblings.
     ///
     /// # Errors
-    /// Every error carries `Diagnostics` with `operation = Read`, the connection state at
-    /// the failure, the latency on the session's clock, the reconnect attempt as
-    /// `retries` and a category.
+    /// Every error carries `Diagnostics` with `operation = Read` (the connection re-stamps
+    /// it for a write), the connection state at the failure, the latency on the session's
+    /// clock, the reconnect attempt as `retries` and a category.
     /// - [`ErrorKind::Backpressure`] if another request of this session is running;
     ///   nothing was sent. The guard also reports it when its own queue is full.
     /// - [`ErrorKind::ResourceLimit`] or [`ErrorKind::MalformedData`] if `pdu` is not a
-    ///   read request or is out of bounds (quantity 0, too large, past the address
-    ///   space); nothing was sent. The same kinds come from the guard for a reply that
+    ///   request or is out of bounds (quantity 0, too large, past the address space);
+    ///   nothing was sent. The same kinds come from the guard for a reply that
     ///   violates the framing, after which the guard resynchronizes before the next
     ///   request.
     /// - [`ErrorKind::MalformedData`] (category `Protocol`) if the matching reply's PDU
-    ///   does not decode, or its byte count does not fit the request. The stream stays
-    ///   aligned.
+    ///   does not decode, or its byte count or echo does not fit the request. The stream
+    ///   stays aligned.
     /// - [`ErrorKind::Cancelled`] if `token` fired: nothing was sent when it fired before
     ///   the flush; the frame may have reached the peer when it fired later.
     /// - [`ErrorKind::Timeout`] if `deadline` passed, in any phase. After the flush the
@@ -573,8 +578,9 @@ impl ModbusSession {
     /// being written poisons the transport, as the guard documents.
     ///
     /// # Wire effects
-    /// Transmits one request frame, once; a read is never replayed by the session
-    /// (retries are the connection's policy, S25). Receiving transmits nothing.
+    /// Transmits one request frame, once; the session never replays a request (retries of a
+    /// read are the connection's policy, S25; a write is never retried). Receiving
+    /// transmits nothing.
     ///
     /// # Examples
     /// ```
@@ -625,7 +631,7 @@ impl ModbusSession {
             "request",
             scheme = "modbus-tcp",
             endpoint = %self.endpoint,
-            op = "read",
+            op = operation_name(pdu.function()),
             txn = tracing::field::Empty
         );
         Box::pin(
@@ -783,6 +789,20 @@ impl ModbusSession {
     }
 }
 
+/// The span name of a request: a write function is a `"write"`, every other a `"read"`.
+const fn operation_name(function: FunctionCode) -> &'static str {
+    match function {
+        FunctionCode::WriteSingleRegister
+        | FunctionCode::WriteMultipleCoils
+        | FunctionCode::WriteMultipleRegisters => "write",
+        FunctionCode::ReadCoils
+        | FunctionCode::ReadDiscreteInputs
+        | FunctionCode::ReadHoldingRegisters
+        | FunctionCode::ReadInputRegisters
+        | FunctionCode::Unknown(_) => "read",
+    }
+}
+
 /// The per-member error for a device exception, by decision D18.
 ///
 /// Code 1 (ILLEGAL FUNCTION) is [`ErrorKind::Unsupported`]`(`[`Operation::Read`]`)`, code
@@ -825,13 +845,24 @@ impl ModbusSession {
 /// ```
 #[must_use]
 pub fn exception_item_error(function: FunctionCode, code: ExceptionCode) -> ItemError {
+    exception_error(Operation::Read, function, code)
+}
+
+/// The error [`exception_item_error`] builds, for the operation that was refused: code 1
+/// is `Unsupported(operation)`, so a device that does not implement a write function is
+/// `Unsupported(Operation::Write)`, and the diagnostics name `operation`.
+pub(super) fn exception_error(
+    operation: Operation,
+    function: FunctionCode,
+    code: ExceptionCode,
+) -> ItemError {
     let kind = match code.as_u8() {
-        ILLEGAL_FUNCTION => ErrorKind::Unsupported(Operation::Read),
+        ILLEGAL_FUNCTION => ErrorKind::Unsupported(operation),
         ILLEGAL_DATA_ADDRESS => ErrorKind::InvalidAddress,
         _ => ErrorKind::DeviceException,
     };
     let diagnostics = crate::Diagnostics {
-        operation: Some(Operation::Read),
+        operation: Some(operation),
         category: Some(FailureCategory::Protocol),
         ..crate::Diagnostics::default()
     };
@@ -847,4 +878,46 @@ pub fn exception_item_error(function: FunctionCode, code: ExceptionCode) -> Item
     .with_diagnostics(diagnostics);
     ItemError::new(error)
         .with_status(ProtocolStatus::new(PROTOCOL, u32::from(code.as_u8())).with_name(code.name()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // covers: MB-TCP-WRITE / the request span says what the frame does
+    #[test]
+    fn the_request_span_names_a_write_function_a_write() {
+        for function in [
+            FunctionCode::WriteSingleRegister,
+            FunctionCode::WriteMultipleCoils,
+            FunctionCode::WriteMultipleRegisters,
+        ] {
+            assert_eq!(operation_name(function), "write", "{function:?}");
+        }
+        for function in [
+            FunctionCode::ReadCoils,
+            FunctionCode::ReadDiscreteInputs,
+            FunctionCode::ReadHoldingRegisters,
+            FunctionCode::ReadInputRegisters,
+            FunctionCode::Unknown(0x2B),
+        ] {
+            assert_eq!(operation_name(function), "read", "{function:?}");
+        }
+    }
+
+    // covers: MB-EXC-01 / ILLEGAL FUNCTION is unsupported for the operation that was refused
+    #[test]
+    fn illegal_function_is_unsupported_for_the_operation_that_was_refused() {
+        for operation in [Operation::Read, Operation::Write] {
+            let error = exception_error(
+                operation,
+                FunctionCode::ReadCoils,
+                ExceptionCode::IllegalFunction,
+            );
+            assert_eq!(error.kind(), ErrorKind::Unsupported(operation));
+            assert_eq!(error.error().diagnostics().operation, Some(operation));
+        }
+        let read = exception_item_error(FunctionCode::ReadCoils, ExceptionCode::IllegalFunction);
+        assert_eq!(read.kind(), ErrorKind::Unsupported(Operation::Read));
+    }
 }

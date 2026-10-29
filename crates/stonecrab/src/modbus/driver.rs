@@ -9,7 +9,7 @@ use crate::{
     Endpoint, ErrorKind, OpFuture, PlcError, ProtocolAddress, Result, Timeouts,
 };
 
-use crate::modbus::connection::alpha_capabilities;
+use crate::modbus::connection::driver_capabilities;
 use crate::modbus::{ConnectionDefaults, ModbusAddress, ModbusConnection, ModbusOptions};
 
 /// The connection-string scheme of this driver.
@@ -104,7 +104,7 @@ impl ModbusTcpDriver {
     ///
     /// let driver = ModbusTcpDriver::new();
     /// assert_eq!(driver.scheme(), "modbus-tcp");
-    /// assert!(driver.capabilities().read && !driver.capabilities().write);
+    /// assert!(driver.capabilities().read && driver.capabilities().write);
     /// ```
     #[must_use]
     pub fn new() -> Self {
@@ -225,26 +225,31 @@ impl Driver for ModbusTcpDriver {
         SCHEME
     }
 
-    /// Read and ping, no write, subscriptions, browse or discovery, one operation at a time,
-    /// PDUs up to 253 bytes: the value every [`ModbusConnection`] reports.
+    /// Read, write and ping, no subscriptions, browse or discovery, one operation at a
+    /// time, PDUs up to 253 bytes: the value every [`ModbusConnection`] reports.
+    ///
+    /// `write` is true; whether a connection may use it is its access policy, which is
+    /// read-only unless the connection string says `access=read-write`.
     ///
     /// # Compatibility: docs/parity/modbus.md#MB-TCP-CAPABILITIES
-    /// The alpha value of `MB-TCP-CAPABILITIES`: write false (D3), subscribe `Unsupported`
-    /// and discover false differ from upstream and are recorded in that row.
+    /// The value of `MB-TCP-CAPABILITIES`: subscribe `Unsupported` and discover false differ
+    /// from upstream and are recorded in that row.
     fn capabilities(&self) -> Capabilities {
-        alpha_capabilities()
+        driver_capabilities()
     }
 
     /// Read `modbus-tcp[:tcp]://host[:port][?parameters]` into a validated configuration.
     ///
     /// The text is parsed with [`ConnectionUri::parse`], which already refuses duplicate
     /// and empty keys. The configuration has an [`Endpoint::Tcp`], the core defaults for
-    /// reconnect, retry, limits and the access policy, and:
+    /// reconnect, retry and limits, a read-only access policy, and:
     ///
     /// - `request-timeout-ms` as `Timeouts.request` (5000 ms by default);
     /// - `address-convention=plc4x` as the configuration's address convention, which
     ///   [`ConnectionConfig::address_options`] hands to
     ///   [`parse_address`](Driver::parse_address);
+    /// - `access=read-write` as the configuration's access policy; `read-only`, which is
+    ///   also what an absent key means, refuses every write before any I/O;
     /// - the six upstream parameters as a [`ModbusOptions`] in the configuration's driver
     ///   options slot, where `connect` reads them back. The options start from this
     ///   driver's defaults ([`with_defaults`](ModbusTcpDriver::with_defaults)) and the
@@ -256,9 +261,9 @@ impl Driver for ModbusTcpDriver {
     /// `host[:port]` (an empty host, a port that is empty, not decimal digits, zero or above
     /// 65535, an IPv6 address without brackets, a path), and a parameter that is unknown,
     /// empty, not a whole number where one is required, outside its bounds, an unknown
-    /// byte-order name, an invalid `ping-address` or an `address-convention` other than
-    /// `plc4x`. The messages never repeat the authority or the connection string; a
-    /// parameter error names its key.
+    /// byte-order name, an invalid `ping-address`, an `address-convention` other than
+    /// `plc4x` or an `access` other than `read-only` and `read-write`. The messages never
+    /// repeat the authority or the connection string; a parameter error names its key.
     ///
     /// # Compatibility: docs/parity/modbus.md#MB-CFG-UNKNOWN
     /// Protocol code, transport code and default port 502 as upstream
@@ -271,7 +276,8 @@ impl Driver for ModbusTcpDriver {
     /// (docs/parity/modbus.md#MB-CFG-MAX-REGISTERS). Unknown keys are an error where
     /// upstream warns (`MB-CFG-UNKNOWN`), which includes the misspelt `unit-identifier` of
     /// the upstream test suite (docs/parity/modbus.md#MB-QUIRK-F); a transport other than
-    /// `tcp`, UDP included, is refused (docs/parity/modbus.md#MB-QUIRK-A).
+    /// `tcp`, UDP included, is refused (docs/parity/modbus.md#MB-QUIRK-A). `access` is a
+    /// Stonecrab parameter with no upstream counterpart (docs/parity/modbus.md#MB-CFG-ACCESS).
     fn parse_config(&self, uri: &str) -> Result<ConnectionConfig> {
         let parsed = ConnectionUri::parse(uri)?;
         if parsed.scheme() != SCHEME {
@@ -281,7 +287,7 @@ impl Driver for ModbusTcpDriver {
             return Err(invalid("the transport code of modbus-tcp is tcp"));
         }
         let endpoint = endpoint(parsed.authority())?;
-        let (options, plc4x) = ModbusOptions::from_parameters(
+        let (options, plc4x, access) = ModbusOptions::from_parameters(
             ModbusOptions::from_defaults(self.defaults),
             parsed.options(),
         )?;
@@ -291,6 +297,7 @@ impl Driver for ModbusTcpDriver {
         };
         let mut builder = ConnectionConfig::builder(SCHEME, endpoint)
             .timeouts(timeouts)
+            .access(access)
             .driver_options(Arc::new(options));
         if plc4x {
             builder = builder.address_convention("plc4x");
@@ -662,7 +669,7 @@ mod tests {
         let connection = block_on_with(&clock, driver.connect(config)).expect("connect");
         assert_eq!(driver.capabilities(), connection.capabilities());
         let capabilities = driver.capabilities();
-        assert!(capabilities.read && !capabilities.write);
+        assert!(capabilities.read && capabilities.write);
         assert!(!capabilities.browse && !capabilities.discover);
         assert_eq!(
             capabilities.max_pdu_bytes.map(std::num::NonZeroUsize::get),

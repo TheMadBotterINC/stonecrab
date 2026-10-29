@@ -619,8 +619,9 @@ mod tests {
             checked += 1;
         }
         assert_eq!(
-            checked, 8,
-            "two function 06, three 15 and three 16 requests"
+            checked, 38,
+            "two function 06, three 15 and three 16 first-party requests, and the 30 write \
+             requests of the upstream driver-suite exchanges (S46)"
         );
     }
 }

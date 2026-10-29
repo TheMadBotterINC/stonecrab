@@ -2,7 +2,7 @@
 An independent native Rust industrial protocol library, built for sensor acquisition
 first. **Alpha**: pre-release versions with experimental APIs. This is one crate, with one
 version: the runtime-independent core contracts are at the crate root, and the codec, the
-transport, the in-process simulator, the read-only Modbus TCP driver, declarative sensor
+transport, the in-process simulator, the Modbus TCP driver, declarative sensor
 profiles and the test kit are modules, switched on by Cargo features. No hardware access
 is implemented and no physical device has been tried.
 
@@ -21,7 +21,7 @@ for the contracts. Upstream compatibility is claimed only where a parity row say
 | --- | --- | --- | --- |
 | none | the core at the crate root, and `stonecrab::codec` | `thiserror`, `bytes` | always built |
 | `sim` | `stonecrab::sim`, the in-process simulator | `tracing` | yes |
-| `modbus` | `stonecrab::modbus`, the Modbus TCP driver (reads) | `transport`, `tracing` | yes |
+| `modbus` | `stonecrab::modbus`, the Modbus TCP driver (reads and writes) | `transport`, `tracing` | yes |
 | `sensors` | `stonecrab::sensors`, sensor profiles and the TOML loader | `serde`, `toml` | yes |
 | `full` | the same set as the defaults, spelled out; the `profile_read` example requires it | `sim`, `modbus`, `sensors` | no |
 | `transport` | `stonecrab::transport`, deadline-bounded transports and the Tokio TCP transport | `tokio` | no (on through `modbus` and `testkit`) |
@@ -38,7 +38,7 @@ The foundation re-exported at the root includes scalar values, identifiers,
 capabilities, errors, deadlines, redacted secrets, immutable tags, bounded read requests,
 correlated read results, original protocol diagnostics and explicit unknown write
 outcomes, and the `Driver`, `Connection` and `DriverRegistry` boundary. Those are pure data
-contracts and traits; a driver (the simulator, or the Modbus driver for reads) performs the
+contracts and traits; a driver (the simulator, or the Modbus driver) performs the
 operations.
 
 | Capability | Support level |
@@ -47,7 +47,7 @@ operations.
 | `sim`: in-process simulator, read and write, scripted failures | simulator-tested |
 | `modbus`: Modbus TCP connect, close and reads of coils, discrete inputs, holding registers and input registers (FC01 to FC04) | interoperability-tested |
 | `modbus`: reconnect, retry, cancellation, timeout, late-reply discard | simulator-tested |
-| `modbus`: write | not supported |
+| `modbus`: write of coils and holding registers (FC15, FC06, FC16), refused unless the connection string says `access=read-write` | interoperability-tested |
 | Subscribe, browse and discover | not supported |
 | `sensors`: synthetic profiles against the simulator | simulator-tested |
 | `sensors`: synthetic profiles against a Modbus TCP server | interoperability-tested |

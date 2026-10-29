@@ -24,10 +24,10 @@ mod tests {
         FakeClock, FakeTransportFactory, Script, Step, block_on_with, poll_once,
     };
     use stonecrab::{
-        AddressOptions, CancellationToken, Clock, Connection, ConnectionConfig, ConnectionState,
-        Credentials, Deadline, Driver, Endpoint, ErrorKind, FailureCategory, Operation, PlcError,
-        PlcValue, ReadRequest, ReadResponse, ResourceLimits, Result, RetryPolicy, Tag, TagId,
-        Timeouts,
+        AccessPolicy, AddressOptions, CancellationToken, Clock, Connection, ConnectionConfig,
+        ConnectionState, Credentials, Deadline, Driver, Endpoint, ErrorKind, FailureCategory,
+        Operation, PlcError, PlcValue, ReadRequest, ReadResponse, ResourceLimits, Result,
+        RetryPolicy, Tag, TagId, Timeouts,
     };
     use tracing::field::{Field, Visit};
     use tracing::span::{Attributes, Id, Record};
@@ -699,7 +699,7 @@ mod tests {
     }
 
     #[test]
-    fn write_has_a_span_and_does_no_io() {
+    fn write_has_a_span_and_a_read_only_connection_does_no_io() {
         let rig = Rig::open(vec![]);
         let request = stonecrab::WriteRequest::builder(rig.connection.limits())
             .item(tag("a", "holding-register:1"), PlcValue::I16(1))
@@ -722,6 +722,98 @@ mod tests {
             Some("write"),
             "op"
         );
+        assert!(rig.sent().is_empty(), "nothing was sent");
+    }
+
+    // covers: MB-TCP-WRITE / a write has a span of its own and its request span says write
+    #[test]
+    fn a_write_that_goes_out_has_a_write_span_and_a_write_request_span() {
+        let echo = adu(1, &[0x06, 0x00, 0x00, 0x00, 0x01]);
+        let config = ConnectionConfig::builder("modbus-tcp", fake_endpoint())
+            .access(AccessPolicy::ReadWrite)
+            .build()
+            .expect("config");
+        let rig = Rig::with(
+            config,
+            vec![Step::Expect(echo.clone()), Step::Reply(echo.clone())],
+        );
+        let request = stonecrab::WriteRequest::builder(rig.connection.limits())
+            .item(tag("a", "holding-register:1"), PlcValue::I16(1))
+            .build()
+            .expect("write request");
+        let (spans, events) = traced(|| {
+            let response =
+                block_on_with(&rig.clock, rig.connection.write(request)).expect("the write");
+            assert_eq!(response.confirmed_count(), 1, "confirmed");
+        });
+        let field = |name: &str, key: &str| {
+            spans
+                .iter()
+                .find(|span| span.name == name)
+                .unwrap_or_else(|| panic!("a {name} span"))
+                .fields
+                .get(key)
+                .cloned()
+        };
+        assert_eq!(field("write", "op").as_deref(), Some("write"), "op");
+        assert_eq!(field("write", "items").as_deref(), Some("1"), "items");
+        assert_eq!(
+            field("request", "op").as_deref(),
+            Some("write"),
+            "the session's request span says what the frame does"
+        );
+        let done = events
+            .iter()
+            .find(|event| event.fields.get("message").map(String::as_str) == Some("write complete"))
+            .expect("a completion event");
+        assert_eq!(done.level, Level::DEBUG, "debug level");
+        assert_eq!(done.fields.get("confirmed").map(String::as_str), Some("1"));
+        assert_eq!(rig.sent(), vec![echo], "the write went out");
+    }
+
+    // covers: MB-TCP-WRITE / a write that went out and got no answer is logged at debug
+    #[test]
+    fn an_unconfirmed_write_is_logged_at_debug_with_its_kind() {
+        let config = ConnectionConfig::builder("modbus-tcp", fake_endpoint())
+            .access(AccessPolicy::ReadWrite)
+            .build()
+            .expect("config");
+        let rig = Rig::with(
+            config,
+            vec![Step::Expect(adu(1, &[0x06, 0x00, 0x00, 0x00, 0x01]))],
+        );
+        let request = stonecrab::WriteRequest::builder(rig.connection.limits())
+            .item(tag("a", "holding-register:1"), PlcValue::I16(1))
+            .build()
+            .expect("write request");
+        let (_, events) = traced(|| {
+            let response =
+                block_on_with(&rig.clock, rig.connection.write(request)).expect("an outcome");
+            assert_eq!(response.unknown_count(), 1, "unknown");
+        });
+        let sent = events
+            .iter()
+            .find(|event| {
+                event.fields.get("message").map(String::as_str)
+                    == Some("a write was sent and not confirmed")
+            })
+            .expect("an event for the unconfirmed write");
+        assert_eq!(sent.level, Level::DEBUG, "debug level");
+        assert_eq!(sent.fields.get("kind").map(String::as_str), Some("Timeout"));
+    }
+
+    // covers: MB-TCP-PING / a request timeout the clock cannot represent fails the ping
+    #[test]
+    fn a_ping_with_a_request_timeout_the_clock_cannot_represent_is_invalid_config() {
+        let mut timeouts = Timeouts::default();
+        timeouts.request = Duration::MAX;
+        let config = ConnectionConfig::builder("modbus-tcp", fake_endpoint())
+            .timeouts(timeouts)
+            .build()
+            .expect("config");
+        let rig = Rig::with(config, vec![]);
+        let error = error_of(rig.ping());
+        assert_eq!(error.kind(), ErrorKind::InvalidConfig, "kind");
         assert!(rig.sent().is_empty(), "nothing was sent");
     }
 

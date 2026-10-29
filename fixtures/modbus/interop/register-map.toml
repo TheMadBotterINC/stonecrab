@@ -17,8 +17,8 @@
 #   first, high byte first).
 #
 # Not listed: the holding-register write area 100-200 (starts at zero) and the coil write
-# area 100-120 (initially false). Writes are deferred (D3), so alpha never reads them;
-# every position not listed below holds zero or false.
+# area 100-120 (initially false). The write tests of S46 (`interop_writes_*`) write inside
+# them and put every value back; every position not listed below holds zero or false.
 
 # Block sizes from the prose of the parity section (Srv:84, 160, 183, 205).
 [sizes]

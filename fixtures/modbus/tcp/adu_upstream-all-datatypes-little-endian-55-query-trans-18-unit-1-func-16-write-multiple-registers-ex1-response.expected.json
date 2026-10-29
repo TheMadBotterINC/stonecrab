@@ -1,0 +1,39 @@
+{
+  "adus": [
+    {
+      "transaction_id": 1,
+      "protocol_id": 0,
+      "length": 6,
+      "unit_id": 1,
+      "pdu": "10 00 0D 00 02"
+    }
+  ],
+  "leftover": 0,
+  "pdu": {
+    "direction": "response",
+    "function": 16,
+    "start": 13,
+    "quantity": 2,
+    "request": [16, 0, 13, 0, 2, 4, 72, 159, 140, 241]
+  },
+  "upstream": {
+    "file": "Modbus-all-datatypes-little-endian.xml",
+    "case": "55 Query: Trans: 18; Unit: 1, Func: 16: Write Multiple Registers",
+    "step": "unnamed incoming-plc-message at position 4",
+    "exchange": 1,
+    "byte_order": "LITTLE_ENDIAN",
+    "operation": "write",
+    "tag": {
+      "name": "hurz",
+      "address": "holding-register:14:DINT",
+      "data_type": "DINT",
+      "elements": 1
+    },
+    "values": [
+      {
+        "type": "DINT",
+        "text": "-242442424"
+      }
+    ]
+  }
+}

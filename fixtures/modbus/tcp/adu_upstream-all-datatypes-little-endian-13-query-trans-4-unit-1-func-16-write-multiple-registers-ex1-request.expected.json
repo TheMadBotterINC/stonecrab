@@ -1,0 +1,38 @@
+{
+  "adus": [
+    {
+      "transaction_id": 1,
+      "protocol_id": 0,
+      "length": 6,
+      "unit_id": 1,
+      "pdu": "06 00 01 2A 00"
+    }
+  ],
+  "leftover": 0,
+  "pdu": {
+    "direction": "request",
+    "function": 6,
+    "address": 1,
+    "value": 10752
+  },
+  "upstream": {
+    "file": "Modbus-all-datatypes-little-endian.xml",
+    "case": "13 Query: Trans: 4; Unit: 1, Func: 16: Write Multiple Registers",
+    "step": "unnamed outgoing-plc-message at position 3",
+    "exchange": 1,
+    "byte_order": "LITTLE_ENDIAN",
+    "operation": "write",
+    "tag": {
+      "name": "hurz",
+      "address": "holding-register:2:BYTE",
+      "data_type": "BYTE",
+      "elements": 1
+    },
+    "values": [
+      {
+        "type": "BYTE",
+        "text": "42"
+      }
+    ]
+  }
+}

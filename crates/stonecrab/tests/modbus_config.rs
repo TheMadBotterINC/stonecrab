@@ -17,8 +17,8 @@ mod tests {
     use stonecrab::modbus::{ConnectionDefaults, ModbusOptions, ModbusTcpDriver, UnitId};
     use stonecrab::testkit::{FakeClock, FakeTransportFactory, Script, Step, block_on_with};
     use stonecrab::{
-        AddressOptions, ByteOrder, Connection, ConnectionConfig, Driver, Endpoint, ErrorKind,
-        PlcError, PlcValue, ReadRequest, ReadResponse, Tag, TagId, WordOrder,
+        AccessPolicy, AddressOptions, ByteOrder, Connection, ConnectionConfig, Driver, Endpoint,
+        ErrorKind, PlcError, PlcValue, ReadRequest, ReadResponse, Tag, TagId, WordOrder,
     };
 
     const HOST: &str = "modbus-tcp://192.0.2.10";
@@ -372,6 +372,43 @@ mod tests {
                 .get(),
             125
         );
+    }
+
+    // covers: MB-CFG-ACCESS / writes are granted by the connection string, read-only otherwise
+    #[test]
+    fn config_access_defaults_to_read_only_and_read_write_grants_writes() {
+        assert_eq!(config(HOST).access(), AccessPolicy::ReadOnly, "the default");
+        assert_eq!(
+            config(&format!("{HOST}?access=read-only")).access(),
+            AccessPolicy::ReadOnly
+        );
+        let granted = config(&format!("{HOST}?access=read-write&request-timeout-ms=800"));
+        assert_eq!(granted.access(), AccessPolicy::ReadWrite);
+        assert_eq!(
+            granted
+                .driver_options_as::<ModbusOptions>()
+                .expect("options")
+                .request_timeout,
+            Duration::from_millis(800),
+            "the other parameters are read beside it"
+        );
+        for bad in [
+            "",
+            "write",
+            "rw",
+            "READ-WRITE",
+            "true",
+            "read-write,read-only",
+        ] {
+            let error = refusal(&format!("{HOST}?access={bad}"));
+            assert_eq!(error.kind(), ErrorKind::InvalidConfig, "{bad:?}");
+            assert!(
+                error.to_string().contains("access"),
+                "names the key: {error}"
+            );
+        }
+        // The key is spelled as the AccessPolicy displays it, and no other spelling counts.
+        assert_refused(&format!("{HOST}?write=true"));
     }
 
     // covers: ALPHA_PLAN S26 / MB-CFG-UNKNOWN divergence

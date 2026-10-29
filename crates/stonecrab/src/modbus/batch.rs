@@ -434,11 +434,12 @@ fn entry(tag: &Tag) -> Result<Entry<'_>> {
 }
 
 /// Resolved byte and word order of one tag; `None` defers that field to the connection.
-type Order = (Option<ByteOrder>, Option<WordOrder>);
+pub(super) type Order = (Option<ByteOrder>, Option<WordOrder>);
 
 /// Tag fields over the address block, field by field; a field set by neither stays
-/// `None` for the connection default.
-fn resolve_order(tag: &Tag, address: &ModbusAddress) -> Order {
+/// `None` for the connection default. The read batcher and the write path resolve the
+/// order the same way (`MB-BYTEORDER-PRECEDENCE`).
+pub(super) fn resolve_order(tag: &Tag, address: &ModbusAddress) -> Order {
     let block = address.byte_order();
     (
         tag.byte_order().or(block.map(|(byte, _)| byte)),

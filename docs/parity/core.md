@@ -43,8 +43,8 @@ Calendar and structured values require a further design decision (ADR-0006).
   diagnostics, redacted Debug, source chaining and actual source-time absence.
 - `ReadResponse`: exact correlation and request ordering across partial/all-item
   failure, split-batch disclosure and monotonic interval checks.
-- `WriteOutcome`: confirmed, rejected and unknown-after-transmit data; no write
-  operation or retry behavior is implemented.
+- `WriteOutcome`: confirmed, rejected and unknown-after-transmit data. The simulator
+  (S11b-2) and the Modbus connection (S46) produce them; no write is ever retried.
 - `SubscribeRequest`, `SubscriptionKind`, `QueuePolicy`, `Subscription`,
   `SubscriptionSender`, `LossCounters`: a bounded, policy-governed event queue with
   explicit loss counts; see "Subscriptions" and ADR-0020.
@@ -105,8 +105,9 @@ state-watch API, so there is no upstream source file to cite; the design source 
 | CORE-STATE-WATCH | None (no state-watch API upstream). | `StateCell::set` and `StateWatch::changed`: version counter, latest-value semantics, intermediate states coalesced, a same-state `set` still bumps the version, all watchers woken. | implemented (primitive) | `current_reflects_set_on_the_cell_and_every_watch`, `changed_is_pending_until_set_then_ready_once_per_version`, `two_sets_before_a_poll_coalesce_into_one_change_with_the_latest_value`, `setting_the_same_state_still_bumps_the_version`, `every_watcher_wakes_and_each_sees_the_change_independently`, `a_clone_starts_from_the_source_seen_version_and_then_tracks_its_own`, `repolling_replaces_the_waker_and_the_same_waker_registers_one_entry`, `a_dropped_future_loses_no_change_and_releases_its_waker`, `a_panicking_waker_does_not_stop_later_watchers_waking`, `setting_on_another_thread_never_loses_a_wake_up`, `changed_stays_pending_after_the_cell_is_dropped`, `a_poisoned_lock_is_recovered`, `debug_shows_state_and_versions_but_no_wakers` |
 
 Cancelling an operation on a real wire is not covered by these rows; see
-`TRANSPORT-GUARD-LIFECYCLE` and `MB-READ-TIMEOUT`. Unknown-after-transmit handling has no
-wire path at the alpha because Modbus writes are deferred (`MB-TCP-WRITE`). The
+`TRANSPORT-GUARD-LIFECYCLE` and `MB-READ-TIMEOUT`. Unknown-after-transmit handling
+on a wire is `MB-TCP-WRITE` (S46): a request that went out and got no usable answer is
+`WriteOutcome::Unknown`, never retried. The
 default-deadline rule and cancellation of a simulated operation are rows of
 `CORE-CONNECTION-TRAIT`.
 
@@ -133,9 +134,9 @@ connection (S25). `Timeouts.idle` is recorded and not enforced at the alpha: no
 background task exists to enforce it (eager reconnect and idle handling are M2).
 
 ## Write batches
-Status: implemented as data only (ADR-0010, slice S09). No write is transmitted: the
-simulator implements `write` in S11b-2 and `modbus-tcp` reports `write: false` at alpha
-(decision D3 in `docs/ALPHA_PLAN.md`; the upstream write mapping is `MB-TCP-WRITE` in
+Status: implemented as data (ADR-0010, slice S09). The types transmit nothing: the
+simulator implements `write` in S11b-2 and `modbus-tcp` puts writes on the wire in S46
+(`Capabilities.write` is true there; the upstream write mapping is `MB-TCP-WRITE` in
 `docs/parity/modbus.md`). Rows cite `docs/ARCHITECTURE.md` section 3.3 rather than
 upstream files; the upstream types are `PlcWriteRequest` and `PlcWriteResponse`.
 

@@ -336,8 +336,8 @@ impl RetryPolicy {
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum AccessPolicy {
-    /// Reads only. Writes are to be refused before any I/O once the connection layer
-    /// enforces the policy (S11b-2); nothing enforces it yet.
+    /// Reads only. Writes are refused before any I/O; the simulator (S11b-2) and the
+    /// Modbus driver (S46) enforce it.
     #[default]
     ReadOnly,
     /// Reads and writes are permitted, subject to the driver's own capabilities.

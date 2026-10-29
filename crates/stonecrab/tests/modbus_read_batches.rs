@@ -609,9 +609,10 @@ mod tests {
         assert!(rig.sent(0).is_empty(), "nothing reached the wire");
     }
 
-    // covers: SPEC mandatory-failure-cases / F3 unsupported capability
+    // covers: SPEC mandatory-failure-cases / F3 unsupported capability; SPEC connection and
+    // resource behavior / read-only policy
     #[test]
-    fn write_is_unsupported_with_nothing_sent_and_the_capabilities_say_so() {
+    fn a_read_only_write_is_refused_with_nothing_sent_and_the_capabilities_say_so() {
         let rig = Rig::open(vec![server()]);
         let request = WriteRequest::builder(rig.connection.limits())
             .item(tag("level", "holding-register:1"), PlcValue::I16(1))
@@ -632,7 +633,10 @@ mod tests {
 
         let capabilities = rig.connection.capabilities();
         assert!(capabilities.read, "read");
-        assert!(!capabilities.write, "write");
+        assert!(
+            capabilities.write,
+            "the driver can write; the policy decides"
+        );
         assert_eq!(
             capabilities.subscribe,
             SubscriptionMode::Unsupported,
@@ -648,7 +652,7 @@ mod tests {
             "PDU"
         );
         assert_eq!(capabilities.concurrency.get(), 1, "concurrency");
-        assert!(!capabilities.supports(Operation::Write), "supports(Write)");
+        assert!(capabilities.supports(Operation::Write), "supports(Write)");
     }
 
     // covers: SPEC mandatory-failure-cases / F7 swapped words

@@ -40,6 +40,23 @@ placeholder.
   session and in-flight slot of a read, bounded by `timeouts.request`; any reply, an
   exception included, is success as upstream's (`MB-QUIRK-D`); `Capabilities.ping` is true
   for `modbus-tcp`. The contract suite gains `Requires::Ping` and two cases (26).
+- Modbus TCP writes on the wire (slice S46): `ModbusConnection::write` sends one request per
+  item (function 15 for a coil, 06 for a one-register holding payload, 16 otherwise), one
+  after another, through the session and the single in-flight slot of a read; a coil takes a
+  `BOOL`, a register the type of its address in the byte and word order of the tag, the
+  address block or the connection default. An echo is `Confirmed`, a device exception is
+  `Rejected` with its code as the protocol status, a request that went out and got no usable
+  answer (deadline, lost link, cancellation, a reply that does not echo it) is
+  `WriteOutcome::Unknown` and is never retried or replayed, and the items after an unknown one
+  are not sent. A discrete input or an input register is `Rejected` without a request.
+  `Capabilities.write` is true for `modbus-tcp`. New connection-string parameter
+  `access=read-only|read-write` (default read-only): a connection whose access policy is
+  read-only refuses every write before anything else, so writes must be granted. The
+  contract suite's write cases now run for `modbus-tcp` over the fake transport and loopback
+  sockets (and the read-only case against pymodbus); the upstream write
+  exchanges of the three retained driver-suite files are vectors (60 more) and are replayed
+  byte for byte. Additive API; `ModbusSession::request` also carries writes, and its span
+  says `op = "write"` for one.
 - `stonecrab::sensors` now denies `clippy::indexing_slicing` (checked by `lint-attrs`), like
   the other modules that parse untrusted input; no code in the module needed to change.
 - Release process and evidence (no crate changes): ADR-0017, `release.toml`,

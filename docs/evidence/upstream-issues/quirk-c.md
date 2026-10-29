@@ -30,10 +30,11 @@ chosen.
 
 ## How Stonecrab handles it
 
-Not ported. Modbus writes are not part of the alpha (`Capabilities.write = false` for
-`modbus-tcp`; `write_is_unsupported_with_nothing_sent_and_the_capabilities_say_so`).
-When writes land, the function choice will get its own parity row and a documented
-decision (the plan lists FC05 as a possible documented divergence).
+Not ported. Since S46 (2026-10-28) `modbus-tcp` writes (`Capabilities.write = true`), and
+a single coil goes out as function 15, as upstream does: Stonecrab never sends function 05
+and does not decode it (`write_functions_that_upstream_does_not_send_are_not_decoded`).
+The choice is the `MB-QUIRK-C` divergence row of `docs/parity/modbus.md`; the write path
+is covered by `crates/stonecrab/tests/modbus_write.rs`.
 
 ## Provenance and status
 

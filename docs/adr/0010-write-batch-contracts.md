@@ -140,3 +140,7 @@ unfulfilled lint expectation if either `#[expect]` attribute of ADR-0003 stops f
 asserts `Send + Sync + 'static` for the six new public types in
 `public_foundation_types_are_send_sync_and_static`. Doctests on every new public type
 and constructor compile and run. `scripts/coverage-gate.sh` holds core at 100% lines.
+
+## Addendum (S46, 2026-10-28)
+Decision 7 is superseded for `modbus-tcp`, which now writes and reports
+`Capabilities.write = true`; see the S46 addendum of ADR-0015.

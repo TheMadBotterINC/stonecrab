@@ -237,3 +237,8 @@ and still qualifies) in `public_foundation_types_are_send_sync_and_static`, and
 Doctests on every public item compile and run. `scripts/coverage-gate.sh` holds core at
 100% lines. The proptest `prop_redacted_display_never_contains_password` arrives with
 S08, and the first enforcement of the policies with S11b-2, S19 and S25.
+
+## Addendum (S46, 2026-10-28)
+Decision 5 no longer holds for `modbus-tcp`, which now writes. `access=read-write` in its
+connection string sets this policy; see the S46 addendum of ADR-0015, which supersedes the
+sentence about the alpha.

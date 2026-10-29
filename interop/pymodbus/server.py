@@ -12,8 +12,9 @@
 #   The four data blocks (holding registers, coils, discrete inputs, input registers) are
 #   filled from the map: every listed entry holds its words or bits at its logical
 #   address, every other position holds zero or false. Any unit id is answered (pymodbus
-#   "single" context). Only reads are of interest to Stonecrab at alpha; pymodbus answers
-#   writes by its own rules and nothing here depends on them.
+#   "single" context). The blocks are writable: pymodbus applies a write to the block it
+#   names and answers by its own rules (the write tests of S46 write the holding-register
+#   write area 100 to 200 and the coil write area 100 to 120, and read them back).
 #
 # Address convention
 #   The map lists logical tag addresses T; the wire address is T - 1 (the driver subtracts

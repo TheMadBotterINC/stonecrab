@@ -4,7 +4,9 @@ use std::num::{NonZeroU16, NonZeroU64};
 use std::str::FromStr;
 use std::time::Duration;
 
-use crate::{AddressOptions, ByteOrder, DriverOptions, ErrorKind, PlcError, Result, WordOrder};
+use crate::{
+    AccessPolicy, AddressOptions, ByteOrder, DriverOptions, ErrorKind, PlcError, Result, WordOrder,
+};
 
 use crate::modbus::address::byte_order_by_name;
 use crate::modbus::{ConnectionDefaults, ModbusAddress, UnitId};
@@ -23,6 +25,11 @@ const MAX_COILS: &str = "max-coils-per-request";
 const MAX_REGISTERS: &str = "max-registers-per-request";
 /// The shared key that selects the address convention.
 const CONVENTION: &str = "address-convention";
+/// `access`, the Stonecrab key that grants writes (`MB-CFG-ACCESS`).
+const ACCESS: &str = "access";
+/// The access value that grants writes; `read-only` is the other and the default.
+const READ_WRITE: &str = "read-write";
+const READ_ONLY: &str = "read-only";
 /// The only convention name accepted at alpha.
 const PLC4X: &str = "plc4x";
 
@@ -182,20 +189,22 @@ impl ModbusOptions {
         }
     }
 
-    /// Read the query parameters of a connection string: the options, and whether
-    /// `address-convention=plc4x` was named.
+    /// Read the query parameters of a connection string: the options, whether
+    /// `address-convention=plc4x` was named and the access policy `access` names
+    /// ([`AccessPolicy::ReadOnly`] when it is absent).
     ///
     /// The core grammar has already refused duplicate and empty keys, so each key appears
-    /// once. Every key outside the six and `address-convention` is refused, which includes
-    /// the misspelt `unit-identifier` of the upstream test suite.
+    /// once. Every key outside the six, `address-convention` and `access` is refused, which
+    /// includes the misspelt `unit-identifier` of the upstream test suite.
     ///
     /// The parameters override `seed`; a key the string does not name keeps the seed's value.
     pub(crate) fn from_parameters(
         seed: Self,
         parameters: &[(String, String)],
-    ) -> Result<(Self, bool)> {
+    ) -> Result<(Self, bool, AccessPolicy)> {
         let mut options = seed;
         let mut plc4x = false;
+        let mut access = AccessPolicy::ReadOnly;
         for (key, value) in parameters {
             match key.as_str() {
                 REQUEST_TIMEOUT => {
@@ -234,10 +243,21 @@ impl ModbusOptions {
                         "{CONVENTION} accepts only {PLC4X} at alpha"
                     )));
                 }
+                ACCESS => {
+                    access = match value.as_str() {
+                        READ_WRITE => AccessPolicy::ReadWrite,
+                        READ_ONLY => AccessPolicy::ReadOnly,
+                        _ => {
+                            return Err(invalid(format!(
+                                "{ACCESS} must be {READ_ONLY} or {READ_WRITE}"
+                            )));
+                        }
+                    };
+                }
                 other => return Err(unknown_key(other)),
             }
         }
-        Ok((options, plc4x))
+        Ok((options, plc4x, access))
     }
 }
 
@@ -300,7 +320,8 @@ fn unknown_key(key: &str) -> PlcError {
     };
     invalid(format!(
         "unknown connection parameter '{shown}'{hint}; the parameters are {REQUEST_TIMEOUT}, \
-         {UNIT_ID}, {PING_ADDRESS}, {BYTE_ORDER}, {MAX_COILS}, {MAX_REGISTERS} and {CONVENTION}"
+         {UNIT_ID}, {PING_ADDRESS}, {BYTE_ORDER}, {MAX_COILS}, {MAX_REGISTERS}, {CONVENTION} \
+         and {ACCESS}"
     ))
 }
 
@@ -312,7 +333,7 @@ fn invalid(message: String) -> PlcError {
 mod tests {
     use super::*;
 
-    fn parse(pairs: &[(&str, &str)]) -> Result<(ModbusOptions, bool)> {
+    fn parse(pairs: &[(&str, &str)]) -> Result<(ModbusOptions, bool, AccessPolicy)> {
         let owned: Vec<(String, String)> = pairs
             .iter()
             .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
@@ -353,7 +374,10 @@ mod tests {
         );
         assert_eq!(defaults.max_coils.get(), 2000);
         assert_eq!(defaults.max_registers.get(), 125);
-        assert_eq!(parse(&[]).expect("none"), (defaults, false));
+        assert_eq!(
+            parse(&[]).expect("none"),
+            (defaults, false, AccessPolicy::ReadOnly)
+        );
     }
 
     #[test]
@@ -412,10 +436,23 @@ mod tests {
             options(&[(PING_ADDRESS, "40007:UINT")]).ping_address,
             "the ping address is read under the plc4x convention, bare forms included"
         );
-        let (_, plc4x) = parse(&[(CONVENTION, "plc4x")]).expect("convention");
+        let (_, plc4x, _) = parse(&[(CONVENTION, "plc4x")]).expect("convention");
         assert!(plc4x, "address-convention=plc4x is reported");
-        let (_, none) = parse(&[(UNIT_ID, "3")]).expect("no convention");
+        let (_, none, _) = parse(&[(UNIT_ID, "3")]).expect("no convention");
         assert!(!none, "no convention without the key");
+    }
+
+    #[test]
+    fn access_grants_writes_only_when_it_says_read_write() {
+        let access = |pairs: &[(&str, &str)]| parse(pairs).expect("valid parameters").2;
+        assert_eq!(access(&[]), AccessPolicy::ReadOnly, "the default");
+        assert_eq!(access(&[(ACCESS, "read-only")]), AccessPolicy::ReadOnly);
+        assert_eq!(access(&[(ACCESS, "read-write")]), AccessPolicy::ReadWrite);
+        for value in ["", "write", "READ-WRITE", "rw", "read-write ", "true"] {
+            let error = refusal(&[(ACCESS, value)]);
+            assert_eq!(error.kind(), ErrorKind::InvalidConfig, "{value:?}");
+            assert!(error.to_string().contains(ACCESS), "names the key: {error}");
+        }
     }
 
     #[test]

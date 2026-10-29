@@ -1,10 +1,11 @@
 # Stonecrab Modbus
 Native Modbus TCP driver for Stonecrab (alpha), `stonecrab::modbus`, behind the `modbus`
-feature (on by default). The alpha scope is read-only: function
-codes 01 (read coils), 02 (read discrete inputs), 03 (read holding registers) and 04
-(read input registers) over TCP with MBAP framing, and a ping that reads one address. RTU,
-ASCII, TLS, UDP, writes, extended registers, string types, subscriptions, browse and
-discovery are out of scope for the alpha and are listed under "Not in the alpha" below.
+feature (on by default). The alpha scope is the function codes 01 (read coils), 02 (read
+discrete inputs), 03 (read holding registers) and 04 (read input registers) over TCP with
+MBAP framing, writes of coils and holding registers (function codes 15, 06 and 16, refused
+unless the connection says `access=read-write`), and a ping that reads one address. RTU,
+ASCII, TLS, UDP, extended registers, string types, subscriptions, browse and discovery are
+out of scope for the alpha and are listed under "Not in the alpha" below.
 The driver has been checked against an independent server, pymodbus 3.8.6, and no physical
 device.
 
@@ -35,8 +36,10 @@ tests run the driver over an in-memory transport and over loopback sockets.
 - `parse_address` is `ModbusAddress::parse` with the address convention of the options.
   Take the options from the configuration with `config.address_options()` before
   `connect` consumes it.
-- `capabilities` is the value every connection reports: read and ping, no write,
+- `capabilities` is the value every connection reports: read, write and ping, no
   subscriptions, browse or discovery, one operation at a time, PDUs up to 253 bytes.
+  Whether a connection may write is its access policy, read-only unless the connection
+  string says `access=read-write`.
 
 ### Connection strings
 `modbus-tcp://host[:port]` or `modbus-tcp:tcp://host[:port]`, followed by an optional
@@ -45,7 +48,8 @@ tests run the driver over an in-memory transport and over loopback sockets.
 (`udp`, `tls` and the rest are `InvalidConfig`). The text may not contain whitespace,
 control characters or `%`, nor a `user:password@` part, and is at most 4096 bytes.
 
-The six upstream parameters and the shared `address-convention` key are the only keys. A
+The six upstream parameters, the shared `address-convention` key and Stonecrab's `access`
+key are the only keys. A
 key may appear once, a value may not be empty, and every other key is `InvalidConfig`
 (upstream warns and ignores it; `MB-CFG-UNKNOWN`). That includes the misspelt
 `unit-identifier` that the upstream manual test passes. An error about a parameter value
@@ -60,6 +64,7 @@ or an unknown key names the key, and no error repeats the connection string.
 | `max-coils-per-request` | 2000 | 1 to 2000 | `MB-CFG-MAX-COILS` |
 | `max-registers-per-request` | 125 | 1 to 125 | `MB-CFG-MAX-REGISTERS` |
 | `address-convention` | none | `plc4x` only | `MB-ADDR-BARE-40001` |
+| `access` | `read-only` | `read-only` or `read-write`; `read-write` is what lets `write` reach the wire (a Stonecrab parameter, upstream has no access policy) | `MB-CFG-ACCESS` |
 
 Numbers are decimal digits only: no sign, no space, no `0x`. `address-convention=plc4x`
 is the explicit-convention rule of the address grammar below: the bare short forms such
@@ -114,9 +119,9 @@ The session and the connection do I/O only through a transport factory the calle
 passes in, so the module's tests run on the in-memory transport of the `testkit` feature
 and, for the driver, over loopback sockets to a scripted peer. The
 common driver contract suite passes against the driver over both: over the in-memory
-transport with the two write cases skipped by name, and over loopback sockets with those two
-and the three timing cases skipped by name (the loopback fixture cannot swallow a reply on a
-deterministic clock). The module builds on the core, `stonecrab::codec` and
+transport with the unsupported-write and unsupported-ping cases skipped by name (the driver
+writes and pings), and over loopback sockets with those two and the four timing cases
+skipped by name (the loopback fixture cannot swallow a reply on a deterministic clock). The module builds on the core, `stonecrab::codec` and
 `stonecrab::transport` (`TcpFactory`, the `Framer` trait, `ConnectionGuard` and
 `TransportFactory`), `bytes` and `tracing`.
 
@@ -137,7 +142,7 @@ read `interoperability-tested`. No physical device has been tried.
 | --- | --- |
 | Read: coils, discrete inputs, holding registers and input registers (function codes 01 to 04) as the 15 numeric and bit types | interoperability-tested |
 | Ping: one read of `ping-address` (`Connection::ping`) | interoperability-tested |
-| Write | not supported |
+| Write: coils and holding registers (function codes 15, 06 and 16), `Unknown` after a request that went out unanswered | interoperability-tested |
 | Subscribe, browse and discover | not supported |
 | Connection string and parameters (`parse_config`) | simulator-tested |
 | Connect, close and connection state | interoperability-tested |
@@ -166,10 +171,9 @@ Each item is a deferred row of the
 with its owner. Where the parser or driver can see the request it rejects it with a typed
 error rather than ignoring it; operations that have no API at all do not exist:
 
-- writes (`MB-TCP-WRITE`): `write` is `Unsupported(Operation::Write)`, sends nothing, and
-  `Capabilities.write` is false; the write PDUs and the upstream FC06-versus-FC16 choice
-  exist in the PDU codec (see "PDU codec"), but putting them on the wire and
-  `WriteOutcome::Unknown` come after the alpha;
+- writes of extended registers (FC21, `MB-ADDR-EXTENDED`) and of a coil with function code
+  05 (upstream never sends it, `MB-QUIRK-C`); the other writes are in the driver (see
+  "Connection");
 - subscriptions, browse and discovery (`MB-TCP-SUBSCRIBE`, `MB-TCP-BROWSE`,
   `MB-TCP-DISCOVER`): these operations do not exist in the API;
 - extended registers (FC20 and FC21, `extended-register`, `6x`), `STRING`, `WSTRING`,
@@ -182,14 +186,15 @@ error rather than ignoring it; operations that have no API at all do not exist:
 - the two byte-swap modes (`BIG_ENDIAN_BYTE_SWAP`, `LITTLE_ENDIAN_BYTE_SWAP`) as upstream
   vectors: the retained PLC4X files configure only `BIG_ENDIAN` and `LITTLE_ENDIAN`, so
   those two rows stay `implemented`, not `automated-verified`;
-- the write exchanges of the upstream driver suites: the adapter serializes them but emits
-  no vector, because writes come after the alpha.
+- a write whose confirmation is lost on demand against an independent server: the fault
+  is injected on the in-memory transport and over loopback, and a stock pymodbus cannot
+  lose a confirmation.
 
 ## Interoperability
 The `interop` job of the repository's CI builds `interop/pymodbus/` (a first-party Modbus
 TCP server on pymodbus 3.8.6, `python:3.12-slim` pinned by digest, serving the register
 map of `fixtures/modbus/interop/register-map.toml`), starts it on `127.0.0.1:5020` and
-runs twelve tests of `tests/modbus_interop_pymodbus.rs` plus the `modbus_tcp_read` example
+runs fifteen tests of `tests/modbus_interop_pymodbus.rs` plus the `modbus_tcp_read` example
 against it. The tests are `#[ignore]`d and run only when `STONECRAB_INTEROP_MODBUS` names the
 server, so `cargo test` needs no container and no network.
 
@@ -217,9 +222,15 @@ What the run verifies against the independent server:
 - Batches split at 125 registers and 2000 coils and say so in `split_into`; 125 registers
   and 2000 coils are one request each.
 - The bare `40001` spelling is refused without `address-convention=plc4x` and reads with it.
-- The common driver contract suite passes through `ModbusTcpDriver::new()`: 14 cases pass
-  and 9 are skipped by name (the timing, disconnect and device-exception cases that need
-  a fault hook a stock pymodbus does not have, and the two write cases).
+- A holding register (function 06) and a coil (function 15) are written and read back, the
+  multi-register types (DINT, REAL, LREAL, and a REAL in the little-endian layout) land in
+  the register words the map documents, and a write the server refuses (exception 02) is
+  `Rejected` while the writes around it are confirmed.
+- The common driver contract suite passes through `ModbusTcpDriver::new()`: 15 cases pass
+  and 11 are skipped by name (the timing, disconnect and device-exception cases that need
+  a fault hook a stock pymodbus does not have, the write whose confirmation is lost, and
+  the two cases of an unsupported write and an unsupported ping, which a driver that
+  writes and pings has nothing to prove for).
 
 Not verified there: timing over a real clock, dropped links and device exceptions on
 demand, and unit-id correlation (pymodbus answers every unit id). The decisions behind
@@ -318,8 +329,8 @@ normal read responses (`ReadBitsResponse` holding the packed bytes exactly as re
 and `WriteMultipleResponse`, which echo the request) and `Exception { function, code }`.
 Write Single Coil (05) is not a variant, because upstream never sends it
 (`MB-QUIRK-C`): function codes 05, 20 and 21 are `FunctionCode::Unknown` and every decoder
-refuses them. The codec only builds and reads PDUs: `Capabilities.write` stays false and
-the connection sends no write until a later slice puts them on the wire.
+refuses them. The codec only builds and reads PDUs; the connection puts the write requests
+on the wire (see "Connection").
 
 `ModbusPdu::write_request(area, start, quantity, payload)` picks the request for an
 encoded payload the way upstream does: a coil is always function 15 (even one coil), a
@@ -536,7 +547,7 @@ assert_eq!(session.stats().mismatched_replies, 1);
 `ModbusConnection::open(config, factory, clock, defaults)` builds the connection from a
 `ConnectionConfig` for the scheme `modbus-tcp` (any other scheme is `InvalidConfig` before
 a transport is opened), opens it and returns it `Connected`. It implements
-`stonecrab::Connection`; the capabilities are read and ping, no write, no subscription, no
+`stonecrab::Connection`; the capabilities are read, write and ping, no subscription, no
 browse, no discovery, 253-byte PDUs and one operation at a time.
 
 `read` checks the request before any I/O, in this order: the connection is not `Closing`,
@@ -565,8 +576,86 @@ A tag's own byte and word order beat its address's, which beat `ConnectionDefaul
 (unit 1 and `BIG_ENDIAN` unless set). A lost peer shows as `Reconnecting` in
 `watch_state`; the next read waits out the backoff and reopens, and the request that was in
 flight when the peer closed fails with `Disconnected` and is never replayed. `close` ends
-in `Closed`, also during the backoff. `write` is `Unsupported(Operation::Write)` and sends
-nothing. A debug span `read` carries `scheme`, `endpoint`, `op`, `items` and `chunks`.
+in `Closed`, also during the backoff. A debug span `read` carries `scheme`, `endpoint`,
+`op`, `items` and `chunks`.
+
+`write` (`MB-TCP-WRITE`) sends one request per item, one after another, as the upstream
+driver does, through the same session, single in-flight slot and deadline rule as a read.
+A connection whose access policy is read-only, which is the default, refuses the call
+first, with `Unsupported(Operation::Write)`, before the connection state, the request or
+the wire is looked at (`MB-WRITE-ACCESS`); `access=read-write` in the connection string
+grants it. After that the call fails, with nothing sent, for a closed connection, a
+cancelled token, a tag that is not a Modbus address, an element count above one, a
+deadline that had passed and a read, write or ping in flight. Otherwise every item gets an
+outcome:
+
+- the value is encoded for the data type of its address in the byte and word order of the
+  tag, else of the address block, else of `ConnectionDefaults`; a coil takes a `BOOL`; the
+  request is function 15 for a coil (even one), 06 for a holding-register payload of
+  exactly 2 bytes and 16 for any other;
+- a discrete input or an input register, and a value that does not fit its address, is
+  `Rejected` with no request, and the other items go on;
+- an echo that repeats the request is `Confirmed`; a device exception is `Rejected`, with
+  the exception as the item error and its code as the protocol status;
+- a request that went out and got no usable answer (the deadline passed, the link was
+  lost, the token fired, or the reply did not decode or did not echo the request) is
+  `WriteOutcome::Unknown` and is never retried or replayed, whatever the `RetryPolicy`
+  says. The items after it are not sent: each is `Rejected` with `ErrorKind::Cancelled`
+  and can be submitted again once the caller has read the value back
+  (`MB-WRITE-UNKNOWN`, `MB-WRITE-HALT`). The reply must echo the function code of the
+  request, so an FC16 response to an FC06 request, as the upstream all-datatypes files
+  pair them, is not a confirmation (`MB-WRITE-ECHO`);
+- a request that never went out (the link cannot be reopened, the deadline had passed, the
+  token had fired) is that item's `Rejected`, with the error that stopped it.
+
+Dropping the future of a write that went out loses the outcome: cancel through the
+request's token to get `Unknown(CancelledAfterTransmit)`. A debug span `write` carries
+`scheme`, `endpoint`, `op` and `items`; the session's `request` span inside it says
+`op = "write"`.
+
+```rust
+# #[cfg(feature = "testkit")]
+# fn main() -> Result<(), stonecrab::PlcError> {
+use std::sync::Arc;
+use stonecrab::{
+    AccessPolicy, AddressOptions, Connection, ConnectionConfig, Endpoint, PlcValue, Tag, TagId,
+    WriteRequest,
+};
+use stonecrab::modbus::{ConnectionDefaults, ModbusAddress, ModbusConnection};
+use stonecrab::testkit::{FakeClock, FakeTransportFactory, Script, Step, block_on_with};
+
+// V1.1b section 6.6: write 0x0003 to register 2 (wire address 1); the device echoes it.
+let clock = FakeClock::default();
+let factory = FakeTransportFactory::new(clock.clone());
+factory.push_script(Script::strict(vec![
+    Step::Expect(vec![0, 1, 0, 0, 0, 6, 1, 6, 0x00, 0x01, 0x00, 0x03]),
+    Step::Reply(vec![0, 1, 0, 0, 0, 6, 1, 6, 0x00, 0x01, 0x00, 0x03]),
+]));
+let config = ConnectionConfig::builder("modbus-tcp", Endpoint::Custom("fake://plc".to_owned()))
+    .access(AccessPolicy::ReadWrite)
+    .build()?;
+let connection = block_on_with(
+    &clock,
+    ModbusConnection::open(
+        config,
+        Arc::new(factory),
+        Arc::new(clock.clone()),
+        ConnectionDefaults::default(),
+    ),
+)?;
+
+let address = ModbusAddress::parse("holding-register:2:UINT", &AddressOptions::default())?;
+let tag = Tag::new(TagId::new("setpoint")?, Arc::new(address));
+let request = WriteRequest::builder(connection.limits())
+    .item(tag, PlcValue::U16(3))
+    .build()?;
+let response = block_on_with(&clock, connection.write(request))?;
+assert_eq!(response.confirmed_count(), 1);
+# Ok::<(), stonecrab::PlcError>(())
+# }
+# #[cfg(not(feature = "testkit"))]
+# fn main() {}
+```
 
 `ping` (`MB-TCP-PING`) sends one read of the `ping-address` (default `4x00001:BOOL`) in the
 unit the address names, else the default unit, through the same session, admission rules

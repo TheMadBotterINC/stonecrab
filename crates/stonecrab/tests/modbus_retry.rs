@@ -17,10 +17,10 @@ mod tests {
     use stonecrab::modbus::{ConnectionDefaults, ModbusAddress, ModbusConnection};
     use stonecrab::testkit::{FakeClock, FakeTransportFactory, Script, Step, block_on_with};
     use stonecrab::{
-        AddressOptions, Clock, Connection, ConnectionConfig, ConnectionConfigBuilder,
+        AccessPolicy, AddressOptions, Clock, Connection, ConnectionConfig, ConnectionConfigBuilder,
         ConnectionState, Deadline, Endpoint, ErrorKind, FailureCategory, Operation, PlcError,
         PlcValue, ReadRequest, ReadResponse, Result, RetryPolicy, Tag, TagId, Timeouts,
-        WriteRequest,
+        UnknownReason, WriteOutcome, WriteRequest, WriteResult,
     };
 
     fn millis(count: u64) -> Duration {
@@ -497,9 +497,43 @@ mod tests {
         assert_eq!(rig.sent().len(), 2, "both chunks were requested");
     }
 
+    // covers: SPEC connection-and-resource-behavior / read retry bounded; SPEC errors /
+    // ambiguous write never replayed
+    #[test]
+    fn writes_are_never_retried_and_send_once() {
+        // The policy would retry a timeout twice and a lost link as well; a write that went
+        // out and was not answered is Unknown instead, after one frame and one timeout.
+        let rig = Rig::open(
+            base_config(
+                secs(1),
+                policy(3, &[ErrorKind::Timeout, ErrorKind::Disconnected]),
+            )
+            .access(AccessPolicy::ReadWrite)
+            .build()
+            .expect("config"),
+            vec![Step::Expect(adu(1, 1, &[0x06, 0, 0, 0, 1]))],
+        );
+        let request = WriteRequest::builder(rig.connection.limits())
+            .item(tag("a", "holding-register:1"), PlcValue::I16(1))
+            .build()
+            .expect("write request");
+        let response = block_on_with(&rig.clock, rig.connection.write(request))
+            .expect("an unconfirmed write is an outcome");
+        assert_eq!(response.unknown_count(), 1, "unknown");
+        assert!(
+            matches!(
+                response.results().first().map(WriteResult::outcome),
+                Some(WriteOutcome::Unknown(UnknownReason::TimeoutAfterTransmit))
+            ),
+            "the deadline passed after the frame went out"
+        );
+        assert_eq!(rig.sent().len(), 1, "one frame, never replayed");
+        assert_eq!(rig.elapsed(), secs(1), "one request timeout, not three");
+    }
+
     // covers: SPEC connection-and-resource-behavior / read retry bounded
     #[test]
-    fn writes_are_never_retried_and_send_nothing() {
+    fn a_read_only_connection_refuses_a_write_with_nothing_sent_and_no_time_passed() {
         let rig = Rig::open(
             base_config(
                 secs(1),

@@ -894,8 +894,9 @@ mod tests {
         );
         assert_eq!(
             upstream.len(),
-            70,
-            "the six plus the 64 request and response vectors of the 32 driver-suite read exchanges"
+            130,
+            "the six plus the 124 request and response vectors of the 62 driver-suite \
+             exchanges (32 reads, 30 writes)"
         );
         assert!(
             vectors.iter().all(|v| v.source != VectorSource::Captured),

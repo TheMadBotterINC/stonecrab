@@ -130,7 +130,7 @@ mod tests {
             .await
             .expect("connect");
         assert_eq!(connection.state(), ConnectionState::Connected);
-        assert!(!connection.capabilities().write);
+        assert!(connection.capabilities().write);
         connection.close().await.expect("close");
         let report = peer.close().await.expect("the peer report");
         assert!(report.received.is_empty(), "connecting sends nothing");

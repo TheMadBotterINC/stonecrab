@@ -1,0 +1,39 @@
+{
+  "adus": [
+    {
+      "transaction_id": 1,
+      "protocol_id": 0,
+      "length": 6,
+      "unit_id": 1,
+      "pdu": "10 00 1B 00 04"
+    }
+  ],
+  "leftover": 0,
+  "pdu": {
+    "direction": "response",
+    "function": 16,
+    "start": 27,
+    "quantity": 4,
+    "request": [16, 0, 27, 0, 4, 8, 64, 5, 191, 10, 139, 20, 95, 207]
+  },
+  "upstream": {
+    "file": "Modbus-all-datatypes.xml",
+    "case": "85 Query: Trans: 28; Unit: 1, Func: 16: Write Multiple Registers",
+    "step": "unnamed incoming-plc-message at position 4",
+    "exchange": 1,
+    "byte_order": "BIG_ENDIAN",
+    "operation": "write",
+    "tag": {
+      "name": "hurz",
+      "address": "holding-register:28:LREAL",
+      "data_type": "LREAL",
+      "elements": 1
+    },
+    "values": [
+      {
+        "type": "LREAL",
+        "text": "2.71828182846"
+      }
+    ]
+  }
+}

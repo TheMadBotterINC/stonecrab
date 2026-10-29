@@ -78,12 +78,15 @@ mod tests {
         assert!(capabilities.supports(Operation::Ping), "ping operation");
 
         let write = level_of("Write");
-        assert_eq!(
-            write, "not supported",
-            "the README says write is unsupported"
+        assert!(
+            capabilities.write && !["planned", "not supported"].contains(&write.as_str()),
+            "write: the driver advertises it and the README says {write}"
         );
-        assert!(!capabilities.write, "write");
-        assert!(!capabilities.supports(Operation::Write), "write operation");
+        assert_eq!(
+            write, "interoperability-tested",
+            "write is claimed at the level the pymodbus job (S46) reached"
+        );
+        assert!(capabilities.supports(Operation::Write), "write operation");
 
         let rest = level_of("Subscribe, browse and discover");
         assert_eq!(

@@ -1,0 +1,43 @@
+{
+  "adus": [
+    {
+      "transaction_id": 1,
+      "protocol_id": 0,
+      "length": 6,
+      "unit_id": 1,
+      "pdu": "10 00 00 00 04"
+    }
+  ],
+  "leftover": 0,
+  "pdu": {
+    "direction": "response",
+    "function": 16,
+    "start": 0,
+    "quantity": 4,
+    "request": [16, 0, 0, 0, 4, 8, 64, 73, 15, 219, 64, 73, 15, 219]
+  },
+  "upstream": {
+    "file": "DriverTestsuite.xml",
+    "case": "Array element write request",
+    "step": "Receive Modbus Input-Register Write Response",
+    "exchange": 1,
+    "byte_order": "BIG_ENDIAN",
+    "operation": "write",
+    "tag": {
+      "name": "hurz",
+      "address": "holding-register:1[0..1]:REAL",
+      "data_type": "REAL",
+      "elements": 2
+    },
+    "values": [
+      {
+        "type": "REAL",
+        "text": "3.1415927"
+      },
+      {
+        "type": "REAL",
+        "text": "3.1415927"
+      }
+    ]
+  }
+}

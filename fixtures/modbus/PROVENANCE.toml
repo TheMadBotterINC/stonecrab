@@ -1728,9 +1728,9 @@ note = "A whole ADU the framer accepts. ParseError::InvalidDiscriminator at the 
 # BEGIN adapter-generated entries (slice S04b)
 # Written by crates/stonecrab/tests/modbus_driver_suite_adapter.rs and compared with this file by
 # adapter_serializes_each_driver_suite_adu_deterministically: do not edit by hand.
-# upstream/tcp/DriverTestsuite.xml: 4 read exchanges serialized (8 vectors); 2 write cases serialized and checked, not emitted (S45 and S46 own writes).
-# upstream/tcp/Modbus-all-datatypes.xml: 14 read exchanges serialized (28 vectors); 14 write cases serialized and checked, not emitted (S45 and S46 own writes).
-# upstream/tcp/Modbus-all-datatypes-little-endian.xml: 14 read exchanges serialized (28 vectors); 14 write cases serialized and checked, not emitted (S45 and S46 own writes).
+# upstream/tcp/DriverTestsuite.xml: 4 read exchanges serialized (8 vectors); 2 write exchanges serialized (4 vectors).
+# upstream/tcp/Modbus-all-datatypes.xml: 14 read exchanges serialized (28 vectors); 14 write exchanges serialized (28 vectors).
+# upstream/tcp/Modbus-all-datatypes-little-endian.xml: 14 read exchanges serialized (28 vectors); 14 write exchanges serialized (28 vectors).
 
 [[vector]]
 name = "tcp/adu_upstream-driver-suite-single-element-read-request-ex1-request"
@@ -1789,6 +1789,34 @@ license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case reports."
 
 [[vector]]
+name = "tcp/adu_upstream-driver-suite-single-element-write-request-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/DriverTestsuite.xml, test case \"Single element write request\", step \"Send Modbus Input-Register Write Request\" (kept at fixtures/modbus/upstream/tcp/DriverTestsuite.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-driver-suite-single-element-write-request-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/DriverTestsuite.xml, test case \"Single element write request\", step \"Receive Modbus Input-Register Write Response\" (kept at fixtures/modbus/upstream/tcp/DriverTestsuite.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-driver-suite-array-element-write-request-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/DriverTestsuite.xml, test case \"Array element write request\", step \"Send Modbus Input-Register Write Request\" (kept at fixtures/modbus/upstream/tcp/DriverTestsuite.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-driver-suite-array-element-write-request-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/DriverTestsuite.xml, test case \"Array element write request\", step \"Receive Modbus Input-Register Write Response\" (kept at fixtures/modbus/upstream/tcp/DriverTestsuite.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
 name = "tcp/adu_upstream-all-datatypes-single-element-read-request-holding-register-1-bool-ex1-request"
 source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"Single element read request: holding-register:1:BOOL\", step \"Send Modbus Read Request\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
@@ -1801,6 +1829,20 @@ source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"Single element read request: holding-register:1:BOOL\", step \"Receive Modbus Read Response\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
 license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case reports."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-single-element-write-request-holding-register-1-bool-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"Single element write request: holding-register:1:BOOL\", step \"Send Modbus Write Request\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-single-element-write-request-holding-register-1-bool-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"Single element write request: holding-register:1:BOOL\", step \"Receive Modbus Write Response\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
 
 [[vector]]
 name = "tcp/adu_upstream-all-datatypes-10-query-trans-3-unit-1-func-3-read-holding-registers-ex1-request"
@@ -1817,6 +1859,20 @@ license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case reports."
 
 [[vector]]
+name = "tcp/adu_upstream-all-datatypes-13-query-trans-4-unit-1-func-16-write-multiple-registers-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"13 Query: Trans: 4; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-13-query-trans-4-unit-1-func-16-write-multiple-registers-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"13 Query: Trans: 4; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
 name = "tcp/adu_upstream-all-datatypes-16-query-trans-5-unit-1-func-3-read-holding-registers-ex1-request"
 source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"16 Query: Trans: 5; Unit: 1, Func: 3: Read Holding Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
@@ -1829,6 +1885,20 @@ source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"16 Query: Trans: 5; Unit: 1, Func: 3: Read Holding Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
 license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case reports."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-19-query-trans-6-unit-1-func-16-write-multiple-registers-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"19 Query: Trans: 6; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-19-query-trans-6-unit-1-func-16-write-multiple-registers-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"19 Query: Trans: 6; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
 
 [[vector]]
 name = "tcp/adu_upstream-all-datatypes-22-query-trans-7-unit-1-func-3-read-holding-registers-ex1-request"
@@ -1845,6 +1915,20 @@ license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case reports."
 
 [[vector]]
+name = "tcp/adu_upstream-all-datatypes-25-query-trans-8-unit-1-func-16-write-multiple-registers-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"25 Query: Trans: 8; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-25-query-trans-8-unit-1-func-16-write-multiple-registers-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"25 Query: Trans: 8; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
 name = "tcp/adu_upstream-all-datatypes-28-query-trans-9-unit-1-func-3-read-holding-registers-ex1-request"
 source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"28 Query: Trans: 9; Unit: 1, Func: 3: Read Holding Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
@@ -1857,6 +1941,20 @@ source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"28 Query: Trans: 9; Unit: 1, Func: 3: Read Holding Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
 license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case reports."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-31-query-trans-10-unit-1-func-16-write-multiple-registers-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"31 Query: Trans: 10; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-31-query-trans-10-unit-1-func-16-write-multiple-registers-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"31 Query: Trans: 10; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
 
 [[vector]]
 name = "tcp/adu_upstream-all-datatypes-34-query-trans-11-unit-1-func-3-read-holding-registers-ex1-request"
@@ -1873,6 +1971,20 @@ license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case reports."
 
 [[vector]]
+name = "tcp/adu_upstream-all-datatypes-37-query-trans-12-unit-1-func-16-write-multiple-registers-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"37 Query: Trans: 12; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-37-query-trans-12-unit-1-func-16-write-multiple-registers-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"37 Query: Trans: 12; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
 name = "tcp/adu_upstream-all-datatypes-40-query-trans-13-unit-1-func-3-read-holding-registers-ex1-request"
 source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"40 Query: Trans: 13; Unit: 1, Func: 3: Read Holding Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
@@ -1885,6 +1997,20 @@ source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"40 Query: Trans: 13; Unit: 1, Func: 3: Read Holding Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
 license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case reports."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-43-query-trans-14-unit-1-func-16-write-multiple-registers-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"43 Query: Trans: 14; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-43-query-trans-14-unit-1-func-16-write-multiple-registers-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"43 Query: Trans: 14; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
 
 [[vector]]
 name = "tcp/adu_upstream-all-datatypes-46-query-trans-15-unit-1-func-3-read-holding-registers-ex1-request"
@@ -1901,6 +2027,20 @@ license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case reports."
 
 [[vector]]
+name = "tcp/adu_upstream-all-datatypes-49-query-trans-16-unit-1-func-16-write-multiple-registers-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"49 Query: Trans: 16; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-49-query-trans-16-unit-1-func-16-write-multiple-registers-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"49 Query: Trans: 16; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
 name = "tcp/adu_upstream-all-datatypes-52-query-trans-17-unit-1-func-3-read-holding-registers-ex1-request"
 source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"52 Query: Trans: 17; Unit: 1, Func: 3: Read Holding Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
@@ -1913,6 +2053,20 @@ source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"52 Query: Trans: 17; Unit: 1, Func: 3: Read Holding Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
 license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case reports."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-55-query-trans-18-unit-1-func-16-write-multiple-registers-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"55 Query: Trans: 18; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-55-query-trans-18-unit-1-func-16-write-multiple-registers-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"55 Query: Trans: 18; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
 
 [[vector]]
 name = "tcp/adu_upstream-all-datatypes-58-query-trans-19-unit-1-func-3-read-holding-registers-ex1-request"
@@ -1929,6 +2083,20 @@ license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case reports."
 
 [[vector]]
+name = "tcp/adu_upstream-all-datatypes-61-query-trans-20-unit-1-func-16-write-multiple-registers-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"61 Query: Trans: 20; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-61-query-trans-20-unit-1-func-16-write-multiple-registers-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"61 Query: Trans: 20; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
 name = "tcp/adu_upstream-all-datatypes-64-query-trans-21-unit-1-func-3-read-holding-registers-ex1-request"
 source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"64 Query: Trans: 21; Unit: 1, Func: 3: Read Holding Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
@@ -1941,6 +2109,20 @@ source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"64 Query: Trans: 21; Unit: 1, Func: 3: Read Holding Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
 license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case reports."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-67-query-trans-22-unit-1-func-16-write-multiple-registers-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"67 Query: Trans: 22; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-67-query-trans-22-unit-1-func-16-write-multiple-registers-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"67 Query: Trans: 22; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
 
 [[vector]]
 name = "tcp/adu_upstream-all-datatypes-70-query-trans-23-unit-1-func-3-read-holding-registers-ex1-request"
@@ -1957,6 +2139,20 @@ license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case reports."
 
 [[vector]]
+name = "tcp/adu_upstream-all-datatypes-73-query-trans-24-unit-1-func-16-write-multiple-registers-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"73 Query: Trans: 24; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-73-query-trans-24-unit-1-func-16-write-multiple-registers-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"73 Query: Trans: 24; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
 name = "tcp/adu_upstream-all-datatypes-76-query-trans-25-unit-1-func-3-read-holding-registers-ex1-request"
 source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"76 Query: Trans: 25; Unit: 1, Func: 3: Read Holding Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
@@ -1969,6 +2165,20 @@ source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"76 Query: Trans: 25; Unit: 1, Func: 3: Read Holding Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
 license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case reports."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-79-query-trans-26-unit-1-func-16-write-multiple-registers-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"79 Query: Trans: 26; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-79-query-trans-26-unit-1-func-16-write-multiple-registers-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"79 Query: Trans: 26; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
 
 [[vector]]
 name = "tcp/adu_upstream-all-datatypes-82-query-trans-27-unit-1-func-3-read-holding-registers-ex1-request"
@@ -1985,6 +2195,20 @@ license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case reports."
 
 [[vector]]
+name = "tcp/adu_upstream-all-datatypes-85-query-trans-28-unit-1-func-16-write-multiple-registers-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"85 Query: Trans: 28; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-85-query-trans-28-unit-1-func-16-write-multiple-registers-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes.xml, test case \"85 Query: Trans: 28; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order BIG_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
 name = "tcp/adu_upstream-all-datatypes-little-endian-single-element-read-request-holding-register-1-bool-ex1-request"
 source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"Single element read request: holding-register:1:BOOL\", step \"Send Modbus Read Request\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
@@ -1997,6 +2221,20 @@ source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"Single element read request: holding-register:1:BOOL\", step \"Receive Modbus Read Response\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
 license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case reports."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-single-element-write-request-holding-register-1-bool-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"Single element write request: holding-register:1:BOOL\", step \"Send Modbus Write Request\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-single-element-write-request-holding-register-1-bool-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"Single element write request: holding-register:1:BOOL\", step \"Receive Modbus Write Response\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
 
 [[vector]]
 name = "tcp/adu_upstream-all-datatypes-little-endian-10-query-trans-3-unit-1-func-3-read-holding-registers-ex1-request"
@@ -2013,6 +2251,20 @@ license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case reports."
 
 [[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-13-query-trans-4-unit-1-func-16-write-multiple-registers-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"13 Query: Trans: 4; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-13-query-trans-4-unit-1-func-16-write-multiple-registers-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"13 Query: Trans: 4; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
 name = "tcp/adu_upstream-all-datatypes-little-endian-16-query-trans-5-unit-1-func-3-read-holding-registers-ex1-request"
 source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"16 Query: Trans: 5; Unit: 1, Func: 3: Read Holding Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
@@ -2025,6 +2277,20 @@ source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"16 Query: Trans: 5; Unit: 1, Func: 3: Read Holding Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
 license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case reports."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-19-query-trans-6-unit-1-func-16-write-multiple-registers-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"19 Query: Trans: 6; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-19-query-trans-6-unit-1-func-16-write-multiple-registers-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"19 Query: Trans: 6; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
 
 [[vector]]
 name = "tcp/adu_upstream-all-datatypes-little-endian-22-query-trans-7-unit-1-func-3-read-holding-registers-ex1-request"
@@ -2041,6 +2307,20 @@ license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case reports."
 
 [[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-25-query-trans-8-unit-1-func-16-write-multiple-registers-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"25 Query: Trans: 8; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-25-query-trans-8-unit-1-func-16-write-multiple-registers-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"25 Query: Trans: 8; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
 name = "tcp/adu_upstream-all-datatypes-little-endian-28-query-trans-9-unit-1-func-3-read-holding-registers-ex1-request"
 source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"28 Query: Trans: 9; Unit: 1, Func: 3: Read Holding Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
@@ -2053,6 +2333,20 @@ source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"28 Query: Trans: 9; Unit: 1, Func: 3: Read Holding Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
 license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case reports."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-31-query-trans-10-unit-1-func-16-write-multiple-registers-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"31 Query: Trans: 10; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-31-query-trans-10-unit-1-func-16-write-multiple-registers-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"31 Query: Trans: 10; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
 
 [[vector]]
 name = "tcp/adu_upstream-all-datatypes-little-endian-34-query-trans-11-unit-1-func-3-read-holding-registers-ex1-request"
@@ -2069,6 +2363,20 @@ license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case reports."
 
 [[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-37-query-trans-12-unit-1-func-16-write-multiple-registers-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"37 Query: Trans: 12; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-37-query-trans-12-unit-1-func-16-write-multiple-registers-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"37 Query: Trans: 12; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
 name = "tcp/adu_upstream-all-datatypes-little-endian-40-query-trans-13-unit-1-func-3-read-holding-registers-ex1-request"
 source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"40 Query: Trans: 13; Unit: 1, Func: 3: Read Holding Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
@@ -2081,6 +2389,20 @@ source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"40 Query: Trans: 13; Unit: 1, Func: 3: Read Holding Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
 license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case reports."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-43-query-trans-14-unit-1-func-16-write-multiple-registers-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"43 Query: Trans: 14; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-43-query-trans-14-unit-1-func-16-write-multiple-registers-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"43 Query: Trans: 14; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
 
 [[vector]]
 name = "tcp/adu_upstream-all-datatypes-little-endian-46-query-trans-15-unit-1-func-3-read-holding-registers-ex1-request"
@@ -2097,6 +2419,20 @@ license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case reports."
 
 [[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-49-query-trans-16-unit-1-func-16-write-multiple-registers-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"49 Query: Trans: 16; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-49-query-trans-16-unit-1-func-16-write-multiple-registers-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"49 Query: Trans: 16; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
 name = "tcp/adu_upstream-all-datatypes-little-endian-52-query-trans-17-unit-1-func-3-read-holding-registers-ex1-request"
 source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"52 Query: Trans: 17; Unit: 1, Func: 3: Read Holding Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
@@ -2109,6 +2445,20 @@ source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"52 Query: Trans: 17; Unit: 1, Func: 3: Read Holding Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
 license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case reports."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-55-query-trans-18-unit-1-func-16-write-multiple-registers-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"55 Query: Trans: 18; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-55-query-trans-18-unit-1-func-16-write-multiple-registers-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"55 Query: Trans: 18; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
 
 [[vector]]
 name = "tcp/adu_upstream-all-datatypes-little-endian-58-query-trans-19-unit-1-func-3-read-holding-registers-ex1-request"
@@ -2125,6 +2475,20 @@ license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case reports."
 
 [[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-61-query-trans-20-unit-1-func-16-write-multiple-registers-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"61 Query: Trans: 20; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-61-query-trans-20-unit-1-func-16-write-multiple-registers-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"61 Query: Trans: 20; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
 name = "tcp/adu_upstream-all-datatypes-little-endian-64-query-trans-21-unit-1-func-3-read-holding-registers-ex1-request"
 source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"64 Query: Trans: 21; Unit: 1, Func: 3: Read Holding Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
@@ -2137,6 +2501,20 @@ source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"64 Query: Trans: 21; Unit: 1, Func: 3: Read Holding Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
 license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case reports."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-67-query-trans-22-unit-1-func-16-write-multiple-registers-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"67 Query: Trans: 22; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-67-query-trans-22-unit-1-func-16-write-multiple-registers-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"67 Query: Trans: 22; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
 
 [[vector]]
 name = "tcp/adu_upstream-all-datatypes-little-endian-70-query-trans-23-unit-1-func-3-read-holding-registers-ex1-request"
@@ -2153,6 +2531,20 @@ license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case reports."
 
 [[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-73-query-trans-24-unit-1-func-16-write-multiple-registers-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"73 Query: Trans: 24; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-73-query-trans-24-unit-1-func-16-write-multiple-registers-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"73 Query: Trans: 24; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
 name = "tcp/adu_upstream-all-datatypes-little-endian-76-query-trans-25-unit-1-func-3-read-holding-registers-ex1-request"
 source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"76 Query: Trans: 25; Unit: 1, Func: 3: Read Holding Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
@@ -2167,6 +2559,20 @@ license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case reports."
 
 [[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-79-query-trans-26-unit-1-func-16-write-multiple-registers-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"79 Query: Trans: 26; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-79-query-trans-26-unit-1-func-16-write-multiple-registers-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"79 Query: Trans: 26; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
 name = "tcp/adu_upstream-all-datatypes-little-endian-82-query-trans-27-unit-1-func-3-read-holding-registers-ex1-request"
 source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"82 Query: Trans: 27; Unit: 1, Func: 3: Read Holding Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
@@ -2179,4 +2585,18 @@ source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"82 Query: Trans: 27; Unit: 1, Func: 3: Read Holding Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
 license = "Apache-2.0"
 note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case reports."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-85-query-trans-28-unit-1-func-16-write-multiple-registers-ex1-request"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"85 Query: Trans: 28; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed outgoing-plc-message at position 3\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
+
+[[vector]]
+name = "tcp/adu_upstream-all-datatypes-little-endian-85-query-trans-28-unit-1-func-16-write-multiple-registers-ex1-response"
+source = "upstream_fixture"
+origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/Modbus-all-datatypes-little-endian.xml, test case \"85 Query: Trans: 28; Unit: 1, Func: 16: Write Multiple Registers\", step \"unnamed incoming-plc-message at position 4\" (kept at fixtures/modbus/upstream/tcp/Modbus-all-datatypes-little-endian.xml)"
+license = "Apache-2.0"
+note = "Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order LITTLE_ENDIAN. The expected file carries the tag and the values the case writes."
 # END adapter-generated entries (slice S04b)

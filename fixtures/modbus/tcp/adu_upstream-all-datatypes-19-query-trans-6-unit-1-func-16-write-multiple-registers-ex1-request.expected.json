@@ -1,0 +1,38 @@
+{
+  "adus": [
+    {
+      "transaction_id": 1,
+      "protocol_id": 0,
+      "length": 6,
+      "unit_id": 1,
+      "pdu": "06 00 02 A5 B8"
+    }
+  ],
+  "leftover": 0,
+  "pdu": {
+    "direction": "request",
+    "function": 6,
+    "address": 2,
+    "value": 42424
+  },
+  "upstream": {
+    "file": "Modbus-all-datatypes.xml",
+    "case": "19 Query: Trans: 6; Unit: 1, Func: 16: Write Multiple Registers",
+    "step": "unnamed outgoing-plc-message at position 3",
+    "exchange": 1,
+    "byte_order": "BIG_ENDIAN",
+    "operation": "write",
+    "tag": {
+      "name": "hurz",
+      "address": "holding-register:3:WORD",
+      "data_type": "WORD",
+      "elements": 1
+    },
+    "values": [
+      {
+        "type": "WORD",
+        "text": "42424"
+      }
+    ]
+  }
+}

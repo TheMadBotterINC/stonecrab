@@ -55,7 +55,7 @@ hardware record exists.
 | Modbus TCP | other device exception codes (01, 03 to 0B) | `modbus` | simulator-tested | `MB-EXC-01`, `MB-EXC-03` to `MB-EXC-0B` | unit tests and `FakeTransport`; never seen from an independent server |
 | Modbus TCP | request-driven reconnect with capped jittered backoff | `modbus` | simulator-tested | `MB-READ-RECONNECT` | `FakeTransport` and fake clock; Stonecrab extension, upstream has none |
 | Modbus TCP | read retry, cancellation, timeout, late-reply discard, resync | `modbus` | simulator-tested | `MB-READ-RETRY`, `MB-READ-TIMEOUT`, `MB-READ-MATCH` | `FakeTransport` and fake clock (D21) |
-| Modbus TCP | write (FC05, 06, 15, 16) | `modbus` | not supported | `MB-TCP-WRITE` | deferred; `Capabilities.write = false`, `write` returns `Unsupported(Operation::Write)` before any I/O |
+| Modbus TCP | write coils (FC15) and holding registers (FC06, FC16); FC05 is never sent | `modbus` | interoperability-tested | `MB-TCP-WRITE`, `MB-CFG-ACCESS`, `MB-WRITE-ACCESS`, `MB-WRITE-UNKNOWN`, `MB-WRITE-HALT`, `MB-WRITE-ECHO` | `Capabilities.write = true`; refused before any I/O unless the connection string says `access=read-write`; one request per item, as upstream; an echo is `Confirmed`, an exception `Rejected`, a request that went out without a usable answer `Unknown` and never replayed; pymodbus 3.8.6 via the `interop` job (`interop_writes_*`); the 29 upstream write exchanges Stonecrab can address replay byte for byte |
 | Modbus TCP | subscriptions (upstream: polling emulation) | `modbus` | not supported | `MB-TCP-SUBSCRIBE` | deferred, M2 |
 | Any physical device | everything | none yet | planned | none | milestone M2S (board adapters, hardware runner, hardware records); no record exists |
 | Modbus TCP | browse | `modbus` | not supported | `MB-TCP-BROWSE` | upstream has no Modbus browse |
@@ -241,10 +241,10 @@ unlimited attempts; `RetryPolicy` one attempt, retrying `Timeout`, `Disconnected
 
 | Peer | What ran | Where | Level it supports |
 | --- | --- | --- | --- |
-| pymodbus 3.8.6 on `python:3.12-slim` (pinned by digest), first-party `server.py` over the register map in `fixtures/modbus/interop/register-map.toml`, TCP port 5020 | twelve `interop_` tests, the `modbus_tcp_read` example, `profile_read --expect-good` for each `modbus-tcp` synthetic profile, the common driver contract suite (15 passed, 11 skipped by name) | the CI job `interop` (ubuntu, every push and pull request) and `mise run interop` | `interoperability-tested` |
+| pymodbus 3.8.6 on `python:3.12-slim` (pinned by digest), first-party `server.py` over the register map in `fixtures/modbus/interop/register-map.toml`, TCP port 5020 | fifteen `interop_` tests (writes of a holding register, a coil and the multi-register types, read back, included), the `modbus_tcp_read` example, `profile_read --expect-good` for each `modbus-tcp` synthetic profile, the common driver contract suite (15 passed, 11 skipped by name) | the CI job `interop` (ubuntu, every push and pull request) and `mise run interop` | `interoperability-tested` |
 | the in-process simulator (`sim`) | the driver contract suite (23 passed, 3 skipped), `sim_read`, `profile_read` on the `sim` profiles | `cargo test --all-features`, CI jobs `test` and `examples` | `simulator-tested` |
-| loopback `ScriptedPeer` (testkit) | a holding-register read over real sockets and the contract suite (19 passed, 7 skipped) | `cargo test --all-features` | `simulator-tested` |
-| `FakeTransport` with a first-party MBAP responder and `FakeClock` | the contract suite (23 passed, 3 skipped), timing, retry, reconnect and cancellation tests | `cargo test --all-features` | `simulator-tested` |
+| loopback `ScriptedPeer` (testkit) | a holding-register read over real sockets and the contract suite (20 passed, 6 skipped) | `cargo test --all-features` | `simulator-tested` |
+| `FakeTransport` with a first-party MBAP responder and `FakeClock` | the contract suite (24 passed, 2 skipped), timing, retry, reconnect, cancellation and write-outcome tests | `cargo test --all-features` | `simulator-tested` |
 
 pymodbus 3.8.6 is the peer the upstream project's own Docker test uses; the Stonecrab
 server is written independently and reproduces only the documented fixture values plus one
@@ -328,10 +328,11 @@ byte-order names (`MB-ADDR-CONFIG-BLOCK`). Inferences about upstream behavior ar
 
 ## Known gaps
 
-Writes, subscriptions, extended registers, strings, calendar types, RTU, UDP and TLS, and
-hardware verification are listed above. Also not done: a mutation threshold as a gate
-(one recorded run, `docs/evidence/alpha.md`), soak and
-benchmark gates, branch-coverage gating (line coverage per module is gated, ADR-0005), a
-differential test against PLC4J, and the upstream write exchanges (the driver-suite and
-all-datatypes read exchanges are vectors since S04b; the write cases are not emitted).
+Subscriptions, extended registers (so extended-register writes), strings, calendar types,
+RTU, UDP and TLS, and hardware verification are listed above. Also not done: a mutation
+threshold as a gate (one recorded run, `docs/evidence/alpha.md`), soak and benchmark
+gates, branch-coverage gating (line coverage per module is gated, ADR-0005), a
+differential test against PLC4J, and a write whose outcome is lost on demand against an
+independent server (the fault is injected on the fake transport and over loopback, not
+against pymodbus).
 [`STATUS.md`](../STATUS.md) carries the current list.

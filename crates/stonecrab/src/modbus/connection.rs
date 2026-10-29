@@ -7,15 +7,19 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use crate::codec::pack_bits_lsb_first;
 use crate::transport::{GuardConfig, TransportFactory};
 use crate::{
-    ByteOrder, CancellationToken, Capabilities, Clock, Connection, ConnectionConfig,
+    AccessPolicy, ByteOrder, CancellationToken, Capabilities, Clock, Connection, ConnectionConfig,
     ConnectionState, Deadline, Diagnostics, ErrorKind, FailureCategory, ItemError, OpFuture,
     Operation, PlcError, PlcValue, ReadItem, ReadRequest, ReadResponse, ResourceLimits, Result,
-    RetryPolicy, StateWatch, SubscriptionMode, Timeouts, WordOrder, WriteRequest, WriteResponse,
+    RetryPolicy, StateWatch, SubscriptionMode, Tag, Timeouts, UnknownReason, WordOrder, WriteItem,
+    WriteOutcome, WriteRequest, WriteResponse, WriteResponseBuilder, WriteResult,
 };
 use tracing::Instrument;
 
+use crate::modbus::batch::resolve_order;
+use crate::modbus::session::exception_error;
 use crate::modbus::{
     BatchLimits, Batcher, Chunk, MAX_PDU_BYTES, Member, ModbusAddress, ModbusAdu, ModbusArea,
     ModbusOptions, ModbusPdu, ModbusSession, TypedDecoder, UnitId, exception_item_error,
@@ -30,16 +34,17 @@ const RAW_BUDGET: NonZeroUsize = match NonZeroUsize::new(MAX_PDU_BYTES) {
     None => NonZeroUsize::MIN,
 };
 
-/// The capabilities of the alpha driver and of every connection it opens: read and ping, no
-/// write, subscriptions, browse or discovery, one operation at a time, PDUs up to 253 bytes
+/// The capabilities of the driver and of every connection it opens: read, write and ping, no
+/// subscriptions, browse or discovery, one operation at a time, PDUs up to 253 bytes
 /// (`MB-TCP-CAPABILITIES`). The driver reports the same value before any connection exists.
 #[expect(
     clippy::redundant_pub_crate,
     reason = "unreachable_pub forbids plain pub in a private module"
 )]
-pub(crate) fn alpha_capabilities() -> Capabilities {
+pub(crate) fn driver_capabilities() -> Capabilities {
     Capabilities {
         read: true,
+        write: true,
         ping: true,
         subscribe: SubscriptionMode::Unsupported,
         max_pdu_bytes: NonZeroUsize::new(MAX_PDU_BYTES),
@@ -120,7 +125,7 @@ impl Default for ConnectionDefaults {
 }
 
 /// A live Modbus TCP connection: reads coils, discrete inputs, holding registers and input
-/// registers as typed values, in correlated batches.
+/// registers as typed values, in correlated batches, and writes coils and holding registers.
 ///
 /// `ModbusConnection` is what the `modbus-tcp` driver hands out as a `dyn Connection`
 /// (slice S26). It owns a [`ModbusSession`] (transaction ids, reply correlation, the
@@ -147,12 +152,20 @@ impl Default for ConnectionDefaults {
 /// - **Retry.** A failed chunk is retried under the configuration's [`RetryPolicy`] (one
 ///   attempt unless the caller raised `max_attempts`), only for the kinds in its
 ///   `retry_on` set, and only while the request's own deadline has not passed. A device
-///   exception is an answer, not a failure, and is never retried. `write` does no I/O and
-///   so never retries.
-/// - **One operation in flight.** `Capabilities.concurrency` is 1: a read or ping that
-///   starts while another runs fails with [`ErrorKind::Backpressure`] before any I/O, as
-///   the simulator's does. The session underneath is therefore never asked for two
-///   exchanges at once, and the chunks of one read are the only requests the device sees.
+///   exception is an answer, not a failure, and is never retried. A write is never
+///   retried, whatever the policy says.
+/// - **Writes.** [`write`](Connection::write) sends one request per item (function 15 for
+///   a coil, 06 or 16 for holding registers), one after another, and gives each item its
+///   own outcome: `Confirmed` for an echo, `Rejected` for a device exception or an item
+///   that cannot be written, `Unknown` for a request that went out and got no usable
+///   answer. It is refused first while the access policy is read-only, which is the
+///   default; `access=read-write` in the connection string, or
+///   `ConnectionConfig::builder(..).access(AccessPolicy::ReadWrite)`, grants it.
+/// - **One operation in flight.** `Capabilities.concurrency` is 1: a read, write or ping
+///   that starts while another runs fails with [`ErrorKind::Backpressure`] before any I/O,
+///   as the simulator's does. The session underneath is therefore never asked for two
+///   exchanges at once, and the chunks of one read (or the items of one write) are the
+///   only requests the device sees.
 /// - **Lifecycle.** `Connected` after [`open`](Self::open); a transport failure shows as
 ///   `Reconnecting { attempt, next_at }` and the next read waits out the backoff and
 ///   reopens (decision D15); `close` ends in `Closed`. A read on a `Closing`, `Closed` or
@@ -175,7 +188,8 @@ impl Default for ConnectionDefaults {
 /// (`MB-READ-MERGE`), one request is in flight (`MB-READ-INFLIGHT`), a request times out
 /// after `request-timeout-ms` (`MB-READ-TIMEOUT`). Reconnect (`MB-READ-RECONNECT`) and read
 /// retry (`MB-READ-RETRY`) are Stonecrab extensions; the default policy sends once, as
-/// upstream does. Ping is the counterpart of `onPing` (`MB-TCP-PING`).
+/// upstream does. Ping is the counterpart of `onPing` (`MB-TCP-PING`) and write of `onWrite`
+/// (`MB-TCP-WRITE`).
 ///
 /// # Examples
 /// ```
@@ -236,7 +250,9 @@ pub struct ModbusConnection {
     /// What `ping` reads once: the `ping-address` of the options in the configuration.
     ping_address: ModbusAddress,
     capabilities: Capabilities,
-    /// True while a read is in flight; see [`Slot`].
+    /// What the configuration permits: a write on a read-only connection is refused first.
+    access: AccessPolicy,
+    /// True while a read, write or ping is in flight; see [`Slot`].
     in_flight: AtomicBool,
 }
 
@@ -255,8 +271,9 @@ impl ModbusConnection {
     /// `Connected`.
     ///
     /// `config` must be for the scheme `modbus-tcp`; its endpoint, timeouts, reconnect
-    /// policy, retry policy and limits are used, its access policy and credentials are
-    /// not (Modbus TCP has no authentication, and a write is refused whatever the policy).
+    /// policy, retry policy, access policy and limits are used, its credentials are not
+    /// (Modbus TCP has no authentication). The access policy is read-only unless the
+    /// configuration says otherwise, and a read-only connection refuses every write.
     /// `factory` opens the transports: the real TCP factory in production, the testkit's
     /// `FakeTransportFactory` in tests. `clock` is the one source of time. `defaults`
     /// carries the connection-wide unit, byte order and request-size limits (see
@@ -389,7 +406,8 @@ impl ModbusConnection {
                 .map_or(ModbusAddress::DEFAULT_PING, |options| {
                     options.ping_address.clone()
                 }),
-            capabilities: alpha_capabilities(),
+            capabilities: driver_capabilities(),
+            access: config.access(),
             in_flight: AtomicBool::new(false),
         })
     }
@@ -426,12 +444,9 @@ impl ModbusConnection {
     }
 
     /// The checks that need no tag: the connection is open and the request not cancelled.
-    fn gate(&self, op: &Op<'_>, request: &ReadRequest) -> Result<()> {
+    fn gate(&self, op: &Op<'_>, cancel: Option<&CancellationToken>) -> Result<()> {
         self.ensure_open(op)?;
-        if request
-            .cancel()
-            .is_some_and(CancellationToken::is_cancelled)
-        {
+        if cancel.is_some_and(CancellationToken::is_cancelled) {
             return Err(op.reject(ErrorKind::Cancelled, "the request was cancelled"));
         }
         Ok(())
@@ -439,32 +454,24 @@ impl ModbusConnection {
 
     /// Validate every tag and split the request into chunks, before any I/O.
     fn plan(&self, op: &Op<'_>, request: &ReadRequest) -> Result<Vec<Chunk>> {
-        for tag in request.items() {
-            let address: &dyn Any = tag.address();
-            if !address.is::<ModbusAddress>() {
-                return Err(op.reject(
-                    ErrorKind::InvalidAddress,
-                    format!("tag {} does not carry a Modbus address", tag.id()),
-                ));
-            }
-        }
-        for tag in request.items() {
-            if tag.count() != NonZeroU32::MIN {
-                return Err(op.reject(
-                    ErrorKind::InvalidConfig,
-                    format!(
-                        "tag {} has element count {}: Modbus element counts above one need \
-                         array selections, which are not supported yet",
-                        tag.id(),
-                        tag.count()
-                    ),
-                ));
-            }
-        }
+        let tags: Vec<&Tag> = request.items().iter().collect();
+        addresses_of(op, &tags)?;
         // The batcher refuses more tags than `max_items_per_request` before it plans, which
         // is the re-validation against the connection's own limits.
         Batcher::plan(request.items(), &self.batch)
             .map_err(|error| op.wrap(error, FailureCategory::Validation))
+    }
+
+    /// Fail with `Timeout` if the request's own deadline had already elapsed.
+    fn ensure_time_left(&self, op: &Op<'_>, deadline: Option<Deadline>) -> Result<()> {
+        if deadline.is_some_and(|deadline| deadline.is_elapsed(self.clock.now())) {
+            return Err(op.error(
+                ErrorKind::Timeout,
+                "the request deadline had already elapsed",
+                FailureCategory::Transport,
+            ));
+        }
+        Ok(())
     }
 
     async fn read_inner(&self, request: ReadRequest, span: tracing::Span) -> Result<ReadResponse> {
@@ -473,20 +480,11 @@ impl ModbusConnection {
             operation: Operation::Read,
             started: self.clock.now(),
         };
-        self.gate(&op, &request)?;
+        self.gate(&op, request.cancel())?;
         let chunks = self.plan(&op, &request)?;
         span.record("chunks", chunks.len());
         let _slot = self.acquire(&op)?;
-        if request
-            .deadline()
-            .is_some_and(|deadline| deadline.is_elapsed(self.clock.now()))
-        {
-            return Err(op.error(
-                ErrorKind::Timeout,
-                "the request deadline had already elapsed",
-                FailureCategory::Transport,
-            ));
-        }
+        self.ensure_time_left(&op, request.deadline())?;
         let mut items = Vec::with_capacity(request.items().len());
         for (index, chunk) in chunks.iter().enumerate() {
             let answer = self
@@ -520,6 +518,219 @@ impl ModbusConnection {
                 let message = error.to_string();
                 self.failure(&op, error, 1, message)
             })
+    }
+
+    async fn write_inner(&self, request: WriteRequest) -> Result<WriteResponse> {
+        let op = Op {
+            connection: self,
+            operation: Operation::Write,
+            started: self.clock.now(),
+        };
+        // The policy is the first word: a read-only connection touches neither the wire nor
+        // the request.
+        if self.access == AccessPolicy::ReadOnly {
+            return Err(op.reject(
+                ErrorKind::Unsupported(Operation::Write),
+                "the connection's access policy is read-only",
+            ));
+        }
+        self.gate(&op, request.cancel())?;
+        let tags: Vec<&Tag> = request.items().iter().map(WriteItem::tag).collect();
+        let addresses = addresses_of(&op, &tags)?;
+        let plans: Vec<_> = request
+            .items()
+            .iter()
+            .zip(addresses)
+            .map(|(item, address)| self.prepare(&op, item, address))
+            .collect();
+        let _slot = self.acquire(&op)?;
+        self.ensure_time_left(&op, request.deadline())?;
+        let results = self.write_all(&op, &request, plans).await;
+        self.respond_write(&op, &request, results)
+    }
+
+    /// The wire request of one item, or the refusal that is the item's alone: its area is
+    /// read-only, or its value cannot be laid out for its type.
+    fn prepare(
+        &self,
+        op: &Op<'_>,
+        item: &WriteItem,
+        address: &ModbusAddress,
+    ) -> std::result::Result<Planned, ItemError> {
+        let refuse = |error: PlcError| ItemError::new(op.wrap(error, FailureCategory::Validation));
+        let area = address.area();
+        if !area.is_writable() {
+            return Err(refuse(PlcError::new(
+                ErrorKind::Unsupported(Operation::Write),
+                format!(
+                    "tag {} is a {}, which is read-only; only coils and holding registers are \
+                     written",
+                    item.tag().id(),
+                    area.long_name()
+                ),
+            )));
+        }
+        // A coil is a BOOL: bit 0 of the register the encoder lays out under the default order.
+        let (byte_order, word_order) = if area.is_bit_area() {
+            (ByteOrder::BigEndian, WordOrder::HighWordFirst)
+        } else {
+            let (byte_order, word_order) = resolve_order(item.tag(), address);
+            (
+                byte_order.unwrap_or(self.defaults.byte_order),
+                word_order.unwrap_or(self.defaults.word_order),
+            )
+        };
+        let registers = TypedDecoder::encode_registers(
+            item.value(),
+            address.data_type(),
+            byte_order,
+            word_order,
+        )
+        .map_err(refuse)?;
+        let (quantity, payload) = if area.is_bit_area() {
+            let bit = registers.first().is_some_and(|word| word & 1 == 1);
+            (1, pack_bits_lsb_first(&[bit]))
+        } else {
+            let payload = registers
+                .iter()
+                .copied()
+                .flat_map(u16::to_be_bytes)
+                .collect();
+            (address.width(), payload)
+        };
+        ModbusPdu::write_request(area, address.offset(), quantity, &payload)
+            .map(|pdu| Planned {
+                unit_id: address.unit_id().unwrap_or(self.defaults.unit_id),
+                pdu,
+            })
+            .map_err(PlcError::from)
+            .map_err(refuse)
+    }
+
+    /// Send the planned writes one after another and say how each ended.
+    ///
+    /// Every item gets a result. A write whose request never left (the link was down, the
+    /// deadline had passed, the token had fired) is that item's `Rejected`, with the error
+    /// that stopped it. After an `Unknown` the rest of the planned writes are not sent: the
+    /// link and the device are in a state nobody knows, and a later write may depend on the
+    /// one that is unknown.
+    async fn write_all(
+        &self,
+        op: &Op<'_>,
+        request: &WriteRequest,
+        plans: Vec<std::result::Result<Planned, ItemError>>,
+    ) -> Vec<WriteResult> {
+        let mut results = Vec::with_capacity(plans.len());
+        let mut halted = false;
+        for (item, plan) in request.items().iter().zip(plans) {
+            let id = item.tag().id();
+            let outcome = match plan {
+                Err(refusal) => WriteOutcome::Rejected(refusal),
+                Ok(_) if halted => WriteOutcome::Rejected(ItemError::new(op.reject(
+                    ErrorKind::Cancelled,
+                    format!("write of {id} was not sent: an earlier write has an unknown outcome"),
+                ))),
+                Ok(plan) => match self.write_one(op, request, &plan).await {
+                    Written::Answered(outcome) => {
+                        halted = matches!(outcome, WriteOutcome::Unknown(_));
+                        outcome
+                    }
+                    Written::Unsent(error) => {
+                        let message = format!("write of {id}: {error}");
+                        WriteOutcome::Rejected(ItemError::new(self.failure(op, error, 1, message)))
+                    }
+                },
+            };
+            results.push(WriteResult::new(id.clone(), outcome));
+        }
+        results
+    }
+
+    /// One write request, sent once: the outcome the device's answer gives, `Unknown` if
+    /// the frame went out and no usable answer came back, or the error of a request that
+    /// never went out.
+    ///
+    /// The frame counts as sent once the guard has handed it whole to the transport (its
+    /// `requests` counter rose): a server cannot act on half an MBAP frame, so a send that
+    /// failed before that point changed nothing. The counter is a lower bound: a send that
+    /// reports a failure (a deadline, a lost link) after the whole frame was written is
+    /// `Rejected`, not `Unknown`. For a frame of at most 20 bytes the window is small, and
+    /// it is recorded as `MB-WRITE-UNKNOWN`.
+    async fn write_one(&self, op: &Op<'_>, request: &WriteRequest, plan: &Planned) -> Written {
+        let deadline = match self.chunk_deadline(op, request.deadline()) {
+            Ok(deadline) => deadline,
+            Err(error) => return Written::Unsent(error),
+        };
+        let sent_before = self.session.stats().guard.requests;
+        let outcome = self
+            .session
+            .request(&plan.pdu, plan.unit_id, deadline, request.cancel())
+            .await;
+        match outcome {
+            Ok(reply) => {
+                let answer = Answer {
+                    reply,
+                    arrived: self.clock.now(),
+                    retries: 0,
+                };
+                Written::Answered(self.outcome_of(op, &answer))
+            }
+            Err(error) if self.session.stats().guard.requests > sent_before => {
+                tracing::debug!(kind = ?error.kind(), "a write was sent and not confirmed");
+                Written::Answered(WriteOutcome::Unknown(unknown_reason(error.kind())))
+            }
+            Err(error) => Written::Unsent(error),
+        }
+    }
+
+    /// What the device's answer to a write says: the echo confirms it (the session has
+    /// proved it repeats the request), an exception rejects it.
+    fn outcome_of(&self, op: &Op<'_>, answer: &Answer) -> WriteOutcome {
+        match &answer.reply {
+            ModbusPdu::Exception { function, code } => {
+                let refusal = exception_error(Operation::Write, *function, *code);
+                WriteOutcome::Rejected(self.stamp_item(op, refusal, answer))
+            }
+            ModbusPdu::WriteSingleRegisterResponse { .. }
+            | ModbusPdu::WriteMultipleResponse { .. } => WriteOutcome::Confirmed,
+            // The session proves every reply against its request, so a read reply to a
+            // write cannot come out of it; it is not a confirmation if it ever does.
+            ModbusPdu::ReadBitsResponse { .. }
+            | ModbusPdu::ReadRegistersResponse { .. }
+            | ModbusPdu::ReadCoils { .. }
+            | ModbusPdu::ReadDiscreteInputs { .. }
+            | ModbusPdu::ReadHoldingRegisters { .. }
+            | ModbusPdu::ReadInputRegisters { .. }
+            | ModbusPdu::WriteMultipleCoils { .. }
+            | ModbusPdu::WriteSingleRegister { .. }
+            | ModbusPdu::WriteMultipleRegisters { .. } => WriteOutcome::Unknown(UNCONFIRMED),
+        }
+    }
+
+    /// The correlated response for `results`, one per item of `request`.
+    fn respond_write(
+        &self,
+        op: &Op<'_>,
+        request: &WriteRequest,
+        results: Vec<WriteResult>,
+    ) -> Result<WriteResponse> {
+        let finished = self.clock.now();
+        let built = results
+            .into_iter()
+            .fold(
+                WriteResponse::builder(request, op.started, finished),
+                WriteResponseBuilder::result,
+            )
+            .build();
+        let response = built.map_err(|error| op.wrap(error, FailureCategory::Internal))?;
+        tracing::debug!(
+            items = response.results().len(),
+            confirmed = response.confirmed_count(),
+            rejected = response.rejected_count(),
+            unknown = response.unknown_count(),
+            "write complete"
+        );
+        Ok(response)
     }
 
     /// The correlated response for `items`, one per tag of `request`, answered by `chunks`
@@ -650,7 +861,7 @@ impl ModbusConnection {
     /// or the exception mapping already said. The original stays as the source.
     fn stamp_item(&self, op: &Op<'_>, item: ItemError, answer: &Answer) -> ItemError {
         let mut diagnostics = item.error().diagnostics().clone();
-        diagnostics.operation = Some(Operation::Read);
+        diagnostics.operation = Some(op.operation);
         diagnostics.connection_state = Some(self.session.state());
         diagnostics.latency = Some(answer.arrived.saturating_duration_since(op.started));
         diagnostics.retries = answer.retries;
@@ -674,6 +885,78 @@ struct Answer {
     reply: ModbusPdu,
     arrived: Instant,
     retries: u32,
+}
+
+/// The Modbus address of every tag, in order, or the first tag that has none or asks
+/// for more than one element.
+fn addresses_of<'t>(op: &Op<'_>, tags: &[&'t Tag]) -> Result<Vec<&'t ModbusAddress>> {
+    let addresses = tags
+        .iter()
+        .map(|tag| {
+            let address: &dyn Any = tag.address();
+            address.downcast_ref::<ModbusAddress>().ok_or_else(|| {
+                op.reject(
+                    ErrorKind::InvalidAddress,
+                    format!("tag {} does not carry a Modbus address", tag.id()),
+                )
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    for tag in tags {
+        if tag.count() != NonZeroU32::MIN {
+            return Err(op.reject(
+                ErrorKind::InvalidConfig,
+                format!(
+                    "tag {} has element count {}: Modbus element counts above one need \
+                     array selections, which are not supported yet",
+                    tag.id(),
+                    tag.count()
+                ),
+            ));
+        }
+    }
+    Ok(addresses)
+}
+
+/// The reason of an `Unknown` whose reply did not confirm the write (it does not decode, or
+/// does not echo the request): the confirmation did not arrive.
+const UNCONFIRMED: UnknownReason = UnknownReason::TimeoutAfterTransmit;
+
+/// One item of a write request, turned into the request that carries it.
+#[derive(Debug)]
+struct Planned {
+    unit_id: UnitId,
+    pdu: ModbusPdu,
+}
+
+/// How one write request ended.
+enum Written {
+    /// The frame went out; this is what is known of the write.
+    Answered(WriteOutcome),
+    /// The frame never went out, for this reason.
+    Unsent(PlcError),
+}
+
+/// Why a write that went out is not confirmed, from the failure that ended the wait: the
+/// deadline, the loss of the link or the caller's cancellation. A reply that does not
+/// answer the write (it does not decode, or echoes something else) is a confirmation that
+/// did not arrive, and counts as the first.
+const fn unknown_reason(kind: ErrorKind) -> UnknownReason {
+    match kind {
+        ErrorKind::Disconnected => UnknownReason::DisconnectedAfterTransmit,
+        ErrorKind::Cancelled => UnknownReason::CancelledAfterTransmit,
+        ErrorKind::Timeout
+        | ErrorKind::InvalidConfig
+        | ErrorKind::InvalidAddress
+        | ErrorKind::Unsupported(_)
+        | ErrorKind::Authentication
+        | ErrorKind::Trust
+        | ErrorKind::MalformedData
+        | ErrorKind::DeviceException
+        | ErrorKind::ResourceLimit
+        | ErrorKind::Backpressure
+        | ErrorKind::Internal => UNCONFIRMED,
+    }
 }
 
 /// The read request PDU: function code by area, wire start and quantity.
@@ -758,10 +1041,10 @@ impl Drop for Slot<'_> {
     }
 }
 
-/// The context every error of one read or ping is stamped with.
+/// The context every error of one read, write or ping is stamped with.
 struct Op<'a> {
     connection: &'a ModbusConnection,
-    /// What the diagnostics name: `Read` or `Ping`.
+    /// What the diagnostics name: `Read`, `Write` or `Ping`.
     operation: Operation,
     /// The clock reading when the operation began, the base of every latency figure.
     started: Instant,
@@ -882,45 +1165,92 @@ impl Connection for ModbusConnection {
         Box::pin(self.read_inner(request, span.clone()).instrument(span))
     }
 
-    /// Refuse the write: `modbus-tcp` is read-only at alpha.
+    /// Write every item of `request`, one wire request each, one after another.
     ///
-    /// # Compatibility: docs/parity/modbus.md#MB-TCP-CAPABILITIES
-    /// Upstream implements writes; Stonecrab defers them (decision D3), and
-    /// `Capabilities.write` is false.
+    /// A connection whose access policy is read-only refuses the call first, before the
+    /// connection state, the request or the wire is looked at. Otherwise the connection
+    /// must be open and the token not cancelled, every tag must carry a [`ModbusAddress`]
+    /// with an element count of one, and only then is one item laid out as a wire request:
+    /// the value is encoded with the data type of its address and the byte and word order
+    /// of the tag, else of the address, else of [`ConnectionDefaults`]; a coil takes a
+    /// `BOOL`; the request is function 15 for a coil (even one), function 06 for a holding
+    /// register payload of exactly 2 bytes and function 16 for any other
+    /// ([`ModbusPdu::write_request`]). An item that cannot be laid out, a discrete input or
+    /// an input register among them, is `Rejected` without a request and does not stop the
+    /// others. Then one operation runs at a time, the request deadline is checked, and
+    /// the requests go out in order, each under `min(request deadline, now +
+    /// timeouts.request)` taken when it starts.
+    ///
+    /// Each answer decides its item and nothing else:
+    ///
+    /// - an echo that repeats the request is `Confirmed`;
+    /// - a device exception is `Rejected`, with the exception as the item error and its
+    ///   code as the protocol status (code 1 is `Unsupported(Operation::Write)`, code 2
+    ///   `InvalidAddress`, every other `DeviceException`);
+    /// - a request that went out and got no usable answer (the deadline passed, the link
+    ///   was lost, the token fired, or the reply did not answer the request) is
+    ///   `Unknown`, with the matching [`UnknownReason`]. Such a write is never retried and
+    ///   never replayed, whatever the retry policy says, and the writes after it in the
+    ///   request are not sent: they are `Rejected` with [`ErrorKind::Cancelled`] and can be
+    ///   resubmitted once the caller has read the value back.
+    ///
+    /// A request that never went out (the link could not be reopened, the deadline had
+    /// passed, the token had fired) is that item's `Rejected`, with the error as the item
+    /// error: once the call has begun, every item has an outcome and no `Confirmed` or
+    /// `Unknown` result is lost to an error of the call.
+    ///
+    /// The deadline source is the request's deadline, or `timeouts.request` of the
+    /// configuration, per wire request.
+    ///
+    /// # Compatibility: docs/parity/modbus.md#MB-TCP-WRITE
+    /// The counterpart of upstream `ModbusTcpConnection.onWrite`: one PDU per tag, chained
+    /// sequentially, coils through function 15, a 2-byte holding-register payload through
+    /// function 06 and any other through function 16, discrete inputs and input registers
+    /// refused (`MB-TCP-WRITE`). Stonecrab refuses a write while the access policy is
+    /// read-only (`MB-WRITE-ACCESS`), reports a write with no usable answer as `Unknown`
+    /// where upstream reports an error code and goes on (`MB-WRITE-UNKNOWN`), and requires
+    /// the reply to echo the function code of the request (`MB-WRITE-ECHO`).
     ///
     /// # Errors
-    /// - [`ErrorKind::Unsupported`]`(`[`Operation::Write`]`)` always, with `Diagnostics`
-    ///   `operation = Write` and the `Validation` category.
+    /// Every error carries `Diagnostics` with `operation = Write`, the connection state, the
+    /// latency and a category.
+    /// - [`ErrorKind::Unsupported`]`(`[`Operation::Write`]`)` if the access policy is
+    ///   read-only; nothing else was looked at and nothing was sent.
+    /// - [`ErrorKind::Disconnected`] if the connection is `Closing`, `Closed` or `Failed`
+    ///   (nothing sent).
+    /// - [`ErrorKind::Cancelled`] if the request's token had fired before the call.
+    /// - [`ErrorKind::InvalidAddress`] if a tag's address is not a Modbus address.
+    /// - [`ErrorKind::InvalidConfig`] if a tag's element count is not 1.
+    /// - [`ErrorKind::Backpressure`] if another read, write or ping is in flight; nothing
+    ///   was sent.
+    /// - [`ErrorKind::Timeout`] if the request deadline had already passed.
+    ///
+    /// A value that does not fit its address, a discrete input or an input register, a
+    /// request that could not go out, and everything the device answers are not errors of
+    /// the call: they are the item's outcome.
     ///
     /// # Cancel safety
-    /// Cancel-safe: the call does no I/O and resolves at once.
+    /// Cancel-safe in the connection's own state: a dropped future releases the single
+    /// in-flight slot. It is not safe for the write: if a request frame had gone out, the
+    /// device may apply it and the caller never learns the outcome, because the future that
+    /// would have reported `Unknown` is gone. Cancel through the request's token instead,
+    /// which resolves the call with `Unknown(CancelledAfterTransmit)` for a write that went
+    /// out. The session discards a late reply and the guard resynchronizes before the next
+    /// request.
     ///
     /// # Wire effects
-    /// None. Nothing is sent, so the outcome is never unknown.
-    fn write(&self, _request: WriteRequest) -> OpFuture<'_, WriteResponse> {
+    /// Transmits one request frame (function code 06, 15 or 16) per item that can be laid
+    /// out, in request order, and stops after the first `Unknown`. A frame is never sent
+    /// twice. Writes the device.
+    fn write(&self, request: WriteRequest) -> OpFuture<'_, WriteResponse> {
         let span = tracing::debug_span!(
             "write",
             scheme = SCHEME,
             endpoint = %self.endpoint,
-            op = "write"
+            op = "write",
+            items = request.items().len()
         );
-        Box::pin(
-            async move {
-                let diagnostics = Diagnostics {
-                    operation: Some(Operation::Write),
-                    connection_state: Some(self.session.state()),
-                    latency: Some(Duration::ZERO),
-                    category: Some(FailureCategory::Validation),
-                    ..Diagnostics::default()
-                };
-                Err(PlcError::new(
-                    ErrorKind::Unsupported(Operation::Write),
-                    "the modbus-tcp driver is read-only at alpha",
-                )
-                .with_diagnostics(diagnostics))
-            }
-            .instrument(span),
-        )
+        Box::pin(self.write_inner(request).instrument(span))
     }
 
     /// Close the connection: `Closing`, then `Closed`.
@@ -1036,7 +1366,7 @@ impl Connection for ModbusConnection {
 #[cfg(feature = "testkit")]
 mod tests {
     use crate::testkit::{FakeClock, FakeTransportFactory};
-    use crate::{AddressOptions, Endpoint, Tag, TagId};
+    use crate::{AddressOptions, Endpoint, TagId};
 
     use super::*;
     use crate::modbus::ModbusDataType;
@@ -1169,5 +1499,203 @@ mod tests {
             .expect("a complete response");
         assert_eq!(response.items().len(), 1, "one item");
         assert_eq!(response.split_into().get(), 1, "one chunk");
+    }
+
+    fn quiet_connection() -> (FakeClock, ModbusConnection) {
+        let clock = FakeClock::default();
+        let factory = FakeTransportFactory::new(clock.clone());
+        let config =
+            ConnectionConfig::builder("modbus-tcp", Endpoint::Custom("fake://plc".to_owned()))
+                .build()
+                .expect("config");
+        let connection = ModbusConnection::build(
+            &config,
+            Arc::new(factory),
+            Arc::new(clock.clone()),
+            ConnectionDefaults::default(),
+        )
+        .expect("connection");
+        (clock, connection)
+    }
+
+    fn item(text: &str, value: PlcValue) -> (WriteItem, ModbusAddress) {
+        let address = ModbusAddress::parse(text, &AddressOptions::default()).expect("address");
+        let tag = Tag::new(TagId::new("w").expect("tag id"), Arc::new(address.clone()));
+        (WriteItem::new(tag, value), address)
+    }
+
+    // covers: MB-TCP-WRITE / an item that cannot be laid out is refused with its own reason
+    #[test]
+    fn an_item_that_cannot_be_laid_out_is_refused_without_a_request() {
+        let (clock, connection) = quiet_connection();
+        let op = Op {
+            connection: &connection,
+            operation: Operation::Write,
+            started: clock.now(),
+        };
+        let prepare = |text: &str, value: PlcValue| {
+            let (item, address) = item(text, value);
+            connection.prepare(&op, &item, &address)
+        };
+
+        // The request builder checks a value against its tag, so these reach `prepare` only
+        // through a hand-made item: a coil takes a BOOL, a register the type of its address.
+        for (text, value) in [
+            ("coil:1", PlcValue::U16(1)),
+            ("holding-register:1:UINT", PlcValue::I16(1)),
+            ("holding-register:1:DWORD", PlcValue::U16(1)),
+        ] {
+            let error = prepare(text, value).expect_err("refused");
+            assert_eq!(error.kind(), ErrorKind::InvalidConfig, "{text}");
+            assert_eq!(
+                error.error().diagnostics().category,
+                Some(FailureCategory::Validation),
+                "{text}"
+            );
+        }
+
+        // The areas that cannot be written never reach the encoder.
+        for text in ["discrete-input:1", "input-register:1:UINT"] {
+            let value = if text.starts_with("discrete") {
+                PlcValue::Bool(true)
+            } else {
+                PlcValue::U16(1)
+            };
+            let error = prepare(text, value).expect_err("read-only");
+            assert_eq!(
+                error.kind(),
+                ErrorKind::Unsupported(Operation::Write),
+                "{text}"
+            );
+        }
+
+        let planned = prepare("coil:20", PlcValue::Bool(true)).expect("a coil");
+        assert_eq!(
+            planned.pdu,
+            ModbusPdu::WriteMultipleCoils {
+                start: 19,
+                quantity: 1,
+                bytes: vec![1]
+            }
+        );
+        assert_eq!(
+            planned.unit_id,
+            UnitId::DEFAULT,
+            "the connection default unit"
+        );
+    }
+
+    // covers: MB-TCP-WRITE / only an echo confirms; a reply of any other shape is not a
+    // confirmation
+    #[test]
+    fn a_reply_that_is_not_an_echo_or_an_exception_is_not_a_confirmation() {
+        let (clock, connection) = quiet_connection();
+        let op = Op {
+            connection: &connection,
+            operation: Operation::Write,
+            started: clock.now(),
+        };
+        let outcome = |reply: ModbusPdu| {
+            let answer = Answer {
+                reply,
+                arrived: clock.now(),
+                retries: 0,
+            };
+            connection.outcome_of(&op, &answer)
+        };
+        let shown = |reply: ModbusPdu| format!("{:?}", outcome(reply));
+        assert_eq!(
+            shown(ModbusPdu::WriteSingleRegisterResponse {
+                address: 1,
+                value: 2
+            }),
+            "Confirmed"
+        );
+        assert_eq!(
+            shown(ModbusPdu::WriteMultipleResponse {
+                function: crate::modbus::FunctionCode::WriteMultipleCoils,
+                start: 1,
+                quantity: 2
+            }),
+            "Confirmed"
+        );
+        let read = ModbusPdu::ReadRegistersResponse {
+            function: crate::modbus::FunctionCode::ReadHoldingRegisters,
+            registers: vec![1],
+        };
+        let request = ModbusPdu::ReadCoils {
+            start: 0,
+            quantity: 1,
+        };
+        for reply in [read, request] {
+            assert_eq!(
+                shown(reply),
+                "Unknown(TimeoutAfterTransmit)",
+                "never a confirmation"
+            );
+        }
+        let refusal = shown(ModbusPdu::Exception {
+            function: crate::modbus::FunctionCode::WriteSingleRegister,
+            code: crate::modbus::ExceptionCode::IllegalFunction,
+        });
+        assert!(
+            refusal.starts_with("Rejected("),
+            "an exception rejects: {refusal}"
+        );
+        assert!(refusal.contains("kind: Unsupported(Write)"), "{refusal}");
+    }
+
+    // covers: SPEC errors / ambiguous write never replayed
+    #[test]
+    fn the_reason_of_an_unknown_follows_what_ended_the_wait() {
+        for (kind, reason) in [
+            (ErrorKind::Timeout, UnknownReason::TimeoutAfterTransmit),
+            (
+                ErrorKind::Disconnected,
+                UnknownReason::DisconnectedAfterTransmit,
+            ),
+            (ErrorKind::Cancelled, UnknownReason::CancelledAfterTransmit),
+            (
+                ErrorKind::MalformedData,
+                UnknownReason::TimeoutAfterTransmit,
+            ),
+            (
+                ErrorKind::ResourceLimit,
+                UnknownReason::TimeoutAfterTransmit,
+            ),
+            (ErrorKind::Internal, UnknownReason::TimeoutAfterTransmit),
+        ] {
+            assert_eq!(unknown_reason(kind), reason, "{kind:?}");
+        }
+    }
+
+    // covers: ALPHA_PLAN S25 / a response the builder refuses is an Internal error (write)
+    #[test]
+    fn a_write_response_the_builder_refuses_is_an_internal_error() {
+        let (clock, connection) = quiet_connection();
+        let (item, _) = item("holding-register:1:UINT", PlcValue::U16(1));
+        let request = WriteRequest::builder(connection.limits())
+            .item(item.tag().clone(), PlcValue::U16(1))
+            .build()
+            .expect("request");
+        let op = Op {
+            connection: &connection,
+            operation: Operation::Write,
+            started: clock.now(),
+        };
+        let error = connection
+            .respond_write(&op, &request, Vec::new())
+            .expect_err("no result for the one item");
+        assert_eq!(error.kind(), ErrorKind::MalformedData, "kind");
+        assert_eq!(
+            error.diagnostics().category,
+            Some(FailureCategory::Internal),
+            "category"
+        );
+        let result = WriteResult::new(item.tag().id().clone(), WriteOutcome::Confirmed);
+        let response = connection
+            .respond_write(&op, &request, vec![result])
+            .expect("a complete response");
+        assert_eq!(response.confirmed_count(), 1);
     }
 }

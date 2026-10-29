@@ -1,0 +1,39 @@
+{
+  "adus": [
+    {
+      "transaction_id": 1,
+      "protocol_id": 0,
+      "length": 6,
+      "unit_id": 1,
+      "pdu": "10 00 0C 00 01"
+    }
+  ],
+  "leftover": 0,
+  "pdu": {
+    "direction": "response",
+    "function": 16,
+    "start": 12,
+    "quantity": 1
+  },
+  "upstream": {
+    "file": "Modbus-all-datatypes.xml",
+    "case": "49 Query: Trans: 16; Unit: 1, Func: 16: Write Multiple Registers",
+    "step": "unnamed incoming-plc-message at position 4",
+    "exchange": 1,
+    "byte_order": "BIG_ENDIAN",
+    "operation": "write",
+    "tag": {
+      "name": "hurz",
+      "address": "holding-register:13:UINT",
+      "data_type": "UINT",
+      "elements": 1
+    },
+    "values": [
+      {
+        "type": "UINT",
+        "text": "42424"
+      }
+    ],
+    "quirk": "The response has another function code than the request: an upstream test-suite pairing. Stonecrab requires the response to echo the function code of the request (docs/parity/modbus.md#MB-WRITE-ECHO)."
+  }
+}

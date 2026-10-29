@@ -402,7 +402,8 @@ mod tests {
 
     // ---- the upstream driver-suite exchanges (S04b) ----------------------------------
 
-    /// The response vectors the adapter serialized from the case models of `file`.
+    /// The read response vectors the adapter serialized from the case models of `file`; the
+    /// write exchanges are tested in `modbus_write_vectors.rs`.
     fn upstream_responses(file: &str) -> Vec<GoldenVector> {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/modbus");
         load_dir(&dir)
@@ -410,6 +411,7 @@ mod tests {
             .into_iter()
             .filter(|vector| {
                 text_at(vector, &["upstream", "file"]) == Some(file)
+                    && text_at(vector, &["upstream", "operation"]) != Some("write")
                     && text_at(vector, &["pdu", "direction"]) == Some("response")
             })
             .collect()

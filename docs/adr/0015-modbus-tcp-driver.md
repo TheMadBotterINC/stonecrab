@@ -1009,3 +1009,27 @@ This addendum records the S45 change; it changes nothing above except where it s
    checked against the request by `ModbusPdu::check_reply_to`.
 3. **Unchanged.** `Capabilities.write` stays false and `write` stays `Unsupported`; the
    wire half is S46.
+
+## Addendum: the write path (slice S46, 2026-10-28)
+This addendum records the S46 change. It supersedes decision 1 where that says there is
+no write on the wire, and ADR-0010 decision 7 and ADR-0008 decision 5 for `modbus-tcp`.
+
+1. **`write = true`.** `modbus-tcp` advertises `Capabilities.write = true` and implements
+   `write` with function codes 06, 15 and 16 (D3 is retired for this driver).
+2. **The `access` parameter.** A new Stonecrab connection-string parameter,
+   `access=read-only|read-write` (`MB-CFG-ACCESS`), sets `ConnectionConfig.access`
+   (ADR-0008 decision 5). The default is `read-only`; any other value is `InvalidConfig`.
+   The plan did not name the parameter. It exists because the connection string is the only
+   place a URI-configured driver can opt into writes.
+3. **Policy first.** With `ReadOnly`, `write` is refused before anything else (open check,
+   tag validation, encoding, the in-flight slot), so a refused write costs no I/O
+   (`MB-WRITE-ACCESS`).
+4. **One request per item.** Upstream chains one PDU per tag sequentially, so each
+   `WriteItem` is one wire request, sent once and never retried or replayed.
+5. **`Unknown` mapping.** A request that went out and got no usable answer (timeout, a
+   disconnect, a cancellation, a reply that does not confirm the write) is
+   `Unknown(TimeoutAfterTransmit | DisconnectedAfterTransmit | CancelledAfterTransmit)`.
+   A device exception is `Rejected`; an echo that matches is `Confirmed`.
+6. **Halt after the first `Unknown`.** The remaining items of the batch are not sent,
+   because the state of the device is no longer known; the application decides what to do
+   next, as ADR-0010 says.

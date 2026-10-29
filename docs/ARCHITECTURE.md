@@ -130,7 +130,7 @@ it, with the exceptions listed after the table.
 | `codec` | `stonecrab::codec` | none (always built) | the core | bounded readers and writers |
 | `transport` | `stonecrab::transport` | `transport` | the core, `bytes`, `tokio` (`rt`, `net`, `time`, `sync`, `io-util`) | the only Tokio user outside the test kit; no spawned task |
 | `sim` | `stonecrab::sim` | `sim` (default) | the core, `tracing` | Tokio-free; depends on neither transport nor codec (D9) |
-| `modbus` | `stonecrab::modbus` | `modbus` (default) | the core, `codec`, `transport`, `tracing` | Modbus TCP reads only |
+| `modbus` | `stonecrab::modbus` | `modbus` (default) | the core, `codec`, `transport`, `tracing` | Modbus TCP reads and writes |
 | `sensors` | `stonecrab::sensors` | `sensors` (default) | the core, `serde`, `toml` | depends on no driver |
 | `testkit` | `stonecrab::testkit` | `testkit` (off) | the core, `transport`, `serde`, `serde_json`, `toml`, `tokio` (`macros`, task spawning for scripted peers) | test fixtures and the contract suite; not a runtime feature |
 
@@ -817,8 +817,9 @@ classDiagram
 - Write batches (`WriteItem`, `WriteRequest`, `WriteResult`, `WriteResponse`) and
   `WriteOutcome::{Confirmed, Rejected, Unknown(UnknownReason)}` exist as correlated data
   and the simulator implements `write` (including `Unknown` after transmit). The Modbus
-  driver reports `write: false` and rejects writes before any I/O; Modbus write PDUs and
-  `WriteOutcome::Unknown` on the wire are deferred (first post-alpha slices, D3).
+  driver reports `write: true`; a write is refused unless the connection says
+  `access=read-write`, and a write with no usable answer is `Unknown` (S46, ADR-0015
+  addendum).
 - **Deferred:** `SubscribeRequest`, `Subscription`, `SubscriptionEvent`, `QueuePolicy`,
   `LossCounters` (M2, D4) and `BrowseRequest`, `BrowseResponse`, `BrowseNode` (M3).
 
@@ -2011,8 +2012,8 @@ stateDiagram-v2
 **Deferred:** the RTU variant of `Resyncing` ("drain until t3.5 silence", M2); the
 `idle timeout` transition into `Reconnecting` (`Timeouts.idle` is recorded and unenforced,
 M2); "subscriptions receive `Ended`" on close (no subscriptions, M2); pending writes
-resolving to `WriteOutcome::Unknown` on reconnect (the Modbus driver sends no write; the
-simulator models it with `UnknownAfterTransmit`); and an eager background reconnect task
+resolving to `WriteOutcome::Unknown` on reconnect (the Modbus driver reports an `Unknown` at
+the call instead, and never replays a write); and an eager background reconnect task
 (first M2 slice).
 
 ### 8.1 Request lifecycle
@@ -2048,8 +2049,8 @@ cancelled token (`Cancelled`), a non-Modbus address (`InvalidAddress`), a tag co
 (`InvalidConfig`) and a batch over the item budget (`ResourceLimit`), and an expired
 request deadline is `Timeout` before the wire. `Queued` is the guard's admission queue; the
 connections themselves answer a concurrent request with `Backpressure` rather than queueing
-it. The write rows of the diagram apply to the simulator only (Modbus writes are
-deferred, D3), and browse and subscribe requests do not exist (M3 and M2). A read that
+it. The write rows of the diagram apply to the simulator only (Modbus writes follow the
+same rows since S46), and browse and subscribe requests do not exist (M3 and M2). A read that
 times out is retried per `RetryPolicy` (default one attempt), a write never.
 
 ---
@@ -2060,10 +2061,10 @@ times out is retried per `RetryPolicy` (default one attempt), a write never.
 | --- | --- | --- |
 | 9.1 Connect through the registry | shipped | the connection-string parameter is `default-unit-identifier` (corrected in the diagram); the driver is built with its transport factory and clock, `ModbusConnection::open` creates the `ConnectionGuard` |
 | 9.2 Batched read with split and partial failure | shipped | the exception is mapped per D18 (`0x02` is `InvalidAddress`, not `DeviceException`); the Modbus connection runs the chunks one after another |
-| 9.3 Timeout, late reply, resynchronization | shipped for TCP | the guard resyncs before the next send; the RTU variant and write `Unknown` outcomes on the wire are deferred (M2 and the write slice) |
+| 9.3 Timeout, late reply, resynchronization | shipped for TCP | the guard resyncs before the next send; the RTU variant is deferred (M2); write `Unknown` outcomes are shipped (S46) |
 | 9.4 Reconnect with backoff | shipped, request-driven | no background sleep: the next request waits out the backoff; no `Subscription` participates (M2) |
 | 9.5 Polling subscription | **deferred, M2** | `SubscribeRequest`, `Subscription`, `QueuePolicy`, `LossCounters`, `StaleTracker` and the poll task do not exist |
-| 9.6 Write with an ambiguous outcome | **deferred**; simulator only | the Modbus driver rejects writes with `Unsupported` before any I/O; the simulator's `UnknownAfterTransmit` step exercises `Unknown` |
+| 9.6 Write with an ambiguous outcome | shipped (S46) | the Modbus driver sends one request per item, reports `Unknown` for a request that went out without a usable answer and stops after the first one; the simulator's `UnknownAfterTransmit` step exercises the same |
 | 9.7 Sensor profile to measurement | partly shipped | `tags` and `measurements` exist; `Acquisition`, address convention `ZeroBased` and the polling loop are deferred (M2); the convention is `plc4x` |
 
 ### 9.1 Connect through the registry

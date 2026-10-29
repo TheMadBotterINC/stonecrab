@@ -4,7 +4,7 @@
 //! Three retained PLC4X files carry the exchanges of the Modbus TCP driver tests as
 //! XML-serialized `ModbusADU` models: `DriverTestsuite.xml`, `Modbus-all-datatypes.xml` and
 //! `Modbus-all-datatypes-little-endian.xml` (`fixtures/modbus/upstream/tcp/`). The adapter
-//! below reads the models with `roxmltree`, serializes each read exchange to wire bytes with
+//! below reads the models with `roxmltree`, serializes each read and write exchange to wire bytes with
 //! its own serializer that follows `protocols/modbus/.../modbus.mspec` (it never calls
 //! Stonecrab's codec or decoder, so a codec bug cannot hide in its own vectors) and renders
 //! the `.hex`, the `.expected.json` and the `PROVENANCE.toml` entry of every request and
@@ -40,6 +40,9 @@ mod tests {
     const END: &str = "# END adapter-generated entries (slice S04b)";
     /// The payload byte order upstream uses when a suite configures none.
     const DEFAULT_MODE: &str = "BIG_ENDIAN";
+    /// What an exchange whose response has another function than its request records. The
+    /// all-datatypes files pair an FC06 request with an FC16 response for the 16-bit writes.
+    const QUIRK: &str = "The response has another function code than the request: an upstream test-suite pairing. Stonecrab requires the response to echo the function code of the request (docs/parity/modbus.md#MB-WRITE-ECHO).";
     const MODES: [&str; 4] = [
         DEFAULT_MODE,
         "LITTLE_ENDIAN",
@@ -462,11 +465,19 @@ mod tests {
         text: String,
     }
 
-    /// One read exchange: a request, its response, the tag it serves and the values the case
-    /// expects the API to report.
+    /// Whether an exchange reads or writes.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Operation {
+        Read,
+        Write,
+    }
+
+    /// One exchange: a request, its response, the tag it serves and the values the case
+    /// expects the API to report (a read) or the application to write (a write).
     struct Read {
         case: String,
         exchange: usize,
+        operation: Operation,
         tag: Tag,
         values: Vec<Value>,
         request: Step,
@@ -626,6 +637,7 @@ mod tests {
             reads.push(Read {
                 case: name.to_owned(),
                 exchange: index.saturating_add(1),
+                operation: Operation::Read,
                 tag,
                 values,
                 request,
@@ -635,20 +647,145 @@ mod tests {
         Ok(reads)
     }
 
-    /// The reads of a case, or none for a write case (which is serialized and checked, but not
-    /// emitted: writes are owned by S45 and S46).
-    fn parse_case(case: Node<'_, '_>) -> Result<Option<Vec<Read>>> {
+    /// The tag a write request names, as `(name, address text, value texts)`.
+    fn write_tag(api_request: Node<'_, '_>) -> Result<(String, String, Vec<String>)> {
+        let tags = child(child(api_request, "TestWriteRequest")?, "tags")?;
+        let kids = elements(tags);
+        let [tag] = kids.as_slice() else {
+            return Err("a write case writes more or less than one tag".into());
+        };
+        let parts = elements(*tag);
+        let (Some(name), Some(address)) = (parts.first(), parts.get(1)) else {
+            return Err("a write tag has no name and address".into());
+        };
+        if name_of(*name) != "name" || name_of(*address) != "address" {
+            return Err("a write tag does not start with its name and address".into());
+        }
+        let values: Vec<String> = parts
+            .iter()
+            .skip(2)
+            .map(|value| {
+                if name_of(*value) == "value" {
+                    Ok(text_of(*value).to_owned())
+                } else {
+                    Err(format!("unknown write tag element <{}>", name_of(*value)))
+                }
+            })
+            .collect::<Result<_>>()?;
+        if values.is_empty() {
+            return Err("a write tag has no value".into());
+        }
+        Ok((
+            text_of(*name).to_owned(),
+            text_of(*address).to_owned(),
+            values,
+        ))
+    }
+
+    /// The wire address a `holding-register:N...` tag text names: N minus one.
+    fn holding_wire_address(address: &str) -> Result<u16> {
+        let digits: String = address
+            .strip_prefix("holding-register:")
+            .ok_or_else(|| format!("write tag `{address}` is not a holding register"))?
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect();
+        let logical: u16 = digits
+            .parse()
+            .map_err(|error| format!("write tag `{address}`: {error}"))?;
+        logical
+            .checked_sub(1)
+            .ok_or_else(|| format!("write tag `{address}` has logical address 0"))
+    }
+
+    /// Pair the one exchange of a write case with the tag and the values its request names,
+    /// and check the pairing: the response code is OK and the request writes the tag's
+    /// registers.
+    fn write_exchange(
+        name: &str,
+        api_request: Node<'_, '_>,
+        exchanges: Vec<(Step, Step)>,
+        api_response: Node<'_, '_>,
+    ) -> Result<Vec<Read>> {
+        let (tag_name, address, texts) = write_tag(api_request)?;
+        let at = format!("case `{name}`, tag `{tag_name}`");
+        let Ok([(request, response)]) = <[(Step, Step); 1]>::try_from(exchanges) else {
+            return Err(format!("{at}: a write case has one exchange"));
+        };
+        if !api_response.descendants().any(|node| {
+            name_of(node) == "ResponseCode" && node.attribute("stringRepresentation") == Some("OK")
+        }) {
+            return Err(format!("{at}: the case expects a failure, not an OK write"));
+        }
+        let data_type = address
+            .rsplit(':')
+            .next()
+            .ok_or_else(|| format!("{at}: no data type in `{address}`"))?
+            .to_owned();
+        let pdu = &request.adu.pdu;
+        let start = match pdu.function {
+            0x06 => pdu.word("address")?,
+            0x10 => pdu.word("startingAddress")?,
+            other => {
+                return Err(format!(
+                    "{at}: function {other} is not a holding-register write"
+                ));
+            }
+        };
+        if start != holding_wire_address(&address).map_err(|error| format!("{at}: {error}"))? {
+            return Err(format!(
+                "{at}: the request does not start at the tag's address"
+            ));
+        }
+        if pdu.function == 0x10
+            && usize::from(pdu.word("quantity")?).saturating_mul(2) != pdu.value()?.len()
+        {
+            return Err(format!(
+                "{at}: the quantity does not match the registers written"
+            ));
+        }
+        let elements = u16::try_from(texts.len()).map_err(|error| format!("{at}: {error}"))?;
+        let values = texts
+            .into_iter()
+            .map(|text| Value {
+                data_type: data_type.clone(),
+                text,
+            })
+            .collect();
+        Ok(vec![Read {
+            case: name.to_owned(),
+            exchange: 1,
+            operation: Operation::Write,
+            tag: Tag {
+                name: tag_name,
+                address,
+                data_type,
+                elements,
+                start,
+            },
+            values,
+            request,
+            response,
+        }])
+    }
+
+    /// The exchanges of a case: its reads, or the one write.
+    fn parse_case(case: Node<'_, '_>) -> Result<Vec<Read>> {
         let name = text_of(child(case, "name")?).to_owned();
         let steps = parse_steps(case).map_err(|error| format!("case `{name}`: {error}"))?;
         match elements(steps.api_request).as_slice() {
-            [kind] if name_of(*kind) == "TestWriteRequest" => Ok(None),
+            [kind] if name_of(*kind) == "TestWriteRequest" => write_exchange(
+                &name,
+                steps.api_request,
+                steps.exchanges,
+                steps.api_response,
+            ),
             [kind] if name_of(*kind) == "TestReadRequest" => read_exchanges(
                 &name,
                 steps.api_request,
                 steps.exchanges,
                 steps.api_response,
-            )
-            .map(Some),
+            ),
             _ => Err(format!("case `{name}`: unknown api-request shape")),
         }
     }
@@ -793,27 +930,63 @@ mod tests {
             pdu.bytes.len(),
             adu.unit_id
         );
-        let detail = if pdu.request {
-            format!(
-                "start {}, quantity {}",
-                pdu.word("startingAddress")?,
-                pdu.word("quantity")?
-            )
-        } else {
-            let value = pdu.value()?;
-            format!(
-                "byte count {}, register count {}",
-                value.len(),
-                value.len().div_euclid(2)
-            )
-        };
         let direction = if pdu.request { "request" } else { "response" };
+        let (function, detail) = match (pdu.function, pdu.request) {
+            (0x03, true) => (
+                "0x03 (read holding registers)",
+                format!(
+                    "start {}, quantity {}",
+                    pdu.word("startingAddress")?,
+                    pdu.word("quantity")?
+                ),
+            ),
+            (0x03, false) => {
+                let value = pdu.value()?;
+                (
+                    "0x03 (read holding registers)",
+                    format!(
+                        "byte count {}, register count {}",
+                        value.len(),
+                        value.len().div_euclid(2)
+                    ),
+                )
+            }
+            (0x06, true) => (
+                "0x06 (write single register)",
+                format!(
+                    "address {}, value {}",
+                    pdu.word("address")?,
+                    pdu.word("value")?
+                ),
+            ),
+            (0x10, true) => (
+                "0x10 (write multiple registers)",
+                format!(
+                    "start {}, quantity {}, byte count {}",
+                    pdu.word("startingAddress")?,
+                    pdu.word("quantity")?,
+                    pdu.value()?.len()
+                ),
+            ),
+            (0x10, false) => (
+                "0x10 (write multiple registers)",
+                format!(
+                    "start {}, quantity {}",
+                    pdu.word("startingAddress")?,
+                    pdu.word("quantity")?
+                ),
+            ),
+            (other, _) => return Err(format!("no description for function {other}")),
+        };
         Ok(format!(
-            "{header} Function 0x03 (read holding registers) {direction}: {detail}."
+            "{header} Function {function} {direction}: {detail}."
         ))
     }
 
-    fn pdu_json(adu: &Adu) -> Result<Json> {
+    /// The `pdu` object of an expected file, in the keys the PDU vector tests read. A
+    /// function 16 response lists the request it answers when that request is function 16
+    /// too, so the echo is proved against it.
+    fn pdu_json(adu: &Adu, answers: Option<&Pdu>) -> Result<Json> {
         let pdu = &adu.pdu;
         let mut fields = vec![
             (
@@ -822,14 +995,38 @@ mod tests {
             ),
             ("function", Json::Number(u64::from(pdu.function))),
         ];
-        if pdu.request {
-            fields.push((
-                "start",
-                Json::Number(u64::from(pdu.word("startingAddress")?)),
-            ));
-            fields.push(("quantity", Json::Number(u64::from(pdu.word("quantity")?))));
-        } else {
-            fields.push(("registers", Json::Numbers(registers(pdu.value()?)?)));
+        match (pdu.function, pdu.request) {
+            (0x03, true) => {
+                fields.push((
+                    "start",
+                    Json::Number(u64::from(pdu.word("startingAddress")?)),
+                ));
+                fields.push(("quantity", Json::Number(u64::from(pdu.word("quantity")?))));
+            }
+            (0x03, false) => fields.push(("registers", Json::Numbers(registers(pdu.value()?)?))),
+            (0x06, true) => {
+                fields.push(("address", Json::Number(u64::from(pdu.word("address")?))));
+                fields.push(("value", Json::Number(u64::from(pdu.word("value")?))));
+            }
+            (0x10, true) => {
+                fields.push((
+                    "start",
+                    Json::Number(u64::from(pdu.word("startingAddress")?)),
+                ));
+                fields.push(("registers", Json::Numbers(registers(pdu.value()?)?)));
+            }
+            (0x10, false) => {
+                fields.push((
+                    "start",
+                    Json::Number(u64::from(pdu.word("startingAddress")?)),
+                ));
+                fields.push(("quantity", Json::Number(u64::from(pdu.word("quantity")?))));
+                if let Some(sent) = answers.filter(|sent| sent.function == pdu.function) {
+                    let bytes = sent.bytes.iter().map(|byte| u64::from(*byte)).collect();
+                    fields.push(("request", Json::Numbers(bytes)));
+                }
+            }
+            (other, _) => return Err(format!("no PDU object for function {other}")),
         }
         Ok(Json::Object(fields))
     }
@@ -868,9 +1065,12 @@ mod tests {
             ("step", Json::text(&step.name)?),
             ("exchange", count(read.exchange)?),
             ("byte_order", Json::text(byte_order)?),
-            ("tag", tag),
         ];
-        if !request {
+        if read.operation == Operation::Write {
+            upstream.push(("operation", Json::text("write")?));
+        }
+        upstream.push(("tag", tag));
+        if !request || read.operation == Operation::Write {
             let values = read
                 .values
                 .iter()
@@ -883,10 +1083,14 @@ mod tests {
                 .collect::<Result<Vec<_>>>()?;
             upstream.push(("values", Json::List(values)));
         }
+        let sent = (!request).then_some(&read.request.adu.pdu);
+        if sent.is_some_and(|sent| sent.function != read.response.adu.pdu.function) {
+            upstream.push(("quirk", Json::text(QUIRK)?));
+        }
         let document = Json::Object(vec![
             ("adus", Json::List(vec![frame])),
             ("leftover", Json::Number(0)),
-            ("pdu", pdu_json(adu)?),
+            ("pdu", pdu_json(adu, sent)?),
             ("upstream", Json::Object(upstream)),
         ]);
         Ok(format!("{}\n", document.render(0)))
@@ -916,8 +1120,12 @@ mod tests {
             describe(step)?,
             spaced_hex(&step.adu.bytes)
         );
+        let carries = match read.operation {
+            Operation::Read => "the tag and the values the case reports",
+            Operation::Write => "the tag and the values the case writes",
+        };
         let entry = format!(
-            "[[vector]]\nname = \"{stem}\"\nsource = \"upstream_fixture\"\norigin = \"apache/plc4x commit {COMMIT}, {UPSTREAM_DIR}/{}, test case \\\"{case}\\\", step \\\"{step_name}\\\" (kept at fixtures/modbus/upstream/tcp/{})\"\nlicense = \"Apache-2.0\"\nnote = \"Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order {byte_order}. The expected file carries the tag and the values the case reports.\"\n",
+            "[[vector]]\nname = \"{stem}\"\nsource = \"upstream_fixture\"\norigin = \"apache/plc4x commit {COMMIT}, {UPSTREAM_DIR}/{}, test case \\\"{case}\\\", step \\\"{step_name}\\\" (kept at fixtures/modbus/upstream/tcp/{})\"\nlicense = \"Apache-2.0\"\nnote = \"Serialized from the XML model by the S04b adapter, never by Stonecrab's codec; payload byte order {byte_order}. The expected file carries {carries}.\"\n",
             suite.file, suite.file
         );
         Ok(Vector {
@@ -969,15 +1177,20 @@ mod tests {
                 .into_iter()
                 .filter(|n| name_of(*n) == "testcase")
             {
-                match parse_case(case).map_err(|error| format!("{}: {error}", suite.file))? {
-                    Some(reads) => {
-                        for read in &reads {
-                            output.vectors.push(vector(read, suite, byte_order, true)?);
-                            output.vectors.push(vector(read, suite, byte_order, false)?);
-                        }
-                        summary.reads = summary.reads.saturating_add(reads.len());
-                    }
-                    None => summary.writes = summary.writes.saturating_add(1),
+                let exchanges =
+                    parse_case(case).map_err(|error| format!("{}: {error}", suite.file))?;
+                for exchange in &exchanges {
+                    output
+                        .vectors
+                        .push(vector(exchange, suite, byte_order, true)?);
+                    output
+                        .vectors
+                        .push(vector(exchange, suite, byte_order, false)?);
+                    let count = match exchange.operation {
+                        Operation::Read => &mut summary.reads,
+                        Operation::Write => &mut summary.writes,
+                    };
+                    *count = count.saturating_add(1);
                 }
             }
             output.summaries.push(summary);
@@ -996,11 +1209,12 @@ mod tests {
             .iter()
             .map(|summary| {
                 format!(
-                    "# upstream/tcp/{}: {} read exchanges serialized ({} vectors); {} write cases serialized and checked, not emitted (S45 and S46 own writes).\n",
+                    "# upstream/tcp/{}: {} read exchanges serialized ({} vectors); {} write exchanges serialized ({} vectors).\n",
                     summary.file,
                     summary.reads,
                     summary.reads.saturating_mul(2),
-                    summary.writes
+                    summary.writes,
+                    summary.writes.saturating_mul(2)
                 )
             })
             .collect();

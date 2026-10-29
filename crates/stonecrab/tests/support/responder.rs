@@ -1,5 +1,6 @@
-//! A first-party Modbus TCP device for the contract run: it answers function codes 01 to 04
-//! from the interop register map, byte for byte over the MBAP layout.
+//! A first-party Modbus TCP device for the contract run: it answers function codes 01 to 04,
+//! 06, 15 and 16 from the interop register map, byte for byte over the MBAP layout. A write
+//! changes the block it names, so a later read sees it.
 //!
 //! This is a test harness, not a double of a Stonecrab trait: it is the peer's side of the
 //! protocol, built from this crate's own codec (`decode_request`, `encode_response`,
@@ -11,7 +12,9 @@
 //! (the next request gets no answer, so the fake clock drives the deadline),
 //! [`Device::arm_exception`] (the next request is refused with a device exception) and
 //! [`Device::arm_disconnect`] (the next request makes the peer close the connection
-//! without answering, a lost link).
+//! without answering, a lost link). [`Device::arm_apply_then_swallow`] and
+//! [`Device::arm_apply_then_disconnect`] are the same two faults for a write that the device
+//! applies first: the confirmation is lost, not the write.
 
 #![expect(
     unreachable_pub,
@@ -23,7 +26,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use bytes::{Bytes, BytesMut};
-use stonecrab::codec::{BoundedReader, BoundedWriter, pack_bits_lsb_first};
+use stonecrab::codec::{BoundedReader, BoundedWriter, pack_bits_lsb_first, unpack_bits_lsb_first};
 use stonecrab::modbus::{
     ExceptionCode, FunctionCode, MAX_PDU_BYTES, MbapHeader, ModbusAdu, ModbusPdu, decode_request,
     encode_response,
@@ -39,6 +42,10 @@ enum Fault {
     Exception(ExceptionCode),
     /// Close the connection without answering.
     Disconnect,
+    /// Serve the request (a write is applied), then stay silent.
+    ApplyThenSwallow,
+    /// Serve the request (a write is applied), then close the connection.
+    ApplyThenDisconnect,
 }
 
 /// The four data blocks, indexed by logical address (wire address plus one), the way the
@@ -56,6 +63,8 @@ struct Blocks {
 struct Shared {
     /// Requests that reached the device, answered or not.
     reads: AtomicU32,
+    /// Writes the device applied to its blocks, whether or not the confirmation was sent.
+    applied: AtomicU32,
     faults: Mutex<VecDeque<Fault>>,
 }
 
@@ -65,7 +74,7 @@ struct Shared {
 /// every responder handed to a fake transport see the same device.
 #[derive(Debug, Clone)]
 pub struct Device {
-    blocks: Arc<Blocks>,
+    blocks: Arc<Mutex<Blocks>>,
     shared: Arc<Shared>,
 }
 
@@ -115,19 +124,40 @@ impl Device {
             &map.discrete_inputs.values,
         );
         Self {
-            blocks: Arc::new(Blocks {
+            blocks: Arc::new(Mutex::new(Blocks {
                 holding,
                 input,
                 coils,
                 discrete,
-            }),
+            })),
             shared: Arc::new(Shared::default()),
         }
     }
 
-    /// How many requests reached the device so far, answered or swallowed.
+    /// How many requests (reads and writes) reached the device so far, answered or
+    /// swallowed.
     pub fn reads(&self) -> u32 {
         self.shared.reads.load(Ordering::Relaxed)
+    }
+
+    /// How many writes the device applied so far, confirmed to the client or not.
+    pub fn applied(&self) -> u32 {
+        self.shared.applied.load(Ordering::Relaxed)
+    }
+
+    /// The holding register at a logical address (wire address plus one).
+    pub fn holding(&self, logical: usize) -> Option<u16> {
+        self.with_blocks(|blocks| blocks.holding.get(logical).copied())
+    }
+
+    /// The coil at a logical address (wire address plus one).
+    pub fn coil(&self, logical: usize) -> Option<bool> {
+        self.with_blocks(|blocks| blocks.coils.get(logical).copied())
+    }
+
+    fn with_blocks<R>(&self, f: impl FnOnce(&mut Blocks) -> R) -> R {
+        let mut blocks = self.blocks.lock().unwrap_or_else(PoisonError::into_inner);
+        f(&mut blocks)
     }
 
     /// Faults armed and not yet used.
@@ -148,6 +178,17 @@ impl Device {
     /// Close the connection on the next request, without answering it.
     pub fn arm_disconnect(&self) {
         self.with_faults(|faults| faults.push_back(Fault::Disconnect));
+    }
+
+    /// Serve the next request (applying it, if it is a write) and leave it unanswered.
+    pub fn arm_apply_then_swallow(&self) {
+        self.with_faults(|faults| faults.push_back(Fault::ApplyThenSwallow));
+    }
+
+    /// Serve the next request (applying it, if it is a write) and close the connection
+    /// without answering it.
+    pub fn arm_apply_then_disconnect(&self) {
+        self.with_faults(|faults| faults.push_back(Fault::ApplyThenDisconnect));
     }
 
     fn with_faults<R>(&self, f: impl FnOnce(&mut VecDeque<Fault>) -> R) -> R {
@@ -183,6 +224,14 @@ impl Device {
             Some(Fault::Exception(code)) => {
                 pdu.first().copied().map(|function| refusal(function, code))
             }
+            Some(Fault::ApplyThenSwallow) => {
+                drop(self.serve(pdu));
+                return Reaction::Silence;
+            }
+            Some(Fault::ApplyThenDisconnect) => {
+                drop(self.serve(pdu));
+                return Reaction::Close;
+            }
             None => self.serve(pdu),
         };
         reply
@@ -200,7 +249,7 @@ impl Device {
         let Ok(request) = decode_request(&mut BoundedReader::new(pdu)) else {
             // A function this device does not serve is ILLEGAL FUNCTION; a known function
             // with a quantity outside its bounds is ILLEGAL DATA VALUE.
-            let known = (1..=4).contains(&first);
+            let known = matches!(first, 1..=4 | 6 | 15 | 16);
             let code = if known {
                 ExceptionCode::IllegalDataValue
             } else {
@@ -208,22 +257,61 @@ impl Device {
             };
             return Some(refusal(first, code));
         };
-        let response = match request {
+        let function = request.function();
+        let response = self.with_blocks(|blocks| match &request {
             ModbusPdu::ReadHoldingRegisters { start, quantity } => {
-                registers(&self.blocks.holding, request.function(), start, quantity)
+                registers(&blocks.holding, function, *start, *quantity)
             }
             ModbusPdu::ReadInputRegisters { start, quantity } => {
-                registers(&self.blocks.input, request.function(), start, quantity)
+                registers(&blocks.input, function, *start, *quantity)
             }
             ModbusPdu::ReadCoils { start, quantity } => {
-                bits(&self.blocks.coils, request.function(), start, quantity)
+                bits(&blocks.coils, function, *start, *quantity)
             }
             ModbusPdu::ReadDiscreteInputs { start, quantity } => {
-                bits(&self.blocks.discrete, request.function(), start, quantity)
+                bits(&blocks.discrete, function, *start, *quantity)
             }
+            ModbusPdu::WriteSingleRegister { address, value } => {
+                if store(&mut blocks.holding, *address, &[*value]) {
+                    self.shared.applied.fetch_add(1, Ordering::Relaxed);
+                    ModbusPdu::WriteSingleRegisterResponse {
+                        address: *address,
+                        value: *value,
+                    }
+                } else {
+                    unaddressable(function)
+                }
+            }
+            ModbusPdu::WriteMultipleRegisters { start, registers } => {
+                if store(&mut blocks.holding, *start, registers) {
+                    self.shared.applied.fetch_add(1, Ordering::Relaxed);
+                    ModbusPdu::WriteMultipleResponse {
+                        function,
+                        start: *start,
+                        quantity: u16::try_from(registers.len()).unwrap_or(u16::MAX),
+                    }
+                } else {
+                    unaddressable(function)
+                }
+            }
+            ModbusPdu::WriteMultipleCoils {
+                start,
+                quantity,
+                bytes,
+            } => match unpack_bits_lsb_first(bytes, usize::from(*quantity)) {
+                Ok(values) if store(&mut blocks.coils, *start, &values) => {
+                    self.shared.applied.fetch_add(1, Ordering::Relaxed);
+                    ModbusPdu::WriteMultipleResponse {
+                        function,
+                        start: *start,
+                        quantity: *quantity,
+                    }
+                }
+                _ => unaddressable(function),
+            },
             // A response or an exception is not a request (and the enum is non-exhaustive).
-            _ => return Some(refusal(first, ExceptionCode::IllegalFunction)),
-        };
+            _ => refused(function, ExceptionCode::IllegalFunction),
+        });
         let mut writer = BoundedWriter::new(MAX_PDU_BYTES);
         encode_response(&response, &mut writer).ok()?;
         Some(writer.into_bytes())
@@ -256,6 +344,31 @@ fn bits(block: &[bool], function: FunctionCode, start: u16, quantity: u16) -> Mo
             code: ExceptionCode::IllegalDataAddress,
         },
     }
+}
+
+/// Put `values` into `block` from wire address `start` (the block is indexed by logical
+/// address); false, with `block` unchanged, if they do not fit.
+fn store<T: Copy>(block: &mut [T], start: u16, values: &[T]) -> bool {
+    let Some(range) = u16::try_from(values.len())
+        .ok()
+        .and_then(|quantity| span(block.len(), start, quantity))
+    else {
+        return false;
+    };
+    for (slot, value) in block.iter_mut().skip(range.start).zip(values) {
+        *slot = *value;
+    }
+    true
+}
+
+/// ILLEGAL DATA ADDRESS for `function`, as a response PDU.
+const fn unaddressable(function: FunctionCode) -> ModbusPdu {
+    refused(function, ExceptionCode::IllegalDataAddress)
+}
+
+/// The exception PDU `code` for `function`, as a response PDU.
+const fn refused(function: FunctionCode, code: ExceptionCode) -> ModbusPdu {
+    ModbusPdu::Exception { function, code }
 }
 
 /// The index range of a read of `quantity` items at wire address `start` in a block of
