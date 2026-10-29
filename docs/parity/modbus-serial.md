@@ -14,8 +14,8 @@ contract suite, the upstream RTU and ASCII vectors, fuzz targets and RTU and ASC
 loopback TCP), with no hardware yet. Since S59b the RTU half of the rows the `interop-rtu`
 job exercises is also checked against an independent peer: diagslave 3.6 run as Modbus RTU
 over TCP, which `modbus-rtu:tcp://` speaks (`interop/diagslave/`, nine `interop_rtu_*` tests
-in `modbus_interop_diagslave_rtu`). The job passed locally on 2026-10-29 (colima, 9 of 9);
-the first hosted run is the next evidence. No ASCII peer exists yet. A row shared by both
+in `modbus_interop_diagslave_rtu`). The job passed locally on 2026-10-29 (colima, 9 of 9)
+and in its first hosted run (40838776577, 9 of 9). No ASCII peer exists yet. A row shared by both
 drivers says which halves are done. (S52d added the
 `MBS-DEVICE-SLM1C-*` rows of "Hardware evidence": a replay of the SLM1-C's documented
 register map at the PDU level, over TCP framing until S52e put it on RTU.) The PDU codec,

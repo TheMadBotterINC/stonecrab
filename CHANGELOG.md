@@ -17,8 +17,8 @@ placeholder.
   21 (the connection stays good), a unit the slave does not serve (diagslave closes the
   connection: `Disconnected`) and ping. New CI job `interop-rtu` and task `mise run
   interop-rtu`, which `mise run interop` includes (TCP works on colima; the UDP peer still
-  needs a Docker that forwards UDP). Passed locally, 9 of 9, on 2026-10-29; the first hosted
-  run is the next evidence. Parity rows `MBS-OP-READ`, `MBS-OP-WRITE`, `MBS-OP-PING`,
+  needs a Docker that forwards UDP). Passed locally and in the first hosted run (40838776577), 9 of 9, on
+  2026-10-29. Parity rows `MBS-OP-READ`, `MBS-OP-WRITE`, `MBS-OP-PING`,
   `MBS-TRANS-TCP`, `MBS-RTU-CRC` and `MBS-RTU-WIRE-MODEL` are automated-verified for the RTU
   half over a gateway; Modbus RTU over a gateway is interoperability-tested, over a serial
   port still simulator-tested. The shared interop `Peer` of the tests can now be built with

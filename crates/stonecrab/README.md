@@ -53,7 +53,7 @@ operations.
 | `modbus`: write of coils and holding registers (FC15, FC06, FC16), refused unless the connection string says `access=read-write` | interoperability-tested |
 | `modbus`: text types `CHAR`, `WCHAR`, `STRING(n)` and `WSTRING(n)`, read and written | simulator-tested |
 | `modbus`: Modbus TCP over UDP (`modbus-tcp:udp`) reads, writes and ping, with lost, delayed, duplicated and reordered replies | interoperability-tested (job `interop-udp`, run 40830080420, 6 of 6); simulator-tested on loopback UDP |
-| `modbus`: Modbus RTU (`modbus-rtu`) reads, writes and ping over a gateway (`modbus-rtu:tcp`), every area, writes read back, frames of 255 bytes, an exception, a unit the slave does not serve | interoperability-tested (job `interop-rtu`, diagslave 3.6 as `-m enc -a 1`, 9 of 9 passed locally on 2026-10-29; the hosted run is the next evidence) |
+| `modbus`: Modbus RTU (`modbus-rtu`) reads, writes and ping over a gateway (`modbus-rtu:tcp`), every area, writes read back, frames of 255 bytes, an exception, a unit the slave does not serve | interoperability-tested (job `interop-rtu`, diagslave 3.6 as `-m enc -a 1`, first hosted run 40838776577, 9 of 9, on 2026-10-29) |
 | `modbus`: Modbus RTU (`modbus-rtu`) reads, writes, ping and polling over a serial port or a gateway, with CRC errors, the silence before a request, late-reply drain and reopen | simulator-tested |
 | `modbus`: Modbus ASCII (`modbus-ascii`) reads, writes, ping and polling over a serial port (7 or 8 data bits) or a gateway, with LRC errors, noise before the colon, late-reply drain and reopen | simulator-tested |
 | Subscribe by polling (`sim` and `modbus`): cyclic and change-of-state, event refused; on a clock that never sleeps (the simulator's default) change-of-state is refused and the interval paces nothing | simulator-tested |
@@ -68,8 +68,8 @@ operations.
 `interoperability-tested` means an interop CI job ran the code against an independent
 server: pymodbus 3.8.6 (job `interop`) and, over UDP, diagslave 3.6 (job `interop-udp`,
 first hosted run 40830080420, 6 of 6 on 2026-10-29) and, for Modbus RTU over a TCP gateway,
-diagslave 3.6 again (job `interop-rtu`, 9 of 9 passed locally on 2026-10-29; the hosted run
-is the next evidence).
+diagslave 3.6 again (job `interop-rtu`, first hosted run 40838776577, 9 of 9 on
+2026-10-29).
 The levels of each module are in its own documentation page (the component documents in
 `docs/components/` of this crate); the table above is the crate's view of the same
 evidence.

@@ -414,3 +414,11 @@ Accepted (2026-10-29), as slice S59b of docs/POST_ALPHA_PLAN.md. It amends decis
   `docs/parity/modbus-serial.md` (rows `MBS-OP-READ`, `MBS-OP-WRITE`, `MBS-OP-PING`,
   `MBS-TRANS-TCP`, `MBS-RTU-CRC` and `MBS-RTU-WIRE-MODEL` carry `automated-verified` for the
   RTU half over a gateway).
+
+## Addendum (2026-10-29): the first hosted run of `interop-rtu`
+
+The hosted job ran with commit 5858730 (CI run 40838776577) on `ubuntu-latest`: the diagslave
+image in its encapsulated mode (`-m enc -p 1503 -a 1`) and all nine `interop_rtu_*` tests
+passed. The `automated-verified` statuses of the S59b addendum and the
+`interoperability-tested` level of RTU over a TCP gateway now rest on that run as well as
+on the first local one.

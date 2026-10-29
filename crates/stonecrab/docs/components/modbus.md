@@ -16,8 +16,8 @@ The TCP driver has been checked against an independent server, pymodbus 3.8.6, a
 physical device; over UDP it runs on loopback sockets, and its `interop-udp` job against
 diagslave 3.6 with `tc netem` faults passed its first hosted run (2026-10-29, run
 40830080420, 6 of 6); the RTU driver has also met diagslave 3.6 as a Modbus RTU over TCP
-slave through its gateway carrier (job `interop-rtu`, S59b, passed locally on 2026-10-29,
-9 of 9; the hosted run is the next evidence), never over a serial line; the ASCII driver
+slave through its gateway carrier (job `interop-rtu`, S59b, first hosted run 40838776577,
+9 of 9, on 2026-10-29), never over a serial line; the ASCII driver
 runs on the in-memory transport and over a loopback socket only.
 No independent server serves the file record function codes, so the extended registers are
 checked against the specification examples, the upstream PLC4X frames and a first-party
@@ -212,7 +212,7 @@ assert!(driver.parse_config("modbus-rtu://COM3?default-unit-identifier=0").is_er
 | --- | --- |
 | Read, write, ping and subscribe by polling over RTU framing, with the operations and limits of `modbus-tcp` | simulator-tested |
 | CRC errors, the silence before a request, the drain of a late reply, a lost serial link and its reopen, replies from another unit | simulator-tested |
-| RTU over a serial-to-IP gateway (`modbus-rtu:tcp://`): read of every area, writes read back, a range selection, frames of 255 bytes, ping, an exception, a unit the slave does not serve | interoperability-tested (job `interop-rtu`, diagslave 3.6 as `-m enc -a 1`, 9 of 9 passed locally on 2026-10-29; the hosted run is the next evidence) |
+| RTU over a serial-to-IP gateway (`modbus-rtu:tcp://`): read of every area, writes read back, a range selection, frames of 255 bytes, ping, an exception, a unit the slave does not serve | interoperability-tested (job `interop-rtu`, diagslave 3.6 as `-m enc -a 1`, first hosted run 40838776577, 9 of 9, on 2026-10-29) |
 | Interoperability against an independent RTU server on a serial line | planned (a virtual serial pair with libmodbus or modbus-tk) |
 | Hardware verification on RS-485 | planned (HW2) |
 

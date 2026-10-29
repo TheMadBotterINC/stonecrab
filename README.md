@@ -22,8 +22,8 @@ run the same code against a built-in simulator with no network and no hardware. 
 checked against two independent Modbus servers (pymodbus 3.8.6 and libmodbus 3.1.11) and
 has never touched a physical device. **It is alpha software and is not for production use
 yet**: it subscribes only by polling, does not browse or discover, its Modbus RTU driver
-has met an independent RTU server only through a TCP gateway (diagslave, passed locally, the
-hosted run is next) and no serial device yet, and its APIs may change
+has met an independent RTU server only through a TCP gateway (diagslave, job `interop-rtu`,
+hosted run 40838776577) and no serial device yet, and its APIs may change
 before 1.0.
 
 ## Add it
@@ -85,7 +85,7 @@ changes no level). Nothing is `hardware-verified`.
 | Modbus TCP | extended registers (FC20 read, FC21 write) | simulator-tested | `MB-ADDR-EXTENDED`, `MB-LIMIT-EXT`; fake transport and the first-party responder (no interop peer serves FC20 or FC21) |
 | Modbus TCP | text: `CHAR`, `WCHAR`, `STRING(n)`, `WSTRING(n)` read and written as `PlcValue::Char` and `PlcValue::String`; bytes that are not UTF-8 or UTF-16 are an item error | simulator-tested (the pymodbus interop test passed locally, S49) | `MB-TYPE-CHAR` to `MB-TYPE-WSTRING`, ADR-0025; `interop_reads_and_writes_text_registers` |
 | Modbus TCP | calendar types | not supported | `MB-TYPE-TIME` (rejected with typed errors) |
-| Modbus RTU | read, write and ping over RTU framing (CRC-16) on a serial-to-IP gateway (`modbus-rtu:tcp://`): every area, writes read back, a range selection, frames of 255 bytes, an exception, a unit the slave does not serve | interoperability-tested (job `interop-rtu`, diagslave 3.6 as `-m enc -a 1`; passed locally, 9 of 9, on 2026-10-29; the hosted run is the next evidence) | `MBS-OP-READ`, `MBS-OP-WRITE`, `MBS-OP-PING`, `MBS-TRANS-TCP`, `MBS-RTU-CRC`, `MBS-RTU-WIRE-MODEL`; `interop_rtu_holding_registers_are_written_and_read_back`; ADR-0024 |
+| Modbus RTU | read, write and ping over RTU framing (CRC-16) on a serial-to-IP gateway (`modbus-rtu:tcp://`): every area, writes read back, a range selection, frames of 255 bytes, an exception, a unit the slave does not serve | interoperability-tested (job `interop-rtu`, diagslave 3.6 as `-m enc -a 1`; first hosted run 40838776577, 9 of 9, on 2026-10-29) | `MBS-OP-READ`, `MBS-OP-WRITE`, `MBS-OP-PING`, `MBS-TRANS-TCP`, `MBS-RTU-CRC`, `MBS-RTU-WIRE-MODEL`; `interop_rtu_holding_registers_are_written_and_read_back`; ADR-0024 |
 | Modbus RTU | read, write, ping and polling subscriptions over RTU framing on a serial port, and polling on a gateway | simulator-tested | `MBS-OP-*`, `MBS-RTU-*` in `docs/parity/modbus-serial.md`; fake transport and fake clock, the contract suite, the upstream RTU vectors, a fuzz target; ADR-0024 |
 | Modbus RTU | CRC errors, the silence before each request, a late reply after a timeout, a lost serial link and its reopen, replies from another unit | simulator-tested | `MBS-RTU-CRC`, `MBS-RTU-SILENCE`, `MBS-BUS-LATE-REPLY`, `MBS-BUS-CORRELATION` |
 | Modbus RTU | a serial device; broadcast and shared ports | planned; broadcast and shared ports not supported | no hardware record yet (HW2); `MBS-CFG-UNIT-ID`, `MBS-BUS-SHARED-PORT` |
