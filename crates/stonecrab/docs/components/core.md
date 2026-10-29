@@ -8,7 +8,8 @@ boundary and data contracts, and protocol behavior lives in the driver modules
 
 See the [foundation parity record](https://github.com/TheMadBotterINC/stonecrab/blob/master/docs/parity/core.md).
 
-Contracts: exact-width scalar values, stable validated tag identifiers, capabilities,
+Contracts: exact-width scalar values, calendar values without a time zone (ADR-0021),
+stable validated tag identifiers, capabilities,
 typed errors with diagnostic context, monotonic deadlines and redacted secret formatting.
 Resource budgets are finite, positive and immutable after builder validation.
 Immutable tags, bounded read requests and correlated read responses are data contracts:
@@ -25,7 +26,8 @@ too; an unknown write outcome is never collapsed into a rejection or replayed.
 | Subscription types and their bounded event queue: `SubscribeRequest`, `Subscription`, `QueuePolicy`, `LossCounters` | simulator-tested (unit and property tests; the simulator and `modbus` poll through them since S55) |
 | Polling subscriptions: the shared producer behind `Connection::subscribe` of the simulator and `modbus` | simulator-tested |
 | Browse and discover | not supported |
-| Calendar, byte, list and raw values (`RawValue`) | not supported |
+| Calendar values: `PlcSignedDuration`, `PlcDate`, `PlcTimeOfDay`, `PlcDateTime` (ADR-0021) | build-tested (unit and property tests); no driver decodes them yet |
+| Byte, list and raw values (`RawValue`) | not supported |
 | Hardware verification | planned |
 
 `simulator-tested` means the driver contract suite of the `testkit` feature runs against

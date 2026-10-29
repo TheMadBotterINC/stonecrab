@@ -326,8 +326,10 @@ vector exercises the family: the six TCP XML suites contain no TIME or DATE, and
 manual tests mention them only on commented-out lines, one of which says "These datatypes
 are not yet fully implemented" (`ManualModbusDriverTestModbusPal.java:49-59, 90-98`;
 `ManualModbusTCPDriverTest.java:88-95`); the expectations there contradict each other and an
-8-byte size. A future Stonecrab encoding (S53) therefore has no upstream byte-level
-reference and no upstream peer that could read it back; it must be fixed by an ADR. The
+8-byte size. A Stonecrab encoding would therefore have no upstream byte-level reference
+and no upstream peer that could read it back. ADR-0021 (S53) fixed the calendar values of
+the core and decided that Modbus gets none until a device defines an encoding: the rows
+below stay deferred as an upstream placeholder, which SPEC.md does not oblige us to fill. The
 PLC4X value classes (`PlcTIME`, `PlcDATE` and the rest) and the code generator's
 case-name convention (`DataIoGenerator.java:375-446`, used by other protocols and never by
 Modbus) must not be copied for the conversions: `PlcLDATE` and `PlcLDATE_AND_TIME` divide
@@ -366,14 +368,14 @@ test already decodes the register words of the interop map for every row's type.
 | MB-TYPE-WCHAR | WCHAR, 405, 2 | 1; `string 16` UTF16BE (368-370) | Rejected at parse time. | deferred (M2); rejection implemented | `wchar_type_is_rejected_at_parse_time` |
 | MB-TYPE-STRING | STRING, 406, 1 per character | `ceil(n/2)` registers for `STRING(n)`; `vstring stringLength * 8` UTF8 (371-373) | Rejected at parse time. | deferred (M2); rejection implemented | `string_type_is_rejected_at_parse_time` |
 | MB-TYPE-WSTRING | WSTRING, 407, 2 per character | `n` registers for `WSTRING(n)`; `vstring stringLength * 16` UTF16BE (374-376) | Rejected at parse time. | deferred (M2); rejection implemented | `wstring_type_is_rejected_at_parse_time` |
-| MB-TYPE-TIME | TIME, 396, 8 | No DataItem case (the `typeSwitch` at 319-377 ends at WSTRING). `widthBits` throws "Unsupported Modbus data type" (RegCodec:191-192). The name still resolves: `getPlcValueType` maps by `PlcValueType.valueOf` (Tag:279-282). Upstream observable behavior: the tag is accepted and sized 4 registers; a read yields response code OK with a null value (a `PlcList` of nulls for an array); a write throws an uncaught `IllegalArgumentException`. See the paragraph above the table. | Rejected at parse time as an unsupported calendar type. | deferred (ADR before the first calendar-value consumer); rejection implemented | `time_family_names_are_rejected_at_parse_time` |
-| MB-TYPE-LTIME | LTIME, 397, 8 | As TIME. | As TIME. | deferred (ADR before the first calendar-value consumer); rejection implemented | `time_family_names_are_rejected_at_parse_time` |
-| MB-TYPE-DATE | DATE, 398, 8 | As TIME. | As TIME. | deferred (ADR before the first calendar-value consumer); rejection implemented | `time_family_names_are_rejected_at_parse_time` |
-| MB-TYPE-LDATE | LDATE, 399, 8 | As TIME. | As TIME. | deferred (ADR before the first calendar-value consumer); rejection implemented | `time_family_names_are_rejected_at_parse_time` |
-| MB-TYPE-TIME-OF-DAY | TIME_OF_DAY, 400, 8 | As TIME. | As TIME. | deferred (ADR before the first calendar-value consumer); rejection implemented | `time_family_names_are_rejected_at_parse_time` |
-| MB-TYPE-LTIME-OF-DAY | LTIME_OF_DAY, 401, 8 | As TIME. | As TIME. | deferred (ADR before the first calendar-value consumer); rejection implemented | `time_family_names_are_rejected_at_parse_time` |
-| MB-TYPE-DATE-AND-TIME | DATE_AND_TIME, 402, 8 | As TIME. | As TIME. | deferred (ADR before the first calendar-value consumer); rejection implemented | `time_family_names_are_rejected_at_parse_time` |
-| MB-TYPE-LDATE-AND-TIME | LDATE_AND_TIME, 403, 8 | As TIME. | As TIME. | deferred (ADR before the first calendar-value consumer); rejection implemented | `time_family_names_are_rejected_at_parse_time` |
+| MB-TYPE-TIME | TIME, 396, 8 | No DataItem case (the `typeSwitch` at 319-377 ends at WSTRING). `widthBits` throws "Unsupported Modbus data type" (RegCodec:191-192). The name still resolves: `getPlcValueType` maps by `PlcValueType.valueOf` (Tag:279-282). Upstream observable behavior: the tag is accepted and sized 4 registers; a read yields response code OK with a null value (a `PlcList` of nulls for an array); a write throws an uncaught `IllegalArgumentException`. See the paragraph above the table. | Rejected at parse time as an unsupported calendar type. | deferred (upstream placeholder, ADR-0021 decision 7); rejection implemented | `time_family_names_are_rejected_at_parse_time` |
+| MB-TYPE-LTIME | LTIME, 397, 8 | As TIME. | As TIME. | deferred (upstream placeholder, ADR-0021 decision 7); rejection implemented | `time_family_names_are_rejected_at_parse_time` |
+| MB-TYPE-DATE | DATE, 398, 8 | As TIME. | As TIME. | deferred (upstream placeholder, ADR-0021 decision 7); rejection implemented | `time_family_names_are_rejected_at_parse_time` |
+| MB-TYPE-LDATE | LDATE, 399, 8 | As TIME. | As TIME. | deferred (upstream placeholder, ADR-0021 decision 7); rejection implemented | `time_family_names_are_rejected_at_parse_time` |
+| MB-TYPE-TIME-OF-DAY | TIME_OF_DAY, 400, 8 | As TIME. | As TIME. | deferred (upstream placeholder, ADR-0021 decision 7); rejection implemented | `time_family_names_are_rejected_at_parse_time` |
+| MB-TYPE-LTIME-OF-DAY | LTIME_OF_DAY, 401, 8 | As TIME. | As TIME. | deferred (upstream placeholder, ADR-0021 decision 7); rejection implemented | `time_family_names_are_rejected_at_parse_time` |
+| MB-TYPE-DATE-AND-TIME | DATE_AND_TIME, 402, 8 | As TIME. | As TIME. | deferred (upstream placeholder, ADR-0021 decision 7); rejection implemented | `time_family_names_are_rejected_at_parse_time` |
+| MB-TYPE-LDATE-AND-TIME | LDATE_AND_TIME, 403, 8 | As TIME. | As TIME. | deferred (upstream placeholder, ADR-0021 decision 7); rejection implemented | `time_family_names_are_rejected_at_parse_time` |
 
 Rejecting the eight names at parse time is stricter than upstream, which accepts the tag
 and reads null; it is an intentional divergence, not parity (divergence row MB-TYPE-TIME

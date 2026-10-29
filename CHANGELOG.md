@@ -5,6 +5,17 @@ as `stonecrab` 0.2.0 (2026-10-27); `stonecrab` 0.1.0 is the specification-stage
 placeholder.
 
 ## Unreleased
+- Calendar values (ADR-0021; additive): `PlcValue` and `PlcValueType` gain
+  `SignedDuration`, `Date`, `TimeOfDay` and `DateTime` after `Duration`, holding the new
+  root types `PlcSignedDuration` (an `i64` nanosecond count; IEC `TIME` and `LTIME`),
+  `PlcDate` (an `i32` day count from 1970-01-01, proleptic Gregorian; `DATE`, `LDATE`),
+  `PlcTimeOfDay` (`00:00` to `23:59:59.999999999`, no leap second; `TIME_OF_DAY`,
+  `LTIME_OF_DAY`) and `PlcDateTime` (a date and a time of day; the three date-and-time
+  types). None carries a time zone. Range-checking constructors return `InvalidConfig`;
+  ordering is chronological; `Display` prints the `java.time` text of the matching PLC4J
+  type (`PT-1.5S`, `2024-02-29`, `13:05`, `2026-10-28T06:30:15.250`). No new dependency.
+  No driver decodes calendar values yet; the Modbus `TIME` and `DATE` names stay rejected,
+  since upstream has no Modbus encoding for them. New parity row `CORE-VALUE-CALENDAR`.
 - New `serial` feature (off by default; `modbus` does not enable it yet): a serial transport
   on a blocking worker thread, `stonecrab::transport::{SerialFactory, SerialTransport}` with
   `DataBits`, `Parity`, `StopBits` and `FlowControl` (upstream's option names and defaults:

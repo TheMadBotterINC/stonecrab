@@ -642,6 +642,10 @@ mod tests {
             PlcValueType::Char,
             PlcValueType::String,
             PlcValueType::Duration,
+            PlcValueType::SignedDuration,
+            PlcValueType::Date,
+            PlcValueType::TimeOfDay,
+            PlcValueType::DateTime,
         ] {
             assert_eq!(
                 SimAddress::new(SimArea::State, "x", refused)

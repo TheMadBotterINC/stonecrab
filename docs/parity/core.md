@@ -18,7 +18,8 @@ Each implemented contract has unit and executable documentation tests, and every
 below is checked by `scripts/parity-check.sh` (`mise run parity`): its id is named in a
 `# Compatibility` section or a test, and its test-id column names real tests. The complete
 upstream protocol/transport/operation inventory is still required before M0 can close.
-Calendar and structured values require a further design decision (ADR-0006).
+Structured values require a further design decision (ADR-0006); calendar values follow
+ADR-0021 (`CORE-VALUE-CALENDAR`).
 
 ## Implemented foundation
 - `Capabilities`, `Operation`, `SubscriptionMode`: explicit operation reporting.
@@ -30,7 +31,9 @@ Calendar and structured values require a further design decision (ADR-0006).
   consistency checked by a builder before allocation.
 - `Secret<T>`: redacted Debug/Display; no memory-zeroization claim.
 - `PlcValue`, `PlcValueType`: exact scalar widths, lossless checked integer widening
-  and explicit float-only access. Byte/raw/calendar/collection values remain deferred.
+  and explicit float-only access. Byte/raw/collection values remain deferred.
+- `PlcSignedDuration`, `PlcDate`, `PlcTimeOfDay`, `PlcDateTime`: the four calendar
+  representations of ADR-0021, range-checked, chronologically ordered, without a zone.
 - Public-API integration tests and compile-time Send/Sync assertions.
 - `ProtocolAddress` and immutable `Tag`: driver-owned addresses, stable caller
   identity, type-hint consistency, positive counts and shared immutable ownership. The
@@ -84,8 +87,9 @@ since S04a; the S04b adapter turns its exchanges into vectors).
 | --- | --- | --- | --- | --- |
 | CORE-BYTEORDER-MODEL | One setting `ModbusByteOrder` with four modes; no separate word order (`docs/parity/modbus.md` "Byte order"). | `ByteOrder` x `WordOrder`, both `Copy` and `Ord`, never inferred; `Tag::with_byte_order`/`with_word_order` set optional fields that default to `None`; precedence tag field, address block, driver default. | implemented | `byte_order_is_total_and_follows_declaration_order`, `word_order_is_total_and_follows_declaration_order`, `orders_are_copy_hash_and_clone_equal`, `debug_text_names_the_variant`, `orders_default_to_absent_and_are_never_inferred`, `each_builder_sets_exactly_one_field`, `both_orders_combine_independently_of_call_order_and_last_write_wins`, `orders_do_not_disturb_other_fields_and_survive_clone_and_debug`, `facade_reexports_ordering_types_and_additive_ord` |
 | CORE-VALUE-ORD | Not applicable (Java enums are comparable by ordinal). | Additive `PartialOrd, Ord` on `ErrorKind`, `Operation`, `PlcValueType` in declaration order; supports `BTreeSet<ErrorKind>`. | implemented | `error_kinds_sort_in_declaration_order_and_round_trip_through_a_set`, `operations_sort_in_declaration_order_and_round_trip_through_a_set`, `value_types_sort_in_declaration_order_stay_copy_and_round_trip_through_a_set` |
+| CORE-VALUE-CALENDAR | PLC4J `PlcValueType` has nine calendar types with Java payloads (`[inventory.api]` `value_type`, `PlcValueType.java:53-61`): `TIME` and `LTIME` as `java.time.Duration` (built from milliseconds and nanoseconds), `DATE` and `LDATE` as `LocalDate`, `TIME_OF_DAY` and `LTIME_OF_DAY` as `LocalTime`, `DATE_AND_TIME`, `DATE_AND_LTIME` and `LDATE_AND_TIME` as `LocalDateTime`; no zone is kept, and `toString` renders the Java value's ISO 8601 text (`plc4j/spi/values`, `PlcTIME` and the rest; `PlcLDATE` and `PlcLDATE_AND_TIME` misconvert nanoseconds, `docs/parity/modbus.md` S44). | Four representations (ADR-0021), appended to `PlcValue` and `PlcValueType`: `SignedDuration(PlcSignedDuration)`, an `i64` nanosecond count (about 292 years either way; `TIME`, `LTIME`); `Date(PlcDate)`, an `i32` day count from 1970-01-01, proleptic Gregorian (`-5877641-06-23` to `+5881580-07-11`; `DATE`, `LDATE`); `TimeOfDay(PlcTimeOfDay)`, `00:00` to `23:59:59.999999999` without a leap second (`TIME_OF_DAY`, `LTIME_OF_DAY`); `DateTime(PlcDateTime)`, a date and a time of day without a zone (the three date-and-time types). Range-checking constructors (`from_millis`, `from_ymd`, `from_hms_nano`, `from_nanos_since_midnight`) refuse with `InvalidConfig`; `Copy`, `Eq`, chronological `Ord`, `Hash`; `Display` is the `java.time` `toString` text of the matching Java type; no numeric or Boolean coercion. A driver reports a wire value outside a range as `MalformedData` with the raw bytes and refuses to encode a value that does not fit its wire type. Divergences: four representations for nine names (the tag carries the IEC type); a Java value beyond the ranges has no Stonecrab value. No driver produces calendar values yet. | implemented (types; no driver decodes them) | `value_types_sort_in_declaration_order_stay_copy_and_round_trip_through_a_set`, `each_value_reports_its_original_representation`, `calendar_values_are_never_coerced_to_numbers_or_booleans`, `signed_durations_cover_the_whole_i64_nanosecond_range_and_no_more`, `signed_durations_render_as_java_time_does`, `dates_cover_the_i32_day_range_and_refuse_dates_outside_it`, `dates_follow_the_gregorian_calendar`, `dates_render_as_java_time_does`, `times_of_day_end_before_midnight_and_have_no_leap_second`, `times_of_day_render_as_java_time_does`, `date_times_pair_a_date_with_a_time_in_chronological_order`, properties `every_day_count_round_trips_through_its_civil_fields`, `date_order_is_day_count_order`, `every_nanosecond_of_the_day_round_trips`, `time_order_is_nanosecond_order` and `millisecond_durations_are_exact_nanosecond_counts`, `public_foundation_types_are_send_sync_and_static`, doctests `PlcSignedDuration`, `PlcSignedDuration::from_millis`, `PlcDate`, `PlcDate::from_ymd`, `PlcTimeOfDay`, `PlcTimeOfDay::from_hms_nano`, `PlcTimeOfDay::from_nanos_since_midnight`, `PlcDateTime` |
 
-`RawValue` and calendar, bytes and list values are deferred (ADR-0006).
+`RawValue`, bytes and list values are deferred (ADR-0006); calendar values follow ADR-0021.
 
 ## Time, cancellation and state observation
 Status: implemented as primitives (ADR-0007, slice S06). Request types have a cancel slot
