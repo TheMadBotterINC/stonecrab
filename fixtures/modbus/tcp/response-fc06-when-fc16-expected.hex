@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as the response to function 16.
+# the function does not match
+06 00 01 00 03

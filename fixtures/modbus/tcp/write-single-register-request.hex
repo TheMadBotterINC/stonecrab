@@ -1,0 +1,5 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Modbus Application Protocol V1.1b section 6.6, Write Single Register, request example.
+# Write 0003 hex to register 2: wire address 0x0001, value 0x0003.
+# Upstream sends this form for a holding-register payload of exactly 2 bytes (MB-TCP-WRITE).
+06 00 01 00 03

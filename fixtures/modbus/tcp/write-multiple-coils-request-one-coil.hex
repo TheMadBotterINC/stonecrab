@@ -1,0 +1,5 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Modbus Application Protocol V1.1b section 6.11, Write Multiple Coils, request layout with a quantity of 1.
+# Coil 173 (wire address 0x00AC) ON: byte count 1, data 01.
+# Upstream never sends function 05, so a single coil is a Write Multiple Coils request (MB-QUIRK-C).
+0F 00 AC 00 01 01 01

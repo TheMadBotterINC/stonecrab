@@ -1,0 +1,6 @@
+{
+  "direction": "response",
+  "function": 6,
+  "error": "TrailingBytes",
+  "remaining": 1
+}

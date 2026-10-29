@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Modbus Application Protocol V1.1b section 6.6, Write Single Register, response example.
+# The normal response echoes the request: address 0x0001, value 0x0003.
+06 00 01 00 03

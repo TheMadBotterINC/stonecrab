@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as a request.
+# one byte after the value
+06 00 01 00 03 00

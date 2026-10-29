@@ -1,0 +1,7 @@
+{
+  "direction": "response",
+  "function": 15,
+  "error": "InvalidDiscriminator",
+  "field": "quantity",
+  "value": 0
+}

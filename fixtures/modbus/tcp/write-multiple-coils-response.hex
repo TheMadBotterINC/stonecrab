@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Modbus Application Protocol V1.1b section 6.11, Write Multiple Coils, response example.
+# The normal response echoes the start address 0x0013 and the quantity 10.
+0F 00 13 00 0A

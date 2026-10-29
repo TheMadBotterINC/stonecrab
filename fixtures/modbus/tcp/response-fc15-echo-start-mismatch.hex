@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as the response to function 15 and checked against the request below.
+# request: 0F 00 13 00 0A 02 CD 01 (start 19); the response echoes start 20
+0F 00 14 00 0A

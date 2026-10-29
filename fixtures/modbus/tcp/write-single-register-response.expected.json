@@ -1,0 +1,7 @@
+{
+  "direction": "response",
+  "function": 6,
+  "address": 1,
+  "value": 3,
+  "request": [6, 0, 1, 0, 3]
+}

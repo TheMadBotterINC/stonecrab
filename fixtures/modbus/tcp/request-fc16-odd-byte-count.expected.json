@@ -1,0 +1,6 @@
+{
+  "direction": "request",
+  "error": "InvalidDiscriminator",
+  "field": "register byte count",
+  "value": 3
+}

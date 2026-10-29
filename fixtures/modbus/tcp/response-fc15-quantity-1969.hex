@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as the response to function 15.
+# start 0, quantity 1969 (0x07B1)
+0F 00 00 07 B1

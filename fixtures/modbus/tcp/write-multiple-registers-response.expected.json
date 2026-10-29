@@ -1,0 +1,7 @@
+{
+  "direction": "response",
+  "function": 16,
+  "start": 1,
+  "quantity": 2,
+  "request": [16, 0, 1, 0, 2, 4, 0, 10, 1, 2]
+}

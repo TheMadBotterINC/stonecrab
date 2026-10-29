@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Modbus Application Protocol V1.1b section 6.6, Write Single Register, request layout at the last wire address.
+# Address 0xFFFF, value 0xFFFF.
+06 FF FF FF FF

@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Modbus Application Protocol V1.1b section 7, Exception Responses: function code | 0x80, then the exception code.
+# Function 0x10 refused with exception code 0x04 (SERVER DEVICE FAILURE).
+90 04

@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as the response to function 6.
+# value field cut to one byte
+06 00 01 00

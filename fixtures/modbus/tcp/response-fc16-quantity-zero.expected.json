@@ -2,6 +2,6 @@
   "direction": "response",
   "function": 16,
   "error": "InvalidDiscriminator",
-  "field": "unsupported function code",
-  "value": 16
+  "field": "quantity",
+  "value": 0
 }

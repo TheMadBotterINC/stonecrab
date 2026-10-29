@@ -1,4 +1,4 @@
 # PDU bytes only: no MBAP header, no unit identifier.
 # Modbus Application Protocol V1.1b section 6.12, Write Multiple Registers, request example.
-# Write 000A and 0102 to registers 2 and 3. Write PDUs are out of the alpha scope (D3).
+# Write 000A and 0102 hex to registers 2 and 3: start 0x0001, quantity 2, byte count 4.
 10 00 01 00 02 04 00 0A 01 02

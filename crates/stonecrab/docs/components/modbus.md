@@ -151,7 +151,7 @@ The layers underneath, with their evidence:
 | Address types: `UnitId`, `ModbusArea`, `ModbusDataType`, `ModbusAddress` | unit-tested; property-tested; fuzzed |
 | Address text grammar and parser (`ModbusAddress::parse`) | unit-tested; fuzzed |
 | Connection-string parser (`ModbusTcpDriver::parse_config`) | unit-tested; property-tested; fuzzed |
-| PDU codec for function codes 01 to 04 and the exception PDU | unit-tested; vector-tested; property-tested; fuzzed |
+| PDU codec for function codes 01 to 04, 06, 15 and 16 and the exception PDU | unit-tested; vector-tested; property-tested; fuzzed |
 | MBAP framing (`MbapFramer`, `MbapHeader`, `ModbusAdu`, `TransactionId`) | unit-tested; vector-tested; fuzzed |
 | Session: transaction ids, reply correlation by transaction id, unit id and function code, exception mapping (`ModbusSession`, `exception_item_error`) | unit-tested on the in-memory transport |
 | Typed register decoding and byte order (`TypedDecoder`) | unit-tested; vector-tested; property-tested; `BIG_ENDIAN` and `LITTLE_ENDIAN` confirmed by the retained upstream PLC4X vectors; the two byte-swap modes are derived from the documented layouts |
@@ -165,8 +165,9 @@ with its owner. Where the parser or driver can see the request it rejects it wit
 error rather than ignoring it; operations that have no API at all do not exist:
 
 - writes (`MB-TCP-WRITE`): `write` is `Unsupported(Operation::Write)`, sends nothing, and
-  `Capabilities.write` is false; write PDUs, the upstream FC06-versus-FC16 choice and
-  `WriteOutcome::Unknown` on the wire come after the alpha;
+  `Capabilities.write` is false; the write PDUs and the upstream FC06-versus-FC16 choice
+  exist in the PDU codec (see "PDU codec"), but putting them on the wire and
+  `WriteOutcome::Unknown` come after the alpha;
 - subscriptions, browse and discovery (`MB-TCP-SUBSCRIBE`, `MB-TCP-BROWSE`,
   `MB-TCP-DISCOVER`): these operations do not exist in the API;
 - ping (`MB-TCP-PING`): `Connection::ping` exists since S40, but the Modbus connection
@@ -311,25 +312,43 @@ the 64-bit types), false for the 16-bit types and for a coil. A sensor profile's
 A PDU is the function code and its data, without the MBAP header. `ModbusPdu` has the four
 read requests (`ReadCoils`, `ReadDiscreteInputs`, `ReadHoldingRegisters`,
 `ReadInputRegisters`, each `{ start, quantity }` with the zero-based wire address), the two
-normal responses (`ReadBitsResponse` holding the packed bytes exactly as received, and
-`ReadRegistersResponse` holding the registers) and `Exception { function, code }`. Write
-PDUs are not transcribed: function codes 05, 06, 15, 16, 20 and 21 are
-`FunctionCode::Unknown` and every decoder refuses them.
+normal read responses (`ReadBitsResponse` holding the packed bytes exactly as received, and
+`ReadRegistersResponse` holding the registers), the three write requests upstream emits
+(`WriteMultipleCoils`, function 15; `WriteSingleRegister`, function 06;
+`WriteMultipleRegisters`, function 16) with their responses (`WriteSingleRegisterResponse`
+and `WriteMultipleResponse`, which echo the request) and `Exception { function, code }`.
+Write Single Coil (05) is not a variant, because upstream never sends it
+(`MB-QUIRK-C`): function codes 05, 20 and 21 are `FunctionCode::Unknown` and every decoder
+refuses them. The codec only builds and reads PDUs: `Capabilities.write` stays false and
+the connection sends no write until a later slice puts them on the wire.
 
-A request is the function code, the start address and the quantity (5 bytes), with a
+`ModbusPdu::write_request(area, start, quantity, payload)` picks the request for an
+encoded payload the way upstream does: a coil is always function 15 (even one coil), a
+holding-register payload of exactly 2 bytes is function 06 and any other is function 16;
+discrete inputs and input registers cannot be written.
+
+A read request is the function code, the start address and the quantity (5 bytes), with a
 quantity of 1 to 2000 bits or 1 to 125 registers and `start + quantity` at most 65536
-(`decode_request`, `encode_request`). A response is the function code, a byte count of 1 to
-250 (even for registers) and the data, or the function code plus 0x80 and one of the ten
-exception codes (`decode_response`, `encode_response`).
+(`decode_request`, `encode_request`). A write request is the function code and the address
+and value (function 06), or the start address, the quantity of 1 to 1968 coils or 1 to 123
+registers, a byte count (`ceil(quantity / 8)` for coils, `2 * quantity` for registers, so
+an odd register count is refused) and the data (functions 15 and 16). A read response is the
+function code, a byte count of 1 to 250 (even for registers) and the data; a write response
+echoes the request (the address and value, or the start address and quantity); an
+exception response is the function code plus 0x80 and one of the ten exception codes
+(`decode_response`, `encode_response`).
 
 Every length is compared with its bound before anything is allocated, a PDU is at most 253
 bytes, and input must hold exactly one PDU. A response does not repeat the request's
 quantity, so `decode_response` cannot know whether the byte count fits it:
 `ModbusPdu::check_reply_to(&request)` proves that, and the matching function, once the
-session knows the request. Exception codes outside the ten that V1.1b section 7 defines are
-refused as `InvalidDiscriminator` rather than carried (`ExceptionCode::Unknown` exists so
-the number can still be named). The rows are `MB-TCP-READ-*`, `MB-EXC-*` and
-`MB-LIMIT-COILS`, `MB-LIMIT-REGISTERS`, `MB-LIMIT-PDU` in the parity record.
+session knows the request. For a write it proves that the echo repeats what was sent; a
+mismatch is a typed `InvalidDiscriminator` naming the field (`echoed start address`,
+`echoed quantity` or `echoed value`). Exception codes outside the ten that V1.1b
+section 7 defines are refused as `InvalidDiscriminator` rather than carried
+(`ExceptionCode::Unknown` exists so the number can still be named). The rows are
+`MB-TCP-READ-*`, `MB-TCP-WRITE`, `MB-EXC-*` and `MB-LIMIT-COILS`, `MB-LIMIT-REGISTERS`,
+`MB-LIMIT-PDU` in the parity record.
 
 ```rust
 use stonecrab::codec::{BoundedReader, BoundedWriter};
@@ -357,6 +376,37 @@ assert_eq!(
         registers: vec![555, 0, 100],
     }
 );
+# Ok::<(), stonecrab::codec::ParseError>(())
+```
+
+```rust
+use stonecrab::codec::{BoundedReader, BoundedWriter};
+use stonecrab::modbus::{
+    FunctionCode, ModbusArea, ModbusPdu, decode_response, encode_request,
+};
+
+// Write 000A and 0102 to two holding registers from wire address 1: V1.1b section 6.12.
+// The 4-byte payload is not exactly 2 bytes, so the request is function 16.
+let request = ModbusPdu::write_request(
+    ModbusArea::HoldingRegister,
+    1,
+    2,
+    &[0x00, 0x0A, 0x01, 0x02],
+)?;
+let mut writer = BoundedWriter::new(253);
+encode_request(&request, &mut writer)?;
+assert_eq!(
+    writer.as_slice(),
+    [0x10, 0x00, 0x01, 0x00, 0x02, 0x04, 0x00, 0x0A, 0x01, 0x02]
+);
+
+// The device echoes the start address and the quantity.
+let reply = [0x10, 0x00, 0x01, 0x00, 0x02];
+let response = decode_response(
+    &mut BoundedReader::new(&reply),
+    FunctionCode::WriteMultipleRegisters,
+)?;
+response.check_reply_to(&request)?;
 # Ok::<(), stonecrab::codec::ParseError>(())
 ```
 

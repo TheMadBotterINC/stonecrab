@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as the response to function 6 and checked against the request below.
+# request: 06 00 01 00 03 (value 3); the response echoes value 4
+06 00 01 00 04

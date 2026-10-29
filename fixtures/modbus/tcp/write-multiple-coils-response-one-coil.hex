@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Modbus Application Protocol V1.1b section 6.11, Write Multiple Coils, response layout with a quantity of 1.
+# Echoes start address 0x00AC and quantity 1.
+0F 00 AC 00 01

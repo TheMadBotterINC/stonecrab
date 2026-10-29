@@ -1,4 +1,5 @@
 # PDU bytes only: no MBAP header, no unit identifier.
 # Modbus Application Protocol V1.1b section 6.5, Write Single Coil, request example.
-# Coil 173 ON. Write PDUs are out of the alpha scope (D3).
+# Coil 173 ON. Upstream never sends function 05 (its echo check is dead code, MB-QUIRK-C),
+# so the codec does not decode it: the function code is refused.
 05 00 AC FF 00

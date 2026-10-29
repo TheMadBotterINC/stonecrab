@@ -993,3 +993,19 @@ parses it with `Short.parseShort` and the inventoried files show no range check
   and doctests (ADR-0009, S27 addendum). The slice adds no Rust dependency, so the D23
   check is unchanged; the Python side adds `pymodbus==3.8.6` inside the container only.
   The coverage rows are unchanged (modbus 100, testkit at least 90).
+
+## Addendum: write PDUs (slice S45, 2026-10-28)
+This addendum records the S45 change; it changes nothing above except where it says so.
+
+1. **Supersedes one bullet.** The statement in the PDU decisions that write PDUs are not
+   transcribed and that function codes 05, 06, 15, 16, 20 and 21 decode as `Unknown` no
+   longer holds for 06, 15 and 16. `FunctionCode` has `WriteSingleRegister`,
+   `WriteMultipleCoils` and `WriteMultipleRegisters`, and every decoder and encoder speaks
+   their requests and responses. Function codes 05, 20 and 21 still decode as `Unknown`
+   and are refused (upstream never sends 05 and the driver does not use 20 or 21).
+2. **Bounds.** Quantity 1..=1968 coils for 15 (with `ceil(quantity / 8)` data bytes) and
+   1..=123 registers for 16 (with `2 * quantity` bytes), `start + quantity <= 65536`, a
+   PDU of at most 253 bytes, all checked before anything is allocated. A response echo is
+   checked against the request by `ModbusPdu::check_reply_to`.
+3. **Unchanged.** `Capabilities.write` stays false and `write` stays `Unsupported`; the
+   wire half is S46.

@@ -1,6 +1,6 @@
 {
   "direction": "request",
   "error": "InvalidDiscriminator",
-  "field": "function code",
-  "value": 16
+  "field": "quantity",
+  "value": 0
 }

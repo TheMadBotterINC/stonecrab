@@ -19,8 +19,8 @@ mod tests {
         BoundedReader, BoundedWriter, ParseError, coil_byte_count, unpack_bits_lsb_first,
     };
     use stonecrab::modbus::{
-        ExceptionCode, FunctionCode, MAX_PDU_BYTES, MbapHeader, ModbusPdu, decode_request,
-        decode_response, encode_request, encode_response,
+        ExceptionCode, FunctionCode, MAX_PDU_BYTES, MbapHeader, ModbusArea, ModbusPdu,
+        decode_request, decode_response, encode_request, encode_response,
     };
     use stonecrab::testkit::{GoldenVector, VectorSource, load_dir};
 
@@ -85,6 +85,14 @@ mod tests {
             .collect()
     }
 
+    fn registers_of(vector: &GoldenVector) -> Vec<u16> {
+        list(vector, "registers")
+            .expect("a register list")
+            .iter()
+            .map(|value| u16::try_from(*value).expect("a register"))
+            .collect()
+    }
+
     fn is_request(vector: &GoldenVector) -> bool {
         match text(vector, "direction") {
             Some("request") => true,
@@ -93,16 +101,37 @@ mod tests {
         }
     }
 
+    /// The read request the expected file describes.
+    fn read_request(vector: &GoldenVector, function: FunctionCode) -> ModbusPdu {
+        let (start, quantity) = (small(vector, "start"), small(vector, "quantity"));
+        match function.as_u8() {
+            1 => ModbusPdu::ReadCoils { start, quantity },
+            2 => ModbusPdu::ReadDiscreteInputs { start, quantity },
+            3 => ModbusPdu::ReadHoldingRegisters { start, quantity },
+            4 => ModbusPdu::ReadInputRegisters { start, quantity },
+            other => panic!("{}: read function {other}", vector.name),
+        }
+    }
+
     /// The PDU the expected file describes, built without the decoder.
     fn expected_pdu(vector: &GoldenVector) -> ModbusPdu {
         let function = function(vector);
         if is_request(vector) {
-            let (start, quantity) = (small(vector, "start"), small(vector, "quantity"));
             return match function.as_u8() {
-                1 => ModbusPdu::ReadCoils { start, quantity },
-                2 => ModbusPdu::ReadDiscreteInputs { start, quantity },
-                3 => ModbusPdu::ReadHoldingRegisters { start, quantity },
-                4 => ModbusPdu::ReadInputRegisters { start, quantity },
+                1..=4 => read_request(vector, function),
+                6 => ModbusPdu::WriteSingleRegister {
+                    address: small(vector, "address"),
+                    value: small(vector, "value"),
+                },
+                15 => ModbusPdu::WriteMultipleCoils {
+                    start: small(vector, "start"),
+                    quantity: small(vector, "quantity"),
+                    bytes: bytes_of(&list(vector, "bytes").expect("a coil write lists its bytes")),
+                },
+                16 => ModbusPdu::WriteMultipleRegisters {
+                    start: small(vector, "start"),
+                    registers: registers_of(vector),
+                },
                 other => panic!("{}: request function {other}", vector.name),
             };
         }
@@ -110,27 +139,47 @@ mod tests {
             let code = ExceptionCode::from_u8(u8::try_from(code).expect("a code byte"));
             return ModbusPdu::Exception { function, code };
         }
-        if let Some(registers) = list(vector, "registers") {
-            let registers = registers
-                .iter()
-                .map(|value| u16::try_from(*value).expect("a register"))
-                .collect();
+        match function.as_u8() {
+            6 => {
+                return ModbusPdu::WriteSingleRegisterResponse {
+                    address: small(vector, "address"),
+                    value: small(vector, "value"),
+                };
+            }
+            15 | 16 => {
+                return ModbusPdu::WriteMultipleResponse {
+                    function,
+                    start: small(vector, "start"),
+                    quantity: small(vector, "quantity"),
+                };
+            }
+            _ => {}
+        }
+        if list(vector, "registers").is_some() {
             return ModbusPdu::ReadRegistersResponse {
                 function,
-                registers,
+                registers: registers_of(vector),
             };
         }
         let bytes = bytes_of(&list(vector, "bytes").expect("a bit response lists its bytes"));
         ModbusPdu::ReadBitsResponse { function, bytes }
     }
 
+    /// Decodes the vector; a response that lists the `request` it answers must also pass
+    /// the reply check against that request, which is where an echo mismatch fails.
     fn decode(vector: &GoldenVector) -> Result<ModbusPdu, ParseError> {
         let mut reader = BoundedReader::new(&vector.bytes);
         if is_request(vector) {
-            decode_request(&mut reader)
-        } else {
-            decode_response(&mut reader, function(vector))
+            return decode_request(&mut reader);
         }
+        let reply = decode_response(&mut reader, function(vector))?;
+        if let Some(sent) = list(vector, "request") {
+            let sent = bytes_of(&sent);
+            let request = decode_request(&mut BoundedReader::new(&sent))
+                .unwrap_or_else(|error| panic!("{}: the request decodes: {error}", vector.name));
+            reply.check_reply_to(&request)?;
+        }
+        Ok(reply)
     }
 
     fn accepted() -> Vec<GoldenVector> {
@@ -205,7 +254,7 @@ mod tests {
     #[test]
     fn every_function_has_a_valid_and_a_negative_vector() {
         let all = vectors();
-        for function in 1_u64..=4 {
+        for function in [1_u64, 2, 3, 4, 6, 15, 16] {
             let of_function = |direction: &str, must_fail: bool| {
                 all.iter().any(|vector| {
                     text(vector, "direction") == Some(direction)
@@ -218,29 +267,29 @@ mod tests {
             };
             assert!(
                 of_function("request", false),
-                "FC0{function}: a valid request"
+                "FC{function}: a valid request"
             );
             assert!(
                 of_function("response", false),
-                "FC0{function}: a valid response"
+                "FC{function}: a valid response"
             );
             assert!(
                 of_function("response", true),
-                "FC0{function}: a negative response"
+                "FC{function}: a negative response"
             );
             let exception = all.iter().any(|vector| {
                 number(vector, "exception").is_some()
                     && number(vector, "function") == Some(function)
             });
-            assert!(exception, "FC0{function}: a valid exception response");
+            assert!(exception, "FC{function}: a valid exception response");
         }
-        for function in 1_u8..=4 {
+        for function in [1_u8, 2, 3, 4, 6, 15, 16] {
             let negative_request = all.iter().any(|vector| {
                 vector.must_fail
                     && text(vector, "direction") == Some("request")
                     && vector.bytes.first() == Some(&function)
             });
-            assert!(negative_request, "FC0{function}: a negative request");
+            assert!(negative_request, "FC{function}: a negative request");
         }
     }
 
@@ -250,9 +299,7 @@ mod tests {
         let names: BTreeSet<String> = rejected().into_iter().map(|v| v.name).collect();
         for name in [
             "tcp/request-write-single-coil",
-            "tcp/request-write-multiple-registers",
             "tcp/request-read-file-record",
-            "tcp/response-write-multiple-registers",
             "tcp/response-read-file-record",
             "tcp/request-function-zero",
             "tcp/response-function-zero",
@@ -462,7 +509,7 @@ mod tests {
                 .expect("expected.json is an object");
             let mut named = BTreeSet::new();
             for (key, value) in object {
-                if matches!(key.as_str(), "direction" | "function" | "error") {
+                if matches!(key.as_str(), "direction" | "function" | "error" | "request") {
                     continue;
                 }
                 named.insert(key.as_str());
@@ -535,5 +582,45 @@ mod tests {
                 );
             }
         }
+    }
+
+    // covers: MB-TCP-WRITE
+    #[test]
+    fn write_request_picks_the_pdu_of_every_accepted_write_request_vector() {
+        let mut checked = 0;
+        for vector in accepted()
+            .iter()
+            .filter(|v| is_request(v) && matches!(function(v).as_u8(), 6 | 15 | 16))
+        {
+            let pdu = expected_pdu(vector);
+            let picked = match function(vector).as_u8() {
+                15 => {
+                    let bytes =
+                        bytes_of(&list(vector, "bytes").expect("a coil write lists its bytes"));
+                    let (start, quantity) = (small(vector, "start"), small(vector, "quantity"));
+                    ModbusPdu::write_request(ModbusArea::Coil, start, quantity, &bytes)
+                }
+                6 => ModbusPdu::write_request(
+                    ModbusArea::HoldingRegister,
+                    small(vector, "address"),
+                    1,
+                    &small(vector, "value").to_be_bytes(),
+                ),
+                16 => {
+                    let registers = registers_of(vector);
+                    let payload: Vec<u8> = registers.iter().flat_map(|r| r.to_be_bytes()).collect();
+                    let quantity = u16::try_from(registers.len()).expect("at most 123");
+                    let start = small(vector, "start");
+                    ModbusPdu::write_request(ModbusArea::HoldingRegister, start, quantity, &payload)
+                }
+                other => panic!("{}: not a write request: {other}", vector.name),
+            };
+            assert_eq!(picked, Ok(pdu), "{}: the selected request", vector.name);
+            checked += 1;
+        }
+        assert_eq!(
+            checked, 8,
+            "two function 06, three 15 and three 16 requests"
+        );
     }
 }

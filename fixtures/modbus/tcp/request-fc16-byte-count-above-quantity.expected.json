@@ -1,0 +1,6 @@
+{
+  "direction": "request",
+  "error": "InvalidDiscriminator",
+  "field": "byte count",
+  "value": 6
+}

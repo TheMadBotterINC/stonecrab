@@ -1,0 +1,7 @@
+{
+  "direction": "response",
+  "function": 16,
+  "error": "OversizedLength",
+  "length": 65537,
+  "max": 65536
+}

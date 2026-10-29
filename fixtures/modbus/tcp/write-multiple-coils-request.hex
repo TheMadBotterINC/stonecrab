@@ -1,0 +1,5 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Modbus Application Protocol V1.1b section 6.11, Write Multiple Coils, request example.
+# Write ten coils from coil 20 (wire address 0x0013): quantity 10, byte count 2,
+# data CD 01. Coil 20 is the least significant bit of the first byte; the 6 padding bits of the last byte are zero.
+0F 00 13 00 0A 02 CD 01

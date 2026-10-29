@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as a request.
+# quantity 124 (0x007C), byte count 248 (0xF8), no data: with all 248 data bytes the PDU would be 254 bytes and fail on its size first
+10 00 00 00 7C F8

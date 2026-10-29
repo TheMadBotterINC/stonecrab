@@ -1,0 +1,8 @@
+{
+  "direction": "response",
+  "function": 16,
+  "request": [16, 0, 1, 0, 2, 4, 0, 10, 1, 2],
+  "error": "InvalidDiscriminator",
+  "field": "echoed quantity",
+  "value": 3
+}

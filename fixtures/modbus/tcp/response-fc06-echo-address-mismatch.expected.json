@@ -1,0 +1,8 @@
+{
+  "direction": "response",
+  "function": 6,
+  "request": [6, 0, 1, 0, 3],
+  "error": "InvalidDiscriminator",
+  "field": "echoed start address",
+  "value": 2
+}

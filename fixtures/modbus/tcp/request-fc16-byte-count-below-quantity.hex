@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as a request.
+# quantity 2, byte count 2, two data bytes
+10 00 01 00 02 02 00 0A

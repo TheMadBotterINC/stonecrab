@@ -38,7 +38,7 @@
 # header included, so they are framing vectors like the other tcp/adu_* ones. Two (the
 # function 0x04 request and response) decode at the PDU layer; the four function 0x14 and
 # 0x15 ("extended registers") vectors are framed by the MBAP framer but are must_fail
-# there: the PDU codec refuses function codes outside the alpha set. A test
+# there: the PDU codec does not speak function codes 0x14 and 0x15. A test
 # (adapter_rederives_each_parser_suite_hex_from_raw_text) re-derives every one of the six
 # .hex files from the <raw> text of the retained XML by a string scan. The read exchanges
 # of the other three files (DriverTestsuite.xml and the two all-datatypes files) are the
@@ -62,7 +62,17 @@
 #   start, quantity       an accepted request
 #   bytes, quantity, bits an accepted bit response (the packed bytes; bits are the first
 #                         `quantity` bits, least significant bit first, optional)
-#   registers             an accepted register response
+#   registers             an accepted register response, or the registers of an accepted
+#                         function 16 request
+#   address, value        an accepted function 06 request or response (a response echoes
+#                         its request)
+#   start, quantity       also an accepted function 15 or 16 response (the echo); start,
+#                         quantity and bytes are an accepted function 15 request, start and
+#                         registers an accepted function 16 request
+#   request               on a response: the request bytes, as a list of numbers, that the
+#                         response answers; the vector is decoded and then checked against
+#                         that request, so an accepted one echoes it and a must_fail one
+#                         (error "echoed ...") fails the echo check, not the decoder
 #   exception             an accepted exception response: the exception code
 #   error and, as the variant has them, field, value, needed, available, length, max,
 #   remaining             a must_fail vector: the ParseError variant and its parameters
@@ -416,14 +426,6 @@ must_fail = true
 note = "ParseError::TrailingBytes: an exception response followed by one extra byte"
 
 [[vector]]
-name = "tcp/response-write-multiple-registers"
-source = "protocol_spec"
-origin = "Modbus Application Protocol V1.1b, section 6.12 (Write Multiple Registers), response example"
-license = "Apache-2.0"
-must_fail = true
-note = "ParseError::InvalidDiscriminator: function 0x10 (write multiple registers) is not transcribed (decision D3)"
-
-[[vector]]
 name = "tcp/response-write-multiple-registers-when-fc03-expected"
 source = "protocol_spec"
 origin = "Modbus Application Protocol V1.1b, section 6.12 (Write Multiple Registers), response example"
@@ -437,7 +439,7 @@ source = "protocol_spec"
 origin = "Modbus Application Protocol V1.1b, section 6.14 (Read File Record), response example"
 license = "Apache-2.0"
 must_fail = true
-note = "ParseError::InvalidDiscriminator: function 0x14 (read file record) is not transcribed (decision D3)"
+note = "ParseError::InvalidDiscriminator: function 0x14 (read file record) is not decoded"
 
 [[vector]]
 name = "tcp/response-pdu-254-bytes"
@@ -525,15 +527,7 @@ source = "protocol_spec"
 origin = "Modbus Application Protocol V1.1b, section 6.5 (Write Single Coil), request example"
 license = "Apache-2.0"
 must_fail = true
-note = "ParseError::InvalidDiscriminator: function 0x05 (write single coil) is not transcribed (decision D3)"
-
-[[vector]]
-name = "tcp/request-write-multiple-registers"
-source = "protocol_spec"
-origin = "Modbus Application Protocol V1.1b, section 6.12 (Write Multiple Registers), request example"
-license = "Apache-2.0"
-must_fail = true
-note = "ParseError::InvalidDiscriminator: function 0x10 (write multiple registers) is not transcribed (decision D3)"
+note = "ParseError::InvalidDiscriminator: function 0x05 (write single coil) is not emitted by upstream and is not decoded (MB-QUIRK-C)"
 
 [[vector]]
 name = "tcp/request-read-file-record"
@@ -541,7 +535,7 @@ source = "protocol_spec"
 origin = "Modbus Application Protocol V1.1b, section 6.14 (Read File Record), request example"
 license = "Apache-2.0"
 must_fail = true
-note = "ParseError::InvalidDiscriminator: function 0x14 (read file record) is not transcribed (decision D3)"
+note = "ParseError::InvalidDiscriminator: function 0x14 (read file record) is not decoded"
 
 [[vector]]
 name = "tcp/request-exception-pdu"
@@ -558,6 +552,404 @@ origin = "Authored to break the request decoder: a 254 byte PDU, one over the 25
 license = "Apache-2.0"
 must_fail = true
 note = "ParseError::OversizedLength: a 254 byte PDU, one over the 253 byte limit of section 4.1; rejected before it is parsed"
+
+[[vector]]
+name = "tcp/write-single-register-request"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.6 (Write Single Register), request example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/write-single-register-response"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.6 (Write Single Register), response example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/write-single-register-request-last-address"
+source = "adversarial"
+origin = "Authored boundary case: Modbus Application Protocol V1.1b, section 6.6 (Write Single Register) at the last wire address 65535 with the largest value"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/write-multiple-coils-request"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.11 (Write Multiple Coils), request example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/write-multiple-coils-response"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.11 (Write Multiple Coils), response example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/write-multiple-coils-request-one-coil"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.11 (Write Multiple Coils), request layout with quantity 1 (upstream sends every coil write this way, MB-TCP-WRITE)"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/write-multiple-coils-response-one-coil"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.11 (Write Multiple Coils), response layout with quantity 1"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/write-multiple-coils-request-quantity-1968"
+source = "adversarial"
+origin = "Modbus Application Protocol V1.1b, section 6.11 (Write Multiple Coils) limits (1968 coils, 0x07B0) and section 4.1 (PDU at most 253 bytes)"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/write-multiple-coils-response-quantity-1968"
+source = "adversarial"
+origin = "Modbus Application Protocol V1.1b, section 6.11 (Write Multiple Coils) limits (1968 coils, 0x07B0)"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/write-multiple-registers-request"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.12 (Write Multiple Registers), request example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/write-multiple-registers-response"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.12 (Write Multiple Registers), response example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/write-multiple-registers-request-quantity-123"
+source = "adversarial"
+origin = "Modbus Application Protocol V1.1b, section 6.12 (Write Multiple Registers) limits (123 registers, 0x007B) and section 4.1 (PDU at most 253 bytes)"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/write-multiple-registers-response-quantity-123"
+source = "adversarial"
+origin = "Modbus Application Protocol V1.1b, section 6.12 (Write Multiple Registers) limits (123 registers, 0x007B)"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/write-multiple-registers-request-last-address"
+source = "adversarial"
+origin = "Authored boundary case: Modbus Application Protocol V1.1b, section 6.12 (Write Multiple Registers) ending exactly at the end of the address space (start + quantity = 65536)"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/write-single-register-exception"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 7 (Exception Responses), same shape for function 06"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/write-multiple-coils-exception"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 7 (Exception Responses), same shape for function 15"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/write-multiple-registers-exception"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 7 (Exception Responses), same shape for function 16"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/request-fc06-truncated-by-one-byte"
+source = "adversarial"
+origin = "Authored to break the request decoder: a Write Single Register request one byte short"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::Truncated: a Write Single Register request one byte short"
+
+[[vector]]
+name = "tcp/request-fc06-one-trailing-byte"
+source = "adversarial"
+origin = "Authored to break the request decoder: a Write Single Register request one byte too long"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::TrailingBytes: a Write Single Register request one byte too long"
+
+[[vector]]
+name = "tcp/request-fc15-quantity-zero"
+source = "adversarial"
+origin = "Authored to break the request decoder: quantity 0 coils, below the minimum of 1"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: quantity 0 coils, below the minimum of 1"
+
+[[vector]]
+name = "tcp/request-fc15-quantity-1969"
+source = "adversarial"
+origin = "Authored to break the request decoder: quantity 1969 coils, one over the limit of 1968, with the 247 data bytes that count would need"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::OversizedLength: quantity 1969 coils, one over the limit of 1968, with the 247 data bytes that count would need"
+
+[[vector]]
+name = "tcp/request-fc15-byte-count-below-quantity"
+source = "adversarial"
+origin = "Authored to break the request decoder: byte count 1 for ten coils, which need 2"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: byte count 1 for ten coils, which need 2"
+
+[[vector]]
+name = "tcp/request-fc15-byte-count-above-quantity"
+source = "adversarial"
+origin = "Authored to break the request decoder: byte count 3 for ten coils, which need 2"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: byte count 3 for ten coils, which need 2"
+
+[[vector]]
+name = "tcp/request-fc15-byte-count-exceeds-data"
+source = "adversarial"
+origin = "Authored to break the request decoder: byte count 2 with only one data byte present"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::Truncated: byte count 2 with only one data byte present"
+
+[[vector]]
+name = "tcp/request-fc15-no-byte-count"
+source = "adversarial"
+origin = "Authored to break the request decoder: a Write Multiple Coils request that ends before the byte count"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::Truncated: a Write Multiple Coils request that ends before the byte count"
+
+[[vector]]
+name = "tcp/request-fc15-one-trailing-byte"
+source = "adversarial"
+origin = "Authored to break the request decoder: a Write Multiple Coils request one byte too long"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::TrailingBytes: a Write Multiple Coils request one byte too long"
+
+[[vector]]
+name = "tcp/request-fc15-span-past-address-space"
+source = "adversarial"
+origin = "Authored to break the request decoder: two coils from wire address 65535, past the end of the address space"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::OversizedLength: two coils from wire address 65535, past the end of the address space"
+
+[[vector]]
+name = "tcp/request-fc16-quantity-zero"
+source = "adversarial"
+origin = "Authored to break the request decoder: quantity 0 registers, below the minimum of 1"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: quantity 0 registers, below the minimum of 1"
+
+[[vector]]
+name = "tcp/request-fc16-quantity-124"
+source = "adversarial"
+origin = "Authored to break the request decoder: quantity 124 registers, one over the limit of 123"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::OversizedLength: quantity 124 registers, one over the limit of 123"
+
+[[vector]]
+name = "tcp/request-fc16-byte-count-below-quantity"
+source = "adversarial"
+origin = "Authored to break the request decoder: byte count 2 for two registers, which need 4"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: byte count 2 for two registers, which need 4"
+
+[[vector]]
+name = "tcp/request-fc16-byte-count-above-quantity"
+source = "adversarial"
+origin = "Authored to break the request decoder: byte count 6 for two registers, which need 4"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: byte count 6 for two registers, which need 4"
+
+[[vector]]
+name = "tcp/request-fc16-odd-byte-count"
+source = "adversarial"
+origin = "Authored to break the request decoder: an odd byte count of 3, which cannot hold whole registers"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: an odd byte count of 3, which cannot hold whole registers"
+
+[[vector]]
+name = "tcp/request-fc16-byte-count-exceeds-data"
+source = "adversarial"
+origin = "Authored to break the request decoder: byte count 4 with only three data bytes present"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::Truncated: byte count 4 with only three data bytes present"
+
+[[vector]]
+name = "tcp/request-fc16-one-trailing-byte"
+source = "adversarial"
+origin = "Authored to break the request decoder: a Write Multiple Registers request one byte too long"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::TrailingBytes: a Write Multiple Registers request one byte too long"
+
+[[vector]]
+name = "tcp/request-fc16-span-past-address-space"
+source = "adversarial"
+origin = "Authored to break the request decoder: two registers from wire address 65535, past the end of the address space"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::OversizedLength: two registers from wire address 65535, past the end of the address space"
+
+[[vector]]
+name = "tcp/response-fc06-truncated-by-one-byte"
+source = "adversarial"
+origin = "Authored to break the response decoder: a Write Single Register response one byte short"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::Truncated: a Write Single Register response one byte short"
+
+[[vector]]
+name = "tcp/response-fc06-one-trailing-byte"
+source = "adversarial"
+origin = "Authored to break the response decoder: a Write Single Register response one byte too long"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::TrailingBytes: a Write Single Register response one byte too long"
+
+[[vector]]
+name = "tcp/response-fc06-echo-value-mismatch"
+source = "adversarial"
+origin = "Authored to break the response decoder: a response that echoes value 4 for a request that wrote 3"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: a response that echoes value 4 for a request that wrote 3"
+
+[[vector]]
+name = "tcp/response-fc06-echo-address-mismatch"
+source = "adversarial"
+origin = "Authored to break the response decoder: a response that echoes address 2 for a request that wrote address 1"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: a response that echoes address 2 for a request that wrote address 1"
+
+[[vector]]
+name = "tcp/response-fc06-when-fc16-expected"
+source = "adversarial"
+origin = "Authored to break the response decoder: a function 0x06 response where the response to function 16 is expected"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: a function 0x06 response where the response to function 16 is expected"
+
+[[vector]]
+name = "tcp/response-fc15-quantity-zero"
+source = "adversarial"
+origin = "Authored to break the response decoder: an echoed quantity of 0 coils"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: an echoed quantity of 0 coils"
+
+[[vector]]
+name = "tcp/response-fc15-quantity-1969"
+source = "adversarial"
+origin = "Authored to break the response decoder: an echoed quantity of 1969 coils, one over the limit of 1968"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::OversizedLength: an echoed quantity of 1969 coils, one over the limit of 1968"
+
+[[vector]]
+name = "tcp/response-fc15-span-past-address-space"
+source = "adversarial"
+origin = "Authored to break the response decoder: an echo of two coils from wire address 65535"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::OversizedLength: an echo of two coils from wire address 65535"
+
+[[vector]]
+name = "tcp/response-fc15-truncated-by-one-byte"
+source = "adversarial"
+origin = "Authored to break the response decoder: a Write Multiple Coils response one byte short"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::Truncated: a Write Multiple Coils response one byte short"
+
+[[vector]]
+name = "tcp/response-fc15-one-trailing-byte"
+source = "adversarial"
+origin = "Authored to break the response decoder: a Write Multiple Coils response one byte too long"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::TrailingBytes: a Write Multiple Coils response one byte too long"
+
+[[vector]]
+name = "tcp/response-fc15-echo-quantity-mismatch"
+source = "adversarial"
+origin = "Authored to break the response decoder: a response that echoes 9 coils for a request that wrote 10"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: a response that echoes 9 coils for a request that wrote 10"
+
+[[vector]]
+name = "tcp/response-fc15-echo-start-mismatch"
+source = "adversarial"
+origin = "Authored to break the response decoder: a response that echoes start address 20 for a request that wrote from 19"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: a response that echoes start address 20 for a request that wrote from 19"
+
+[[vector]]
+name = "tcp/response-fc16-quantity-zero"
+source = "adversarial"
+origin = "Authored to break the response decoder: an echoed quantity of 0 registers"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: an echoed quantity of 0 registers"
+
+[[vector]]
+name = "tcp/response-fc16-quantity-124"
+source = "adversarial"
+origin = "Authored to break the response decoder: an echoed quantity of 124 registers, one over the limit of 123"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::OversizedLength: an echoed quantity of 124 registers, one over the limit of 123"
+
+[[vector]]
+name = "tcp/response-fc16-span-past-address-space"
+source = "adversarial"
+origin = "Authored to break the response decoder: an echo of two registers from wire address 65535"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::OversizedLength: an echo of two registers from wire address 65535"
+
+[[vector]]
+name = "tcp/response-fc16-truncated-by-one-byte"
+source = "adversarial"
+origin = "Authored to break the response decoder: a Write Multiple Registers response one byte short"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::Truncated: a Write Multiple Registers response one byte short"
+
+[[vector]]
+name = "tcp/response-fc16-one-trailing-byte"
+source = "adversarial"
+origin = "Authored to break the response decoder: a Write Multiple Registers response one byte too long"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::TrailingBytes: a Write Multiple Registers response one byte too long"
+
+[[vector]]
+name = "tcp/response-fc16-echo-quantity-mismatch"
+source = "adversarial"
+origin = "Authored to break the response decoder: a response that echoes 3 registers for a request that wrote 2"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: a response that echoes 3 registers for a request that wrote 2"
+
+[[vector]]
+name = "tcp/response-fc16-echo-start-mismatch"
+source = "adversarial"
+origin = "Authored to break the response decoder: a response that echoes start address 2 for a request that wrote from 1"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: a response that echoes start address 2 for a request that wrote from 1"
 
 [[vector]]
 name = "tcp/adu_read-coils-request"
@@ -1307,7 +1699,7 @@ source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/ParserSerializerTestsuite.xml, test case \"Read Extended Registers Request Split File Record\" (kept at fixtures/modbus/upstream/tcp/ParserSerializerTestsuite.xml)"
 license = "Apache-2.0"
 must_fail = true
-note = "A whole ADU the framer accepts. ParseError::InvalidDiscriminator at the PDU layer: function code 0x14 (read file record) is outside the alpha set (decision D3). Retained for framing tests and PDU-layer negative tests only."
+note = "A whole ADU the framer accepts. ParseError::InvalidDiscriminator at the PDU layer: function code 0x14 (read file record) is not decoded. Retained for framing tests and PDU-layer negative tests only."
 
 [[vector]]
 name = "tcp/adu_upstream-read-extended-registers-response-split-file-record"
@@ -1315,7 +1707,7 @@ source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/ParserSerializerTestsuite.xml, test case \"Read Extended Registers Response Split File Record\" (kept at fixtures/modbus/upstream/tcp/ParserSerializerTestsuite.xml)"
 license = "Apache-2.0"
 must_fail = true
-note = "A whole ADU the framer accepts. ParseError::InvalidDiscriminator at the PDU layer: function code 0x14 (read file record) is outside the alpha set (decision D3). Retained for framing tests and PDU-layer negative tests only."
+note = "A whole ADU the framer accepts. ParseError::InvalidDiscriminator at the PDU layer: function code 0x14 (read file record) is not decoded. Retained for framing tests and PDU-layer negative tests only."
 
 [[vector]]
 name = "tcp/adu_upstream-write-extended-registers-request-file-record"
@@ -1323,7 +1715,7 @@ source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/ParserSerializerTestsuite.xml, test case \"Write Extended Registers Request File Record\" (kept at fixtures/modbus/upstream/tcp/ParserSerializerTestsuite.xml)"
 license = "Apache-2.0"
 must_fail = true
-note = "A whole ADU the framer accepts. ParseError::InvalidDiscriminator at the PDU layer: function code 0x15 (write file record) is outside the alpha set (decision D3). Retained for framing tests and PDU-layer negative tests only."
+note = "A whole ADU the framer accepts. ParseError::InvalidDiscriminator at the PDU layer: function code 0x15 (write file record) is not decoded. Retained for framing tests and PDU-layer negative tests only."
 
 [[vector]]
 name = "tcp/adu_upstream-write-extended-registers-request-split-file-record"
@@ -1331,7 +1723,7 @@ source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/ParserSerializerTestsuite.xml, test case \"Write Extended Registers Request Split File Record\" (kept at fixtures/modbus/upstream/tcp/ParserSerializerTestsuite.xml)"
 license = "Apache-2.0"
 must_fail = true
-note = "A whole ADU the framer accepts. ParseError::InvalidDiscriminator at the PDU layer: function code 0x15 (write file record) is outside the alpha set (decision D3). Retained for framing tests and PDU-layer negative tests only."
+note = "A whole ADU the framer accepts. ParseError::InvalidDiscriminator at the PDU layer: function code 0x15 (write file record) is not decoded. Retained for framing tests and PDU-layer negative tests only."
 
 # BEGIN adapter-generated entries (slice S04b)
 # Written by crates/stonecrab/tests/modbus_driver_suite_adapter.rs and compared with this file by

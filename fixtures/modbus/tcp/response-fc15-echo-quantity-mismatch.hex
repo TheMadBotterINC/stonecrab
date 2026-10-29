@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as the response to function 15 and checked against the request below.
+# request: 0F 00 13 00 0A 02 CD 01 (ten coils); the response echoes quantity 9
+0F 00 13 00 09

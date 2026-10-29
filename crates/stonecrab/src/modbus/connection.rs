@@ -677,7 +677,12 @@ fn decode_member(
         | ModbusPdu::ReadCoils { .. }
         | ModbusPdu::ReadDiscreteInputs { .. }
         | ModbusPdu::ReadHoldingRegisters { .. }
-        | ModbusPdu::ReadInputRegisters { .. } => Err(mismatch()),
+        | ModbusPdu::ReadInputRegisters { .. }
+        | ModbusPdu::WriteMultipleCoils { .. }
+        | ModbusPdu::WriteSingleRegister { .. }
+        | ModbusPdu::WriteMultipleRegisters { .. }
+        | ModbusPdu::WriteSingleRegisterResponse { .. }
+        | ModbusPdu::WriteMultipleResponse { .. } => Err(mismatch()),
     }
 }
 

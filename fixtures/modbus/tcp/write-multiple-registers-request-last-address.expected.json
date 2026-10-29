@@ -1,0 +1,6 @@
+{
+  "direction": "request",
+  "function": 16,
+  "start": 65534,
+  "registers": [1, 2]
+}

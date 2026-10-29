@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as a request.
+# start 0xFFFF, quantity 2, byte count 1
+0F FF FF 00 02 01 03

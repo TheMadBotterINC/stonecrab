@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Modbus Application Protocol V1.1b section 6.12, Write Multiple Registers, request layout ending at the last wire address.
+# Start 0xFFFE, quantity 2: registers 65534 and 65535.
+10 FF FE 00 02 04 00 01 00 02

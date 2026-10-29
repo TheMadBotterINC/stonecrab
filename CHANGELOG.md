@@ -20,6 +20,14 @@ placeholder.
   the provided `ProtocolAddress::spans_multiple_words` (false by default, true for Modbus
   addresses wider than one register) and `validate_for`; the testkit's `FixtureAddress`
   and `ConventionDriver` can declare wide addresses.
+- Modbus write PDUs as upstream emits them (PDU codec only; `Capabilities.write` stays
+  false and no write goes on the wire): `FunctionCode` gains `WriteSingleRegister`,
+  `WriteMultipleCoils` and `WriteMultipleRegisters`, `ModbusPdu` gains their requests and
+  responses and `ModbusPdu::write_request`, which picks function 15, 06 or 16 for a payload.
+  Behavior change: function codes 06, 15 and 16 now decode (`FunctionCode::from_u8` returns the
+  named variant, `decode_request` and `decode_response` accept them) instead of being refused
+  as `Unknown`; the enums are `non_exhaustive`, so this is not a semver break. FC05 is still
+  not decoded.
 - `stonecrab::sensors` now denies `clippy::indexing_slicing` (checked by `lint-attrs`), like
   the other modules that parse untrusted input; no code in the module needed to change.
 - Release process and evidence (no crate changes): ADR-0017, `release.toml`,

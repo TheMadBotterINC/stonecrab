@@ -7,8 +7,8 @@ mod tests {
     use proptest::prelude::*;
     use stonecrab::codec::{BoundedReader, BoundedWriter};
     use stonecrab::modbus::{
-        FunctionCode, MAX_PDU_BYTES, ModbusPdu, decode_request, decode_response, encode_request,
-        encode_response,
+        FunctionCode, MAX_PDU_BYTES, ModbusArea, ModbusPdu, decode_request, decode_response,
+        encode_request, encode_response,
     };
 
     const READS: [FunctionCode; 4] = [
@@ -16,6 +16,12 @@ mod tests {
         FunctionCode::ReadDiscreteInputs,
         FunctionCode::ReadHoldingRegisters,
         FunctionCode::ReadInputRegisters,
+    ];
+
+    const WRITES: [FunctionCode; 3] = [
+        FunctionCode::WriteSingleRegister,
+        FunctionCode::WriteMultipleCoils,
+        FunctionCode::WriteMultipleRegisters,
     ];
 
     fn request_of(function: FunctionCode, start: u16, quantity: u16) -> ModbusPdu {
@@ -90,6 +96,70 @@ mod tests {
             }
         }
 
+        // covers: MB-TCP-WRITE, MB-LIMIT-COILS, MB-LIMIT-REGISTERS, MB-LIMIT-SPAN
+        // covers: SPEC mandatory-failure-cases / F1 oversized lengths
+        #[test]
+        fn prop_write_request_is_chosen_encoded_and_decoded_exactly_when_it_is_legal(
+            area in proptest::sample::select(vec![ModbusArea::Coil, ModbusArea::HoldingRegister]),
+            start in prop_oneof![any::<u16>(), 65_000_u16..=u16::MAX],
+            quantity in prop_oneof![any::<u16>(), 0_u16..=130, 1_960_u16..=1_975],
+            delta in prop_oneof![Just(0_isize), Just(0), Just(0), Just(-1), Just(1)],
+        ) {
+            let (limit, exact) = if area == ModbusArea::Coil {
+                (1_968_u16, usize::from(quantity).div_ceil(8))
+            } else {
+                (123, usize::from(quantity).saturating_mul(2))
+            };
+            let len = exact.saturating_add_signed(delta);
+            let payload = vec![0xA5_u8; if len <= 600 { len } else { 0 }];
+            let end = usize::from(start).saturating_add(usize::from(quantity));
+            let legal = (1..=limit).contains(&quantity) && end <= 65_536 && payload.len() == exact;
+            let picked = ModbusPdu::write_request(area, start, quantity, &payload);
+            prop_assert_eq!(picked.is_ok(), legal);
+            if let Ok(pdu) = picked {
+                let expected = if area == ModbusArea::Coil {
+                    FunctionCode::WriteMultipleCoils
+                } else if payload.len() == 2 {
+                    FunctionCode::WriteSingleRegister
+                } else {
+                    FunctionCode::WriteMultipleRegisters
+                };
+                prop_assert_eq!(pdu.function(), expected);
+                let mut writer = BoundedWriter::new(MAX_PDU_BYTES);
+                prop_assert_eq!(encode_request(&pdu, &mut writer), Ok(()));
+                prop_assert_eq!(
+                    decode_request(&mut BoundedReader::new(writer.as_slice())),
+                    Ok(pdu)
+                );
+            }
+        }
+
+        // covers: MB-TCP-WRITE, MB-LIMIT-COILS, MB-LIMIT-REGISTERS, MB-LIMIT-SPAN
+        #[test]
+        fn prop_write_multiple_response_round_trips_exactly_when_it_is_legal(
+            coils in any::<bool>(),
+            start in prop_oneof![any::<u16>(), 65_000_u16..=u16::MAX],
+            quantity in prop_oneof![any::<u16>(), 0_u16..=130, 1_960_u16..=1_975],
+        ) {
+            let (function, limit) = if coils {
+                (FunctionCode::WriteMultipleCoils, 1_968_u16)
+            } else {
+                (FunctionCode::WriteMultipleRegisters, 123)
+            };
+            let end = usize::from(start).saturating_add(usize::from(quantity));
+            let legal = (1..=limit).contains(&quantity) && end <= 65_536;
+            let [start_hi, start_lo] = start.to_be_bytes();
+            let [quantity_hi, quantity_lo] = quantity.to_be_bytes();
+            let wire = [function.as_u8(), start_hi, start_lo, quantity_hi, quantity_lo];
+            let decoded = decode_response(&mut BoundedReader::new(&wire), function);
+            prop_assert_eq!(decoded.is_ok(), legal);
+            if let Ok(pdu) = decoded {
+                let mut writer = BoundedWriter::new(MAX_PDU_BYTES);
+                prop_assert_eq!(encode_response(&pdu, &mut writer), Ok(()));
+                prop_assert_eq!(writer.as_slice(), wire.as_slice());
+            }
+        }
+
         // covers: SPEC mandatory-failure-cases / F1 malformed discriminators, truncated payloads
         #[test]
         fn prop_decode_never_panics_and_accepted_bytes_re_encode(
@@ -104,6 +174,12 @@ mod tests {
                 vec![0x04],
                 vec![0x81],
                 vec![0x83],
+                vec![0x06],
+                vec![0x0F],
+                vec![0x10],
+                vec![0x86],
+                vec![0x8F],
+                vec![0x90],
             ];
             for prefix in prefixes {
                 let mut input = prefix;
@@ -115,7 +191,7 @@ mod tests {
                     prop_assert_eq!(encode_request(&pdu, &mut writer), Ok(()));
                     prop_assert_eq!(writer.as_slice(), input.as_slice());
                 }
-                for function in READS {
+                for function in READS.into_iter().chain(WRITES) {
                     if let Ok(pdu) = decode_response(&mut BoundedReader::new(&input), function) {
                         let mut writer = BoundedWriter::new(MAX_PDU_BYTES);
                         prop_assert_eq!(encode_response(&pdu, &mut writer), Ok(()));

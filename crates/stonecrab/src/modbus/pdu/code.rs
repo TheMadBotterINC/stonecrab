@@ -2,8 +2,9 @@
 
 /// The function code of a PDU.
 ///
-/// The alpha speaks function codes 01 to 04. Every other value, including the write codes
-/// 05, 06, 15 (0x0F), 16 (0x10) and the file record codes 20 and 21 (0x14, 0x15), is
+/// The codec speaks the read function codes 01 to 04 and the three write codes upstream
+/// emits: 06, 15 (0x0F) and 16 (0x10). Every other value, including Write Single Coil (05,
+/// which upstream never sends) and the file record codes 20 and 21 (0x14, 0x15), is
 /// [`Unknown`](Self::Unknown): the codec carries the number and refuses to decode a PDU
 /// that uses it. Use [`from_u8`](Self::from_u8) to build a value so that a number with a
 /// named variant never ends up as `Unknown`.
@@ -15,13 +16,15 @@
 /// assert_eq!(FunctionCode::from_u8(0x03), FunctionCode::ReadHoldingRegisters);
 /// assert_eq!(FunctionCode::ReadHoldingRegisters.as_u8(), 0x03);
 /// assert_eq!(FunctionCode::ReadHoldingRegisters.exception_code(), 0x83);
-/// assert_eq!(FunctionCode::from_u8(0x10), FunctionCode::Unknown(0x10));
+/// assert_eq!(FunctionCode::from_u8(0x10), FunctionCode::WriteMultipleRegisters);
+/// assert_eq!(FunctionCode::from_u8(0x05), FunctionCode::Unknown(0x05));
 /// ```
 ///
 /// # Compatibility: docs/parity/modbus.md#MB-TCP-READ-HR
-/// The four named variants are the upstream read PDUs: FC01 `MB-TCP-READ-COIL`, FC02
-/// `MB-TCP-READ-DI`, FC03 `MB-TCP-READ-HR` and FC04 `MB-TCP-READ-IR`. The write PDUs
-/// upstream builds (`MB-TCP-WRITE`) are not transcribed (decision D3).
+/// The four read variants are the upstream read PDUs: FC01 `MB-TCP-READ-COIL`, FC02
+/// `MB-TCP-READ-DI`, FC03 `MB-TCP-READ-HR` and FC04 `MB-TCP-READ-IR`. The three write
+/// variants are the PDUs upstream builds for `MB-TCP-WRITE`; FC05 stays `Unknown`
+/// (`MB-QUIRK-C`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum FunctionCode {
@@ -33,12 +36,19 @@ pub enum FunctionCode {
     ReadHoldingRegisters,
     /// 0x04, read input registers.
     ReadInputRegisters,
+    /// 0x06, write single register.
+    WriteSingleRegister,
+    /// 0x0F (15), write multiple coils.
+    WriteMultipleCoils,
+    /// 0x10 (16), write multiple registers.
+    WriteMultipleRegisters,
     /// Any other function code, kept as the number that was on the wire.
     Unknown(u8),
 }
 
 impl FunctionCode {
-    /// The function code for `value`, `Unknown` when it is not one of 0x01 to 0x04.
+    /// The function code for `value`, `Unknown` when it is not 0x01 to 0x04, 0x06, 0x0F or
+    /// 0x10.
     ///
     /// # Examples
     /// ```
@@ -53,6 +63,9 @@ impl FunctionCode {
             0x02 => Self::ReadDiscreteInputs,
             0x03 => Self::ReadHoldingRegisters,
             0x04 => Self::ReadInputRegisters,
+            0x06 => Self::WriteSingleRegister,
+            0x0F => Self::WriteMultipleCoils,
+            0x10 => Self::WriteMultipleRegisters,
             other => Self::Unknown(other),
         }
     }
@@ -72,6 +85,9 @@ impl FunctionCode {
             Self::ReadDiscreteInputs => 0x02,
             Self::ReadHoldingRegisters => 0x03,
             Self::ReadInputRegisters => 0x04,
+            Self::WriteSingleRegister => 0x06,
+            Self::WriteMultipleCoils => 0x0F,
+            Self::WriteMultipleRegisters => 0x10,
             Self::Unknown(value) => value,
         }
     }

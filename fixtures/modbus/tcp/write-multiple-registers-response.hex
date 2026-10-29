@@ -1,5 +1,4 @@
 # PDU bytes only: no MBAP header, no unit identifier.
 # Modbus Application Protocol V1.1b section 6.12, Write Multiple Registers, response example.
-# Starting address 1, quantity 2. Write PDUs are out of the alpha scope (D3):
-# decoded as the response to function 0x10 the codec refuses it.
+# The normal response echoes the start address 0x0001 and the quantity 2.
 10 00 01 00 02

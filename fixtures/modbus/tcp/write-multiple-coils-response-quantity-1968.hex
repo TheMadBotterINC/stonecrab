@@ -1,0 +1,3 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Modbus Application Protocol V1.1b section 6.11, Write Multiple Coils, response to the largest legal request: start 0, quantity 1968 (0x07B0).
+0F 00 00 07 B0
