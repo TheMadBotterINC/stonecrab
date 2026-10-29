@@ -370,6 +370,49 @@ jobs:
           path: target/interop-evidence/diagslave/
       - run: interop/diagslave/interop.sh stop
         if: ${{ always() }}
+  interop-rtu:
+    # Modbus RTU framing and CRC-16 (modbus-rtu:tcp, the stream of a serial-to-IP gateway)
+    # against an independent peer: the diagslave 3.6 image of interop-udp run as Modbus RTU
+    # over TCP ("diagslave -m enc -a 1"), serving unit 1 on 127.0.0.1:1503 in the container
+    # stonecrab-interop-diagslave-rtu, so the two jobs never share a name or a port (slice
+    # S59b, ADR-0024). The steps are the subcommands of interop/diagslave/interop.sh in its
+    # enc mode, which `mise run interop-rtu` (and `mise run interop`) also runs. No tc, no
+    # netem: nothing here needs a kernel module.
+    runs-on: ubuntu-latest
+    env:
+      INTEROP_DIAGSLAVE_MODE: enc
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
+        with:
+          toolchain: "1.99.1"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.148
+      # docker build -f interop/diagslave/Dockerfile -t stonecrab-interop-diagslave:local .
+      # Fails on a diagslave archive whose SHA-256 is not the pinned one.
+      - run: interop/diagslave/interop.sh build
+      # docker run -d -p 127.0.0.1:1503:1503/tcp stonecrab-interop-diagslave:local enc
+      - run: interop/diagslave/interop.sh start
+      # Probe until 60 s have elapsed (a real FC03 read as an RTU frame with its CRC, see
+      # interop.sh).
+      - run: interop/diagslave/interop.sh wait
+      # cargo nextest run --locked -p stonecrab --all-features --run-ignored ignored-only
+      #   -E 'binary(modbus_interop_diagslave_rtu) & test(/^tests::interop_/)' --test-threads 1
+      # The step fails when the filter does not select exactly EXPECTED_TESTS (in interop.sh)
+      # tests.
+      - run: interop/diagslave/interop.sh tests
+      # Image id, base, archive checksum, the command line diagslave ran with and the server log
+      # next to the test output.
+      - run: interop/diagslave/interop.sh evidence
+        if: ${{ always() }}
+      - uses: actions/upload-artifact@v6
+        if: ${{ always() }}
+        with:
+          name: interop-rtu-evidence
+          path: target/interop-evidence/diagslave-rtu/
+      - run: interop/diagslave/interop.sh stop
+        if: ${{ always() }}
   machete:
     runs-on: ubuntu-latest
     steps:

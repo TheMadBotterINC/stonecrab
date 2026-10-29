@@ -377,3 +377,40 @@ behind noise on the same line is lost as well. Go keeps such a frame.
   of the framer and of the parameters, and the fuzz target `fuzz_modbus_ascii`.
 - `docs/parity/modbus-serial.md` records the ASCII rows as implemented, with the divergences
   of decisions 5 and 6 and the LRC fail-fast.
+
+## Addendum (S59b, 2026-10-29): RTU against an independent peer
+### Status
+Accepted (2026-10-29), as slice S59b of docs/POST_ALPHA_PLAN.md. It amends decision 14 above
+(evidence level, "no interop peer exists yet") and changes no other decision. No code under
+`crates/stonecrab/src` changes.
+
+### Decision
+1. **The peer.** The diagslave 3.6 image of S61 (ADR-0027) is run a second way: `diagslave -m
+   enc -p 1503 -a 1`, Modbus RTU encapsulated in TCP, which is the stream of the `tcp`
+   carrier (decision 10 above). `serve.sh` takes the mode; `interop.sh` reads
+   `INTEROP_DIAGSLAVE_MODE`; the container, the host port (TCP 1503), the test file and the
+   evidence directory are the mode's own, so the UDP job is unchanged and the two never
+   collide. The CI job is `interop-rtu`; `mise run interop-rtu` runs it and `mise run
+   interop` includes it, because TCP works where UDP does not forward.
+2. **One unit, `-a 1`.** Without `-a` diagslave answers every unit id and the
+   request-to-an-unserved-unit case cannot be observed. With `-a 1` a frame for another unit
+   (and one with a wrong CRC) makes diagslave close the connection with no reply: the driver
+   reports `Disconnected`. That is recorded as the peer's behavior, not as a rule of the
+   driver; a unit that is merely silent is still `Timeout` (decision 7 and the fake-transport
+   tests). The other tests need one unit only.
+3. **Evidence level.** Over the `tcp` carrier, reads of every area, writes read back (the
+   driver sends FC06 or FC16 for registers and FC15 for coils; diagslave's log does not tell
+   05 from 15 or 06 from 16), a range selection, requests and replies of 255 bytes, ping,
+   exception 02 (for function codes 20 and 21, which diagslave refuses always) and an
+   unserved unit are `interoperability-tested`, against a closed-source peer whose RTU
+   framing shares no code with Stonecrab. The first run was local (colima, 9 of 9, 2026-10-29);
+   the first hosted run is the next evidence. The serial carrier, the silence and the drain
+   (a gateway has no line), a bad CRC from the slave and ASCII are not touched: they stay
+   `simulator-tested`. The input registers and discrete inputs of diagslave alias its holding
+   registers and coils, so the tests read them at cells written through the other area.
+
+### Compliance
+- `crates/stonecrab/tests/modbus_interop_diagslave_rtu.rs`, `interop/diagslave/`,
+  `docs/parity/modbus-serial.md` (rows `MBS-OP-READ`, `MBS-OP-WRITE`, `MBS-OP-PING`,
+  `MBS-TRANS-TCP`, `MBS-RTU-CRC` and `MBS-RTU-WIRE-MODEL` carry `automated-verified` for the
+  RTU half over a gateway).

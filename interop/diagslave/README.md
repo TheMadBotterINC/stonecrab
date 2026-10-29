@@ -1,11 +1,22 @@
-# Stonecrab Modbus UDP interoperability peer
+# Stonecrab diagslave interoperability peer (Modbus UDP and Modbus RTU over TCP)
 
-The independent peer of `modbus-tcp:udp` (slice S61, ADR-0027): diagslave 3.6, the free
-Modbus slave simulator of proconX, run as a Modbus UDP slave (`diagslave -m udp`), with
-`tc netem` inside the container to lose, delay, duplicate and reorder its replies, which
-Toxiproxy cannot do for UDP. The `interop-udp` job of `.github/workflows/ci.yml`,
-and `mise run interop-udp` build it, run the driver against it and keep the evidence. It is
-not part of `mise run interop`, because it needs a Docker that forwards published UDP ports.
+The independent peer of `modbus-tcp:udp` (slice S61, ADR-0027) and of `modbus-rtu:tcp` (slice
+S59b, ADR-0024): diagslave 3.6, the free Modbus slave simulator of proconX, in one image run
+in two modes. `serve.sh` takes the mode as its argument.
+
+- `udp` (the default): a Modbus UDP slave (`diagslave -m udp -p 1502`), with `tc netem` inside
+  the container to lose, delay, duplicate and reorder its replies, which Toxiproxy cannot do
+  for UDP. The `interop-udp` job of `.github/workflows/ci.yml` and `mise run interop-udp`
+  build it, run the driver against it and keep the evidence. It is not part of `mise run
+  interop`, because it needs a Docker that forwards published UDP ports.
+- `enc`: a Modbus RTU over TCP slave (`diagslave -m enc -p 1503 -a 1`), which is the stream
+  a serial-to-IP gateway carries: RTU frames with their CRC-16 on a TCP connection, the
+  carrier of `modbus-rtu:tcp://host:port`. The `interop-rtu` job and `mise run interop-rtu`
+  (which `mise run interop` includes, because TCP is forwarded everywhere) do the same for
+  it. `interop.sh` reads the mode from `INTEROP_DIAGSLAVE_MODE` (`udp` by default, `enc`
+  for the RTU run; the task and the job set it). The two modes use different container
+  names, host ports (UDP 1502, TCP 1503), test files and evidence directories, so the two
+  jobs never collide.
 
 ## First-party statement, license and provenance
 
@@ -31,10 +42,59 @@ binary of its own architecture (x86_64 or aarch64); the aarch64 binary's banner 
 
 ## What it serves
 
-diagslave answers every unit id, keeps holding registers, input registers, coils and inputs in
-memory, zero until written, and logs every request. The tests write the three holding
-registers 101 to 103 (one-based, 0x1111, 0x2222 and 0x3333) before they read them, so a reply
-to the wrong request shows as a wrong value.
+Without `-a`, diagslave answers every unit id, which is how the `udp` mode runs it. It keeps
+holding registers, input registers, coils and inputs in memory, zero until written, and logs
+every request. The tests write the three holding registers 101 to 103 (one-based, 0x1111,
+0x2222 and 0x3333) before they read them, so a reply to the wrong request shows as a wrong
+value.
+
+### The `enc` mode
+
+diagslave 3.6 documents `-m enc` as "Encapsulated Modbus RTU over TCP" (README.txt, version
+3.0). Its start-up banner reads "Protocol configuration: Encapsulated RTU over TCP". What
+the RTU tests rely on, all of it observed on this image on 2026-10-29 and none of it
+documented by proconX beyond the mode name:
+
+- `-a 1`: the slave address 1. Without `-a` diagslave answers every unit id (the banner reads
+  "address = -1"); with it, a frame for another unit (0, 2 and 255 were tried; 2 and 17
+  without `-a` are answered) gets no reply and diagslave closes the connection at once. It is
+  not silence: the peer answers a unit it does not serve by closing the TCP connection,
+  which the driver reports as `Disconnected`. A frame whose CRC is wrong, an unknown function
+  code (0x41 and 0x63) and function codes 07 and 17 get the same treatment.
+- The areas are in memory, zero until written, and they outlive a connection (they live as
+  long as the container). Input registers are the holding registers and discrete inputs are
+  the coils: a write to one is read from the other. The tests write the cells they read.
+- Functions 01 to 06, 15 and 16 are served as written, with the standard reply frames; a
+  read of 125 registers (a reply of 255 bytes) and a write of 123 registers are served. A
+  read of zero registers, of more than 125, or that runs past register 65536 gets exception
+  02.
+- Function codes 20 and 21 (read and write file record, which Stonecrab sends for the
+  extended registers) are answered with exception 02, whatever the file and the record: the
+  tests use that as the exception a real slave sends. Function 22 and 43/14 are echoed or
+  answered, function 23 gets exception 03.
+- Connections: more than one at a time are accepted; a connection idle for several seconds is
+  not closed (4 s was tried), and the options `-o` (master activity time-out, 3 s) and `-c`
+  (connection time-out, 60 s) are left at their defaults.
+- The log names the operation (`readHoldingRegisters`, `writeCoils`, `readFileRecord`) with
+  the first reference (one-based, like Stonecrab's addresses) and the count. It does not tell
+  function code 05 from 15 or 06 from 16: both of a pair log as `writeCoils` or
+  `writeHoldingRegisters`. Which codes the driver sends is pinned by `tests/modbus_rtu.rs`
+  (FC06 for one register, FC16 for more, FC15 for coils: `FC05 is never sent`), not here.
+
+The nine tests of `modbus_interop_diagslave_rtu` write the values they read, in cells of their
+own, over `modbus-rtu:tcp://127.0.0.1:1503`:
+
+| Test | What it shows |
+| --- | --- |
+| `interop_rtu_holding_registers_are_written_and_read_back` | FC06 and FC16 writes of a `UINT`, a `UDINT` and a `REAL`, read back by FC03 as the same values and as their halves |
+| `interop_rtu_input_registers_read_what_diagslave_aliases_to_the_holding_registers` | FC04 reads of cells written through the holding area |
+| `interop_rtu_coils_are_written_and_read_back` | ten coil writes, one FC01 read of the pattern |
+| `interop_rtu_discrete_inputs_read_what_diagslave_aliases_to_the_coils` | FC02 reads of coils just written |
+| `interop_rtu_a_range_selection_is_one_request_and_one_list_of_what_was_written` | `holding-register:501[0..5]:UINT` written and read as one list in one request |
+| `interop_rtu_the_longest_frames_are_framed_and_checked_each_way` | a write of 123 registers and a read of 125: requests and replies of 255 bytes |
+| `interop_rtu_exception_02_is_a_typed_device_exception_and_the_session_goes_on` | FC20 and FC21 refused with exception 02: `InvalidAddress`, status code 2, and the connection is still good |
+| `interop_rtu_a_unit_the_slave_does_not_serve_is_a_closed_connection_not_a_reply` | unit 2: `Disconnected`, and unit 1 on another connection is untouched |
+| `interop_rtu_ping_reads_the_ping_address` | ping |
 
 ## The faults
 
@@ -55,7 +115,7 @@ loads the module first. `netem` shapes what leaves the container, so it acts on 
 | `interop_udp_netem_duplicated_replies_are_discarded_by_correlation` | `duplicate 100%` | a raw probe gets two copies of one reply, then twelve reads, each with its own value |
 | `interop_udp_netem_reordered_replies_never_answer_the_wrong_request` | `delay 400ms reorder 50%` | thirty reads with a 250 ms deadline: every answer has the right value, every failure is `Timeout`, and there is at least one of each |
 
-## Build and run
+## Build and run (udp)
 
 From the repository root, with Docker running:
 
@@ -77,4 +137,23 @@ only, so the readiness probe fails there (colima's grpc port forwarder,
 `--port-forwarder grpc`, is documented to forward UDP too; it was not tried for S61).
 `mise run interop-udp` does all of it, including the check that the filter selects exactly
 six tests, and writes the evidence to `target/interop-evidence/diagslave/`: the test output,
-the image id with its base and the archive checksum, the `iproute2` version and the server log.
+the image id with its base and the archive checksum, the `iproute2` version, the command line
+diagslave ran with and the server log.
+
+## Build and run (enc)
+
+```sh
+docker build -f interop/diagslave/Dockerfile -t stonecrab-interop-diagslave:local .
+docker run -d --name stonecrab-interop-diagslave-rtu \
+  -p 127.0.0.1:1503:1503/tcp stonecrab-interop-diagslave:local enc
+STONECRAB_INTEROP_DIAGSLAVE_RTU=modbus-rtu:tcp://127.0.0.1:1503 \
+  cargo nextest run -p stonecrab --all-features --run-ignored ignored-only --test-threads 1 \
+  -E 'binary(modbus_interop_diagslave_rtu) & test(/^tests::interop_/)'
+docker rm -f stonecrab-interop-diagslave-rtu
+```
+
+`mise run interop-rtu` does all of it, including the check that the filter selects exactly
+nine tests, and writes the evidence to `target/interop-evidence/diagslave-rtu/`: the test
+output, the image id with its base and the archive checksum, the command line (`mode: enc`,
+`command: /usr/local/bin/diagslave -m enc -p 1503 -a 1`) and the server log. The run needs
+no `NET_ADMIN` capability and no kernel module.

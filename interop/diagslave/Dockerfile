@@ -1,6 +1,7 @@
 # Stonecrab interoperability peer (slice S61): diagslave 3.6, the free Modbus slave simulator of
-# proconX (https://www.modbusdriver.com/diagslave.html), serving Modbus UDP ("-m udp"), with
-# iproute2 for the "tc netem" faults the tests apply inside the container. First-party recipe,
+# proconX (https://www.modbusdriver.com/diagslave.html), serving Modbus UDP ("-m udp") or, since
+# slice S59b, Modbus RTU over TCP ("-m enc"; serve.sh takes the mode), with iproute2 for the
+# "tc netem" faults the UDP tests apply inside the container. First-party recipe,
 # Apache-2.0; diagslave itself is not in this repository and the image is never published: the
 # build downloads the archive and checks it by SHA-256 (see PROVENANCE.toml for its license).
 # Build with the repository root as the context:
@@ -46,5 +47,5 @@ COPY interop/diagslave/serve.sh /usr/local/bin/serve.sh
 RUN useradd --system --no-create-home --uid 10001 modbus
 USER 10001
 
-EXPOSE 1502/udp
+EXPOSE 1502/udp 1503/tcp
 ENTRYPOINT ["/usr/local/bin/serve.sh"]

@@ -8,18 +8,21 @@
 #   mise run parity        = CI "parity" job (scripts/parity-check.sh and its --self-test)
 #   mise run features      = CI "features" job
 #   mise run examples      = CI "examples" job
-#   mise run interop       = CI "interop", "interop-libmodbus", "interop-modbus-tk" and
-#                            "interop-toxiproxy" jobs (needs Docker; interop/pymodbus/interop.sh,
-#                            then interop/libmodbus/interop.sh, interop/modbus-tk/interop.sh and
-#                            interop/toxiproxy/interop.sh, evidence under target/interop-evidence/
-#                            and its libmodbus/, modbus-tk/ and toxiproxy/). The UDP peer is not
-#                            part of it: it needs a Docker that forwards published UDP ports,
-#                            which colima's default ssh forwarder does not.
+#   mise run interop       = CI "interop", "interop-libmodbus", "interop-modbus-tk",
+#                            "interop-toxiproxy" and "interop-rtu" jobs (needs Docker;
+#                            interop/pymodbus/interop.sh, then interop/libmodbus/interop.sh,
+#                            interop/modbus-tk/interop.sh, interop/toxiproxy/interop.sh and
+#                            interop/diagslave/interop.sh in its enc mode, evidence under
+#                            target/interop-evidence/ and its libmodbus/, modbus-tk/, toxiproxy/
+#                            and diagslave-rtu/). The UDP peer is not part of it: it needs a
+#                            Docker that forwards published UDP ports, which colima's default
+#                            ssh forwarder does not.
 #   mise run interop-libmodbus = CI "interop-libmodbus" job alone (slice S52a)
 #   mise run interop-modbus-tk = CI "interop-modbus-tk" job alone (slice S52c)
 #   mise run interop-toxiproxy = CI "interop-toxiproxy" job alone (slice S52b)
 #   mise run interop-udp   = CI "interop-udp" job (slice S61; Docker must forward UDP: Docker
 #                            Desktop, or colima with its grpc port forwarder)
+#   mise run interop-rtu   = CI "interop-rtu" job alone (slice S59b)
 #   mise run fuzz          = CI "fuzz-smoke" job (scripts/fuzz-smoke.sh; optional seconds argument)
 #   mise run machete       = CI "machete" job
 #   mise run dependencies  = CI "dependencies" job
@@ -160,12 +163,13 @@ run = [
 ]
 
 [tasks.interop]
-description = "The interop peers in Docker, one after the other: pymodbus (the interop tests, the modbus_tcp_read example and profile_read for each modbus-tcp profile), libmodbus (its tests), the modbus-tk multi-unit server (its unit-ID tests), then the failure paths of pymodbus and libmodbus behind Toxiproxy with a tshark decode, keeping the evidence of each (ADR-0015 decision 16, slices S52a, S52c and S52b; the UDP peer of S61 is the separate interop-udp task)"
+description = "The interop peers in Docker, one after the other: pymodbus (the interop tests, the modbus_tcp_read example and profile_read for each modbus-tcp profile), libmodbus (its tests), the modbus-tk multi-unit server (its unit-ID tests), then the failure paths of pymodbus and libmodbus behind Toxiproxy with a tshark decode, keeping the evidence of each (ADR-0015 decision 16, slices S52a, S52c and S52b), then Modbus RTU over TCP against diagslave (slice S59b); the UDP peer of S61 is the separate interop-udp task"
 run = [
   "interop/pymodbus/interop.sh run",
   "interop/libmodbus/interop.sh run",
   "interop/modbus-tk/interop.sh run",
   "interop/toxiproxy/interop.sh run",
+  "INTEROP_DIAGSLAVE_MODE=enc interop/diagslave/interop.sh run",
 ]
 
 [tasks.interop-libmodbus]
@@ -183,6 +187,10 @@ run = "interop/toxiproxy/interop.sh run"
 [tasks.interop-udp]
 description = "Build and run diagslave 3.6 as a Modbus UDP slave in Docker, run the modbus-tcp:udp interop tests against it with tc netem loss, delay, duplication and reordering, keep the evidence in target/interop-evidence/diagslave/ (slice S61, ADR-0027)"
 run = "interop/diagslave/interop.sh run"
+
+[tasks.interop-rtu]
+description = "Build and run diagslave 3.6 as a Modbus RTU over TCP slave (diagslave -m enc -a 1) in Docker, run the modbus-rtu:tcp interop tests against it (reads of each area, writes read back, the longest frames, an exception, a unit it does not serve, ping), keep the evidence in target/interop-evidence/diagslave-rtu/ (slice S59b, ADR-0024)"
+run = "INTEROP_DIAGSLAVE_MODE=enc interop/diagslave/interop.sh run"
 
 [tasks.fuzz]
 description = "cargo deny on the fuzz workspace, then every fuzz target for 60 s (ADR-0009)"

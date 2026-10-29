@@ -35,6 +35,8 @@
 # diagslave is proprietary freeware, not open source: it is an independent peer for
 # interoperability evidence (interoperability-tested at most) and nothing of it is copied
 # into the repository. The register values the tests expect are written by the tests first.
+# Slice S59b runs the same image and the same archive as a Modbus RTU over TCP slave
+# ("-m enc -a 1"); the pins and the terms above are unchanged.
 
 [[file]]
 path = "Dockerfile"
@@ -50,15 +52,15 @@ note = "First-party. Keeps the build context to the file the Dockerfile copies."
 
 [[file]]
 path = "serve.sh"
-origin = "Authored for S61 from the usage text of diagslave 3.6 (README.txt: -m udp, -p)"
+origin = "Authored for S61 from the usage text of diagslave 3.6 (README.txt: -m udp, -p); the enc mode added for S59b from the same text (-m enc, -a, -p)"
 license = "Apache-2.0"
-note = "First-party. Runs diagslave as a Modbus UDP slave on port 1502."
+note = "First-party. Runs diagslave as a Modbus UDP slave on port 1502 (the default) or, with the argument enc, as a Modbus RTU over TCP slave for unit 1 on port 1503."
 
 [[file]]
 path = "interop.sh"
 origin = "Authored for S61, in the shape of interop/libmodbus/interop.sh"
 license = "Apache-2.0"
-note = "First-party. Build, run, probe, test and collect evidence; shared by the CI job and mise run interop-udp."
+note = "First-party. Build, run, probe, test and collect evidence in both modes (INTEROP_DIAGSLAVE_MODE udp or enc); shared by the CI jobs interop-udp and interop-rtu and by mise run interop-udp, interop-rtu and interop."
 
 [[file]]
 path = "README.md"

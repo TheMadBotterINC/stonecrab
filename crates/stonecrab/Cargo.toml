@@ -173,6 +173,10 @@ name = "modbus_interop_diagslave"
 required-features = ["modbus", "testkit"]
 
 [[test]]
+name = "modbus_interop_diagslave_rtu"
+required-features = ["modbus", "testkit"]
+
+[[test]]
 name = "modbus_interop_toxiproxy"
 required-features = ["modbus", "testkit"]
 

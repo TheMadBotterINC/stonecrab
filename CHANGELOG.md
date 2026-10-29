@@ -5,6 +5,24 @@ as `stonecrab` 0.2.0 (2026-10-27); `stonecrab` 0.1.0 is the specification-stage
 placeholder.
 
 ## Unreleased
+- Modbus RTU against an independent peer (ADR-0024, slice S59b; no crate API change): the
+  diagslave 3.6 image of the UDP run now also serves Modbus RTU over TCP (`diagslave -m enc
+  -p 1503 -a 1`, one unit), the stream a serial-to-IP gateway carries, which
+  `modbus-rtu:tcp://host:port` speaks. `interop/diagslave/serve.sh` takes the mode
+  (`udp`, the default, or `enc`) and `interop.sh` reads `INTEROP_DIAGSLAVE_MODE`, with its own
+  container (`stonecrab-interop-diagslave-rtu`), port, evidence directory and test file, so
+  the UDP job is unchanged. Nine ignored tests (`modbus_interop_diagslave_rtu`) write and
+  read back every area through `ModbusRtuDriver`, a range selection, a write of 123 and a read
+  of 125 registers (frames of 255 bytes), exception 02 for the file-record functions 20 and
+  21 (the connection stays good), a unit the slave does not serve (diagslave closes the
+  connection: `Disconnected`) and ping. New CI job `interop-rtu` and task `mise run
+  interop-rtu`, which `mise run interop` includes (TCP works on colima; the UDP peer still
+  needs a Docker that forwards UDP). Passed locally, 9 of 9, on 2026-10-29; the first hosted
+  run is the next evidence. Parity rows `MBS-OP-READ`, `MBS-OP-WRITE`, `MBS-OP-PING`,
+  `MBS-TRANS-TCP`, `MBS-RTU-CRC` and `MBS-RTU-WIRE-MODEL` are automated-verified for the RTU
+  half over a gateway; Modbus RTU over a gateway is interoperability-tested, over a serial
+  port still simulator-tested. The shared interop `Peer` of the tests can now be built with
+  any driver.
 - Board adapters, the ADXL345 accelerometer over I2C (ADR-0029, slice S64; additive): under
   the existing `boards` feature (no new feature, no new dependency), `stonecrab::boards`
   gains the `I2cBus` trait (`write` and `write_read`, deadline-bounded, a NACK is

@@ -15,8 +15,10 @@ alpha" below.
 The TCP driver has been checked against an independent server, pymodbus 3.8.6, and no
 physical device; over UDP it runs on loopback sockets, and its `interop-udp` job against
 diagslave 3.6 with `tc netem` faults passed its first hosted run (2026-10-29, run
-40830080420, 6 of 6); the RTU and ASCII drivers run on the in-memory transport and over
-a loopback socket only.
+40830080420, 6 of 6); the RTU driver has also met diagslave 3.6 as a Modbus RTU over TCP
+slave through its gateway carrier (job `interop-rtu`, S59b, passed locally on 2026-10-29,
+9 of 9; the hosted run is the next evidence), never over a serial line; the ASCII driver
+runs on the in-memory transport and over a loopback socket only.
 No independent server serves the file record function codes, so the extended registers are
 checked against the specification examples, the upstream PLC4X frames and a first-party
 device on the in-memory transport only.
@@ -210,8 +212,8 @@ assert!(driver.parse_config("modbus-rtu://COM3?default-unit-identifier=0").is_er
 | --- | --- |
 | Read, write, ping and subscribe by polling over RTU framing, with the operations and limits of `modbus-tcp` | simulator-tested |
 | CRC errors, the silence before a request, the drain of a late reply, a lost serial link and its reopen, replies from another unit | simulator-tested |
-| RTU over a serial-to-IP gateway (`modbus-rtu:tcp://`) | simulator-tested (a loopback socket) |
-| Interoperability against an independent RTU server | planned (a virtual serial pair with libmodbus or modbus-tk) |
+| RTU over a serial-to-IP gateway (`modbus-rtu:tcp://`): read of every area, writes read back, a range selection, frames of 255 bytes, ping, an exception, a unit the slave does not serve | interoperability-tested (job `interop-rtu`, diagslave 3.6 as `-m enc -a 1`, 9 of 9 passed locally on 2026-10-29; the hosted run is the next evidence) |
+| Interoperability against an independent RTU server on a serial line | planned (a virtual serial pair with libmodbus or modbus-tk) |
 | Hardware verification on RS-485 | planned (HW2) |
 
 The RTU rows of the
@@ -316,6 +318,7 @@ The layers underneath, with their evidence:
 | Typed register decoding and byte order (`TypedDecoder`) | unit-tested; vector-tested; property-tested; `BIG_ENDIAN` and `LITTLE_ENDIAN` confirmed by the retained upstream PLC4X vectors; the two byte-swap modes are derived from the documented layouts |
 | Read batching (`Batcher`) | unit-tested; property-tested |
 | Connection and driver (`ModbusConnection`, `ModbusTcpDriver`) | unit-tested on the in-memory transport; contract-suite-tested on the in-memory transport and over loopback sockets; one read run over loopback; ten reads, two pings and the contract suite against pymodbus 3.8.6; ten tests against libmodbus 3.1.11 |
+| Connection and driver over RTU (`ModbusRtuDriver`) | unit-tested on the in-memory transport; contract-suite-tested on the in-memory transport; nine tests through the gateway carrier against diagslave 3.6 (`-m enc -a 1`) |
 
 ## Not in the alpha
 Each item is a deferred row of the
@@ -331,8 +334,9 @@ error rather than ignoring it; operations that have no API at all do not exist:
   array form (`MB-ADDR-*`, `MB-TYPE-TIME`); a bytes value (`PlcValue::Bytes`, ADR-0025
   decision 9);
 - the extended registers on any independent server: none of pymodbus 3.8.6, libmodbus
-  3.1.11 and modbus-tk serves function codes 20 and 21 (`MB-ADDR-EXTENDED` is
-  `implemented`, not `automated-verified`);
+  3.1.11 and modbus-tk serves function codes 20 and 21, and diagslave 3.6 parses the RTU
+  frames of both and answers each with exception 02 (S59b), so no value is ever exchanged
+  (`MB-ADDR-EXTENDED` is `implemented`, not `automated-verified`);
 - TLS and TLS-PSK transports (`MB-TCP-TRANSPORTS-TLS`, `MB-TCP-TRANSPORTS-TLS-PSK`) and the
   `udp.` transport options (`MB-CFG-TRANSPORT-OPTIONS`); the RTU and ASCII items that are
   deferred (broadcast, shared ports, the serial read and write timeouts, DTR and RTS) are

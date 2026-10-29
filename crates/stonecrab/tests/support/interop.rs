@@ -1,7 +1,7 @@
-//! The driver side of the interop tests, shared by `modbus_interop_pymodbus.rs` and
-//! `modbus_interop_libmodbus.rs`: a [`Peer`] is a `ModbusTcpDriver` and its connection to
-//! the server a URL names, with the calls the tests make on it and the readers of a
-//! response. Which server and which URL belong to each test file, not to this module.
+//! The driver side of the interop tests, shared by the `modbus_interop_*.rs` files: a
+//! [`Peer`] is a driver (`ModbusTcpDriver`, or the one the test hands over) and its
+//! connection to the server a URL names, with the calls the tests make on it and the readers
+//! of a response. Which server and which URL belong to each test file, not to this module.
 
 #![expect(
     unreachable_pub,
@@ -46,16 +46,20 @@ fn with_item_budget(config: &ConnectionConfig, items: usize) -> ConnectionConfig
 
 /// A driver, its connection to the server and the options addresses are parsed with.
 pub struct Peer {
-    driver: ModbusTcpDriver,
+    driver: Box<dyn Driver>,
     options: AddressOptions,
     pub connection: Box<dyn Connection>,
 }
 
 impl Peer {
-    /// Connect to the server `uri` names; the test fails with `hint` appended to the message
-    /// when it cannot.
+    /// Connect a `ModbusTcpDriver` to the server `uri` names; the test fails with `hint`
+    /// appended to the message when it cannot.
     pub async fn connect(uri: &str, hint: &str) -> Self {
-        let driver = ModbusTcpDriver::new();
+        Self::connect_with(Box::new(ModbusTcpDriver::new()), uri, hint).await
+    }
+
+    /// As [`connect`](Self::connect), with the driver of the scheme `uri` names.
+    pub async fn connect_with(driver: Box<dyn Driver>, uri: &str, hint: &str) -> Self {
         let config = driver
             .parse_config(uri)
             .expect("the connection string parses");
