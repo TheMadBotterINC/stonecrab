@@ -189,3 +189,10 @@ lists. `crates/stonecrab/tests/modbus_parse.rs`, `modbus_address.rs` and
 `crates/stonecrab/tests/modbus_interop_pymodbus.rs` reads and writes the text registers of
 the pymodbus peer (`interop_reads_and_writes_text_registers`). `scripts/coverage-gate.sh`
 holds modbus at 100% lines.
+
+## Addendum (2026-10-29): the provenance entry of the text registers
+
+`fixtures/modbus/interop/text-registers.toml` now has its own `[[file]]` entry in
+`fixtures/modbus/PROVENANCE.toml` (first-party, Apache-2.0), and the testkit test that pins
+the list of `[[file]]` entries (`golden_dir_lists_every_vector_in_provenance`) names it.
+The exception recorded under Consequences is closed.

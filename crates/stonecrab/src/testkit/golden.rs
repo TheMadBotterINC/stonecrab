@@ -908,12 +908,13 @@ mod tests {
             files,
             [
                 "interop/register-map.toml",
+                "interop/text-registers.toml",
                 "upstream/tcp/ParserSerializerTestsuite.xml",
                 "upstream/tcp/DriverTestsuite.xml",
                 "upstream/tcp/Modbus-all-datatypes.xml",
                 "upstream/tcp/Modbus-all-datatypes-little-endian.xml",
             ],
-            "the register map and the four retained upstream files"
+            "the register map, the text registers and the four retained upstream files"
         );
     }
 
