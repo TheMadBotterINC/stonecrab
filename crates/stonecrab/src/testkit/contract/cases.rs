@@ -291,6 +291,7 @@ impl Env<'_> {
             Requires::Write if !capabilities.write => {
                 Some("driver reports write unsupported".into())
             }
+            Requires::Ping if !capabilities.ping => Some("driver reports ping unsupported".into()),
             Requires::WriteUnsupported if capabilities.write => {
                 Some("driver reports write supported; the case needs it unsupported".into())
             }
@@ -302,6 +303,7 @@ impl Env<'_> {
                 .then(|| format!("fixture cannot inject {fault}")),
             Requires::Read
             | Requires::Write
+            | Requires::Ping
             | Requires::WriteUnsupported
             | Requires::WritableAddress => None,
         })
@@ -411,10 +413,12 @@ pub(super) enum Id {
     UnknownNotReplayed,
     UnsupportedWrite,
     UnsupportedPing,
+    SupportedPing,
+    SilentPing,
 }
 
 impl Id {
-    pub(super) const ALL: [Self; 24] = [
+    pub(super) const ALL: [Self; 26] = [
         Self::Capabilities,
         Self::Lifecycle,
         Self::Correlation,
@@ -439,6 +443,8 @@ impl Id {
         Self::UnknownNotReplayed,
         Self::UnsupportedWrite,
         Self::UnsupportedPing,
+        Self::SupportedPing,
+        Self::SilentPing,
     ];
 
     pub(super) const fn case(self) -> ContractCase {
@@ -568,6 +574,16 @@ impl Id {
                 "F3 unsupported capability; ADR-0011 addendum (S40)",
                 &[],
             ),
+            Self::SupportedPing => ContractCase::new(
+                "a supported ping answers and changes no state",
+                "SPEC 'Public API contract' capability queries; ADR-0011 addendum (S40)",
+                &[Requires::Ping],
+            ),
+            Self::SilentPing => ContractCase::new(
+                "a ping to a silent device yields Timeout",
+                "F2 timeout; ADR-0011 addendum (S40)",
+                &[Requires::Ping, Requires::Fault(Fault::Timeout)],
+            ),
         }
     }
 
@@ -597,6 +613,8 @@ impl Id {
             Self::UnknownNotReplayed => unknown_not_replayed(env).await,
             Self::UnsupportedWrite => unsupported_write(env).await,
             Self::UnsupportedPing => unsupported_ping(env).await,
+            Self::SupportedPing => supported_ping(env).await,
+            Self::SilentPing => silent_ping(env).await,
         }
     }
 }
@@ -1116,6 +1134,55 @@ async fn unsupported_ping(env: &Env<'_>) -> Check {
         connection.state(),
         state,
         "the state after an unsupported ping",
+    )?;
+    release(connection).await;
+    Ok(())
+}
+
+async fn supported_ping(env: &Env<'_>) -> Check {
+    let connection = env.open().await?;
+    ensure(
+        connection.capabilities().ping,
+        "the driver reports ping although the connection does not",
+    )?;
+    let state = connection.state();
+    connection
+        .ping()
+        .await
+        .must("a ping on a driver with ping")?;
+    ensure_eq(connection.state(), state, "the state after a ping")?;
+    let request = env.readable_request(&*connection, &[A])?;
+    let response = connection.read(request).await.must("a read after a ping")?;
+    ensure(
+        response.iter_failed().next().is_none(),
+        "a read after a ping failed",
+    )?;
+    release(connection).await;
+    Ok(())
+}
+
+async fn silent_ping(env: &Env<'_>) -> Check {
+    let connection = env.open().await?;
+    env.inject(Fault::Timeout)?;
+    let error = refused(
+        connection.ping().await,
+        ErrorKind::Timeout,
+        "a ping whose reply is lost",
+    )?;
+    let found = error.diagnostics();
+    ensure_eq(
+        found.operation,
+        Some(Operation::Ping),
+        "a silent ping: diagnostics.operation",
+    )?;
+    ensure(
+        found.connection_state.is_some(),
+        "a silent ping: diagnostics.connection_state is absent",
+    )?;
+    ensure_eq(
+        found.category,
+        Some(FailureCategory::Transport),
+        "a silent ping: diagnostics.category",
     )?;
     release(connection).await;
     Ok(())

@@ -21,7 +21,8 @@ const TRANSPORT: &str = "tcp";
 /// The port of a connection string that names none (upstream `DEFAULT_TCP_PORT`).
 const DEFAULT_PORT: u16 = 502;
 
-/// The `Driver` of the `modbus-tcp` scheme: read-only Modbus TCP (function codes 01 to 04).
+/// The `Driver` of the `modbus-tcp` scheme: read-only Modbus TCP (function codes 01 to 04)
+/// with ping.
 ///
 /// The driver is a stateless factory. It holds the clock, the transport factory and the
 /// connection-wide [`ConnectionDefaults`] that every connection it opens starts from, and
@@ -224,8 +225,8 @@ impl Driver for ModbusTcpDriver {
         SCHEME
     }
 
-    /// Read only, no subscriptions, browse or discovery, one operation at a time, PDUs up
-    /// to 253 bytes: the value every [`ModbusConnection`] reports.
+    /// Read and ping, no write, subscriptions, browse or discovery, one operation at a time,
+    /// PDUs up to 253 bytes: the value every [`ModbusConnection`] reports.
     ///
     /// # Compatibility: docs/parity/modbus.md#MB-TCP-CAPABILITIES
     /// The alpha value of `MB-TCP-CAPABILITIES`: write false (D3), subscribe `Unsupported`

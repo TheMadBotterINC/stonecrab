@@ -192,7 +192,7 @@ jobs:
       # cargo nextest run --locked -p stonecrab --all-features
       #   --run-ignored ignored-only -E 'binary(modbus_interop_pymodbus) & test(/^tests::interop_/)'
       # (nextest names a test by its module path, hence the tests:: prefix.) The step
-      # fails when the filter does not select exactly the ten interop tests.
+      # fails when the filter does not select exactly EXPECTED_TESTS (in interop.sh) tests.
       - run: interop/pymodbus/interop.sh tests
       # cargo run --locked -p stonecrab --example modbus_tcp_read --features modbus
       - run: interop/pymodbus/interop.sh example

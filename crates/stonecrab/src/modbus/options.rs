@@ -58,8 +58,8 @@ const KEY_ECHO_LIMIT: usize = 32;
 /// `LITTLE_ENDIAN_BYTE_SWAP` is (big, low word first).
 ///
 /// `request_timeout` is also stored in the configuration's `Timeouts.request`, which is
-/// what the connection enforces. The `ping_address` is validated and recorded and then
-/// unused: the alpha has no ping operation.
+/// what the connection enforces. The `ping_address` is what
+/// [`Connection::ping`](crate::Connection::ping) reads once (`MB-TCP-PING`).
 ///
 /// The struct is `#[non_exhaustive]`; start from [`Default`] and assign the fields. Its
 /// `Debug` output carries no secrets (it has none to carry), as [`DriverOptions`] requires.
@@ -104,7 +104,7 @@ pub struct ModbusOptions {
     /// The unit a read addresses when the tag's address names none
     /// (`default-unit-identifier`).
     pub unit_id: UnitId,
-    /// The address the upstream ping would read (`ping-address`); recorded, unused.
+    /// The address a ping reads once (`ping-address`).
     pub ping_address: ModbusAddress,
     /// The byte order of a value whose tag and address name none
     /// (`default-payload-byte-order`).

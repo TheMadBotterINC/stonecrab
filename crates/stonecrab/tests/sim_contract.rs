@@ -102,7 +102,23 @@ mod tests {
             ContractSuite::cases().len(),
             "every case has an outcome"
         );
-        assert_eq!(report.skipped(), 1, "only one case is skipped:\n{report}");
+        assert_eq!(
+            report.skipped(),
+            3,
+            "only the unsupported-write case and the two supported-ping cases are skipped:\n{report}"
+        );
+        for name in [
+            "a supported ping answers and changes no state",
+            "a ping to a silent device yields Timeout",
+        ] {
+            assert_eq!(
+                report.outcome(name),
+                Some(&CaseOutcome::Skipped(
+                    "driver reports ping unsupported".to_owned()
+                )),
+                "the sim has no ping, so {name} is skipped:\n{report}"
+            );
+        }
         assert!(
             matches!(
                 report.outcome(UNSUPPORTED_WRITE),

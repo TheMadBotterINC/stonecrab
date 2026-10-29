@@ -69,7 +69,8 @@ pymodbus 3.8.6 in the `interop` CI job). Nothing is `hardware-verified`.
 | Modbus TCP | reconnect, read retry, cancellation, timeout, late-reply discard, resync | simulator-tested | `FakeTransport` and fake clock; `MB-READ-RECONNECT`, `MB-READ-TIMEOUT`, `MB-READ-RETRY` |
 | Modbus TCP | write | not supported | `MB-TCP-WRITE` (deferred); the driver reports `write: false` and sends nothing |
 | Modbus TCP | subscriptions (upstream emulates them by polling) | not supported | `MB-TCP-SUBSCRIBE` (deferred, M2) |
-| Modbus TCP | browse, discover, ping | not supported | `MB-TCP-BROWSE`, `MB-TCP-DISCOVER`, `MB-TCP-PING` (deferred) |
+| Modbus TCP | ping (one read of the configured `ping-address`) | interoperability-tested | `MB-TCP-PING`; `interop_ping_reads_each_configured_area_and_succeeds`, `interop_ping_of_an_address_the_server_refuses_still_answers` |
+| Modbus TCP | browse, discover | not supported | `MB-TCP-BROWSE`, `MB-TCP-DISCOVER` (deferred) |
 | Modbus TCP | RTU, ASCII, UDP, TLS | not supported | `MB-TCP-TRANSPORTS-*` (deferred); the parser rejects them |
 | Modbus TCP | extended registers (FC20/21), strings, calendar types, array selections | not supported | `MB-ADDR-EXTENDED`, `MB-ADDR-STRING`, `MB-TYPE-TIME`, `MB-ADDR-SELECTION` (rejected with typed errors) |
 | Simulator (`sim`) | read, write, scripted failures, bounded read retry | simulator-tested | driver contract suite; `docs/parity/sim.md` |

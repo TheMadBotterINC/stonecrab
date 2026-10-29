@@ -25,9 +25,11 @@
 //! - `a timeout carries diagnostics naming operation, state and category`
 //! - `read retry stops after the configured maximum attempts`
 //!
-//! The two write cases are skipped because the driver reports `write` unsupported (D3). The
-//! disconnect, device-exception and no-I/O cases run: the responder closes the peer
-//! (`Reaction::Close`) or answers exception 04 on demand.
+//! The silent-ping case needs the same hook and is skipped with them. The two write cases
+//! are skipped because the driver reports `write` unsupported (D3), and the unsupported-ping
+//! case because the driver supports ping (S47). The disconnect, device-exception and no-I/O
+//! cases run: the responder closes the peer (`Reaction::Close`) or answers exception 04 on
+//! demand.
 #![cfg(all(feature = "modbus", feature = "testkit"))]
 #![forbid(unsafe_code)]
 
@@ -64,11 +66,19 @@ mod tests {
     const TIMEOUT_DIAGNOSTICS: &str =
         "a timeout carries diagnostics naming operation, state and category";
     const RETRY_STOPS: &str = "read retry stops after the configured maximum attempts";
+    const SILENT_PING: &str = "a ping to a silent device yields Timeout";
+    const UNSUPPORTED_PING: &str = "an unsupported ping performs no I/O and changes no state";
+    const SUPPORTED_PING: &str = "a supported ping answers and changes no state";
     const READ_ONLY_POLICY: &str = "a read-only policy rejects a write with no I/O";
     const UNKNOWN_NOT_REPLAYED: &str = "an unknown write outcome is never replayed";
 
     /// The cases the fixture cannot run, by name, with the reason the report must give.
-    const TIMING_SKIPS: [&str; 3] = [ABSENT_DEADLINE, TIMEOUT_DIAGNOSTICS, RETRY_STOPS];
+    const TIMING_SKIPS: [&str; 4] = [
+        ABSENT_DEADLINE,
+        TIMEOUT_DIAGNOSTICS,
+        RETRY_STOPS,
+        SILENT_PING,
+    ];
 
     fn register_map() -> InteropMap {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -152,8 +162,21 @@ mod tests {
         );
         assert_eq!(
             report.skipped(),
-            5,
-            "exactly the three timing skips and the two write skips:\n{report}"
+            7,
+            "exactly the four timing skips, the two write skips and the unsupported-ping \
+             skip:\n{report}"
+        );
+        assert_eq!(
+            report.outcome(UNSUPPORTED_PING),
+            Some(&CaseOutcome::Skipped(
+                "driver reports ping supported; the case needs it unsupported".to_owned()
+            )),
+            "the driver supports ping:\n{report}"
+        );
+        assert_eq!(
+            report.outcome(SUPPORTED_PING),
+            Some(&CaseOutcome::Passed),
+            "a ping over a real socket answers:\n{report}"
         );
         for name in TIMING_SKIPS {
             assert_eq!(

@@ -52,6 +52,9 @@ mod tests {
         "a disconnect carries diagnostics naming operation, state and category";
     const READ_ONLY_POLICY: &str = "a read-only policy rejects a write with no I/O";
     const UNKNOWN_NOT_REPLAYED: &str = "an unknown write outcome is never replayed";
+    const UNSUPPORTED_PING: &str = "an unsupported ping performs no I/O and changes no state";
+    const SUPPORTED_PING: &str = "a supported ping answers and changes no state";
+    const SILENT_PING: &str = "a ping to a silent device yields Timeout";
 
     fn register_map() -> InteropMap {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -177,9 +180,25 @@ mod tests {
         );
         assert_eq!(
             report.skipped(),
-            2,
-            "exactly the two write skips:\n{report}"
+            3,
+            "exactly the two write skips and the unsupported-ping skip:\n{report}"
         );
+        // The driver supports ping, so the unsupported-ping case has nothing to prove here
+        // and the two cases of a supported ping run.
+        assert_eq!(
+            report.outcome(UNSUPPORTED_PING),
+            Some(&CaseOutcome::Skipped(
+                "driver reports ping supported; the case needs it unsupported".to_owned()
+            )),
+            "the unsupported-ping case is skipped by name:\n{report}"
+        );
+        for name in [SUPPORTED_PING, SILENT_PING] {
+            assert_eq!(
+                report.outcome(name),
+                Some(&CaseOutcome::Passed),
+                "{name} ran and passed:\n{report}"
+            );
+        }
         // The write cases need a driver that supports write; this one does not (D3).
         for name in [READ_ONLY_POLICY, UNKNOWN_NOT_REPLAYED] {
             assert_eq!(

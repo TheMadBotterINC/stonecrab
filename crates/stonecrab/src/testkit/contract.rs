@@ -69,6 +69,8 @@ pub enum Requires {
     Write,
     /// The driver reports that writes are unsupported.
     WriteUnsupported,
+    /// The driver reports `Capabilities.ping`.
+    Ping,
     /// The fixture names a writable address.
     WritableAddress,
     /// The fixture has the hook that arms this fault.
@@ -81,6 +83,7 @@ impl fmt::Display for Requires {
             Self::Read => f.write_str("driver supports read"),
             Self::Write => f.write_str("driver supports write"),
             Self::WriteUnsupported => f.write_str("driver reports write unsupported"),
+            Self::Ping => f.write_str("driver supports ping"),
             Self::WritableAddress => f.write_str("fixture names a writable address"),
             Self::Fault(fault) => write!(f, "fixture fault: {fault}"),
         }
@@ -491,11 +494,11 @@ impl ContractSuite {
     /// use stonecrab::testkit::ContractSuite;
     ///
     /// let cases = ContractSuite::cases();
-    /// assert_eq!(cases.len(), 24);
+    /// assert_eq!(cases.len(), 26);
     /// let mut names: Vec<_> = cases.iter().map(|case| case.name).collect();
     /// names.sort_unstable();
     /// names.dedup();
-    /// assert_eq!(names.len(), 24, "case names are unique");
+    /// assert_eq!(names.len(), 26, "case names are unique");
     /// ```
     #[must_use]
     pub fn cases() -> Vec<ContractCase> {

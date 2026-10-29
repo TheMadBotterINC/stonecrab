@@ -57,7 +57,8 @@ hardware record exists.
 | Modbus TCP | subscriptions (upstream: polling emulation) | `modbus` | not supported | `MB-TCP-SUBSCRIBE` | deferred, M2 |
 | Any physical device | everything | none yet | planned | none | milestone M2S (board adapters, hardware runner, hardware records); no record exists |
 | Modbus TCP | browse | `modbus` | not supported | `MB-TCP-BROWSE` | upstream has no Modbus browse |
-| Modbus TCP | discover, ping | `modbus` | not supported | `MB-TCP-DISCOVER`, `MB-TCP-PING` | deferred; `ping-address` is validated and unused |
+| Modbus TCP | discover | `modbus` | not supported | `MB-TCP-DISCOVER` | deferred |
+| Modbus TCP | ping | `modbus` | interoperability-tested | `MB-TCP-PING`, `MB-CFG-PING-ADDRESS`, `MB-QUIRK-D` | one read of `ping-address`; any correlated reply, an exception included, is success as upstream's; pymodbus 3.8.6 via the `interop` job |
 | Modbus TCP | UDP, TLS, TLS-PSK, `test` transports | `modbus` | not supported | `MB-TCP-TRANSPORTS-*` | deferred; `InvalidConfig` |
 | Modbus TCP | extended registers (FC20, FC21) | `modbus` | not supported | `MB-ADDR-EXTENDED` | deferred, M2; `InvalidAddress` |
 | Modbus RTU, ASCII | everything | none yet | planned | none yet | milestone M2 |
@@ -137,7 +138,7 @@ may appear once and every other key is `InvalidConfig` (upstream warns and ignor
 | --- | --- | --- | --- |
 | `request-timeout-ms` | 5000 | whole milliseconds above 0; also `Timeouts.request` | `MB-CFG-REQUEST-TIMEOUT` |
 | `default-unit-identifier` | 1 | 0 to 255 | `MB-CFG-UNIT-ID` |
-| `ping-address` | `4x00001:BOOL` | an address of the grammar, read under `plc4x`; recorded, unused | `MB-CFG-PING-ADDRESS` |
+| `ping-address` | `4x00001:BOOL` | an address of the grammar, read under `plc4x`; the address `ping` reads once | `MB-CFG-PING-ADDRESS` |
 | `default-payload-byte-order` | `BIG_ENDIAN` | `BIG_ENDIAN`, `LITTLE_ENDIAN`, `BIG_ENDIAN_BYTE_SWAP`, `LITTLE_ENDIAN_BYTE_SWAP` | `MB-CFG-BYTE-ORDER` |
 | `max-coils-per-request` | 2000 | 1 to 2000 | `MB-CFG-MAX-COILS` |
 | `max-registers-per-request` | 125 | 1 to 125 | `MB-CFG-MAX-REGISTERS` |
@@ -154,10 +155,10 @@ unlimited attempts; `RetryPolicy` one attempt, retrying `Timeout`, `Disconnected
 
 | Peer | What ran | Where | Level it supports |
 | --- | --- | --- | --- |
-| pymodbus 3.8.6 on `python:3.12-slim` (pinned by digest), first-party `server.py` over the register map in `fixtures/modbus/interop/register-map.toml`, TCP port 5020 | ten `interop_` tests, the `modbus_tcp_read` example, `profile_read --expect-good` for each `modbus-tcp` synthetic profile, the common driver contract suite (14 passed, 9 skipped by name) | the CI job `interop` (ubuntu, every push and pull request) and `mise run interop` | `interoperability-tested` |
-| the in-process simulator (`sim`) | the driver contract suite (22 passed, 1 skipped), `sim_read`, `profile_read` on the `sim` profiles | `cargo test --all-features`, CI jobs `test` and `examples` | `simulator-tested` |
-| loopback `ScriptedPeer` (testkit) | a holding-register read over real sockets and the contract suite (18 passed, 5 skipped) | `cargo test --all-features` | `simulator-tested` |
-| `FakeTransport` with a first-party MBAP responder and `FakeClock` | the contract suite (21 passed, 2 skipped), timing, retry, reconnect and cancellation tests | `cargo test --all-features` | `simulator-tested` |
+| pymodbus 3.8.6 on `python:3.12-slim` (pinned by digest), first-party `server.py` over the register map in `fixtures/modbus/interop/register-map.toml`, TCP port 5020 | twelve `interop_` tests, the `modbus_tcp_read` example, `profile_read --expect-good` for each `modbus-tcp` synthetic profile, the common driver contract suite (15 passed, 11 skipped by name) | the CI job `interop` (ubuntu, every push and pull request) and `mise run interop` | `interoperability-tested` |
+| the in-process simulator (`sim`) | the driver contract suite (23 passed, 3 skipped), `sim_read`, `profile_read` on the `sim` profiles | `cargo test --all-features`, CI jobs `test` and `examples` | `simulator-tested` |
+| loopback `ScriptedPeer` (testkit) | a holding-register read over real sockets and the contract suite (19 passed, 7 skipped) | `cargo test --all-features` | `simulator-tested` |
+| `FakeTransport` with a first-party MBAP responder and `FakeClock` | the contract suite (23 passed, 3 skipped), timing, retry, reconnect and cancellation tests | `cargo test --all-features` | `simulator-tested` |
 
 pymodbus 3.8.6 is the peer the upstream project's own Docker test uses; the Stonecrab
 server is written independently and reproduces only the documented fixture values plus one
@@ -225,7 +226,8 @@ and why.
 | `MB-ADDR-SELECTION`, `MB-ADDR-STRING`, `MB-TYPE-TIME`, `MB-ADDR-EXTENDED` | deferred address features are typed `InvalidAddress` rejections |
 | `MB-READ-GAP` | no gap reads: only adjacent or overlapping tags merge |
 | `MB-LIMIT-ADU` | the MBAP length is bounded (2..=254, ADU at most 260 bytes) before the body is read |
-| `MB-QUIRK-A`, `MB-QUIRK-B`, `MB-QUIRK-C`, `MB-QUIRK-D` | the bogus `UDPTransport` import, the split FC20 second-item loss, the dead FC05 branch and the any-reply ping are not ported |
+| `MB-QUIRK-A`, `MB-QUIRK-B`, `MB-QUIRK-C` | the bogus `UDPTransport` import, the split FC20 second-item loss and the dead FC05 branch are not ported |
+| `MB-QUIRK-D` | ported on purpose: `ping` reports success for any reply that answers it, an exception included, as upstream's `onPing` does |
 | `MB-QUIRK-F` | the undeclared `unit-identifier` of the upstream test suite is an error |
 | `MB-QUIRK-G` | `4x:INT` is a typed `InvalidAddress`, not a `NumberFormatException` (inferred) |
 | `MB-QUIRK-I` | no polling receive loop |

@@ -244,9 +244,9 @@ mod tests {
         assert_eq!(bare.ping_address.logical_address(), 7);
     }
 
-    // covers: ALPHA_PLAN S26 / MB-TCP-PING validated, recorded, unused (no wire traffic)
+    // covers: MB-CFG-PING-ADDRESS / connecting sends no ping, whatever the ping address
     #[test]
-    fn ping_address_is_validated_but_unused() {
+    fn connecting_sends_no_ping_whatever_the_ping_address() {
         let clock = FakeClock::default();
         let factory = FakeTransportFactory::new(clock.clone());
         factory.push_script(Script::strict(vec![]));

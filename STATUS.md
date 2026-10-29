@@ -238,7 +238,9 @@ bits per chunk), `ModbusSession` (reply accepted only when transaction id, unit 
 function code match), `ModbusConnection` and `ConnectionDefaults`, and `ModbusTcpDriver`
 with `ModbusOptions` (the six upstream parameters with upstream defaults plus
 `address-convention`; unknown keys are `InvalidConfig`). `write` is `Unsupported` with no
-I/O. Deferred items are in "Known gaps".
+I/O. `ping` reads the configured `ping-address` once (S47): any correlated reply, an
+exception included, is success, as upstream does (quirk d). Deferred items are in "Known
+gaps".
 
 ### `stonecrab::sensors`, feature `sensors`
 
@@ -258,7 +260,7 @@ Driver)` (declared convention passed as `AddressOptions`), and
 `ScriptedPeer`, `ScriptedPeerFactory`, `FakeTransport`, `FakeTransportFactory`,
 `CountingFactory`, `LengthPrefixedFramer` (the sanctioned doubles of CODING_STANDARDS
 13.5), the golden-vector loader and `InteropMap`, and the
-`ContractSuite` every driver runs (24 cases since S40; skips are named, never silent), which driver
+`ContractSuite` every driver runs (26 cases since S47; skips are named, never silent), which driver
 authors can run against their own driver. Contract
 results: simulator 22 passed and 1 skip; Modbus over the fake transport 21 and 2; over
 loopback `ScriptedPeer` 18 and 5; against pymodbus 14 and 9.
@@ -345,6 +347,7 @@ commit; gates named were run locally before that commit.
 | S39 | 2026-10-28 | The word-order rule follows the driver (finding G05): `ProtocolAddress::spans_multiple_words` (provided, default false; Modbus answers true for every type wider than one register, from its register count, not a name list) and `SensorProfile::validate_for(&dyn Driver)`, which runs every `validate` rule, then parses each measurement address and reports `AddressRejected`, `MissingByteOrder` and `MissingWordOrder` in document order; `tags` runs it, so Modbus profiles without orders are still refused there. Behavior change: `validate` alone no longer reports the order errors (CHANGELOG, ADR-0016 addendum, SENSORS-VALIDATION). `WIDE_MODBUS_TYPES` is gone; the testkit's `ConventionDriver::with_wide_addresses` is the second driver in the tests (`sensors_word_order.rs`, 8 tests); sensors and modbus stay at 100% lines | check, coverage, lint-attrs, parity, examples |
 | S04b | 2026-10-28 | Driver-suite XML adapter: `roxmltree` 0.21.2 as a dev-dependency only (ADR-0009 addendum: the alpha's testkit `fixtures` feature would now reach the published crate), the adapter is the test file `modbus_driver_suite_adapter.rs` with its own serializer from `modbus.mspec`, and its output is checked byte for byte against the committed vectors; 32 read exchanges (DriverTestsuite.xml 4, each all-datatypes file 14) become 64 `adu_upstream-*` vectors with PROVENANCE entries and counts. The typed-decoder tests decode every big-endian and little-endian response to the value the XML reports (a discriminator test shows the little-endian ones fail as big-endian), so `MB-BYTEORDER-BE` and `-LE` are `automated-verified`; the swap modes stay `implemented` (no retained file configures them). Findings: the all-datatypes files share the driver-suite step format (pending item 8 closed), upstream's `ModbusTcpDriverIT` loads `DriverTestsuiteOptimized.xml` (item 7 narrowed), and their 16-bit write cases pair an FC06 request with an FC16 response | check, coverage, lint-attrs, parity, dependencies, machete, package list (with --allow-dirty before the commit) |
 | S45 | 2026-10-28 | Modbus write PDUs as upstream emits them: `FunctionCode` gains FC06, FC15 and FC16; `ModbusPdu` gains the three requests and their responses, with V1.1b bounds checked before allocation (FC15 1..=1968 coils, FC16 1..=123 registers, the 65536 address span, 253-byte PDUs) and the response echo checked against the request; `ModbusPdu::write_request` picks FC15 for every coil write, FC06 for a 2-byte holding-register payload and FC16 otherwise, and refuses read-only areas. FC05 is never emitted (upstream quirk c) and stays refused. 54 new vectors (spec examples with sections, adversarial must_fail, exceptions; the old D3 must_fail write vectors became spec vectors), fuzz seeds; `Capabilities.write` stays false (S46 puts writes on the wire); `decode_member` in the connection gained the five new variants in its mismatch arm | check, coverage, lint-attrs, parity, fuzz (fuzz_modbus_pdu, 60 s) |
+| S47 | 2026-10-28 | Modbus ping: the connection overrides `Connection::ping` with one read of the configured `ping-address` (default `4x00001:BOOL`, its area's function code and width, the address's unit id) through the read slot and session, bounded by `timeouts.request`, no retry; `Capabilities.ping` is true. Quirk (d) decided: matched upstream, so any correlated reply, an exception PDU included, is success; silence is `Timeout`, a closed connection `Disconnected`, other failures keep their kinds (MB-QUIRK-D reproduced; MB-TCP-PING automated-verified, including a pymodbus case where a refused read still answers the ping). The contract suite has 26 cases (new: a supported ping answers and changes no state; a silent device makes it a Timeout), the interop job expects 12 tests, COMPATIBILITY splits ping from discover | check, coverage, lint-attrs, parity, examples, interop |
 
 ## Verified evidence and reproduction
 

@@ -423,16 +423,11 @@ fn entry(tag: &Tag) -> Result<Entry<'_>> {
             format!("tag {} does not carry a Modbus address", tag.id()),
         ));
     };
-    let width = if address.area().is_bit_area() {
-        1
-    } else {
-        address.data_type().register_size()
-    };
     Ok(Entry {
         unit_id: address.unit_id(),
         area: address.area(),
         offset: address.offset(),
-        width,
+        width: address.width(),
         tag,
         address,
     })

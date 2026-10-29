@@ -1384,7 +1384,7 @@ out the backoff and reopens, and the read in flight when the peer closed fails w
 | --- | --- | --- | --- |
 | `request-timeout-ms` | 5000 | whole milliseconds above 0; also `Timeouts.request` | `MB-CFG-REQUEST-TIMEOUT` |
 | `default-unit-identifier` | 1 | 0 to 255 | `MB-CFG-UNIT-ID` |
-| `ping-address` | `4x00001:BOOL` | an address of the grammar; recorded, unused (no ping) | `MB-CFG-PING-ADDRESS` |
+| `ping-address` | `4x00001:BOOL` | an address of the grammar; read by ping | `MB-CFG-PING-ADDRESS` |
 | `default-payload-byte-order` | `BIG_ENDIAN` | the four upstream names | `MB-CFG-BYTE-ORDER` |
 | `max-coils-per-request` | 2000 | 1 to 2000 | `MB-CFG-MAX-COILS` |
 | `max-registers-per-request` | 125 | 1 to 125 | `MB-CFG-MAX-REGISTERS` |
@@ -1919,7 +1919,7 @@ the crate because a separate test crate would be a dev-dependency cycle. It ship
 `Script`, `Step` (including `Respond` and `React`), `Reaction`, `ScriptedPeer`,
 `ScriptedPeerFactory`, `FakeTransport`, `FakeTransportFactory`, `CountingFactory` and
 `LengthPrefixedFramer`; the golden-vector loader (`load_dir`, `GoldenVector`,
-`VectorSource`) and `InteropMap`; and `ContractSuite` (24 cases, `ContractFixture`,
+`VectorSource`) and `InteropMap`; and `ContractSuite` (26 cases, `ContractFixture`,
 `ContractReport`) which every driver runs and which driver authors can run against their
 own driver. The loaders and some of its tests read repository files, so they run from a
 checkout. **Deferred:** `DifferentialRunner` and `UpstreamHarness` (M5), the

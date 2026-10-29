@@ -624,6 +624,16 @@ impl ModbusAddress {
         self.offset
     }
 
+    /// How many registers or bits a read of the address covers: one bit, or the data type's
+    /// register count.
+    pub(crate) const fn width(&self) -> u16 {
+        if self.area.is_bit_area() {
+            1
+        } else {
+            self.data_type.register_size()
+        }
+    }
+
     /// The one-based logical address people write: the wire offset plus one, 1 to 65536.
     ///
     /// # Compatibility: docs/parity/modbus.md#MB-ADDR-LONG

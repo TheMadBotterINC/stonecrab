@@ -2,10 +2,11 @@
 Native Modbus TCP driver for Stonecrab (alpha), `stonecrab::modbus`, behind the `modbus`
 feature (on by default). The alpha scope is read-only: function
 codes 01 (read coils), 02 (read discrete inputs), 03 (read holding registers) and 04
-(read input registers) over TCP with MBAP framing. RTU, ASCII, TLS, UDP, writes, extended
-registers, string types, subscriptions, browse, discovery and ping are out of scope for
-the alpha and are listed under "Not in the alpha" below. The driver has been checked
-against an independent server, pymodbus 3.8.6, and no physical device.
+(read input registers) over TCP with MBAP framing, and a ping that reads one address. RTU,
+ASCII, TLS, UDP, writes, extended registers, string types, subscriptions, browse and
+discovery are out of scope for the alpha and are listed under "Not in the alpha" below.
+The driver has been checked against an independent server, pymodbus 3.8.6, and no physical
+device.
 
 This module offers `ModbusTcpDriver`, the `Driver` of the `modbus-tcp` scheme, with
 `ModbusOptions`, the parsed connection parameters; `ModbusConnection` with
@@ -34,8 +35,8 @@ tests run the driver over an in-memory transport and over loopback sockets.
 - `parse_address` is `ModbusAddress::parse` with the address convention of the options.
   Take the options from the configuration with `config.address_options()` before
   `connect` consumes it.
-- `capabilities` is the value every connection reports: read only, no subscriptions,
-  browse or discovery, one operation at a time, PDUs up to 253 bytes.
+- `capabilities` is the value every connection reports: read and ping, no write,
+  subscriptions, browse or discovery, one operation at a time, PDUs up to 253 bytes.
 
 ### Connection strings
 `modbus-tcp://host[:port]` or `modbus-tcp:tcp://host[:port]`, followed by an optional
@@ -54,7 +55,7 @@ or an unknown key names the key, and no error repeats the connection string.
 | --- | --- | --- | --- |
 | `request-timeout-ms` | 5000 | whole number of milliseconds above 0; also the config's `Timeouts.request` | `MB-CFG-REQUEST-TIMEOUT` |
 | `default-unit-identifier` | 1 | 0 to 255 (upstream has no bound; divergence) | `MB-CFG-UNIT-ID` |
-| `ping-address` | `4x00001:BOOL` | an address of the grammar below, read under the `plc4x` convention; recorded, unused at alpha | `MB-CFG-PING-ADDRESS` |
+| `ping-address` | `4x00001:BOOL` | an address of the grammar below, read under the `plc4x` convention; the address `Connection::ping` reads once | `MB-CFG-PING-ADDRESS` |
 | `default-payload-byte-order` | `BIG_ENDIAN` | `BIG_ENDIAN`, `LITTLE_ENDIAN`, `BIG_ENDIAN_BYTE_SWAP`, `LITTLE_ENDIAN_BYTE_SWAP` | `MB-CFG-BYTE-ORDER` |
 | `max-coils-per-request` | 2000 | 1 to 2000 | `MB-CFG-MAX-COILS` |
 | `max-registers-per-request` | 125 | 1 to 125 | `MB-CFG-MAX-REGISTERS` |
@@ -135,6 +136,7 @@ read `interoperability-tested`. No physical device has been tried.
 | Capability | Support level |
 | --- | --- |
 | Read: coils, discrete inputs, holding registers and input registers (function codes 01 to 04) as the 15 numeric and bit types | interoperability-tested |
+| Ping: one read of `ping-address` (`Connection::ping`) | interoperability-tested |
 | Write | not supported |
 | Subscribe, browse and discover | not supported |
 | Connection string and parameters (`parse_config`) | simulator-tested |
@@ -156,7 +158,7 @@ The layers underneath, with their evidence:
 | Session: transaction ids, reply correlation by transaction id, unit id and function code, exception mapping (`ModbusSession`, `exception_item_error`) | unit-tested on the in-memory transport |
 | Typed register decoding and byte order (`TypedDecoder`) | unit-tested; vector-tested; property-tested; `BIG_ENDIAN` and `LITTLE_ENDIAN` confirmed by the retained upstream PLC4X vectors; the two byte-swap modes are derived from the documented layouts |
 | Read batching (`Batcher`) | unit-tested; property-tested |
-| Connection and driver (`ModbusConnection`, `ModbusTcpDriver`) | unit-tested on the in-memory transport; contract-suite-tested on the in-memory transport and over loopback sockets; one read run over loopback; ten reads and the contract suite against pymodbus 3.8.6 |
+| Connection and driver (`ModbusConnection`, `ModbusTcpDriver`) | unit-tested on the in-memory transport; contract-suite-tested on the in-memory transport and over loopback sockets; one read run over loopback; ten reads, two pings and the contract suite against pymodbus 3.8.6 |
 
 ## Not in the alpha
 Each item is a deferred row of the
@@ -170,9 +172,6 @@ error rather than ignoring it; operations that have no API at all do not exist:
   `WriteOutcome::Unknown` come after the alpha;
 - subscriptions, browse and discovery (`MB-TCP-SUBSCRIBE`, `MB-TCP-BROWSE`,
   `MB-TCP-DISCOVER`): these operations do not exist in the API;
-- ping (`MB-TCP-PING`): `Connection::ping` exists since S40, but the Modbus connection
-  does not override it yet, so it returns `Unsupported` and `Capabilities.ping` is false;
-  the `ping-address` key is validated and unused;
 - extended registers (FC20 and FC21, `extended-register`, `6x`), `STRING`, `WSTRING`,
   `CHAR`, `WCHAR`, the `TIME` and `DATE` family, array selections and the legacy array
   form (`MB-ADDR-*`, `MB-TYPE-*`);
@@ -190,8 +189,8 @@ error rather than ignoring it; operations that have no API at all do not exist:
 The `interop` job of the repository's CI builds `interop/pymodbus/` (a first-party Modbus
 TCP server on pymodbus 3.8.6, `python:3.12-slim` pinned by digest, serving the register
 map of `fixtures/modbus/interop/register-map.toml`), starts it on `127.0.0.1:5020` and
-runs ten tests of `tests/modbus_interop_pymodbus.rs` plus the `modbus_tcp_read` example against
-it. The tests are `#[ignore]`d and run only when `STONECRAB_INTEROP_MODBUS` names the
+runs twelve tests of `tests/modbus_interop_pymodbus.rs` plus the `modbus_tcp_read` example
+against it. The tests are `#[ignore]`d and run only when `STONECRAB_INTEROP_MODBUS` names the
 server, so `cargo test` needs no container and no network.
 
 To run it locally you need Docker; from the repository root:
@@ -537,15 +536,15 @@ assert_eq!(session.stats().mismatched_replies, 1);
 `ModbusConnection::open(config, factory, clock, defaults)` builds the connection from a
 `ConnectionConfig` for the scheme `modbus-tcp` (any other scheme is `InvalidConfig` before
 a transport is opened), opens it and returns it `Connected`. It implements
-`stonecrab::Connection`; the capabilities are read only, no subscription, no browse,
-no discovery, 253-byte PDUs and one operation at a time.
+`stonecrab::Connection`; the capabilities are read and ping, no write, no subscription, no
+browse, no discovery, 253-byte PDUs and one operation at a time.
 
 `read` checks the request before any I/O, in this order: the connection is not `Closing`,
 `Closed` or `Failed` (`Disconnected`), the token is not cancelled (`Cancelled`), every
 tag's address is a `ModbusAddress` (`InvalidAddress`, naming the tag and never the
 address), no tag has an element count above one (`InvalidConfig`: array selections are
 deferred) and the request fits `max_items_per_request` (`ResourceLimit`). Then one read runs
-at a time (a concurrent one is `Backpressure`) and an expired request deadline is
+at a time (a concurrent read or ping is `Backpressure`) and an expired request deadline is
 `Timeout`. The tags are planned into chunks by `Batcher::plan` and the chunks run one
 after another:
 
@@ -568,6 +567,16 @@ A tag's own byte and word order beat its address's, which beat `ConnectionDefaul
 flight when the peer closed fails with `Disconnected` and is never replayed. `close` ends
 in `Closed`, also during the backoff. `write` is `Unsupported(Operation::Write)` and sends
 nothing. A debug span `read` carries `scheme`, `endpoint`, `op`, `items` and `chunks`.
+
+`ping` (`MB-TCP-PING`) sends one read of the `ping-address` (default `4x00001:BOOL`) in the
+unit the address names, else the default unit, through the same session, admission rules
+and single in-flight slot as a read: a `Closing`, `Closed` or `Failed` connection is
+`Disconnected` with nothing sent, a read or ping in flight is `Backpressure`, and a peer
+that does not answer within `timeouts.request` is `Timeout`. It never retries, and
+dropping the future frees the slot and discards a late reply. Any reply that answers the
+request is success, an exception reply included (`MB-QUIRK-D`: upstream's `onPing` does the
+same, and a reply of any kind shows that the peer answers); a transport failure keeps its
+kind. A debug span `ping` carries `scheme`, `endpoint` and `op`.
 
 ```rust
 # #[cfg(feature = "testkit")]

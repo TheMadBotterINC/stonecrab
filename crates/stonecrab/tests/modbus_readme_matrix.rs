@@ -70,6 +70,13 @@ mod tests {
             "read is claimed at the level the pymodbus job (S27) reached"
         );
 
+        let ping = level_of("Ping");
+        assert!(
+            capabilities.ping && !["planned", "not supported"].contains(&ping.as_str()),
+            "ping: the driver advertises it and the README says {ping}"
+        );
+        assert!(capabilities.supports(Operation::Ping), "ping operation");
+
         let write = level_of("Write");
         assert_eq!(
             write, "not supported",
@@ -90,7 +97,6 @@ mod tests {
         );
         assert!(!capabilities.browse, "browse");
         assert!(!capabilities.discover, "discover");
-        assert!(!capabilities.ping, "ping");
 
         // The interoperability job (S27) exists; no hardware claim at all.
         assert_eq!(level_of("Interoperability"), "interoperability-tested");

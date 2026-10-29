@@ -152,13 +152,13 @@ fn case(name: &'static str) -> ContractCase {
 }
 
 #[test]
-fn the_suite_names_twenty_four_distinct_cases_each_with_a_coverage_mapping() {
+fn the_suite_names_twenty_six_distinct_cases_each_with_a_coverage_mapping() {
     let cases = ContractSuite::cases();
-    assert_eq!(cases.len(), 24, "the case list");
+    assert_eq!(cases.len(), 26, "the case list");
     let mut names: Vec<&str> = cases.iter().map(|case| case.name).collect();
     names.sort_unstable();
     names.dedup();
-    assert_eq!(names.len(), 24, "every sentence is distinct");
+    assert_eq!(names.len(), 26, "every sentence is distinct");
     assert!(
         cases.iter().all(|case| !case.covers.is_empty()),
         "every case maps to a mandatory case"
@@ -221,6 +221,7 @@ fn faults_and_requirements_print_the_words_the_skip_reasons_use() {
     for (need, text) in [
         (Requires::Read, "driver supports read"),
         (Requires::Write, "driver supports write"),
+        (Requires::Ping, "driver supports ping"),
         (
             Requires::WriteUnsupported,
             "driver reports write unsupported",
@@ -454,7 +455,7 @@ fn a_driver_with_nothing_passes_the_cases_it_can_and_skips_the_rest_with_reasons
     assert_eq!(report.passed(), 5, "exactly the five:\n{report}");
     assert_eq!(
         report.skipped(),
-        19,
+        21,
         "everything else is skipped:\n{report}"
     );
     assert_eq!(

@@ -28,6 +28,10 @@ placeholder.
   named variant, `decode_request` and `decode_response` accept them) instead of being refused
   as `Unknown`; the enums are `non_exhaustive`, so this is not a semver break. FC05 is still
   not decoded.
+- `ModbusConnection` overrides `Connection::ping`: one read of `ping-address` through the
+  session and in-flight slot of a read, bounded by `timeouts.request`; any reply, an
+  exception included, is success as upstream's (`MB-QUIRK-D`); `Capabilities.ping` is true
+  for `modbus-tcp`. The contract suite gains `Requires::Ping` and two cases (26).
 - `stonecrab::sensors` now denies `clippy::indexing_slicing` (checked by `lint-attrs`), like
   the other modules that parse untrusted input; no code in the module needed to change.
 - Release process and evidence (no crate changes): ADR-0017, `release.toml`,

@@ -419,6 +419,49 @@ mod tests {
         peer.close().await;
     }
 
+    // covers: MB-TCP-PING, MB-CFG-PING-ADDRESS; the ping reads the configured address
+    #[tokio::test(flavor = "current_thread")]
+    #[ignore = "interop: set STONECRAB_INTEROP_MODBUS"]
+    async fn interop_ping_reads_each_configured_area_and_succeeds() {
+        for query in [
+            "",
+            "ping-address=coil:1",
+            "ping-address=discrete-input:2",
+            "ping-address=input-register:3:UINT",
+            "ping-address=holding-register:14:DINT",
+        ] {
+            let peer = Peer::connect(query).await;
+            assert!(
+                peer.connection.capabilities().ping,
+                "{query}: the capability"
+            );
+            peer.connection
+                .ping()
+                .await
+                .unwrap_or_else(|error| panic!("{query:?}: the ping failed: {error}"));
+            peer.close().await;
+        }
+    }
+
+    // covers: MB-QUIRK-D; an exception reply answers the ping, as upstream's onPing does
+    #[tokio::test(flavor = "current_thread")]
+    #[ignore = "interop: set STONECRAB_INTEROP_MODBUS"]
+    async fn interop_ping_of_an_address_the_server_refuses_still_answers() {
+        let peer = Peer::connect("ping-address=holding-register:60000:UINT").await;
+        // The same address read as a tag is refused with exception 02 ...
+        let response = peer
+            .read(vec![peer.tag("far", "holding-register:60000:UINT")])
+            .await;
+        assert_eq!(
+            failure(&response, "far").status().map(ProtocolStatus::code),
+            Some(2),
+            "the server refuses the address with ILLEGAL DATA ADDRESS"
+        );
+        // ... and the ping of it succeeds, because the server answered.
+        peer.connection.ping().await.expect("an exception answers");
+        peer.close().await;
+    }
+
     // covers: SPEC mandatory-failure-cases / F5 Modbus level; MB-READ-MERGE
     #[tokio::test(flavor = "current_thread")]
     #[ignore = "interop: set STONECRAB_INTEROP_MODBUS"]
@@ -619,10 +662,19 @@ mod tests {
 
     // The suite sentences that cannot run against a server that has no fault hooks, with the
     // reason the report must give for each.
-    const SKIPPED: [(&str, &str); 9] = [
+    const SKIPPED: [(&str, &str); 11] = [
         (
             "an absent deadline uses the connection timeout",
             "fixture cannot inject timeout",
+        ),
+        (
+            "a ping to a silent device yields Timeout",
+            "fixture cannot inject timeout",
+        ),
+        // The driver supports ping, so the case that needs it unsupported has nothing to prove.
+        (
+            "an unsupported ping performs no I/O and changes no state",
+            "driver reports ping supported; the case needs it unsupported",
         ),
         (
             "a disconnect during a read yields Disconnected",
@@ -681,7 +733,7 @@ mod tests {
         .expect("write");
         writeln!(
             file,
-            "skipped by name (no fault hooks against a real server):"
+            "skipped by name (no fault hooks against a real server, or not applicable):"
         )
         .expect("write");
         for (name, reason) in SKIPPED {

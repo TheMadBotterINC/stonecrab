@@ -18,7 +18,7 @@ use tracing::Instrument;
 
 use crate::modbus::{
     BatchLimits, Batcher, Chunk, MAX_PDU_BYTES, Member, ModbusAddress, ModbusAdu, ModbusArea,
-    ModbusPdu, ModbusSession, TypedDecoder, UnitId, exception_item_error,
+    ModbusOptions, ModbusPdu, ModbusSession, TypedDecoder, UnitId, exception_item_error,
 };
 
 /// The only scheme this connection serves.
@@ -30,8 +30,8 @@ const RAW_BUDGET: NonZeroUsize = match NonZeroUsize::new(MAX_PDU_BYTES) {
     None => NonZeroUsize::MIN,
 };
 
-/// The capabilities of the alpha driver and of every connection it opens: read only, no
-/// subscriptions, browse or discovery, one operation at a time, PDUs up to 253 bytes
+/// The capabilities of the alpha driver and of every connection it opens: read and ping, no
+/// write, subscriptions, browse or discovery, one operation at a time, PDUs up to 253 bytes
 /// (`MB-TCP-CAPABILITIES`). The driver reports the same value before any connection exists.
 #[expect(
     clippy::redundant_pub_crate,
@@ -40,6 +40,7 @@ const RAW_BUDGET: NonZeroUsize = match NonZeroUsize::new(MAX_PDU_BYTES) {
 pub(crate) fn alpha_capabilities() -> Capabilities {
     Capabilities {
         read: true,
+        ping: true,
         subscribe: SubscriptionMode::Unsupported,
         max_pdu_bytes: NonZeroUsize::new(MAX_PDU_BYTES),
         concurrency: NonZeroUsize::MIN,
@@ -148,17 +149,25 @@ impl Default for ConnectionDefaults {
 ///   `retry_on` set, and only while the request's own deadline has not passed. A device
 ///   exception is an answer, not a failure, and is never retried. `write` does no I/O and
 ///   so never retries.
-/// - **One read in flight.** `Capabilities.concurrency` is 1: a read that starts while
-///   another runs fails with [`ErrorKind::Backpressure`] before any I/O, as the simulator's
-///   does. The session underneath is therefore never asked for two exchanges at once, and
-///   the chunks of one read are the only requests the device sees.
+/// - **One operation in flight.** `Capabilities.concurrency` is 1: a read or ping that
+///   starts while another runs fails with [`ErrorKind::Backpressure`] before any I/O, as
+///   the simulator's does. The session underneath is therefore never asked for two
+///   exchanges at once, and the chunks of one read are the only requests the device sees.
 /// - **Lifecycle.** `Connected` after [`open`](Self::open); a transport failure shows as
 ///   `Reconnecting { attempt, next_at }` and the next read waits out the backoff and
 ///   reopens (decision D15); `close` ends in `Closed`. A read on a `Closing`, `Closed` or
 ///   `Failed` connection fails with `Disconnected` before any I/O.
+/// - **Ping.** [`ping`](Connection::ping) sends one read of the configured ping address
+///   (`ping-address` of [`ModbusOptions`], default `4x00001:BOOL`) through the same session,
+///   the same admission rules and the same in-flight slot as a read, bounded by
+///   `timeouts.request`, and never retries. Any reply that answers the request proves the
+///   peer is alive, an exception reply included (`MB-QUIRK-D`); a silent peer is
+///   [`ErrorKind::Timeout`].
 /// - **Tracing.** A `debug` span `read` covers each read with `scheme = "modbus-tcp"`,
 ///   `endpoint` (host and port, never credentials), `op = "read"`, `items` and `chunks`;
 ///   the session's `request` span nests inside it with the `txn` of the chunk in flight.
+///   `ping` has a `ping` span with `op = "ping"`; its nested `request` span says
+///   `op = "read"` because a ping is a read on the wire.
 ///   `open` and `close` have `info` spans of the same shape.
 ///
 /// # Compatibility: docs/parity/modbus.md#MB-READ-MERGE
@@ -166,7 +175,7 @@ impl Default for ConnectionDefaults {
 /// (`MB-READ-MERGE`), one request is in flight (`MB-READ-INFLIGHT`), a request times out
 /// after `request-timeout-ms` (`MB-READ-TIMEOUT`). Reconnect (`MB-READ-RECONNECT`) and read
 /// retry (`MB-READ-RETRY`) are Stonecrab extensions; the default policy sends once, as
-/// upstream does.
+/// upstream does. Ping is the counterpart of `onPing` (`MB-TCP-PING`).
 ///
 /// # Examples
 /// ```
@@ -224,6 +233,8 @@ pub struct ModbusConnection {
     limits: ResourceLimits,
     batch: BatchLimits,
     defaults: ConnectionDefaults,
+    /// What `ping` reads once: the `ping-address` of the options in the configuration.
+    ping_address: ModbusAddress,
     capabilities: Capabilities,
     /// True while a read is in flight; see [`Slot`].
     in_flight: AtomicBool,
@@ -249,7 +260,9 @@ impl ModbusConnection {
     /// `factory` opens the transports: the real TCP factory in production, the testkit's
     /// `FakeTransportFactory` in tests. `clock` is the one source of time. `defaults`
     /// carries the connection-wide unit, byte order and request-size limits (see
-    /// [`ConnectionDefaults`]).
+    /// [`ConnectionDefaults`]). The address [`ping`](Connection::ping) reads is the
+    /// `ping_address` of the [`ModbusOptions`] in the driver options of `config`, else the
+    /// upstream default `4x00001:BOOL`.
     ///
     /// The deadline source is `timeouts.connect`, applied by the guard to the open.
     ///
@@ -371,6 +384,11 @@ impl ModbusConnection {
             limits,
             batch,
             defaults,
+            ping_address: config
+                .driver_options_as::<ModbusOptions>()
+                .map_or(ModbusAddress::DEFAULT_PING, |options| {
+                    options.ping_address.clone()
+                }),
             capabilities: alpha_capabilities(),
             in_flight: AtomicBool::new(false),
         })
@@ -386,13 +404,13 @@ impl ModbusConnection {
             .map_err(|_busy| {
                 op.reject(
                     ErrorKind::Backpressure,
-                    "another read is in flight and the connection runs one at a time",
+                    "another operation is in flight and the connection runs one at a time",
                 )
             })
     }
 
-    /// The checks that need no tag: the connection is open and the request not cancelled.
-    fn gate(&self, op: &Op<'_>, request: &ReadRequest) -> Result<()> {
+    /// The connection is open: not `Closing`, `Closed` or `Failed`.
+    fn ensure_open(&self, op: &Op<'_>) -> Result<()> {
         let state = self.session.state();
         if matches!(
             state,
@@ -404,6 +422,12 @@ impl ModbusConnection {
                 FailureCategory::Transport,
             ));
         }
+        Ok(())
+    }
+
+    /// The checks that need no tag: the connection is open and the request not cancelled.
+    fn gate(&self, op: &Op<'_>, request: &ReadRequest) -> Result<()> {
+        self.ensure_open(op)?;
         if request
             .cancel()
             .is_some_and(CancellationToken::is_cancelled)
@@ -446,6 +470,7 @@ impl ModbusConnection {
     async fn read_inner(&self, request: ReadRequest, span: tracing::Span) -> Result<ReadResponse> {
         let op = Op {
             connection: self,
+            operation: Operation::Read,
             started: self.clock.now(),
         };
         self.gate(&op, &request)?;
@@ -470,6 +495,31 @@ impl ModbusConnection {
             items.extend(self.items_of(&op, chunk, &answer));
         }
         self.respond(&op, &request, items, chunks.len())
+    }
+
+    /// One read of the ping address, answered by any reply that correlates with it.
+    async fn ping_inner(&self) -> Result<()> {
+        let op = Op {
+            connection: self,
+            operation: Operation::Ping,
+            started: self.clock.now(),
+        };
+        self.ensure_open(&op)?;
+        let _slot = self.acquire(&op)?;
+        let address = &self.ping_address;
+        let pdu = read_pdu(address.area(), address.offset(), address.width());
+        let unit_id = address.unit_id().unwrap_or(self.defaults.unit_id);
+        let deadline = self.chunk_deadline(&op, None)?;
+        // The session has proved the reply against the request, so a data reply and an
+        // exception reply both show that the peer answers (`MB-QUIRK-D`).
+        self.session
+            .request(&pdu, unit_id, deadline, None)
+            .await
+            .map(|_reply| ())
+            .map_err(|error| {
+                let message = error.to_string();
+                self.failure(&op, error, 1, message)
+            })
     }
 
     /// The correlated response for `items`, one per tag of `request`, answered by `chunks`
@@ -510,7 +560,7 @@ impl ModbusConnection {
         total: usize,
         chunk: &Chunk,
     ) -> Result<Answer> {
-        let pdu = read_pdu(chunk);
+        let pdu = read_pdu(chunk.area, chunk.start, chunk.quantity);
         let unit_id = chunk.unit_id.unwrap_or(self.defaults.unit_id);
         let mut attempts: u32 = 0;
         loop {
@@ -561,22 +611,25 @@ impl ModbusConnection {
         total: usize,
         attempts: u32,
     ) -> PlcError {
+        let message = format!("chunk {} of {total}: {error}", index.saturating_add(1));
+        self.failure(op, error, attempts, message)
+    }
+
+    /// `error` as the operation's own, saying `message`, with its diagnostics.
+    fn failure(&self, op: &Op<'_>, error: PlcError, attempts: u32, message: String) -> PlcError {
         let mut diagnostics = error.diagnostics().clone();
-        diagnostics.operation = Some(Operation::Read);
+        diagnostics.operation = Some(op.operation);
         // The state now, not the guard's at the instant of the failure: a peer that closed
-        // leaves the guard `Reconnecting` by the time the read reports it.
+        // leaves the guard `Reconnecting` by the time the operation reports it.
         diagnostics.connection_state = Some(self.session.state());
         diagnostics.latency = Some(op.elapsed());
         diagnostics.retries = attempts.saturating_sub(1);
         diagnostics
             .category
             .get_or_insert(FailureCategory::Transport);
-        PlcError::new(
-            error.kind(),
-            format!("chunk {} of {total}: {error}", index.saturating_add(1)),
-        )
-        .with_diagnostics(diagnostics)
-        .with_source(error)
+        PlcError::new(error.kind(), message)
+            .with_diagnostics(diagnostics)
+            .with_source(error)
     }
 
     /// One item per member of `chunk`, decoded from the chunk's answer.
@@ -623,10 +676,9 @@ struct Answer {
     retries: u32,
 }
 
-/// The read request PDU for `chunk`: function code by area, wire start and quantity.
-const fn read_pdu(chunk: &Chunk) -> ModbusPdu {
-    let (start, quantity) = (chunk.start, chunk.quantity);
-    match chunk.area {
+/// The read request PDU: function code by area, wire start and quantity.
+const fn read_pdu(area: ModbusArea, start: u16, quantity: u16) -> ModbusPdu {
+    match area {
         ModbusArea::Coil => ModbusPdu::ReadCoils { start, quantity },
         ModbusArea::DiscreteInput => ModbusPdu::ReadDiscreteInputs { start, quantity },
         ModbusArea::HoldingRegister => ModbusPdu::ReadHoldingRegisters { start, quantity },
@@ -706,10 +758,12 @@ impl Drop for Slot<'_> {
     }
 }
 
-/// The context every error of one read is stamped with.
+/// The context every error of one read or ping is stamped with.
 struct Op<'a> {
     connection: &'a ModbusConnection,
-    /// The clock reading when the read began, the base of every latency figure.
+    /// What the diagnostics name: `Read` or `Ping`.
+    operation: Operation,
+    /// The clock reading when the operation began, the base of every latency figure.
     started: Instant,
 }
 
@@ -723,7 +777,7 @@ impl Op<'_> {
 
     fn diagnostics(&self, category: FailureCategory) -> Diagnostics {
         Diagnostics {
-            operation: Some(Operation::Read),
+            operation: Some(self.operation),
             connection_state: Some(self.connection.session.state()),
             latency: Some(self.elapsed()),
             category: Some(category),
@@ -745,7 +799,7 @@ impl Op<'_> {
         self.error(kind, message, FailureCategory::Validation)
     }
 
-    /// Re-wrap an error from core or the batcher with this read's diagnostics.
+    /// Re-wrap an error from core or the batcher with this operation's diagnostics.
     fn wrap(&self, error: PlcError, category: FailureCategory) -> PlcError {
         PlcError::new(error.kind(), error.to_string())
             .with_diagnostics(self.diagnostics(category))
@@ -798,7 +852,8 @@ impl Connection for ModbusConnection {
     /// - [`ErrorKind::InvalidConfig`] if a tag's element count is not 1.
     /// - [`ErrorKind::ResourceLimit`] if the request has more items than
     ///   `max_items_per_request`.
-    /// - [`ErrorKind::Backpressure`] if another read is in flight; nothing was sent.
+    /// - [`ErrorKind::Backpressure`] if another read or a ping is in flight; nothing was
+    ///   sent.
     /// - [`ErrorKind::Timeout`] if the request deadline had passed, or a chunk's deadline
     ///   passed and the retry policy gave up.
     /// - [`ErrorKind::MalformedData`] if a reply violated the framing or did not answer
@@ -892,6 +947,88 @@ impl Connection for ModbusConnection {
             op = "close"
         );
         Box::pin(self.session.close().instrument(span))
+    }
+
+    /// Check that the peer answers: one read of `ping-address` through the session.
+    ///
+    /// The read goes through the same admission rules and the same single in-flight slot
+    /// as [`read`](Self::read), so a ping while a read (or another ping) runs fails with
+    /// [`ErrorKind::Backpressure`] before any I/O. It is never retried. The address is the
+    /// `ping-address` of the connection string (`4x00001:BOOL` unless it says otherwise),
+    /// read in the unit it names, else in the default unit, as one coil, one discrete input
+    /// or as many registers as its data type spans. The value of the reply is not looked
+    /// at.
+    ///
+    /// The deadline source is `timeouts.request`.
+    ///
+    /// # Compatibility: docs/parity/modbus.md#MB-TCP-PING
+    /// The counterpart of upstream `onPing`, including its quirk (d): any reply that
+    /// answers the request is success, an exception reply too, because a correlated reply
+    /// shows that the peer answers (docs/parity/modbus.md#MB-QUIRK-D).
+    ///
+    /// # Errors
+    /// Every error carries `Diagnostics` with `operation = Ping`, the connection state, the
+    /// latency and a category.
+    /// - [`ErrorKind::Disconnected`] if the connection is `Closing`, `Closed` or `Failed`
+    ///   (nothing sent), or the peer closed before it answered.
+    /// - [`ErrorKind::Backpressure`] if a read or another ping is in flight; nothing was
+    ///   sent.
+    /// - [`ErrorKind::Timeout`] if no reply arrived within `timeouts.request`.
+    /// - [`ErrorKind::MalformedData`] if a reply violated the framing or did not answer
+    ///   the request.
+    ///
+    /// # Cancel safety
+    /// Cancel-safe: a dropped future releases the single in-flight slot. If the request
+    /// frame had gone out, its reply may still arrive; the session discards it as late and
+    /// the guard resynchronizes before the next request. A ping reads and so changes
+    /// nothing on the device.
+    ///
+    /// # Wire effects
+    /// Transmits one read request frame (function code 01, 02, 03 or 04) for the ping
+    /// address. Nothing is ever written to the device.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[cfg(feature = "testkit")]
+    /// # fn main() -> Result<(), stonecrab::PlcError> {
+    /// use std::sync::Arc;
+    /// use stonecrab::{Connection, ConnectionConfig, Endpoint};
+    /// use stonecrab::modbus::{ConnectionDefaults, ModbusConnection};
+    /// use stonecrab::testkit::{FakeClock, FakeTransportFactory, Script, Step, block_on_with};
+    ///
+    /// // The default ping address, holding register 1, is wire address 0 of unit 1.
+    /// let clock = FakeClock::default();
+    /// let factory = FakeTransportFactory::new(clock.clone());
+    /// factory.push_script(Script::strict(vec![
+    ///     Step::Expect(vec![0, 1, 0, 0, 0, 6, 1, 3, 0, 0, 0, 1]),
+    ///     Step::Reply(vec![0, 1, 0, 0, 0, 5, 1, 3, 2, 0, 0]),
+    /// ]));
+    /// let config = ConnectionConfig::builder("modbus-tcp", Endpoint::Custom("fake://plc".to_owned()))
+    ///     .build()?;
+    /// let connection = block_on_with(
+    ///     &clock,
+    ///     ModbusConnection::open(
+    ///         config,
+    ///         Arc::new(factory),
+    ///         Arc::new(clock.clone()),
+    ///         ConnectionDefaults::default(),
+    ///     ),
+    /// )?;
+    /// assert!(connection.capabilities().ping);
+    /// block_on_with(&clock, connection.ping())?;
+    /// # Ok::<(), stonecrab::PlcError>(())
+    /// # }
+    /// # #[cfg(not(feature = "testkit"))]
+    /// # fn main() {}
+    /// ```
+    fn ping(&self) -> OpFuture<'_, ()> {
+        let span = tracing::debug_span!(
+            "ping",
+            scheme = SCHEME,
+            endpoint = %self.endpoint,
+            op = "ping"
+        );
+        Box::pin(self.ping_inner().instrument(span))
     }
 }
 
@@ -1007,6 +1144,7 @@ mod tests {
             .expect("request");
         let op = Op {
             connection: &connection,
+            operation: Operation::Read,
             started: clock.now(),
         };
         // No item for the one requested tag: the response is incomplete.
