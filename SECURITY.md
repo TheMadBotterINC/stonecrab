@@ -1,22 +1,23 @@
 # Security
 
 ## Status
-Stonecrab is alpha software. The alpha supports reading coils, discrete inputs, holding
-registers and input registers from Modbus TCP servers, an in-process simulator and
-declarative sensor profiles. It does not write to devices, subscribe, browse, discover or
-speak Modbus RTU, and it has been checked against one independent server (pymodbus 3.8.6)
-and no physical device. See [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) for the exact
-support levels. The supported published version is `stonecrab` 0.2.0, the alpha, one
-crate, published on 2026-10-27 after the maintainer's separate approval; `stonecrab`
-0.1.0 is a specification-stage package with no protocol code and is not supported.
+Stonecrab is pre-1.0 software. Version 0.3.0 reads and writes Modbus devices over TCP,
+UDP, a serial line (RTU and ASCII) and, behind the opt-in `tls` feature, TLS; it also has
+an in-process simulator, declarative sensor profiles and, behind the opt-in `boards`
+feature, two sensor-board adapters. It does not browse or discover, and it has been
+checked against independent software peers (pymodbus 3.8.6, libmodbus 3.1.11 and
+diagslave 3.6) and no physical device. See [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md)
+for the exact support levels. The supported published version is `stonecrab` 0.3.0, one
+crate, published on 2026-10-29 after the maintainer's separate approval; the alpha, 0.2.0,
+and the specification-stage package 0.1.0 are not supported.
 
 ## Supported versions
-The alpha line is the only supported line. Nothing older is supported, and the 0.1.0
-placeholder has no code to defend.
+The latest release line, 0.3, is the only supported line. Nothing older is supported: the
+alpha, 0.2.0, is superseded by it, and the 0.1.0 placeholder has no code to defend.
 
 | Crate | Supported version |
 | --- | --- |
-| `stonecrab` | 0.2.0 |
+| `stonecrab` | 0.3.0 |
 
 Stonecrab is one crate with one version; its modules (the simulator, Modbus TCP, the
 sensor profiles, the transport and the codec) are not versioned separately. Pre-1.0
@@ -45,5 +46,5 @@ pull request, the patch release) are written down in
 [`docs/adr/0017-release-process-and-evidence.md`](docs/adr/0017-release-process-and-evidence.md),
 decision 5.
 
-`stonecrab` 0.2.0 and the 0.1.0 placeholder are the published versions. No version has
-been yanked and no advisory has been filed.
+`stonecrab` 0.3.0, 0.2.0 and the 0.1.0 placeholder are the published versions. No
+version has been yanked and no advisory has been filed.

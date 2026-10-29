@@ -25,7 +25,7 @@ types are Stonecrab's own contract. The behavior that is specified is recorded i
 | `Jitter` (xorshift64* sample source for `ReconnectPolicy::next_delay`) | build-tested |
 | `SerialTransport` and `SerialFactory` (feature `serial`) | simulator-tested; interoperability-tested through Modbus RTU and Modbus ASCII on a pseudo-terminal pair of a Linux host (job `interop-serial-port`, diagslave 3.6, first hosted run 40849466167, 11 of 11 per framing) |
 | `UdpTransport` and `UdpFactory`, `Transport::delivers_datagrams` | interoperability-tested (job `interop-udp`, run 40830080420, 6 of 6); simulator-tested on loopback sockets |
-| `TlsFactory` and `TlsSettings` (feature `tls`): TLS 1.3 and 1.2 on rustls and ring, explicit trust anchors, mutual TLS | interoperability-tested through Modbus TCP over TLS (job `interop-tls`, pymodbus 3.8.6 with mutual TLS, 3 of 3 in its local run on 2026-10-29; first hosted run pending); simulator-tested on loopback sockets against rustls's server |
+| `TlsFactory` and `TlsSettings` (feature `tls`): TLS 1.3 and 1.2 on rustls and ring, explicit trust anchors, mutual TLS | interoperability-tested through Modbus TCP over TLS (job `interop-tls`, pymodbus 3.8.6 with mutual TLS, 3 of 3 locally and in its first hosted run, 40880582023, on 2026-10-29); simulator-tested on loopback sockets against rustls's server |
 | TLS-PSK transport | not supported (rustls has no external pre-shared keys) |
 | Hardware verification | planned |
 
@@ -72,8 +72,8 @@ peer's close with and without `close_notify`, the bounds, the PEM refusals) and 
 of the handshake deadline on the paused clock. Through `stonecrab::modbus`
 (`modbus-tcp:tls`) it carries the reads, a write and ping of its `interop-tls` job against
 pymodbus 3.8.6 on Python's ssl module (OpenSSL), with mutual TLS and a PKI that openssl makes
-at run time; that job passed 3 of 3 in its local run on 2026-10-29 and its first hosted run
-is pending.
+at run time; that job passed 3 of 3 locally and in its first hosted run, 40880582023, on
+2026-10-29.
 
 ## Feature
 The module exists only with the `transport` feature, which is the only thing that brings

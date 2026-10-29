@@ -1,7 +1,7 @@
 [package]
 name = "stonecrab"
 version = "0.3.0"
-description = "Native Rust industrial protocol library: core contracts, Modbus TCP, an in-process simulator and sensor profiles in one crate"
+description = "Native Rust industrial protocol library: core contracts, Modbus (TCP, UDP, TLS, RTU, ASCII), an in-process simulator and sensor profiles in one crate"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -34,7 +34,7 @@ tls = ["transport", "dep:rustls", "dep:tokio-rustls"]
 # The serial transport on a blocking worker thread (`stonecrab::transport::SerialTransport`).
 # Needs the transport. `modbus` enables it for Modbus RTU (ADR-0024).
 serial = ["transport", "dep:serial2"]
-# The native Modbus TCP and Modbus RTU drivers (`stonecrab::modbus`). Needs the transport,
+# The native Modbus TCP, RTU and ASCII drivers (`stonecrab::modbus`). Needs the transport,
 # the serial transport for RTU, and the codec (the codec is always built).
 modbus = ["transport", "serial", "dep:tracing"]
 # The in-process simulator driver (`stonecrab::sim`).

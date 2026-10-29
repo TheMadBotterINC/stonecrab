@@ -13,27 +13,30 @@ Copyright 2026 The Mad Botter INC and the Stonecrab contributors. Apache-2.0.
 ```
 
 Stonecrab reads values from industrial equipment, such as sensors and controllers that
-speak Modbus TCP, and hands them to your program as plain, checked numbers. It is one
-package with one version, `stonecrab`, written in Rust. Today it can read coils, discrete
-inputs, holding registers and input registers from a Modbus TCP server, turn the raw
-values into scaled sensor measurements that carry a quality grade, using declarative
-profiles, write coils and holding registers when a connection is granted write access, and
-run the same code against a built-in simulator with no network and no hardware. It has been
-checked against two independent Modbus servers (pymodbus 3.8.6 and libmodbus 3.1.11) and
-has never touched a physical device. **It is alpha software and is not for production use
-yet**: it subscribes only by polling, does not browse or discover, its Modbus RTU and ASCII
-drivers have met an independent server (diagslave 3.6) through a TCP gateway and through a
-serial port of the driver on a pseudo-terminal pair, in hosted runs, but never a serial
-device or an electrical line, and its APIs may change before 1.0.
+speak Modbus, and hands them to your program as plain, checked numbers. It is one package
+with one version, `stonecrab`, written in Rust. Today it can read coils, discrete inputs,
+holding registers and input registers from a Modbus server (over TCP, UDP, TLS, RTU or
+ASCII), turn the raw values into scaled sensor measurements that carry a quality grade,
+using declarative profiles, write coils and holding registers when a connection is granted
+write access, and run the same code against a built-in simulator with no network and no
+hardware. It has been checked against independent Modbus servers (pymodbus 3.8.6,
+libmodbus 3.1.11 and diagslave 3.6) and has never touched a physical device. **It is alpha
+software and is not for production use yet**: it subscribes only by polling, does not
+browse or discover, its Modbus RTU and ASCII drivers have met an independent server
+(diagslave 3.6) through a TCP gateway and through a serial port of the driver on a
+pseudo-terminal pair, in hosted runs, but never a serial device or an electrical line, and
+its APIs may change before 1.0.
 
 ## Add it
 ```sh
 cargo add stonecrab
 ```
-That one line gives you the simulator, Modbus TCP and the sensor profiles. `stonecrab`
-0.2.0, the alpha, is published on crates.io (2026-10-27), so it fetches 0.2.0. The older
-0.1.0 is a specification-stage placeholder with no protocol code and stays listed as an
-old version. The repository has no `v0.2.0` tag and no GitHub release yet.
+That one line gives you the simulator, the Modbus drivers (TCP, UDP, RTU and ASCII) and
+the sensor profiles; TLS and the board adapters are the opt-in `tls` and `boards`
+features. `stonecrab` 0.3.0 is published on crates.io (2026-10-29), so it fetches 0.3.0;
+the alpha, 0.2.0 (2026-10-27), and the specification-stage placeholder 0.1.0 stay listed
+as old versions. Releases are tagged `v<version>` from `v0.3.0` on; 0.2.0 has no tag, and
+there is no GitHub release.
 
 Programmers use it through one object-safe boundary (`DriverRegistry`, `Driver`,
 `Connection`): register a driver, connect with a connection string such as
@@ -45,7 +48,7 @@ Everything is in the one crate; the features only decide what is compiled in.
 | Feature | What you get | On by default |
 | --- | --- | --- |
 | `sim` | `stonecrab::sim`, the in-process simulator | yes |
-| `modbus` | `stonecrab::modbus`, the Modbus TCP and Modbus RTU drivers (reads and writes); brings in Tokio and the serial transport | yes |
+| `modbus` | `stonecrab::modbus`, the Modbus TCP (over TCP, UDP and, with `tls`, TLS), RTU and ASCII drivers (reads and writes); brings in Tokio and the serial transport | yes |
 | `sensors` | `stonecrab::sensors`, declarative sensor profiles and the TOML loader | yes |
 | `transport` | `stonecrab::transport`, deadline-bounded transports; the only thing that needs Tokio, and on whenever `modbus` is | no |
 | `serial` | the serial transport in `stonecrab::transport` (`SerialFactory`, one worker thread per port); on whenever `modbus` is | no |
@@ -81,7 +84,7 @@ changes no level). Nothing is `hardware-verified`.
 | Modbus TCP | ping (one read of the configured `ping-address`) | interoperability-tested | `MB-TCP-PING`; `interop_ping_reads_each_configured_area_and_succeeds`, `interop_ping_of_an_address_the_server_refuses_still_answers` |
 | Modbus TCP | browse, discover | not supported | `MB-TCP-BROWSE`, `MB-TCP-DISCOVER` (deferred) |
 | Modbus TCP | over UDP (`modbus-tcp:udp://host[:port]`, default port 502): reads, writes and ping, a lost, delayed, duplicated or reordered reply ending in `Timeout` or discarded by transaction id | interoperability-tested (job `interop-udp`, run 40830080420, 6 of 6); simulator-tested on loopback UDP | `MB-TCP-TRANSPORTS-UDP`, `UTR-UDP`; diagslave 3.6 with `tc netem` (job `interop-udp`, first hosted run 40830080420, 6 of 6 on 2026-10-29), `interop_udp_netem_reordered_replies_never_answer_the_wrong_request`; ADR-0027 |
-| Modbus TCP | over TLS (`modbus-tcp:tls://host[:port]?tls.trust-store=ca.pem[&tls.keystore=client.pem]`, default port 802, feature `tls`): reads, writes and ping over TLS 1.3 or 1.2, the server verified against the given authorities and its host name, mutual TLS with a client certificate | interoperability-tested (job `interop-tls`, pymodbus 3.8.6 with mutual TLS, 3 of 3 in its local run on 2026-10-29; first hosted run pending) | `MB-TCP-TRANSPORTS-TLS`, `UTR-TLS`, `UTR-TLS-TRUST`; `interop_tls_reads_writes_and_pings_over_mutual_tls`; ADR-0032 |
+| Modbus TCP | over TLS (`modbus-tcp:tls://host[:port]?tls.trust-store=ca.pem[&tls.keystore=client.pem]`, default port 802, feature `tls`): reads, writes and ping over TLS 1.3 or 1.2, the server verified against the given authorities and its host name, mutual TLS with a client certificate | interoperability-tested (job `interop-tls`, pymodbus 3.8.6 with mutual TLS, 3 of 3 locally and in its first hosted run, 40880582023, on 2026-10-29) | `MB-TCP-TRANSPORTS-TLS`, `UTR-TLS`, `UTR-TLS-TRUST`; `interop_tls_reads_writes_and_pings_over_mutual_tls`; ADR-0032 |
 | Modbus TCP | TLS-PSK | not supported | `MB-TCP-TRANSPORTS-TLS-PSK` (deferred: rustls has no external pre-shared keys); the parser rejects it |
 | Modbus TCP | array selections `[i]`, `[lo..hi]`, `;base`: a range read and written as one `PlcValue::List`, on the extended registers too | simulator-tested | `MB-ADDR-SELECTION`; fake transport, including the upstream array read and write exchanges |
 | Modbus TCP | extended registers (FC20 read, FC21 write) | simulator-tested | `MB-ADDR-EXTENDED`, `MB-LIMIT-EXT`; fake transport and the first-party responder (no interop peer serves FC20 or FC21) |
@@ -162,11 +165,10 @@ connection-string and address grammars.
 See [`STATUS.md`](STATUS.md) for the current engineering handoff, verification
 evidence, known gaps and continuation steps, and
 [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) for what is supported, at which level and
-against which peers. The 0.1.0 package on crates.io is specification-stage only; 0.2.0
-is the alpha. This README describes `master`, which is version 0.3.0 and not yet
-published: Modbus writes landed after 0.2.0, and the sensor `unit` became optional (see
-"Unreleased" and its "Migration from 0.2" in [`CHANGELOG.md`](CHANGELOG.md)), so the
-published 0.2.0 reads only.
+against which peers. The 0.1.0 package on crates.io is specification-stage only, 0.2.0
+is the alpha and 0.3.0 is the current release: Modbus writes and the other changes since
+the alpha are in its section of [`CHANGELOG.md`](CHANGELOG.md), with the "Migration from
+0.2" entry for the sensor `unit`, which became optional.
 Upstream compatibility is claimed only for the rows of
 [`docs/parity/modbus.md`](docs/parity/modbus.md) that say so, at the support levels above.
 

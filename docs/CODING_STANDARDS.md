@@ -897,7 +897,7 @@ debug    = true
 ```toml
 [package]
 name         = "stonecrab"
-version      = "0.2.0"
+version      = "0.3.0"
 description  = "Native Rust industrial protocol library: core contracts, Modbus TCP, an in-process simulator and sensor profiles in one crate"
 edition.workspace      = true
 rust-version.workspace = true

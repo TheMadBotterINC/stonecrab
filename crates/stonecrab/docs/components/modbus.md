@@ -10,8 +10,9 @@ same operations run over Modbus RTU on a serial line or a serial-to-IP gateway (
 RTU" below) and, since S60, over Modbus ASCII (see "Modbus ASCII" below); since S49
 the text types `CHAR`, `WCHAR`, `STRING(n)` and `WSTRING(n)` are read and written (see
 "Text" below), and since S61 Modbus TCP also runs over UDP (`modbus-tcp:udp`, ADR-0027).
-TLS, browse and discovery are out of scope for the alpha and are listed under "Not in the
-alpha" below.
+Since S71 it also runs over TLS with the opt-in `tls` feature (`modbus-tcp:tls`, ADR-0032).
+Browse, discovery and TLS-PSK are out of scope and are listed under "Not in the alpha"
+below.
 The TCP driver has been checked against an independent server, pymodbus 3.8.6, and no
 physical device; over UDP it runs on loopback sockets, and its `interop-udp` job against
 diagslave 3.6 with `tc netem` faults passed its first hosted run (2026-10-29, run
@@ -310,13 +311,13 @@ device has been tried.
 | --- | --- |
 | Read: coils, discrete inputs, holding registers and input registers (function codes 01 to 04) as the 15 numeric and bit types | interoperability-tested |
 | Array selections `[i]`, `[lo..hi]` and `;base`: a range read and written as one `PlcValue::List`, on every area (the extended registers included) | simulator-tested |
-| Text: `CHAR`, `WCHAR`, `STRING(n)` and `WSTRING(n)` read and written as `PlcValue::Char` and `PlcValue::String` (the pymodbus interop test passed locally in S49 and is not yet a hosted-runner result) | simulator-tested |
+| Text: `CHAR`, `WCHAR`, `STRING(n)` and `WSTRING(n)` read and written as `PlcValue::Char` and `PlcValue::String` (the pymodbus interop test passed locally in S49 and in hosted CI, run 40830080420) | simulator-tested |
 | Ping: one read of `ping-address` (`Connection::ping`) | interoperability-tested |
 | Write: coils and holding registers (function codes 15, 06 and 16), `Unknown` after a request that went out unanswered | interoperability-tested |
 | Extended registers: read by function code 20 and write by function code 21, cut at the end of each 10000-register file (`extended-register:N`, `6x`, bare `6`) | simulator-tested |
 | Subscribe by polling: cyclic and change-of-state, event refused (`Connection::subscribe`) | simulator-tested |
 | Browse and discover | not supported |
-| Modbus TCP over TLS (`modbus-tcp:tls`, feature `tls`): reads, writes and ping with mutual TLS; untrusted, expired and misnamed server certificates refused as `Trust`, a refused client certificate as `Authentication` (job `interop-tls` against pymodbus 3.8.6 with mutual TLS, 3 of 3 in its local run on 2026-10-29, first hosted run pending; loopback tests against rustls's server) | interoperability-tested |
+| Modbus TCP over TLS (`modbus-tcp:tls`, feature `tls`): reads, writes and ping with mutual TLS; untrusted, expired and misnamed server certificates refused as `Trust`, a refused client certificate as `Authentication` (job `interop-tls` against pymodbus 3.8.6 with mutual TLS, 3 of 3 locally and in its first hosted run, 40880582023, on 2026-10-29; loopback tests against rustls's server) | interoperability-tested |
 | Modbus TCP over TLS-PSK (rustls has no external pre-shared keys) | not supported |
 | Connection string and parameters (`parse_config`) | simulator-tested |
 | Connect, close and connection state | interoperability-tested |
@@ -362,8 +363,8 @@ error rather than ignoring it; operations that have no API at all do not exist:
   3.1.11 and modbus-tk serves function codes 20 and 21, and diagslave 3.6 parses the RTU
   frames of both and answers each with exception 02 (S59b), so no value is ever exchanged
   (`MB-ADDR-EXTENDED` is `implemented`, not `automated-verified`);
-- TLS and TLS-PSK transports (`MB-TCP-TRANSPORTS-TLS`, `MB-TCP-TRANSPORTS-TLS-PSK`) and the
-  `udp.` transport options (`MB-CFG-TRANSPORT-OPTIONS`); the RTU and ASCII items that are
+- the TLS-PSK transport (`MB-TCP-TRANSPORTS-TLS-PSK`; rustls has no external pre-shared keys)
+  and the `udp.` transport options (`MB-CFG-TRANSPORT-OPTIONS`); the RTU and ASCII items that are
   deferred (broadcast, shared ports, the serial read and write timeouts, DTR and RTS) are
   listed in the serial parity record;
 - the upstream gap-filling read optimizer, by decision (S51, ADR-0015 addendum): Stonecrab

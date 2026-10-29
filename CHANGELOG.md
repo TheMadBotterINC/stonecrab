@@ -1,12 +1,104 @@
 # Changelog
 All notable changes to this project are documented here, in the style of Keep a
-Changelog. Stonecrab is one crate, so there is one section for the alpha. It is published
-as `stonecrab` 0.2.0 (2026-10-27); `stonecrab` 0.1.0 is the specification-stage
-placeholder.
+Changelog. Stonecrab is one crate, so each release has one section. `stonecrab` 0.3.0
+(2026-10-29) and the alpha, 0.2.0 (2026-10-27), are published; `stonecrab` 0.1.0 is the
+specification-stage placeholder.
 
 ## Unreleased
+
+## stonecrab 0.3.0 (2026-10-29)
+The second pre-release, one crate (ADR-0018), released under maintainer decision E12. It
+opens with the four release-note items that `docs/SPEC.md` ('Open-source project
+requirements') requires; every change since 0.2.0 follows, newest first.
+
+- **Upstream baseline:** Apache PLC4X v1.0.0 (commit
+  `ea229918f5d07700e04d7d69ab1645da679cb700`, pinned in `upstream/manifest.toml`), as for
+  0.2.0. Its `modbus.mspec` is now vendored under `upstream/mspec/` for the code generator;
+  the generated codec is compiled only into the crate's own tests, and the hand-written
+  codec is the one that runs.
+- **Supported operations:** what 0.2.0 read, plus Modbus writes (FC06, FC15, FC16, FC21,
+  and FC05 for one coil on request), ping, polling subscriptions, extended registers
+  (FC20, FC21), text, calendar and list values with array selections, Modbus RTU and ASCII
+  over a serial port or a TCP gateway, Modbus TCP over UDP and, behind the opt-in `tls`
+  feature, over TLS; the connection cache, the event pump and Object PLC Mapping; stale
+  tracking, an acquisition loop and profile schema version 2 for sensor profiles; and,
+  behind the opt-in `boards` feature, the MAX31855 over SPI and the ADXL345 over the
+  caller's I2C bus, with a Linux `/dev/spidev` backend for the MAX31855 behind
+  `adapters-linux`. The level of each is in `docs/COMPATIBILITY.md`.
+- **Hardware evidence:** none. No physical device has been used. The highest level of any
+  row is `interoperability-tested`, against software peers: pymodbus 3.8.6 (TCP and TLS),
+  libmodbus 3.1.11, diagslave 3.6 (UDP, RTU over TCP, and RTU and ASCII through
+  pseudo-terminals on Linux), a first-party modbus-tk 1.1.5 server and Toxiproxy 2.13.0
+  for injected faults. The documented device maps, the SOLO SLM1-C among them, are
+  replayed, not run against devices.
+- **Breaking changes:** the sensor `unit` is `Option<String>` (S74). The "Migration from
+  0.2" entry below shows the change a caller makes and lists the behavior changes since
+  0.2.0 that a caller can notice.
+
+Gates not run for 0.3.0, so that nobody reads their absence as a pass: the 8-hour release
+fuzz run and the 24-hour soak (decision E9; CI fuzzes each target for 60 seconds and the
+recorded soaks ran for 10 minutes), hardware verification, differential tests against
+PLC4J and a mutation-testing threshold (the weekly `scheduled` job, with its 30-minute fuzz
+and mutation runs, has not run yet; the only mutation run is the alpha's). Branch coverage
+is reported, not gated. `cargo semver-checks` has no lint for the one source break (see the
+migration entry).
+
+- Object PLC Mapping, the third PLC4X tool (ADR-0033, slice S72, decisions E6 and E11;
+  additive, no feature, no dependency, no proc-macro crate): `PlcEntity`, `EntityField`,
+  `FieldValue`, `EntityManager` and `ConnectedEntity` at the crate root and the declarative
+  macro `stonecrab::plc_entity!`, built under every feature set. A type implements
+  `PlcEntity` to list its mapped fields (`EntityField`: name, address or alias `${name}`,
+  optional cache duration) and convert each by name from and to `PlcValue`; `plc_entity!`
+  writes the struct and that implementation, a field followed by `=> "address"` (and
+  optionally `(cache = <const Duration>)`) being mapped. `FieldValue` converts `bool`, the
+  integer types (from any integer whose value fits), `f32`, `f64`, `char`, `String`,
+  `Duration`, the calendar types, `Vec<T>` and `PlcValue`; a value a field cannot hold is
+  `InvalidConfig` naming the field, and a field type without `FieldValue`, a non-literal
+  address, a non-constant cache duration or a generic struct do not compile.
+  `EntityManager::new(cache, registry, clock)` parses addresses with the connection
+  string's driver, with `with_alias` and `with_request_timeout` (default 1 s, reads and
+  writes); `read` fills a `Default` entity in one read, `write` writes every mapped field in
+  one write and returns the `WriteResponse`, `connect` and `merge` keep the entity attached
+  as a `ConnectedEntity`, whose `refresh` reads in one request only the fields whose cache
+  duration has passed on the injected clock (no duration: every refresh, upstream's -1; at
+  exactly the duration a field is still fresh), and `disconnect` gives it back. Every request
+  takes a lease from the `ConnectionCache` and gives it back; nothing is spawned. The runtime
+  proxy is not ported (`TOOL-OPM-PROXY`, deferred). Simulator-tested: 24 cases on the fake
+  clock against the simulator and Modbus TCP over the fake transport, and `compile_fail`
+  doctests of the macro.
+- TLS transport and Modbus TCP over TLS (ADR-0032, slice S71, decision E11; additive, behind
+  the new opt-in `tls` feature, which is not in `default` or `full`). `stonecrab::transport::TlsFactory`
+  and `TlsSettings`: rustls 0.23 on the ring provider (with `tokio-rustls` 0.26), TLS 1.3 and
+  1.2, ring's default AEAD suites. The server must present a certificate for the endpoint's
+  host (a DNS name or an IP address) that chains to an authority of the caller's PEM trust
+  store; there are no web PKI roots, no platform store and no way to turn verification off.
+  A PEM keystore (certificate chain and unencrypted key) adds a client certificate for mutual
+  TLS. One deadline covers resolution, connect and handshake. A failed certificate check is
+  `Trust`, a server's certificate alert `Authentication` (under TLS 1.3 at the first receive),
+  other failures `Disconnected`, an unusable PEM file `InvalidConfig` naming the option and
+  never a path. `TlsSettings`'s `Debug`, and so `redacted_display`, hides the keystore path;
+  no session key is logged and no password is taken. `modbus-tcp:tls://host[:port]` (default
+  port 802) with `tls.trust-store` (required) and `tls.keystore`, upstream's names; the other
+  `tls.` keys, `verify` and `ignore-common-name` included, stay `InvalidConfig`.
+  `ModbusOptions` gains `tls: Option<TlsSettings>` under the feature, and
+  `ModbusTcpDriver::connect` builds the factory from it. `modbus-tcp:tls-psk` is refused with
+  its reason (rustls has no external pre-shared keys); the RTU and ASCII `tls` carriers stay
+  refused. Without the feature `modbus-tcp:tls` is refused as before. Dependencies (audited):
+  `rustls`, `tokio-rustls`, `ring` (C and assembly: a C compiler is needed),
+  `rustls-webpki`, `rustls-pki-types`, `untrusted`, `subtle`, `zeroize`, `getrandom` 0.2 and,
+  on Windows, `windows-sys` 0.52; `deny.toml` names `rustls` as a wrapper of the `once_cell`
+  ban; `ring` is also a dev-dependency, for the test certificate authorities made at run time
+  (no key is committed). Interop: pymodbus 3.8.6 in its image, in a new mutual-TLS mode of
+  `interop/pymodbus/server.py`, with a PKI that openssl makes in the image at run time, in the
+  new `interop-tls` CI job and `mise run interop-tls`, which `mise run interop` now includes
+  (3 of 3 locally and in the first hosted run, 40880582023, on 2026-10-29; pymodbus closes
+  without its alert when it refuses a client, which reads as `Disconnected`). Parity rows
+  `UTR-TLS`, `UTR-TLS-TRUST` and `MB-TCP-TRANSPORTS-TLS` automated-verified; `UTR-TLS-PSK`,
+  `UTR-TLS-PSK-CONFIG` and `MB-TCP-TRANSPORTS-TLS-PSK` deferred with the refusal implemented.
+  The `cross` job installs the aarch64 and armv7 C cross compilers, which `ring`'s build
+  script needs even for `cargo check`.
 - The SOLO follow-ups (slice S73, decision E11; ADR-0015 and ADR-0016 addenda of 2026-10-29).
-  Both are additive on master (0.3.0, unpublished) and change no default.
+  Both are additive and change no default.
   - Modbus: the opt-in connection parameter `single-coil-write=fc05` writes a single coil with
     function 05 where upstream always sends function 15 (`fc15` is the default). The three
     drivers take it (`modbus-tcp`, `modbus-rtu`, `modbus-ascii`); it is
@@ -30,8 +122,8 @@ placeholder.
     options record `single-coil-write=fc05`. A 0.2.0 reader refuses a version 2 document with
     `IncompatibleSchema { found: 2 }`.
 - Release 0.3.0: the sensor `unit` is optional (ADR-0016 addendum, slice S74, finding G06,
-  decisions E7 and E12; a breaking change, so the crate version moves from 0.2.0 to 0.3.0,
-  nothing is published or tagged yet). `MeasurementDef::unit` and `Measurement::unit` are
+  decisions E7 and E12; a breaking change, so the crate version moves from 0.2.0 to
+  0.3.0). `MeasurementDef::unit` and `Measurement::unit` are
   `Option<String>`. A profile may leave `unit` out: it loads as `None`, which means the
   unit is unknown, and it validates. A stated unit is checked as before, except that a blank
   one (only whitespace) is now `EmptyUnit` like the empty string, not `UnknownUnit`; the
@@ -41,11 +133,12 @@ placeholder.
   `Syntax`, not `IncompatibleSchema`). The `profile_read` example logs an absent unit as
   nothing. Tests: an absent unit loads and gives `None`, validates, and gives a measurement
   with `unit` `None`; a blank unit is refused; the boards still produce their units.
-- Migration from 0.2 (0.2.0 to 0.3.0). `cargo semver-checks` 0.51.0 against the published
-  0.2.0, which is what `mise run semver` and the CI `semver` job run, reports no finding for
-  this release: it has no lint for the type of a public struct field, so the one source
-  break below is not listed by it, and the 0.3.0 version number is what announces it. The
-  changes since 0.2.0 that a caller can notice are these:
+- Migration from 0.2 (0.2.0 to 0.3.0). Every change since 0.2.0 passed `cargo semver-checks`
+  0.51.0 as a minor release: in CI against the published 0.2.0 until S74 moved the version
+  to 0.3.0 (a major step, which the tool does not check), and against master for S73, S71
+  and S72. The tool has no lint for the type of a public struct field, so it never reported
+  the one source break below; the 0.3.0 version number is what announces it. The changes
+  since 0.2.0 that a caller can notice are these:
   - Source break, `unit` is `Option<String>` (S74). Code that reads `measurement.unit` or
     `definition.unit` as a `String` stops compiling. Before:
     `println!("{} {}", measurement.value, measurement.unit)` and
@@ -76,61 +169,24 @@ placeholder.
     `WriteSingleCoil` (S73). Code that compares a profile's `schema_version` with `CURRENT`
     to mean version 1 should use `SchemaVersion::V1`; a `match` over `FunctionCode` that
     relied on `Unknown(5)` needs the named arm.
+  - Behavior, the Modbus drivers report `Capabilities.write` and `Capabilities.ping` as true
+    (S46, S47), where 0.2.0 reported no write and had no ping. A write is still refused with
+    `Unsupported(Operation::Write)` and nothing sent unless the connection string says
+    `access=read-write`, so the flag does not tell whether a write will be accepted.
+  - Behavior, a Modbus connection opened inside a Tokio runtime runs a supervisor task
+    (S57): it reconnects without waiting for a request, so the state can move to
+    `Reconnecting` with no request pending, and it enforces `Timeouts.idle`, which 0.2.0
+    recorded and ignored: a link no request has used for that long is closed, and the next
+    request opens a new one. `ResourceLimits::max_queued_events`, also unread in 0.2.0, now
+    bounds a subscription's queue (S54).
+  - Behavior, `SensorProfile::validate` refuses a status field whose `bit` is 64 or more
+    (`ProfileError::StatusBitOutOfRange`), and `validate_for`, which `SensorProfile::tags`
+    runs, also refuses a bit beyond the width of its status address, two spellings of one
+    address and bit, and a status bit inside the measurement's `bit_field` (S37).
   - Build, the `modbus` feature enables `serial` (S59, E10), so a build with Modbus TCP only
-    also compiles the `serial2` dependency. A build with `default-features = false` and
-    without `modbus` is unchanged.
-- Object PLC Mapping, the third PLC4X tool (ADR-0033, slice S72, decisions E6 and E11;
-  additive, no feature, no dependency, no proc-macro crate): `PlcEntity`, `EntityField`,
-  `FieldValue`, `EntityManager` and `ConnectedEntity` at the crate root and the declarative
-  macro `stonecrab::plc_entity!`, built under every feature set. A type implements
-  `PlcEntity` to list its mapped fields (`EntityField`: name, address or alias `${name}`,
-  optional cache duration) and convert each by name from and to `PlcValue`; `plc_entity!`
-  writes the struct and that implementation, a field followed by `=> "address"` (and
-  optionally `(cache = <const Duration>)`) being mapped. `FieldValue` converts `bool`, the
-  integer types (from any integer whose value fits), `f32`, `f64`, `char`, `String`,
-  `Duration`, the calendar types, `Vec<T>` and `PlcValue`; a value a field cannot hold is
-  `InvalidConfig` naming the field, and a field type without `FieldValue`, a non-literal
-  address, a non-constant cache duration or a generic struct do not compile.
-  `EntityManager::new(cache, registry, clock)` parses addresses with the connection
-  string's driver, with `with_alias` and `with_request_timeout` (default 1 s, reads and
-  writes); `read` fills a `Default` entity in one read, `write` writes every mapped field in
-  one write and returns the `WriteResponse`, `connect` and `merge` keep the entity attached
-  as a `ConnectedEntity`, whose `refresh` reads in one request only the fields whose cache
-  duration has passed on the injected clock (no duration: every refresh, upstream's -1; at
-  exactly the duration a field is still fresh), and `disconnect` gives it back. Every request
-  takes a lease from the `ConnectionCache` and gives it back; nothing is spawned. The runtime
-  proxy is not ported (`TOOL-OPM-PROXY`, deferred). Simulator-tested: 21 cases on the fake
-  clock against the simulator and Modbus TCP over the fake transport, and `compile_fail`
-  doctests of the macro.
-- TLS transport and Modbus TCP over TLS (ADR-0032, slice S71, decision E11; additive, behind
-  the new opt-in `tls` feature, which is not in `default` or `full`). `stonecrab::transport::TlsFactory`
-  and `TlsSettings`: rustls 0.23 on the ring provider (with `tokio-rustls` 0.26), TLS 1.3 and
-  1.2, ring's default AEAD suites. The server must present a certificate for the endpoint's
-  host (a DNS name or an IP address) that chains to an authority of the caller's PEM trust
-  store; there are no web PKI roots, no platform store and no way to turn verification off.
-  A PEM keystore (certificate chain and unencrypted key) adds a client certificate for mutual
-  TLS. One deadline covers resolution, connect and handshake. A failed certificate check is
-  `Trust`, a server's certificate alert `Authentication` (under TLS 1.3 at the first receive),
-  other failures `Disconnected`, an unusable PEM file `InvalidConfig` naming the option and
-  never a path. `TlsSettings`'s `Debug`, and so `redacted_display`, hides the keystore path;
-  no session key is logged and no password is taken. `modbus-tcp:tls://host[:port]` (default
-  port 802) with `tls.trust-store` (required) and `tls.keystore`, upstream's names; the other
-  `tls.` keys, `verify` and `ignore-common-name` included, stay `InvalidConfig`.
-  `ModbusOptions` gains `tls: Option<TlsSettings>` under the feature, and
-  `ModbusTcpDriver::connect` builds the factory from it. `modbus-tcp:tls-psk` is refused with
-  its reason (rustls has no external pre-shared keys); the RTU and ASCII `tls` carriers stay
-  refused. Without the feature `modbus-tcp:tls` is refused as before. Dependencies (audited):
-  `rustls`, `tokio-rustls`, `ring` (C and assembly: a C compiler is needed),
-  `rustls-webpki`, `rustls-pki-types`, `untrusted`, `subtle`, `zeroize`, `getrandom` 0.2 and,
-  on Windows, `windows-sys` 0.52; `deny.toml` names `rustls` as a wrapper of the `once_cell`
-  ban; `ring` is also a dev-dependency, for the test certificate authorities made at run time
-  (no key is committed). Interop: pymodbus 3.8.6 in its image, in a new mutual-TLS mode of
-  `interop/pymodbus/server.py`, with a PKI that openssl makes in the image at run time, in the
-  new `interop-tls` CI job and `mise run interop-tls`, which `mise run interop` now includes
-  (3 of 3 locally on 2026-10-29; pymodbus closes without its alert when it refuses a client,
-  which reads as `Disconnected`). Parity rows `UTR-TLS`, `UTR-TLS-TRUST` and
-  `MB-TCP-TRANSPORTS-TLS` automated-verified; `UTR-TLS-PSK`, `UTR-TLS-PSK-CONFIG` and
-  `MB-TCP-TRANSPORTS-TLS-PSK` deferred with the refusal implemented.
+    also compiles the `serial2` dependency and its own (`cfg-if`, `libc`, and `windows-sys`
+    on Windows). A build with `default-features = false` and without `modbus` is
+    unchanged.
 - The MSpec code generator, proven on Modbus (ADR-0019 and its addendum of 2026-10-29,
   slices S66 and S67; no crate API change). Apache PLC4X's `modbus.mspec` is vendored verbatim,
   ASF header kept, at `upstream/mspec/modbus/modbus.mspec` (maintainer decision E8; upstream
@@ -265,7 +321,7 @@ placeholder.
   `active_leases` and `connection_strings` report what the cache holds. Nothing is spawned:
   every bound is read from the injected clock when the cache or a lease is called.
   Subscriptions made through a lease are not restored on a replacement connection
-  (`TOOL-CC-RESTORE`, deferred). Simulator-tested: 23 cases on the fake clock against the
+  (`TOOL-CC-RESTORE`, deferred). Simulator-tested: 24 cases on the fake clock against the
   simulator and Modbus TCP over the fake transport.
 - The event pump, the second PLC4X tool (ADR-0031, slice S69; additive, no feature, no
   dependency): `EventPump`, `TagBatch` and `BatchEvent` at the crate root, built under every
@@ -284,7 +340,7 @@ placeholder.
   Batches on different connections run independently, the queue holds at most one event
   per batch, and `recv` is cancel-safe (a read in flight goes on at the next call). The
   subscription trigger (an upstream placeholder), configuration files and value
-  transformations are deferred. Simulator-tested: 16 cases on the fake clock against the
+  transformations are deferred. Simulator-tested: 17 cases on the fake clock against the
   simulator and Modbus TCP over the fake transport.
 - Board adapters, the ADXL345 accelerometer over I2C (ADR-0029, slice S64; additive): under
   the existing `boards` feature (no new feature, no new dependency), `stonecrab::boards`
@@ -331,6 +387,11 @@ placeholder.
   retrieved while this was written, no converter was read, and the bench record is a runbook,
   `docs/hardware/max31855-spi.md`, that needs the maintainer's approval. No change to any
   industrial parity status.
+- Release-evidence tooling (no crate changes, slice S62; ADR-0017 addendum): `mise run soak`
+  (`examples/soak.rs` and `scripts/soak.sh`) against the simulator or pymodbus, `mise run
+  fuzz-evidence` (`scripts/fuzz-evidence.sh`) for the 8-hour release fuzz run and `mise run
+  branch-coverage` (`scripts/branch-coverage.sh`, reported by the weekly `scheduled` job),
+  with their pass criteria and records under `docs/evidence/`.
 - Modbus text types (ADR-0025, finding G08; additive): `CHAR`, `WCHAR`, `STRING(n)` and
   `WSTRING(n)` read and write on holding, input (read) and extended registers.
   `ModbusDataType` gains `Char`, `WChar`, `String` and `WString`, appended after `LReal`;
@@ -504,19 +565,20 @@ placeholder.
   `modbus_device_replays` serves each map through the first-party responder with the
   vendors' request limits and function tables enforced and runs what the hardware records
   will run: every documented register and coil, the limits, the break flag driving `Bad`,
-  the error codes and the documented write targets. The SOLO suite is a PDU-level replay over
-  TCP framing until the serial driver exists. Runbooks `docs/hardware/hw1-sio-mb04thms.md`
-  and `docs/hardware/hw2-slm1-c.md` list the steps and everything the documents leave open.
-  Findings: the SOLO manual lists function codes 05 and 16 but not 15, so a Stonecrab coil
-  write cannot reach it yet, and schema version 1 cannot make a process variable error code
-  `Bad` (it is `Uncertain`). New parity rows `MB-DEVICE-SIO-*` and `MBS-DEVICE-SLM1C-*`.
+  the error codes and the documented write targets. The SOLO suite was a PDU-level replay
+  over TCP framing until the serial driver existed; since S52e it runs over Modbus RTU.
+  Runbooks `docs/hardware/hw1-sio-mb04thms.md` and `docs/hardware/hw2-slm1-c.md` list the
+  steps and everything the documents leave open. Findings: the SOLO manual lists function
+  codes 05 and 16 but not 15, so a Stonecrab coil write cannot reach it yet, and schema
+  version 1 cannot make a process variable error code `Bad` (it is `Uncertain`). New parity
+  rows `MB-DEVICE-SIO-*` and `MBS-DEVICE-SLM1C-*`.
 - Fixed (ADR-0014 addendum S57, note S57b): on a multi-thread runtime a `close` that
   overtook the supervisor's idle close could drop that transport without shutting it down;
   the idle close now keeps the transport in the guard until its shutdown has returned, and
   `close` shuts down what it finds there. `GuardStats` gains `discarded_frames` (additive;
   the struct is `#[non_exhaustive]`): frames the guard read and dropped between exchanges,
   such as a late reply the supervisor drops before the Modbus session can count it.
-- New `serial` feature (off by default; `modbus` does not enable it yet): a serial transport
+- New `serial` feature (off by default; `modbus` enables it since S59): a serial transport
   on a blocking worker thread, `stonecrab::transport::{SerialFactory, SerialTransport}` with
   `DataBits`, `Parity`, `StopBits` and `FlowControl` (upstream's option names and defaults:
   9600 baud, 8 data bits, no parity, 1 stop bit, no flow control). One thread owns the port
@@ -623,14 +685,14 @@ placeholder.
   tshark 4.4 (Debian trixie) captures the run in the proxy's network namespace and decodes
   it independently: no malformed packet, every driver request one well-formed Modbus/TCP
   frame. Evidence under `target/interop-evidence/toxiproxy/`.
-- Subscription types and a bounded event queue (ADR-0020; additive): `SubscribeRequest`
-  and its builder, `SubscriptionKind` (cyclic, change-of-state, event), `QueuePolicy`
+- Subscription types and a bounded event queue (ADR-0020; additive): `SubscribeRequest` and
+  its builder, `SubscriptionKind` (cyclic, change-of-state, event), `QueuePolicy`
   (backpressure, latest-value coalescing, drop-oldest), `LossCounters`, `Subscription`
-  (mode, sampling interval, loss, `recv`, `unsubscribe`) and `SubscriptionSender`. The
-  queue holds at most `ResourceLimits::max_queued_events` events, which is now read.
-  `Connection` gains a provided `subscribe` that returns `Unsupported(Subscribe)` with no
-  I/O; no driver overrides it yet. The contract suite gains the case "an unsupported
-  subscribe performs no I/O and changes no state" (27 cases).
+  (mode, sampling interval, loss, `recv`, `unsubscribe`) and `SubscriptionSender`. The queue
+  holds at most `ResourceLimits::max_queued_events` events, which is now read. `Connection`
+  gains a provided `subscribe` that returns `Unsupported(Subscribe)` with no I/O; the
+  simulator and the Modbus drivers override it since S55 (polling). The contract suite gains
+  the case "an unsupported subscribe performs no I/O and changes no state" (27 cases).
 - `SensorProfile::validate_for` checks status bits (findings G02 and G03): a bit beyond the width of
   its status address's type is `ProfileError::StatusBitOutOfRange` (bit 64 or more already in
   `validate`), two spellings of one address and bit are `OverlappingStatusBits`, and a status bit
@@ -656,8 +718,8 @@ placeholder.
   the provided `ProtocolAddress::spans_multiple_words` (false by default, true for Modbus
   addresses wider than one register) and `validate_for`; the testkit's `FixtureAddress`
   and `ConventionDriver` can declare wide addresses.
-- Modbus write PDUs as upstream emits them (PDU codec only; `Capabilities.write` stays
-  false and no write goes on the wire): `FunctionCode` gains `WriteSingleRegister`,
+- Modbus write PDUs as upstream emits them (the PDU codec of S45; the writes go on the wire
+  since S46): `FunctionCode` gains `WriteSingleRegister`,
   `WriteMultipleCoils` and `WriteMultipleRegisters`, `ModbusPdu` gains their requests and
   responses and `ModbusPdu::write_request`, which picks function 15, 06 or 16 for a payload.
   Behavior change: function codes 06, 15 and 16 now decode (`FunctionCode::from_u8` returns the
@@ -694,14 +756,14 @@ placeholder.
   STATUS, the project brief and the coding standards no longer call 0.2.0 unpublished or
   use the old repository owner.
 - `Operation::Ping`, `Capabilities.ping` and a provided `Connection::ping` that returns
-  `Unsupported` until a driver overrides it (additive; no driver overrides it yet).
+  `Unsupported` until a driver overrides it (additive; `ModbusConnection` does since S47).
 - Upstream Modbus test vectors (no crate changes): four Apache PLC4X test files are
   retained verbatim under `fixtures/modbus/upstream/` with NOTICE attribution, and the six
   frames of the parser suite are vectors, none of them in the published crate.
 - MSpec code generator decision (no crate changes): ADR-0019 chooses a native Rust
   maintainer tool, `tools/stonecrab-codegen`, proven first on Modbus against the
   hand-written codec through the vector corpus, with a provenance header and an offline
-  `regen` gate; nothing is generated yet.
+  `regen` gate (built in S66 and S67).
 - Upstream driver-suite vectors (no crate changes): a test-only adapter
   (`tests/modbus_driver_suite_adapter.rs`, the `roxmltree` dev-dependency) serializes the
   XML models of the retained PLC4X driver suites with its own mspec serializer and emits 64

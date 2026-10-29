@@ -28,7 +28,7 @@
 
 > **Historical document.** This is the retained project brief, written before any code
 > existed. It is superseded by [`docs/SPEC.md`](docs/SPEC.md) (normative behavior) and
-> [`STATUS.md`](STATUS.md) (what exists today); `stonecrab` 0.2.0 is published. The body
+> [`STATUS.md`](STATUS.md) (what exists today); `stonecrab` 0.3.0 is published. The body
 > below is left as written.
 
 > **Project status at the time of writing: specification stage.** There is no code in this repository yet. The documents here define what will be built, how parity with upstream will be measured, and what the first release must prove before it claims anything. Read [`docs/SPEC.md`](docs/SPEC.md) for the engineering specification and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design.

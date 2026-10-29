@@ -35,7 +35,7 @@ Lifetimes, `Send + Sync` bounds, and `#[derive]` lists are omitted from the diag
 
 ## 1. The crate and its modules
 
-Stonecrab is one package, `stonecrab` 0.2.0 (ADR-0018). What the original design drew as
+Stonecrab is one package, `stonecrab` 0.3.0 (ADR-0018). What the original design drew as
 separate crates are modules of it; a module that carries a dependency sits behind a Cargo
 feature (section 10). Dependencies point downward only: applications -> `stonecrab` ->
 driver modules -> transport and codec -> the core at the crate root. Sensor metadata is kept

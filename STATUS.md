@@ -8,13 +8,13 @@ its own commit; the slice log below records what each one landed.
 ## Start here
 
 Stonecrab is an independent native Rust port of Apache PLC4X, prioritizing sensor
-acquisition. The repository is at the **alpha baseline**: the alpha defined in
-[`docs/ALPHA_PLAN.md`](docs/ALPHA_PLAN.md) is built, its definition of done is met, the
-release evidence and process (slice S32, ADR-0017, `docs/evidence/alpha.md`) are recorded,
-and the code ships as **one crate** (slice S33, ADR-0018). The alpha, `stonecrab` 0.2.0,
-is published on crates.io. It is not yet tagged (no `v0.2.0` tag, no GitHub release) and
-nothing is posted upstream: those steps are the maintainer's (see "Recommended
-continuation" and [`docs/POST_ALPHA_PLAN.md`](docs/POST_ALPHA_PLAN.md)).
+acquisition, and ships as **one crate** (slice S33, ADR-0018). The alpha defined in
+[`docs/ALPHA_PLAN.md`](docs/ALPHA_PLAN.md) was built and published as `stonecrab` 0.2.0
+(release evidence and process: slice S32, ADR-0017, `docs/evidence/alpha.md`). The
+hardware-free slices of [`docs/POST_ALPHA_PLAN.md`](docs/POST_ALPHA_PLAN.md) followed and
+were published as `stonecrab` 0.3.0 on 2026-10-29 (decision E12), tagged `v0.3.0`. 0.2.0
+was never tagged, there is no GitHub release, and nothing is posted upstream: those steps
+are the maintainer's (see "Recommended continuation").
 
 - Repository: https://github.com/TheMadBotterINC/stonecrab
 - Primary/default branch: **`master`**, locally and remotely.
@@ -23,9 +23,10 @@ continuation" and [`docs/POST_ALPHA_PLAN.md`](docs/POST_ALPHA_PLAN.md)).
 - Published on crates.io: **`stonecrab` 0.2.0**, the alpha, on 2026-10-27 from commit
   `640665a` after the maintainer's explicit approval (hosted run 40612938390 green);
   `stonecrab` 0.1.0, the specification-stage placeholder, stays listed as an old version.
-- Version on master: **`stonecrab` 0.3.0** since slice S74 (2026-10-29), because the sensor
-  `unit` became `Option<String>` (G06), a breaking change; CHANGELOG.md has the migration
-  note. It is unpublished: decision E12 approves releasing it after the current run.
+- Published on crates.io: **`stonecrab` 0.3.0** on 2026-10-29 (decision E12), the version
+  since slice S74, because the sensor `unit` became `Option<String>` (G06), a breaking
+  change; CHANGELOG.md has its section and the migration note. The next breaking change
+  moves master to 0.4.0 with its own note (CODING_STANDARDS 9.10).
 - Alpha version: **`stonecrab` 0.2.0**, one crate. The former sibling crates
   (core, codec, transport, driver-sim, modbus, sensors) and the test kit are modules of it,
   and there are no other packages. The minor bump records removal of the published
@@ -474,6 +475,7 @@ commit; gates named were run locally before that commit.
 | S73 | 2026-10-29 | The two SOLO SLM1-C findings of S52d (decision E11). (a) The opt-in `single-coil-write=fc05` of `modbus-tcp`, `modbus-rtu` and `modbus-ascii` (an ADR-0015 addendum, `MB-CFG-SINGLE-COIL`) sends a write of exactly one coil as FC05 (`FF00` or `0000`); two or more coils and register writes keep their function, FC15 stays the default as upstream, and the echo check and the S46 outcome rules are unchanged; `FunctionCode::WriteSingleCoil`, `ModbusPdu::WriteSingleCoil` and `WriteSingleCoilResponse` are appended; `decode_request` still refuses FC05, and the generated codec still disables it. (b) Profile schema version 2 (an ADR-0016 addendum; `SchemaVersion::CURRENT` is now 2, version 1 loads unchanged): `value_rules` match the unscaled integer value and set `Bad` or `Uncertain` with an optional reason, ranked with range and status quality by `Quality::worse`; the winning reason is the new `Measurement::quality_reason`; the key in a version 1 profile is `ValueRuleNeedsSchema2`, an empty rule `EmptyValueRule` (both appended). The SOLO profile moves to version 2 with its five named sentinels `Bad` and their reasons, and its replay writes the five bit registers with FC05 over RTU. The fuzz targets for the PDU and the profile loader follow (FC05 echoes decode; version 2 loads) | check, coverage (modbus, sensors and boards 100%), lint-attrs, parity, examples, semver (against master as a minor), dependencies, machete, regen, package list, interop for every gateway peer, fuzz-smoke |
 | S71 | 2026-10-29 | TLS (decision E11, ADR-0032; an ADR-0018 addendum for the feature): an opt-in `tls` feature (in neither the default set nor `full`) adds `rustls` 0.23 with the `ring` provider and `tokio-rustls` 0.26 (licenses within deny.toml; `rustls` joins the `once_cell` wrappers, and the copies in `fuzz/` and `tools/stonecrab-codegen/` follow), a `TlsFactory` over the TCP connect path with the handshake inside the same deadline, and `modbus-tcp:tls://host[:802]` with upstream's keys `tls.trust-store` (required) and `tls.keystore` (mutual TLS; PEM, at most 1 MiB, read once). Trust is only the given anchors (no web PKI, platform store or verify-off); the server name is always verified; TLS 1.2 and 1.3. Certificate failures are `Trust`, a refused client certificate `Authentication`; the keystore path never reaches `Display`, `Debug` or `redacted_display`, and errors name the option, not the path. `tls-psk` is `InvalidConfig` with the reason; `modbus-rtu` and `modbus-ascii` refuse every `tls.` key on every carrier (a review caught a silent plaintext fallback there). Tests run on a PKI generated in code (Ed25519 through ring; `rcgen` needs the banned `time`); the new `interop-tls` job and `mise run interop-tls` (also in `mise run interop`) run pymodbus 3.8.6 over mutual TLS with a PKI made at run time. The first hosted run of `interop-tls` goes with this push | check, coverage (modbus 100%, transport 98.7%), lint-attrs, parity, examples, semver (against master as a minor), dependencies, machete, features, regen, package list, fuzz-smoke, interop for every gateway peer and interop-tls (3 of 3 against pymodbus 3.8.6 over mutual TLS) |
 | S72 | 2026-10-29 | Object PLC Mapping, the third PLC4X tool (decisions E6 and E11, ADR-0033): no proc-macro crate and no feature or dependency. A type implements `PlcEntity` (its `EntityField` list of name, address or `${alias}` and optional cache duration, and a by-name conversion through `FieldValue` for `bool`, the integers, `f32`, `f64`, `char`, `String`, `Duration`, the calendar types, `Vec<T>` and `PlcValue`), or `stonecrab::plc_entity!`, a `macro_rules!` macro, writes the struct and the implementation (`field: Type => "address" (cache = <const Duration>)`; a field type without `FieldValue`, a non-literal address, a non-constant duration or a generic struct do not compile, shown by `compile_fail` doctests). `EntityManager` over the S68 `ConnectionCache`: `read` (one request), `write` (one request, the `WriteResponse` returned), `connect` and `merge` give a `ConnectedEntity` whose `refresh` re-reads in one request only the fields whose duration passed on the injected clock (no duration means every refresh, upstream's -1), and `disconnect` returns the value; aliases (`with_alias`) and a request timeout (default 1 s) as upstream. Each request takes a lease and gives it back; nothing is spawned. Writes send the field type's own value, so a written field must have its tag's type (ADR-0033). The runtime proxy stays deferred (`TOOL-OPM-PROXY`). 24 cases on the fake clock against the simulator and Modbus TCP over the fake transport | check, coverage (core 100%), lint-attrs, parity, examples, semver (against master as a minor), dependencies, machete, features, regen, package list, fuzz-smoke, interop for every peer |
+| S66/S67, S71 (evidence) | 2026-10-29 | The first hosted runs of the new jobs: `regen` passed in run 40869309931 (commit 30b0b83) and in every completed run since; `interop-tls` passed 3 of 3 in run 40880582023 (commit bef0d25), so the TLS cells name that run. That push failed two jobs: `cross`, because `ring` (feature `tls`) compiles C in its build script and the runner had no aarch64 or armv7 C compiler, and the Windows legs of `test`, because the redaction test looked for a raw path in a display that shows paths in their Debug form; 764294b installs the cross compilers in `cross` and makes the test compare the Debug form and the keystore file name. Before that, run 40869309931 failed `fuzz-smoke` because `fuzz/Cargo.lock` still named 0.2.0 (fixed in c1238e9) | parity |
 
 ## Verified evidence and reproduction
 
@@ -832,16 +834,19 @@ These are actions outside the code (plan P1 to P5), as verified on 2026-10-28:
 
 ## Recommended continuation
 
-The alpha plan is executed (S01 to S33; S04a and S04b are unblocked by the P4 approval and
-are scheduled in the post-alpha plan) and `stonecrab` 0.2.0 is published. The next work is
-[`docs/POST_ALPHA_PLAN.md`](docs/POST_ALPHA_PLAN.md), accepted by the maintainer on
-2026-10-28: do Phase A (S34, S35) first, then the phases in the order that plan gives.
+The alpha plan is executed (S01 to S33) and published as `stonecrab` 0.2.0. The
+hardware-free slices of [`docs/POST_ALPHA_PLAN.md`](docs/POST_ALPHA_PLAN.md) are executed
+too (the slice log above) and published as `stonecrab` 0.3.0. What remains of that plan
+waits for the maintainer: test hardware (E4; HW2, the SOLO SLM1-C on RS-485, first), the
+24-hour soak and the 8-hour fuzz run (E9), and the later phases (OPC UA in M3, then
+EtherNet/IP or S7 in M4) in the order the plan gives.
 
-Maintainer-only steps, which no automated run does: P1 to P3 above, creating and pushing
-the annotated tag `v0.2.0` on commit `640665a`, dispatching the `release-evidence`
-workflow once (it has never been dispatched), deciding whether to file the six drafted
-upstream issues under `docs/evidence/upstream-issues/` (none is filed), and E4 (test
-hardware, deferred).
+Maintainer-only steps, which no automated run does: P1 to P3 above (P1, the private
+vulnerability-reporting channel, is a release prerequisite in `SECURITY.md` that neither
+0.2.0 nor 0.3.0 met), optionally the annotated tag `v0.2.0` on commit `640665a`,
+dispatching the `release-evidence` workflow (it has never been dispatched), deciding
+whether to file the six drafted upstream issues under `docs/evidence/upstream-issues/`
+(none is filed), and E4 (test hardware, deferred).
 
 ### Post-alpha decisions (2026-10-28)
 

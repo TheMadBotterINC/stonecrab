@@ -9,7 +9,7 @@ rust-version = "1.97"
 license = "Apache-2.0"
 authors = ["The Mad Botter INC"]
 repository = "https://github.com/TheMadBotterINC/stonecrab"
-keywords = ["plc", "industrial", "modbus", "opcua", "protocols"]
+keywords = ["plc", "industrial", "modbus", "sensors", "protocols"]
 categories = ["network-programming", "embedded"]
 
 [workspace.dependencies]
