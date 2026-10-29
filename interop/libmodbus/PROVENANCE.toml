@@ -1,0 +1,55 @@
+# Provenance of the first-party files under interop/libmodbus (CODING_STANDARDS 13.6).
+#
+# A separate file for the reason given in interop/pymodbus/PROVENANCE.toml: the loader
+# (stonecrab::testkit::load_provenance) reads only files below the directory of the provenance
+# file, and these files are outside fixtures/modbus. Same schema, no [[vector]].
+#
+# The peer is not in this repository. The Dockerfile builds it, inside the image, from what
+# Debian ships:
+#
+#   base image   debian:trixie-slim, the multi-architecture index digest
+#                sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4,
+#                pulled on 2026-10-28 (Debian 13.7)
+#   packages     libmodbus5 3.1.11-2 and libmodbus-dev 3.1.11-2 (Debian source package
+#                libmodbus 3.1.11-2), installed by exact version from the trixie archive
+#   library      libmodbus: LGPL-2.1-or-later, used as a shared library of the image
+#   server       unit-test-server.c and unit-test.h, the tests/ files of libmodbus 3.1.11 that
+#                libmodbus-dev installs under /usr/share/doc/libmodbus-dev/examples/:
+#                BSD-3-Clause, Copyright Stephane Raimbault. Their SHA-256 are pinned in the
+#                Dockerfile (unit-test-server.c 62d3dc09...86c3, unit-test.h 84a20de4...97bf)
+#                and checked before the compile
+#
+# None of that source is copied into the repository. The register-map constants that the
+# tests need from unit-test.h (UT_BITS_ADDRESS, UT_REGISTERS_TAB and the others) are
+# transcribed as test constants in crates/stonecrab/tests/modbus_interop_libmodbus.rs, with a
+# comment naming the source and its BSD-3-Clause license.
+
+[[file]]
+path = "Dockerfile"
+origin = "Authored for S52a from the pinned base image debian:trixie-slim and the Debian package libmodbus-dev 3.1.11-2 (docs/POST_ALPHA_PLAN.md, Until hardware arrives)"
+license = "Apache-2.0"
+note = "First-party recipe. The base image is pinned by digest, the packages by version, the two server source files by SHA-256; the source itself is not stored here."
+
+[[file]]
+path = "Dockerfile.dockerignore"
+origin = "Authored for S52a"
+license = "Apache-2.0"
+note = "First-party. Keeps the build context to the file the Dockerfile copies."
+
+[[file]]
+path = "serve.sh"
+origin = "Authored for S52a; the behavior it works around (one connection, then exit) is read from unit-test-server.c of libmodbus 3.1.11"
+license = "Apache-2.0"
+note = "First-party. The restart loop that runs the server on port 1502 on every interface."
+
+[[file]]
+path = "interop.sh"
+origin = "Authored for S52a, in the shape of interop/pymodbus/interop.sh"
+license = "Apache-2.0"
+note = "First-party. Build, run, probe, test and collect evidence; shared by the CI job and mise run interop."
+
+[[file]]
+path = "README.md"
+origin = "Authored for S52a"
+license = "Apache-2.0"
+note = "First-party."

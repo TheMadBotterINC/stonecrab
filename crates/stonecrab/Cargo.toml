@@ -114,6 +114,10 @@ name = "modbus_interop_pymodbus"
 required-features = ["modbus", "testkit"]
 
 [[test]]
+name = "modbus_interop_libmodbus"
+required-features = ["modbus", "testkit"]
+
+[[test]]
 name = "modbus_parse"
 required-features = ["modbus"]
 

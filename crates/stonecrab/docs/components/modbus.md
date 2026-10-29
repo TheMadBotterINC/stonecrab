@@ -136,8 +136,9 @@ The labels are those of the project's hardware-evidence policy: `build-tested`,
 `simulator-tested`, `interoperability-tested` and `hardware-verified`, plus `planned` and
 `not supported`. `simulator-tested` covers the in-memory transport and the loopback
 scripted peer. The `interop` CI job (slice S27) runs the driver against an independent
-server, pymodbus 3.8.6, on every push (see "Interoperability" below); the rows it exercises
-read `interoperability-tested`. No physical device has been tried.
+server, pymodbus 3.8.6, on every push, and the `interop-libmodbus` job (slice S52a) against a
+second one, libmodbus 3.1.11's `unit-test-server` (see "Interoperability" below); the rows
+they exercise read `interoperability-tested`. No physical device has been tried.
 
 | Capability | Support level |
 | --- | --- |
@@ -164,7 +165,7 @@ The layers underneath, with their evidence:
 | Session: transaction ids, reply correlation by transaction id, unit id and function code, exception mapping (`ModbusSession`, `exception_item_error`) | unit-tested on the in-memory transport |
 | Typed register decoding and byte order (`TypedDecoder`) | unit-tested; vector-tested; property-tested; `BIG_ENDIAN` and `LITTLE_ENDIAN` confirmed by the retained upstream PLC4X vectors; the two byte-swap modes are derived from the documented layouts |
 | Read batching (`Batcher`) | unit-tested; property-tested |
-| Connection and driver (`ModbusConnection`, `ModbusTcpDriver`) | unit-tested on the in-memory transport; contract-suite-tested on the in-memory transport and over loopback sockets; one read run over loopback; ten reads, two pings and the contract suite against pymodbus 3.8.6 |
+| Connection and driver (`ModbusConnection`, `ModbusTcpDriver`) | unit-tested on the in-memory transport; contract-suite-tested on the in-memory transport and over loopback sockets; one read run over loopback; ten reads, two pings and the contract suite against pymodbus 3.8.6; ten tests against libmodbus 3.1.11 |
 
 ## Not in the alpha
 Each item is a deferred row of the
@@ -239,6 +240,39 @@ What the run verifies against the independent server:
 Not verified there: timing over a real clock, dropped links and device exceptions on
 demand, and unit-id correlation (pymodbus answers every unit id). The decisions behind
 the run are in ADR-0015, decision 16.
+
+### A second peer: libmodbus 3.1.11
+The `interop-libmodbus` job (slice S52a) builds `interop/libmodbus/`, a `debian:trixie-slim`
+image pinned by digest that compiles the `unit-test-server` shipped in Debian's `libmodbus-dev`
+3.1.11-2 (the C stack of the libmodbus test suite: it shares no code with Stonecrab or
+pymodbus), starts it on `127.0.0.1:1502` and runs the ten tests of
+`tests/modbus_interop_libmodbus.rs` against it, one at a time. The server serves one
+connection and exits, and the image starts it again, so each test opens one connection and
+what it writes is gone when it closes. `mise run interop` runs this peer after pymodbus and
+`mise run interop-libmodbus` runs it alone; the evidence (image id, package version, server
+log, test output) is in `target/interop-evidence/libmodbus/`. The expected values are the
+constants of libmodbus's `unit-test.h`, transcribed in the test file with their source and
+license.
+
+What the run verifies against it, with unit id 17:
+
+- The 22 input bits and the input register of `unit-test.h`; the coils and holding
+  registers start at zero, take the 37 coils and three registers of `unit-test.h` by
+  function codes 15 and 06 and read them back; a REAL written by function code 16 lands in
+  the words `unit-test.h` lists for each of the four byte orders.
+- Exception 06 at address 0x170 is a `DeviceException` item error with status 6, and the
+  next read works.
+- A reply with the wrong transaction id and unit id (address 0x171) is discarded and the read
+  ends in `Timeout`; a 500 ms reply (0x172) is read inside a 2 s deadline, and past a 200 ms
+  deadline it is a `Timeout`, its late reply is discarded and the next read gets its own;
+  a reply sent one byte at a time (0x173, unit 255) is reassembled.
+- A reply that holds one register for a two-register read, which the server sends for every
+  such read, fails the read as `MalformedData` (category `Protocol`) and the connection
+  goes on. The failure carries no raw bytes: the byte count is proved against the quantity
+  before the registers are decoded.
+
+Not verified: dropped links, a server that refuses a unit id, and anything the server does
+not do (it never receives function code 07, which makes 3.1.11 exit without a reply).
 
 ## Address grammar
 `ModbusAddress::parse(text, &AddressOptions)` reads the grammar of the upstream PLC4X Modbus

@@ -19,8 +19,8 @@ inputs, holding registers and input registers from a Modbus TCP server, turn the
 values into scaled sensor measurements that carry a quality grade, using declarative
 profiles, write coils and holding registers when a connection is granted write access, and
 run the same code against a built-in simulator with no network and no hardware. It has been
-checked against an independent Modbus server (pymodbus 3.8.6) and has never touched a
-physical device. **It is alpha software and is not for production use yet**: it does not
+checked against two independent Modbus servers (pymodbus 3.8.6 and libmodbus 3.1.11) and
+has never touched a physical device. **It is alpha software and is not for production use yet**: it does not
 subscribe, browse, discover or speak Modbus RTU, and its APIs may change before 1.0.
 
 ## Add it
@@ -56,7 +56,8 @@ Support levels use only the labels of the project's hardware-evidence policy
 ([`docs/SPEC.md`](docs/SPEC.md)): `build-tested`, `simulator-tested`,
 `interoperability-tested` and `hardware-verified`, plus `planned` and `not supported`.
 `interoperability-tested` means a run against an independent implementation (here
-pymodbus 3.8.6 in the `interop` CI job). Nothing is `hardware-verified`.
+pymodbus 3.8.6 in the `interop` CI job, and libmodbus 3.1.11 in `interop-libmodbus` for
+the rows that say so). Nothing is `hardware-verified`.
 
 | Protocol | Operation | Support level | Evidence |
 | --- | --- | --- | --- |

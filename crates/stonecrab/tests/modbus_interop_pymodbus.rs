@@ -37,11 +37,14 @@
 #![forbid(unsafe_code)]
 
 #[cfg(test)]
+#[path = "support/interop.rs"]
+mod interop;
+
+#[cfg(test)]
 mod tests {
     use std::io::Write;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
-    use std::time::Duration;
 
     use stonecrab::modbus::{ModbusTcpDriver, SystemClock};
     use stonecrab::testkit::{
@@ -49,10 +52,11 @@ mod tests {
         FixtureAddress, InteropMap, RegisterEntry,
     };
     use stonecrab::transport::TcpFactory;
+
+    use crate::interop::{Peer, failure, value_of};
     use stonecrab::{
-        AddressOptions, Clock, Connection, ConnectionConfig, Deadline, Driver, ErrorKind,
-        ItemError, Operation, PlcValue, ProtocolStatus, ReadRequest, ReadResponse, ResourceLimits,
-        Tag, TagId, WriteOutcome, WriteRequest, WriteResponse,
+        AddressOptions, Clock, Driver, ErrorKind, Operation, PlcValue, ProtocolStatus,
+        ReadResponse, Tag, TagId, WriteOutcome,
     };
 
     /// The environment variable that names the server.
@@ -60,12 +64,6 @@ mod tests {
 
     /// The environment variable that names the evidence directory (optional).
     const EVIDENCE: &str = "STONECRAB_INTEROP_EVIDENCE_DIR";
-
-    /// The deadline of every read.
-    const DEADLINE: Duration = Duration::from_secs(2);
-
-    /// The most items any request of these tests carries: 2001 coils.
-    const MAX_ITEMS: usize = 2_001;
 
     fn server_url() -> String {
         std::env::var(VARIABLE).unwrap_or_else(|_| {
@@ -86,105 +84,19 @@ mod tests {
         }
     }
 
+    /// The driver connected to the server named by the variable, with `query` appended to
+    /// its connection string.
+    async fn connect(query: &str) -> Peer {
+        let hint = format!(
+            "Start it with `mise run interop` or point {VARIABLE} at a running pymodbus peer"
+        );
+        Peer::connect(&url_with(query), &hint).await
+    }
+
     fn register_map() -> InteropMap {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../fixtures/modbus/interop/register-map.toml");
         InteropMap::load(&path).expect("the interop register map loads")
-    }
-
-    /// The configuration with the request item budget raised, everything else kept.
-    fn with_item_budget(config: &ConnectionConfig, items: usize) -> ConnectionConfig {
-        let limits = ResourceLimits::builder()
-            .max_items_per_request(items)
-            .build()
-            .expect("limits");
-        let mut builder = ConnectionConfig::builder(config.scheme(), config.endpoint().clone())
-            .timeouts(*config.timeouts())
-            .reconnect(*config.reconnect())
-            .retry(config.retry().clone())
-            .access(config.access())
-            .limits(limits);
-        if let Some(name) = config.address_options().convention() {
-            builder = builder.address_convention(name);
-        }
-        if let Some(options) = config.driver_options() {
-            builder = builder.driver_options(Arc::clone(options));
-        }
-        builder.build().expect("the rebuilt configuration")
-    }
-
-    /// A driver, its connection to the server and the options addresses are parsed with.
-    struct Peer {
-        driver: ModbusTcpDriver,
-        options: AddressOptions,
-        connection: Box<dyn Connection>,
-    }
-
-    impl Peer {
-        async fn connect(query: &str) -> Self {
-            Self::open(ModbusTcpDriver::new(), query).await
-        }
-
-        async fn open(driver: ModbusTcpDriver, query: &str) -> Self {
-            let uri = url_with(query);
-            let config = driver
-                .parse_config(&uri)
-                .expect("the connection string parses");
-            let config = with_item_budget(&config, MAX_ITEMS);
-            let options = config.address_options();
-            let connection = driver.connect(config).await.unwrap_or_else(|error| {
-                panic!(
-                    "cannot connect to the server named by {VARIABLE}: {error}. Start it with \
-                     `mise run interop` or point the variable at a running pymodbus peer"
-                )
-            });
-            Self {
-                driver,
-                options,
-                connection,
-            }
-        }
-
-        fn tag(&self, id: &str, text: &str) -> Tag {
-            let address = self
-                .driver
-                .parse_address(text, &self.options)
-                .expect("the address parses");
-            Tag::new(TagId::new(id).expect("tag id"), address)
-        }
-
-        async fn read(&self, tags: Vec<Tag>) -> ReadResponse {
-            let deadline = Deadline::after(SystemClock::default().now(), DEADLINE)
-                .expect("a deadline that fits");
-            let mut builder = ReadRequest::builder(self.connection.limits()).deadline(deadline);
-            for tag in tags {
-                builder = builder.tag(tag);
-            }
-            let request = builder.build().expect("the request is within its budgets");
-            self.connection
-                .read(request)
-                .await
-                .expect("the read completes")
-        }
-
-        /// Write the items in one request, with the same 2 s deadline as a read.
-        async fn write(&self, items: Vec<(Tag, PlcValue)>) -> WriteResponse {
-            let deadline = Deadline::after(SystemClock::default().now(), DEADLINE)
-                .expect("a deadline that fits");
-            let mut builder = WriteRequest::builder(self.connection.limits()).deadline(deadline);
-            for (tag, value) in items {
-                builder = builder.item(tag, value);
-            }
-            let request = builder.build().expect("the request is within its budgets");
-            self.connection
-                .write(request)
-                .await
-                .expect("the write completes")
-        }
-
-        async fn close(self) {
-            self.connection.close().await.expect("close");
-        }
     }
 
     /// The value an entry documents, parsed from its `value` text as the entry's type.
@@ -211,25 +123,6 @@ mod tests {
         }
     }
 
-    fn outcome<'a>(response: &'a ReadResponse, id: &str) -> &'a Result<PlcValue, ItemError> {
-        response
-            .get(&TagId::new(id).expect("tag id"))
-            .unwrap_or_else(|| panic!("the response has an item for {id}"))
-            .outcome()
-    }
-
-    /// The value of a tag that was read, or `None` when its item failed.
-    fn value_of(response: &ReadResponse, id: &str) -> Option<PlcValue> {
-        outcome(response, id).as_ref().ok().cloned()
-    }
-
-    /// The error of a tag whose item failed; the test fails when it was read.
-    fn failure<'a>(response: &'a ReadResponse, id: &str) -> &'a ItemError {
-        outcome(response, id)
-            .as_ref()
-            .expect_err("the item was expected to fail")
-    }
-
     fn entry_tag(peer: &Peer, area: &str, entry: &RegisterEntry) -> Tag {
         let text = format!("{area}:{}:{}", entry.address, entry.data_type);
         peer.tag(&format!("{area}-{}", entry.address), &text)
@@ -252,7 +145,7 @@ mod tests {
 
     /// Read each bit of a run as its own tag and compare with the documented bits.
     async fn read_bits(area: &str, address: u16, documented: &[bool]) {
-        let peer = Peer::connect("").await;
+        let peer = connect("").await;
         let tags: Vec<Tag> = (0..documented.len())
             .map(|offset| {
                 let logical = usize::from(address).saturating_add(offset);
@@ -287,7 +180,7 @@ mod tests {
     async fn interop_reads_all_fifteen_holding_register_types() {
         let map = register_map();
         assert_eq!(map.holding_registers.len(), 15, "the map lists 15 types");
-        let peer = Peer::connect("").await;
+        let peer = connect("").await;
 
         // All fifteen in one request: registers 1 to 31 are contiguous, so one chunk.
         let tags = map
@@ -344,7 +237,7 @@ mod tests {
             5,
             "five typed entries over 1..=7"
         );
-        let peer = Peer::connect("").await;
+        let peer = connect("").await;
         let tags = map
             .input_registers
             .iter()
@@ -378,7 +271,7 @@ mod tests {
         let plain = format!("holding-register:{}:REAL", entry.address);
 
         // The address block overrides the order for this tag alone.
-        let peer = Peer::connect("").await;
+        let peer = connect("").await;
         let block = format!("{plain}{{byte-order: 'LITTLE_ENDIAN'}}");
         let by_block = peer.read(vec![peer.tag("by-block", &block)]).await;
         assert_eq!(
@@ -398,7 +291,7 @@ mod tests {
         peer.close().await;
 
         // The connection parameter sets the order for every tag without its own.
-        let little = Peer::connect("default-payload-byte-order=LITTLE_ENDIAN").await;
+        let little = connect("default-payload-byte-order=LITTLE_ENDIAN").await;
         let by_parameter = little.read(vec![little.tag("by-parameter", &plain)]).await;
         assert_eq!(
             value_of(&by_parameter, "by-parameter"),
@@ -421,7 +314,7 @@ mod tests {
         let map = register_map();
         let beyond = map.sizes.input_registers.saturating_add(1);
         assert_eq!(beyond, 22, "the first input register past the map");
-        let peer = Peer::connect("").await;
+        let peer = connect("").await;
         let response = peer
             .read(vec![
                 peer.tag("good", "holding-register:13:UINT"),
@@ -455,7 +348,7 @@ mod tests {
             "ping-address=input-register:3:UINT",
             "ping-address=holding-register:14:DINT",
         ] {
-            let peer = Peer::connect(query).await;
+            let peer = connect(query).await;
             assert!(
                 peer.connection.capabilities().ping,
                 "{query}: the capability"
@@ -472,7 +365,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     #[ignore = "interop: set STONECRAB_INTEROP_MODBUS"]
     async fn interop_ping_of_an_address_the_server_refuses_still_answers() {
-        let peer = Peer::connect("ping-address=holding-register:60000:UINT").await;
+        let peer = connect("ping-address=holding-register:60000:UINT").await;
         // The same address read as a tag is refused with exception 02 ...
         let response = peer
             .read(vec![peer.tag("far", "holding-register:60000:UINT")])
@@ -492,7 +385,7 @@ mod tests {
     #[ignore = "interop: set STONECRAB_INTEROP_MODBUS"]
     async fn interop_split_batch_discloses_chunks() {
         let map = register_map();
-        let peer = Peer::connect("").await;
+        let peer = connect("").await;
 
         // Two areas are two chunks, and the answers come back in request order.
         let two_areas = peer
@@ -558,7 +451,7 @@ mod tests {
     #[ignore = "interop: set STONECRAB_INTEROP_MODBUS"]
     async fn interop_125_register_and_2000_coil_reads() {
         let map = register_map();
-        let peer = Peer::connect("").await;
+        let peer = connect("").await;
 
         let registers: Vec<Tag> = (1..=125_u16)
             .map(|address| {
@@ -647,7 +540,7 @@ mod tests {
 
         // With address-convention=plc4x the same text is holding register 1 (true), and the
         // other bare areas read the map's values.
-        let peer = Peer::connect("address-convention=plc4x").await;
+        let peer = connect("address-convention=plc4x").await;
         let response = peer
             .read(vec![
                 peer.tag("hr1", "40001:BOOL"),
@@ -724,7 +617,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     #[ignore = "interop: set STONECRAB_INTEROP_MODBUS"]
     async fn interop_writes_a_holding_register_and_a_coil_and_reads_them_back() {
-        let peer = Peer::connect("access=read-write").await;
+        let peer = connect("access=read-write").await;
         assert!(peer.connection.capabilities().write, "the capability");
 
         // FC06 for the register and FC15 for the coil: two items, two wire requests.
@@ -783,7 +676,7 @@ mod tests {
     #[ignore = "interop: set STONECRAB_INTEROP_MODBUS"]
     async fn interop_writes_multi_register_types_in_the_documented_word_layouts() {
         let map = register_map();
-        let peer = Peer::connect("access=read-write").await;
+        let peer = connect("access=read-write").await;
 
         // (address text, first register, value, the words the map documents for that value).
         // The words are not produced by the encoder under test: they are the `words` of the
@@ -848,7 +741,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     #[ignore = "interop: set STONECRAB_INTEROP_MODBUS"]
     async fn interop_a_refused_write_is_rejected_and_the_others_still_go() {
-        let peer = Peer::connect("access=read-write").await;
+        let peer = connect("access=read-write").await;
         let written = peer
             .write(vec![
                 (peer.tag("first", "coil:101"), PlcValue::Bool(true)),
@@ -987,7 +880,7 @@ mod tests {
     #[ignore = "interop: set STONECRAB_INTEROP_MODBUS"]
     async fn interop_contract_suite_passes_against_pymodbus() {
         // Reach the server first so a missing one fails with the message naming the variable.
-        Peer::connect("").await.close().await;
+        connect("").await.close().await;
 
         // Writes are granted, as the suite needs for a driver that supports write: the
         // capabilities case confirms one write to the fixture's writable register.

@@ -35,6 +35,14 @@ placeholder.
   off, and a hole in a device's map would turn that into exception 02 for every tag of the
   merged request. `MB-READ-GAP` is recorded as a decided divergence (ADR-0015 addendum)
   and a test shows the two requests on the wire.
+- Interop (no crate API change): a second independent Modbus TCP peer, libmodbus 3.1.11's
+  `unit-test-server` (C, from Debian trixie's `libmodbus-dev` 3.1.11-2 on an image pinned by
+  digest, restarted after each connection), in the new `interop-libmodbus` CI job and `mise
+  run interop`. Ten tests in `tests/modbus_interop_libmodbus.rs` cover reads, writes read
+  back (FC15, FC06, FC16), exception 06, a reply with the wrong transaction and unit id, a
+  500 ms reply inside and past a deadline, a reply sent one byte at a time and a short reply
+  to a two-register read (`MalformedData`, no raw bytes). The pymodbus tests share their
+  `Peer` helper with the new ones through `tests/support/interop.rs`.
 - Subscription types and a bounded event queue (ADR-0020; additive): `SubscribeRequest`
   and its builder, `SubscriptionKind` (cyclic, change-of-state, event), `QueuePolicy`
   (backpressure, latest-value coalescing, drop-oldest), `LossCounters`, `Subscription`

@@ -209,6 +209,42 @@ jobs:
           path: target/interop-evidence/
       - run: interop/pymodbus/interop.sh stop
         if: ${{ always() }}
+  interop-libmodbus:
+    # The driver against a second, independent server: libmodbus 3.1.11's unit-test-server, a
+    # C stack, in Docker, built from interop/libmodbus/ on a Debian trixie image pinned by
+    # digest (slice S52a). Its own job so that a failure of either peer does not hide the
+    # other's result. The steps are the subcommands of interop/libmodbus/interop.sh, which
+    # `mise run interop-libmodbus` also runs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
+        with:
+          toolchain: "1.99.1"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.148
+      # docker build -f interop/libmodbus/Dockerfile -t stonecrab-interop-libmodbus:local .
+      - run: interop/libmodbus/interop.sh build
+      # docker run -d on 127.0.0.1:1502
+      - run: interop/libmodbus/interop.sh start
+      # Probe until 60 s have elapsed (a real Modbus read, see interop.sh).
+      - run: interop/libmodbus/interop.sh wait
+      # cargo nextest run --locked -p stonecrab --all-features --run-ignored ignored-only
+      #   -E 'binary(modbus_interop_libmodbus) & test(/^tests::interop_/)' --test-threads 1
+      # The server serves one connection at a time, hence one test at a time. The step fails
+      # when the filter does not select exactly EXPECTED_TESTS (in interop.sh) tests.
+      - run: interop/libmodbus/interop.sh tests
+      # Image id, package version and server log next to the test output.
+      - run: interop/libmodbus/interop.sh evidence
+        if: ${{ always() }}
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: interop-libmodbus-evidence
+          path: target/interop-evidence/libmodbus/
+      - run: interop/libmodbus/interop.sh stop
+        if: ${{ always() }}
   machete:
     runs-on: ubuntu-latest
     steps:
