@@ -6,6 +6,12 @@ specification-stage placeholder.
 
 ## Unreleased
 
+- **Dependencies:** `toml` 0.9 to 1.1 (resolved 1.1.8, with `toml_parser` 1.1.5,
+  `toml_datetime` 1.1.2 and `winnow` 1.0.4) for the crate, the fuzz workspace and the code
+  generator. There is no API or behavior change: no `toml` type is public, and profiles load
+  and report errors as before. The locks no longer pin `toml_parser` to keep one `winnow`
+  (ADR-0016 addendum).
+
 ## stonecrab 0.3.0 (2026-10-29)
 The second pre-release, one crate (ADR-0018), released under maintainer decision E12. It
 opens with the four release-note items that `docs/SPEC.md` ('Open-source project

@@ -284,40 +284,42 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
 - Review date: 2026-10-27. `cargo-deny` passes advisory, license, ban and source checks;
   this records the trust boundary, not a memory-safety certification.
 
-## toml 0.9.12 (stonecrab, features `sensors` and `testkit`)
+## toml 1.1.8 (stonecrab, features `sensors` and `testkit`)
 - Purpose: the TOML reader behind `SensorProfile::from_toml`. TOML is the format the
   specification names for profiles ("initially TOML or an equivalently validated
   declarative format"). A hand-written reader would be the attack surface that this
   dependency removes (CODING_STANDARDS 21.1).
 - License: MIT OR Apache-2.0.
-- Features: `[workspace.dependencies]` has `toml = { version = "0.9", default-features =
+- Features: `[workspace.dependencies]` has `toml = { version = "1.1", default-features =
   false, features = ["parse", "serde", "std"] }`, all three names verified against the
-  0.9.12 manifest. `parse` adds the parser (`toml_parser`, `winnow`), `serde` adds
+  1.1.8 manifest. `parse` adds the parser (`toml_parser`, `winnow`), `serde` adds
   `toml::from_str` for derived types, `std` is the standard-library build. `display` (the
   serializer, `toml_writer`) stays off because the library never writes a profile;
   `preserve_order` (`indexmap`), `fast_hash`, `debug` and `unbounded` stay off. The
   crate is optional in `stonecrab`, enabled by the `sensors` feature (on by default) and
   by `testkit`.
-- Transitive crates in this configuration: `toml_parser` 1.0.9 (MIT OR Apache-2.0),
-  `toml_datetime` 0.7.5 (MIT OR Apache-2.0), `serde_spanned` 1.1.2 (MIT OR Apache-2.0),
-  `winnow` 0.7.15 (MIT) and `serde_core` (above). `toml_writer`, `indexmap`, `hashbrown`
+- Transitive crates in this configuration: `toml_parser` 1.1.5 (MIT OR Apache-2.0),
+  `toml_datetime` 1.1.2 (MIT OR Apache-2.0), `serde_spanned` 1.1.2 (MIT OR Apache-2.0),
+  `winnow` 1.0.4 (MIT) and `serde_core` (above). `toml_writer`, `indexmap`, `hashbrown`
   and `equivalent` appear in `Cargo.lock` because Cargo records optional dependencies, but
   no enabled feature builds them. `toml_datetime` pulls neither `time` nor `chrono`: its
   `Datetime` is its own type.
-- Duplicate `winnow`: `toml` 0.9.12 requires `winnow` 0.7 while `toml_parser` 1.1 and later
-  require `winnow` 1.0, which makes `clippy::multiple_crate_versions` (a `cargo` group lint,
-  denied by `-D warnings`) fail. `Cargo.lock` therefore pins `toml_parser` at 1.0.9, the
-  newest release that still uses `winnow` 0.7 (`toml` accepts `toml_parser` from 1.0.7).
-  `cargo update` without `--precise` undoes the pin; moving to `toml` 1.x (which uses
-  `winnow` 1.0) or listing `winnow` in `clippy.toml` `allowed-duplicate-crates` are the
-  alternatives, recorded in ADR-0016.
+- One `winnow`: `toml` 1.1.8 and `toml_parser` 1.1.5 both use `winnow` 1.0, so
+  `clippy::multiple_crate_versions` (a `cargo` group lint, denied by `-D warnings`) stays
+  quiet without a lockfile pin. Until 2026-10-29 the crate used `toml` 0.9.12, whose
+  `winnow` 0.7 met `toml_parser` 1.1's `winnow` 1.0, and the locks pinned `toml_parser` at
+  1.0.9 to keep one copy (ADR-0016). The move to `toml` 1.1 (Dependabot PR #3) dropped the
+  pin from `Cargo.lock`, `fuzz/Cargo.lock` and the codegen tool's lock. The one breaking
+  change of `toml` 1.0 (`Time` seconds and nanoseconds became `Option`) touches no Stonecrab
+  code, no `toml` type is in the public API, and cargo-semver-checks reports no change; the
+  MSRV of `toml` 1.1 is Rust 1.85, below the crate's 1.97 (ADR-0016 addendum).
 - Unsafe: `toml`, `toml_datetime` and `serde_spanned` are `forbid(unsafe_code)`;
   `toml_parser` is `forbid(unsafe_code)` unless its `unsafe` feature is on (it is off);
-  `winnow` 0.7.15 contains `unsafe` (49 occurrences of the keyword in its sources on
-  2026-10-27, in its byte-slice and string helpers). No crate compiles native code or has a
+  `winnow` 1.0.4 contains `unsafe` (47 occurrences of the keyword in its sources on
+  2026-10-29, in its stream and byte-slice helpers; 0.7.15 had 49). No crate compiles native code or has a
   build script. First-party code stays `forbid(unsafe_code)`.
 - Resource bounds: the library refuses a document over 64 KiB before the parser sees it
-  (`ProfileError::Oversized`), and `toml` 0.9 limits nesting depth by default (the
+  (`ProfileError::Oversized`), and `toml` 1.1 limits nesting depth by default (the
   `unbounded` feature, which lifts the limit, is off).
 - Banned crates: the D23 check (`cargo tree -e normal,dev -i once_cell -i lazy_static -i log
   -i time -i chrono`, and each name alone) matches no package, so no `deny.toml` wrapper is
@@ -325,7 +327,7 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
 - Alternatives: `serde_json` or RON profiles (no comments and no readable tables for
   hand-edited register maps), `toml_edit` (preserves formatting, which a read-only loader does
   not need, and is larger), and a hand-written reader (rejected above).
-- Review date: 2026-10-27. `cargo-deny` passes advisory, license, ban and source checks;
+- Review date: 2026-10-27, revisited 2026-10-29 for `toml` 1.1. `cargo-deny` passes advisory, license, ban and source checks;
   this records the trust boundary, not a memory-safety certification.
 
 ## serde_json 1.0.154 (stonecrab, feature `testkit`)
@@ -533,8 +535,8 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
   is the expected surface of a hash crate; ADR-0019 decision 2 chose it. The tool's own code is
   `forbid(unsafe_code)`, and nothing of this runs in a library build or a test of the crate:
   only `mise run generate` and the `regen` gate run the tool.
-- The other dependency of the tool is `toml` 0.9.12, the version and features audited above
-  for the crate (`parse`, `serde`, `std`), with the same `toml_parser` 1.0.9 pin in the tool's
+- The other dependency of the tool is `toml` 1.1.8, the version and features audited above
+  for the crate (`parse`, `serde`, `std`), with the same single `winnow` 1.0.4 in the tool's
   `Cargo.lock`, so `clippy::multiple_crate_versions` stays quiet there too.
 - Banned crates: the D23 check in the tool workspace (`cargo tree --locked -e
   normal,dev,build -i <name>` for each of `once_cell`, `lazy_static`, `log`, `time` and

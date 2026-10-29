@@ -448,7 +448,8 @@ codec to refuse wherever the framer refuses.
    `src/mspec.rs` (`MSpec.g4`) and `src/expression.rs` (`Expression.g4`, upstream's
    precedence), both hand-written recursive descent; the emitter is `src/emit.rs` and
    `src/emit/`; `src/output.rs` writes the header, runs the pinned `rustfmt` and replaces the
-   output set. Dependencies: `toml` 0.9 (the root's version, features and `toml_parser` pin)
+   output set. Dependencies: `toml` 0.9 (the root's version, features and `toml_parser` pin; 1.1 with the
+   root since 2026-10-29, see the ADR-0016 addendum of that date)
    and `sha2` 0.11 with default features off. The tool's lint table copies the root
    `[workspace.lints]`, because a workspace cannot inherit another's; its items are
    `pub(crate)` in `pub mod`s of the binary, which satisfies both `unreachable_pub` and

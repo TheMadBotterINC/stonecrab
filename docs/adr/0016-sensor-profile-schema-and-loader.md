@@ -662,3 +662,23 @@ Compliance: `schema_version_2_loads_and_version_1_documents_load_as_they_did`,
 `a_failed_read_is_bad_with_no_reason`, `value_rules_need_schema_version_2`,
 `a_value_rule_without_a_value_is_reported`, and for the SOLO
 `a_process_variable_error_code_is_never_a_good_reading`.
+
+## Addendum: `toml` 1.1 retires the `toml_parser` pin (2026-10-29)
+Decision 9 adopted `toml` 0.9 and pinned `toml_parser` at 1.0.9 in `Cargo.lock` and
+`fuzz/Cargo.lock`, so that one `winnow` resolved. Dependabot PR #3 proposed `toml` 1.1, the
+first alternative that decision names, and the move is taken: the root
+`[workspace.dependencies]` entry and the codegen tool's own entry are `toml = { version =
+"1.1", default-features = false, features = ["parse", "serde", "std"] }` (resolved 1.1.8,
+with `toml_parser` 1.1.5, `toml_datetime` 1.1.2 and `winnow` 1.0.4). `toml` and its parser
+now share `winnow` 1.0, so all three locks (root, `fuzz/`, `tools/stonecrab-codegen/`) hold
+one `winnow` with no pin, and a plain `cargo update` no longer reintroduces a duplicate.
+
+The feature names are unchanged and the depth limit is still on (`unbounded` stays off).
+The one breaking change of `toml` 1.0, `Time::second` and `Time::nanosecond` becoming
+`Option`, touches no code here: profiles hold integers, strings and tables, and no `toml`
+type is in the public API (`ProfileError::Syntax` carries a line and a column,
+`GoldenError` a message), so cargo-semver-checks against the published 0.3.0 reports no
+change and the bump needs no version change. The error positions that
+`invalid_toml_is_a_syntax_error_with_a_position` asserts are unchanged. `toml` 1.1 needs
+Rust 1.85, below the crate's MSRV of 1.97. `docs/DEPENDENCY_AUDIT.md` records the new
+versions and the recounted `unsafe` of `winnow` 1.0.4.
