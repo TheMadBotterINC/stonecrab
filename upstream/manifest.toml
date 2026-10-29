@@ -2297,7 +2297,7 @@ notes = [
   "Operations: none of the six protocol operations; it consumes ping(), subscription and unsubscription request builders of the wrapped connection.",
   "Other public API: getCachedConnectionCount, getActiveLeaseCount, getCachedConnections, removeCachedConnection (PlcConnectionCache.java:222-263, from grep).",
   "The source tree has six classes: LeasedPlcConnection, ConnectionStateTracker, PlcConnectionCache, SubscriptionRecord, ConnectionContainer and exceptions/PlcConnectionCacheClosedException.",
-  "UNCERTAIN: Default values of the timeouts were not read.",
+  "Default timeouts, read in S68 (PlcConnectionCache.java:82-96): maxIdleTime 5 min, maxLeaseTime 1 min (0 disables), maxWaitTime 30 s (0 disables connectBounded), pingTimeout 5 s, idlePingThreshold 30 s (0 means always ping), closeTimeout 5 s (0 disables the bound), LEASE_WAIT_GRACE_MS 1 s (not a setting); the default scheduler has 2 daemon threads.",
 ]
 
 [inventory.tool_connection_cache.operations]

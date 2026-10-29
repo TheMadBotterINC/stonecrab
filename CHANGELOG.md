@@ -34,6 +34,30 @@ placeholder.
   `ModbusRtuDriver` (no schema change). The HW2 runbook gives the `modbus-rtu` connection
   string of the hardware steps and a new parity row `MBS-DEVICE-SLM1C-RTU` cites the new
   test. Still a replay: operating the device needs the maintainer's approval.
+- The connection cache, the first PLC4X tool (ADR-0030, slice S68; additive, no feature, no
+  dependency): `ConnectionCache`, `ConnectionCacheBuilder` and `LeasedConnection` at the
+  crate root, built under every feature set. `ConnectionCache::builder(registry, clock)`
+  takes a `DriverRegistry` and a `Clock`; the builder sets `max_idle_time`,
+  `max_lease_time`, `max_wait_time`, `ping_timeout`, `idle_ping_threshold`, `close_timeout`
+  (upstream's defaults: 5 min, 1 min, 30 s, 5 s, 30 s, 5 s) and `limits`, and refuses a zero
+  idle time, lease time, ping timeout or close timeout with `InvalidConfig`. `get` leases the
+  connection of a connection string, opening it through the registry if needed. One lease is
+  out per string at a time; other callers wait in arrival order, at most
+  `max_pending_requests` per string (`Backpressure` beyond), and a wait past `max_wait_time`
+  is `Timeout`. A `LeasedConnection` is a `Connection` that forwards `read`, `write`, `ping`
+  and `subscribe` while it is valid. Past `max_lease_time` its calls fail with `Timeout` and
+  a waiter takes the connection over. Dropping it, or `close` on it, gives the connection
+  back. A connection idle past `idle_ping_threshold`, or whose last lease expired, is pinged
+  before reuse (if it supports ping) and replaced if the ping fails. A `Disconnected` or
+  `Timeout` through a lease has the next lease replace the connection. The next `get`
+  closes connections idle past `max_idle_time`, and every close is bounded by
+  `close_timeout`. `close` refuses every later `get` with `Disconnected`, and `remove`
+  force-closes one string's connection even while it is leased. `len`, `is_empty`,
+  `active_leases` and `connection_strings` report what the cache holds. Nothing is spawned:
+  every bound is read from the injected clock when the cache or a lease is called.
+  Subscriptions made through a lease are not restored on a replacement connection
+  (`TOOL-CC-RESTORE`, deferred). Simulator-tested: 23 cases on the fake clock against the
+  simulator and Modbus TCP over the fake transport.
 - Board adapters, the ADXL345 accelerometer over I2C (ADR-0029, slice S64; additive): under
   the existing `boards` feature (no new feature, no new dependency), `stonecrab::boards`
   gains the `I2cBus` trait (`write` and `write_read`, deadline-bounded, a NACK is

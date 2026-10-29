@@ -26,6 +26,7 @@ too; an unknown write outcome is never collapsed into a rejection or replayed.
 | The same boundary on a real wire, through `stonecrab::modbus` (reads) | interoperability-tested |
 | Subscription types and their bounded event queue: `SubscribeRequest`, `Subscription`, `QueuePolicy`, `LossCounters` | simulator-tested (unit and property tests; the simulator and `modbus` poll through them since S55) |
 | Polling subscriptions: the shared producer behind `Connection::subscribe` of the simulator and `modbus` | simulator-tested |
+| Connection cache: `ConnectionCache`, `LeasedConnection` (ADR-0030) | simulator-tested (the simulator and Modbus TCP over the fake transport, on the fake clock) |
 | Browse and discover | not supported |
 | Calendar values: `PlcSignedDuration`, `PlcDate`, `PlcTimeOfDay`, `PlcDateTime` (ADR-0021) | build-tested (unit and property tests); no driver decodes them yet |
 | Lists: `PlcValue::List`, `PlcValueType::List` (ADR-0022) | simulator-tested (unit tests; the Modbus driver reads and writes them through array selections over the fake transport) |
@@ -74,4 +75,59 @@ assert_eq!(value.as_u64(), Some(u64::MAX));
 assert_eq!(value.as_f64(), None);
 assert_eq!(deadline.remaining(now), Some(Duration::from_secs(1)));
 # Ok::<(), stonecrab::PlcError>(())
+```
+
+## Connection cache
+`ConnectionCache` is the first PLC4X tool in Stonecrab (ADR-0030; upstream's
+`PlcConnectionCache`). It opens one connection per connection string through a
+`DriverRegistry` and lends it to one holder at a time as a `LeasedConnection`, which is
+itself a `Connection`: calls go through to the cached connection, and dropping the lease
+gives the connection back instead of closing it. Other callers for the same string wait in
+arrival order, at most `ResourceLimits::max_pending_requests` of them, the holder included.
+
+Every bound is measured on the injected `Clock` and applied when the cache or a lease is
+called; the cache spawns nothing. A lease older than `max_lease_time` (default one minute)
+fails every later call with `Timeout`, and a waiter takes the connection over. A `get` gives
+up after `max_wait_time` (30 s) in the queue, closes connections nobody leased for
+`max_idle_time` (five minutes), pings a connection idle for `idle_ping_threshold` (30 s)
+before lending it, bounded by `ping_timeout` (5 s), and replaces one whose ping failed or
+whose earlier lease saw `Disconnected` or `Timeout`. A connection without ping
+(`Capabilities.ping` false, such as the simulator's) is lent without one. Closes are bounded
+by `close_timeout` (5 s). `close` and `remove` force-close; `len`, `active_leases` and
+`connection_strings` report what the cache holds. Subscriptions made through a lease are
+not restored on a replacement connection (deferred, `TOOL-CC-RESTORE`).
+
+```rust
+# #[cfg(all(feature = "sim", feature = "testkit"))]
+# fn main() -> Result<(), stonecrab::PlcError> {
+use std::sync::Arc;
+use std::time::Duration;
+use stonecrab::sim::{SimDevice, SimDriver};
+use stonecrab::testkit::{FakeClock, block_on_with, poll_once};
+use stonecrab::{ConnectionCache, DriverRegistry, ErrorKind};
+
+let clock = FakeClock::default();
+let mut registry = DriverRegistry::new();
+registry.register(Arc::new(
+    SimDriver::new()
+        .with_clock(Arc::new(clock.clone()))
+        .with_device("bench", SimDevice::new())?,
+))?;
+let cache = ConnectionCache::builder(Arc::new(registry), Arc::new(clock.clone()))
+    .max_lease_time(Duration::from_secs(10))
+    .build()?;
+
+let lease = block_on_with(&clock, cache.get("sim://bench"))?;
+let mut waiter = cache.get("sim://bench");
+assert!(poll_once(&mut waiter).is_pending(), "one lease at a time");
+drop(lease);
+assert!(poll_once(&mut waiter).is_ready(), "the next caller gets the same connection");
+assert_eq!(cache.len(), 1);
+block_on_with(&clock, cache.close())?;
+let refused = block_on_with(&clock, cache.get("sim://bench")).err().map(|error| error.kind());
+assert_eq!(refused, Some(ErrorKind::Disconnected));
+# Ok(())
+# }
+# #[cfg(not(all(feature = "sim", feature = "testkit")))]
+# fn main() {}
 ```

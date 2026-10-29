@@ -17,6 +17,7 @@ mod capability;
 mod clock;
 mod config;
 mod connection;
+mod connection_cache;
 mod deadline;
 mod driver;
 mod error;
@@ -92,6 +93,7 @@ pub use config::{
     ReconnectPolicy, RetryPolicy, Timeouts,
 };
 pub use connection::Connection;
+pub use connection_cache::{ConnectionCache, ConnectionCacheBuilder, LeasedConnection};
 pub use deadline::Deadline;
 pub use driver::Driver;
 pub use error::{ConnectionState, Diagnostics, ErrorKind, FailureCategory, PlcError, Result};

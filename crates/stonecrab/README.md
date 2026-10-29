@@ -57,6 +57,7 @@ operations.
 | `modbus`: Modbus RTU (`modbus-rtu`) reads, writes, ping and polling over a serial port or a gateway, with CRC errors, the silence before a request, late-reply drain and reopen | simulator-tested |
 | `modbus`: Modbus ASCII (`modbus-ascii`) reads, writes, ping and polling over a serial port (7 or 8 data bits) or a gateway, with LRC errors, noise before the colon, late-reply drain and reopen | simulator-tested |
 | Subscribe by polling (`sim` and `modbus`): cyclic and change-of-state, event refused; on a clock that never sleeps (the simulator's default) change-of-state is refused and the interval paces nothing | simulator-tested |
+| Connection cache (`ConnectionCache`, always built): one lease at a time per connection string, waiters in order, lease, wait, idle, ping and close bounds on the injected clock, `remove` and `close`; subscriptions are not restored on a replacement connection | simulator-tested |
 | Browse and discover | not supported |
 | `sensors`: synthetic profiles against the simulator | simulator-tested |
 | `sensors`: synthetic profiles against a Modbus TCP server | interoperability-tested |

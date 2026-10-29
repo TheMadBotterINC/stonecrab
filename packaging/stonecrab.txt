@@ -28,6 +28,7 @@ src/codec/writer.rs
 src/codec.rs
 src/config.rs
 src/connection.rs
+src/connection_cache.rs
 src/deadline.rs
 src/driver.rs
 src/error.rs
