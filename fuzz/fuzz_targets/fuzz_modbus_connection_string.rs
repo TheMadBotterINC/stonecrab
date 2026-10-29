@@ -4,10 +4,12 @@
 //! is not valid UTF-8 contributes its longest valid prefix. The target asserts the
 //! invariants: parsing never panics; a rejection is always `InvalidConfig` with a message
 //! free of control characters that never repeats the authority or a parameter value (a
-//! message is a fixed template plus, for an unknown key, the key name, so an ASCII input
-//! can legitimately be a fragment of one and a key can appear: the first smoke runs found
-//! both, kept as the `regression_*` seeds; the check therefore looks for non-ASCII
-//! authority and value text that no key contains, which no template holds); a success carries
+//! message is a fixed ASCII template without quotes plus, for an unknown key, the key
+//! between quotes, shortened to its first characters and `...`; so an ASCII input can
+//! legitimately be a fragment of a template, and a value can coincide with the end of a
+//! shortened key and its `...`: the smoke runs found these, kept as the `regression_*`
+//! seeds. The check therefore requires the quoted text to begin a key, and looks outside
+//! the quotes for non-ASCII authority and value text, which no template holds); a success carries
 //! `ModbusOptions` inside the documented bounds, mirrors the request timeout into
 //! `Timeouts.request`, and its redacted display is a single clean line. (No
 //! `forbid(unsafe_code)` here: `fuzz_target!` expands to an `extern` fn.)
@@ -35,18 +37,28 @@ fn check(driver: &ModbusTcpDriver, text: &str) {
             assert_eq!(error.kind(), ErrorKind::InvalidConfig, "only InvalidConfig");
             let message = error.to_string();
             assert!(!message.chars().any(char::is_control), "no control characters");
-            // A key name may be echoed (shortened); the authority and the values never are.
-            // Templates are ASCII, so a non-ASCII part cannot appear unless it was echoed.
+            // A key name may be echoed between quotes, shortened with "..."; the authority
+            // and the values never are. Templates are ASCII without quotes, so a non-ASCII
+            // part outside the quotes cannot appear unless it was echoed.
             if let Ok(uri) = ConnectionUri::parse(text) {
-                let keys: Vec<&str> = uri.options().iter().map(|(key, _)| key.as_str()).collect();
+                let (outside, quoted) = match message.split_once('\'') {
+                    Some((before, rest)) => match rest.rsplit_once('\'') {
+                        Some((inside, after)) => (format!("{before}{after}"), Some(inside)),
+                        None => (message.clone(), None),
+                    },
+                    None => (message.clone(), None),
+                };
+                if let Some(shown) = quoted {
+                    let shown = shown.strip_suffix("...").unwrap_or(shown);
+                    assert!(
+                        uri.options().iter().any(|(key, _value)| key.starts_with(shown)),
+                        "only a key, or its beginning, is quoted"
+                    );
+                }
                 let values = uri.options().iter().map(|(_key, value)| value.as_str());
                 for part in std::iter::once(uri.authority()).chain(values) {
-                    // A part that also occurs inside a key may surface through the key echo.
-                    if part.is_ascii() || keys.iter().any(|key| key.contains(part)) {
-                        continue;
-                    }
                     assert!(
-                        !message.contains(part),
+                        part.is_ascii() || !outside.contains(part),
                         "an error never repeats the authority or a value"
                     );
                 }
