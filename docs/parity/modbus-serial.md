@@ -50,6 +50,8 @@ and `SPI` abbreviates `plc4j/spi/drivers/src/main/java/org/apache/plc4x/java/spi
 | Poll | `plc4j/utils/subscription-emulation/.../PollingSubscriptionConnectionBase.java` (`modbus_rtu.polling_base`) |
 | Tag | `P/base/tag/ModbusTag.java` (`modbus_rtu.tag_unit_id`) |
 | DB, CB | `SPI/DriverBase.java`, `SPI/ConnectionBase.java` (`modbus_rtu.driverbase_flags`, `connbase_meta`) |
+| CF | `plc4j/spi/config/src/main/java/org/apache/plc4x/java/spi/config/ConfigurationFactory.java` |
+| TcpT, UdpT | `plc4j/transports/tcp/src/main/java/org/apache/plc4x/java/transport/tcp/TcpTransport.java`, `plc4j/transports/udp/src/main/java/org/apache/plc4x/java/transport/udp/UdpTransport.java` |
 | GoMb | `plc4go/internal/modbus` (`go_modbus`, ping at `Connection.go:134-211`) |
 | GoSer | `plc4go/spi/transports/serial` (`go_transport_serial`) |
 
@@ -82,7 +84,11 @@ metadata derived from the overridden hooks (DB:117-139; CB:269-312).
 ## Configuration
 Driver options (`RtuCfg:29-67`, `AscCfg:29-67`, identical for both): six, the same as
 `ModbusTcpConfiguration`. Serial options come from the shared `SerialTransportConfiguration`
-(`SerCfg:28-123`); `RtuSer` and `AscSer` add nothing (`RtuSer:19-25`).
+(`SerCfg:28-123`); `RtuSer` and `AscSer` add nothing (`RtuSer:19-25`). Transport options
+are read under the transport code as a prefix: the serial options in a connection string are
+`serial.baud-rate`, `serial.data-bits` and so on (DB:197-200; the upstream manual tests write
+`serial.baud-rate=9600`, `ManualModbusRTUDriverTest.java:73`). The option names in the rows
+below are written without the prefix. The driver options are unprefixed.
 
 | Row id | Upstream name, type, default (manifest key or path:lines) | Planned Stonecrab behavior | Status | Test ids |
 | --- | --- | --- | --- | --- |
@@ -92,12 +98,13 @@ Driver options (`RtuCfg:29-67`, `AscCfg:29-67`, identical for both): six, the sa
 | MBS-CFG-BYTE-ORDER | `default-payload-byte-order`, `BIG_ENDIAN` with the three other modes (modbus_rtu.notes). | Same as MB-CFG-BYTE-ORDER and the MB-BYTEORDER-* rows. | planned (M2) | `planned:serial_default_byte_order_is_big_endian` |
 | MBS-CFG-MAX-COILS | `max-coils-per-request`, int, 2000 (modbus_rtu.notes). | Same as MB-CFG-MAX-COILS. The RTU ADU is shorter than the TCP one (see MBS-LIMIT-ADU), so the effective bound is the smaller of the option and what one frame carries. | planned (M2) | `planned:serial_max_coils_default_is_2000`, `planned:serial_batcher_respects_the_frame_ceiling` |
 | MBS-CFG-MAX-REGISTERS | `max-registers-per-request`, int, 125 (modbus_rtu.notes). | Same as MB-CFG-MAX-REGISTERS. | planned (M2) | `planned:serial_max_registers_default_is_125` |
-| MBS-CFG-UNKNOWN | Unknown parameters are reported, not rejected (DB:206-209, 315-319). | Same as MB-CFG-UNKNOWN. | planned (M2) | `planned:serial_unknown_option_is_reported_not_rejected` |
+| MBS-CFG-TRANSPORT-OPTIONS | The key rule is `<transport-code>.<option>` for the selected transport, plus the `log.` prefix for the audit log and the unprefixed `allow-unsupported-transport` (DB:180-204; CF:66-82). A Modbus RTU or ASCII connection offers `serial.` (baud-rate, data-bits, stop-bits, parity, flow-control, read-timeout-ms, write-timeout-ms, dtr, rts, reuse-port, interframe-delay; `SerCfg:33-122`) and, for the gateway carriers, `tcp.`, `udp.`, `tls.`, `tls-psk.` and `test.` keys (`RtuDrv:59-75`, identical for ASCII). The names are recorded in `docs/parity/transport.md` (UTR-SERIAL-OPTIONS, UTR-TCP-OPTIONS, UTR-UDP-OPTIONS, UTR-TLS-TRUST, UTR-TLS-PSK-CONFIG, UTR-TEST). | The `serial.` keys are accepted with their prefix, with the defaults and rules of the rows below (S58). The `tcp.`, `udp.`, `tls.`, `tls-psk.`, `test.` and `log.` keys are rejected as unknown, as for Modbus TCP (MB-CFG-TRANSPORT-OPTIONS), until the transport slices (S61 and M3) offer them. | planned (M2) | `planned:serial_options_are_read_under_the_serial_prefix`, `planned:serial_unprefixed_baud_rate_is_an_unknown_key`, `planned:rtu_over_tcp_tcp_prefixed_option_is_rejected` |
+| MBS-CFG-UNKNOWN | Unknown parameters are reported, not rejected (DB:206-209, 315-319). | Same as MB-CFG-UNKNOWN: rejected with `InvalidConfig` (a recorded divergence). | planned (M2) | `planned:serial_unknown_option_is_rejected_with_invalid_config` |
 | MBS-CFG-SERIAL-BAUD | `baud-rate`, int, 9600 (SerCfg:28-123). | `baud-rate`, positive integer, default 9600. | planned (M2) | `planned:serial_baud_rate_default_is_9600`, `planned:serial_baud_rate_zero_is_invalid_config` |
-| MBS-CFG-SERIAL-DATA-BITS | `data-bits`, int, 8. The ASCII driver keeps 8N1 although real ASCII lines often use 7 data bits and even parity (modbus_ascii.notes). | `data-bits` with default 8 for both drivers; 7 is accepted so an ASCII line can be configured. | planned (M2) | `planned:serial_data_bits_default_is_8`, `planned:ascii_accepts_7_data_bits_with_even_parity` |
-| MBS-CFG-SERIAL-STOP-BITS | `stop-bits`, int, 1. | `stop-bits` 1 or 2, default 1. | planned (M2) | `planned:serial_stop_bits_default_is_1` |
-| MBS-CFG-SERIAL-PARITY | `parity`: none, odd, even, mark, space; default none. | The same five values, default none; an unknown name is `InvalidConfig`. | planned (M2) | `planned:serial_parity_default_is_none`, `planned:serial_parity_unknown_name_is_invalid_config` |
-| MBS-CFG-SERIAL-FLOW | `flow-control`: none, rts-cts, xon-xoff; default none. | The same three values, default none. | planned (M2) | `planned:serial_flow_control_default_is_none` |
+| MBS-CFG-SERIAL-DATA-BITS | `data-bits`, int, 8; the Java transport does not validate it and hands it to jSerialComm (`SerI:125-126`). The ASCII driver keeps 8N1 although real ASCII lines often use 7 data bits and even parity (modbus_ascii.notes). | `data-bits` with default 8 for both drivers; 7 is accepted so an ASCII line can be configured. | planned (M2) | `planned:serial_data_bits_default_is_8`, `planned:ascii_accepts_7_data_bits_with_even_parity` |
+| MBS-CFG-SERIAL-STOP-BITS | `stop-bits`, int, 1; not validated by the Java transport (`SerI:125-126`). | `stop-bits` 1 or 2, default 1 (the bound is a Stonecrab rule, not upstream behavior). | planned (M2) | `planned:serial_stop_bits_default_is_1` |
+| MBS-CFG-SERIAL-PARITY | `parity`: none, odd, even, mark, space; default none. The value is lower-cased and `_` is turned into `-` before matching, so `Even` works and `EVEN_PARITY` (written by the upstream manual tests) becomes `even-parity`, which matches no case and fails the connection (`SerI:260-274, 292-294`). | The same five values, default none, matched after the same normalisation (case-insensitive, `_` as `-`); an unknown name, `EVEN_PARITY` included, is `InvalidConfig`. | planned (M2) | `planned:serial_parity_default_is_none`, `planned:serial_parity_unknown_name_is_invalid_config`, `planned:serial_parity_names_are_case_insensitive` |
+| MBS-CFG-SERIAL-FLOW | `flow-control`: none, rts-cts, xon-xoff; default none. Aliases `rtscts` and `xonxoff` are accepted too, with the same lower-case and `_` as `-` normalisation as parity, so `RTS_CTS` and `XON_XOFF` work (`SerI:276-294`). | The same three values and the two aliases, default none, matched after the same normalisation; an unknown name is `InvalidConfig`. | planned (M2) | `planned:serial_flow_control_default_is_none`, `planned:serial_flow_control_aliases_and_case_are_accepted` |
 | MBS-CFG-SERIAL-TIMEOUTS | `read-timeout-ms` 1000 and `write-timeout-ms` 1000, applied as semi-blocking read timeouts (SerI:86-135). | Both keys, default 1000; a write that cannot finish within the write timeout fails the request. | planned (M2) | `planned:serial_read_and_write_timeouts_default_to_1000`, `planned:serial_write_timeout_fails_the_request` |
 | MBS-CFG-SERIAL-DTR-RTS | `dtr` and `rts`, boolean, false; asserted only when true, never explicitly cleared on the dedicated path (transport_serial.notes). | Both keys, default false; Stonecrab asserts them when true and leaves the line state alone otherwise (same observable behavior). | planned (M2) | `planned:serial_dtr_and_rts_default_to_false`, `planned:serial_rts_true_is_asserted_on_open` |
 | MBS-CFG-SERIAL-REUSE-PORT | `reuse-port`, boolean, false; true acquires a shared port and joining requires an identical configuration, else a hard error (SerI:86-135; Shared:33-60). | Shared ports are planned with MBS-SHARED-PORT. | planned (M2) | `planned:serial_reuse_port_default_is_false` |
@@ -114,9 +121,9 @@ Default transport `serial`; supported `serial`, `tcp`, `tls`, `tls-psk`, `udp`, 
 | MBS-TRANS-SERIAL | Serial port through jSerialComm (transport_serial.library); client only, no framing; opened with baud, data bits, stop bits, parity and flow control (SerI:86-135). | A serial transport (S58) on a blocking worker, opened from the same options; framing stays in the driver. The tests use a virtual serial pair. | planned (M2) | `planned:serial_transport_opens_a_virtual_pair`, `planned:serial_transport_applies_line_settings`, `planned:serial_transport_round_trips_bytes` |
 | MBS-TRANS-PORT-NAME | The whole transport URL is the port name (SerT:34-61). Go uses only the URL path, so `serial://COM3` would lose the host part (go_transport_serial.notes; UNCERTAIN, not tested). | The port name is the URL path, or the host plus path for a Windows name; an empty name is `InvalidConfig`. The accepted forms are fixed by a test, not by Go's behavior. | planned (M2) | `planned:serial_port_name_comes_from_the_connection_string`, `planned:serial_empty_port_name_is_invalid_config` |
 | MBS-TRANS-RING | A fixed 64 KiB receive ring per connection; overflow drops the OLDEST bytes, unlike the other transports (SerI:52-56, 652-658). Go has the ring on shared ports only (go_transport_serial.notes). | A bounded receive buffer of 64 KiB; on overflow the oldest bytes are dropped and the loss is counted so the framer resynchronizes. | planned (M2) | `planned:serial_receive_overflow_drops_the_oldest_bytes`, `planned:serial_overflow_is_reported_to_the_framer` |
-| MBS-TRANS-TCP | `tcp` accepted as a carrier for serial-to-IP gateways; default port is the Modbus TCP constant (modbus_rtu.notes; UNCERTAIN, constant not opened). Go injects 502 for RTU and ASCII over tcp (go_modbus.notes). | `modbus-rtu:tcp://host:port` carries RTU frames over the Stonecrab TCP transport, default port 502. | planned (M2) | `planned:rtu_over_tcp_carries_crc_framed_adus`, `planned:ascii_over_tcp_carries_lrc_framed_adus`, `planned:rtu_over_tcp_default_port_is_502` |
-| MBS-TRANS-TLS | `tls` and `tls-psk` accepted for gateways; default ports map to the Modbus TLS constant (modbus_rtu.notes). | Rejected with `InvalidConfig` until the TLS transport exists, as MB-TCP-TRANSPORTS-TLS and MB-TCP-TRANSPORTS-TLS-PSK. | deferred (follows MB-TCP-TRANSPORTS-TLS) | none |
-| MBS-TRANS-UDP | `udp` accepted; the driver imports `org.bouncycastle.tls.UDPTransport` for its instanceof check, which looks suspect (modbus_rtu.notes, UNCERTAIN). | Rejected with `InvalidConfig`; revisited with S61 (MB-TCP-TRANSPORTS-UDP). | deferred (follows MB-TCP-TRANSPORTS-UDP) | none |
+| MBS-TRANS-TCP | `tcp` accepted as a carrier for serial-to-IP gateways; the Java RTU and ASCII drivers have no default port for it: `ModbusRtuTcpTransportConfiguration` and `ModbusAsciiTcpTransportConfiguration` are empty subclasses, so a connection string without a port fails with "No port defined" (TcpT:76-84). The generated constants are 502, 502 and 802 (`Mspec:24-28`). Go injects 502 for RTU and ASCII over tcp (go_modbus.notes). | `modbus-rtu:tcp://host:port` carries RTU frames over the Stonecrab TCP transport, default port 502 as Go does: a divergence from the Java driver, recorded as a divergence row when the slice lands. | planned (M2) | `planned:rtu_over_tcp_carries_crc_framed_adus`, `planned:ascii_over_tcp_carries_lrc_framed_adus`, `planned:rtu_over_tcp_default_port_is_502` |
+| MBS-TRANS-TLS | `tls` and `tls-psk` accepted for gateways; both default to port 802, the Modbus TLS constant (`ModbusRtuTlsTransportConfiguration` and `ModbusRtuPskTlsTransportConfiguration`). | Rejected with `InvalidConfig` until the TLS transport exists, as MB-TCP-TRANSPORTS-TLS and MB-TCP-TRANSPORTS-TLS-PSK. | deferred (follows MB-TCP-TRANSPORTS-TLS) | none |
+| MBS-TRANS-UDP | `udp` accepted, with no default port (`ModbusRtuUdpTransportConfiguration` is an empty subclass, UdpT:75-83 throws "No port defined"); the driver imports `org.bouncycastle.tls.UDPTransport` for its instanceof check, which looks suspect (modbus_rtu.notes, UNCERTAIN). | Rejected with `InvalidConfig`; revisited with S61 (MB-TCP-TRANSPORTS-UDP). | deferred (follows MB-TCP-TRANSPORTS-UDP) | none |
 | MBS-TRANS-TEST | `test` transport declared; runtime behavior for RTU is untested upstream (modbus_rtu.notes, UNCERTAIN). | Rejected with `InvalidConfig`; Stonecrab uses its own fake transport. | deferred (follows MB-TCP-TRANSPORTS-TEST) | none |
 | MBS-TRANS-GO-CARRIERS | Go registers `serial` and `tcp` for RTU and ASCII and `tcp` for TCP (go_modbus.notes). | Covered by MBS-TRANS-SERIAL and MBS-TRANS-TCP. | planned (M2) | `planned:go_carrier_set_is_a_subset_of_stonecrab_carriers` |
 | MBS-TRANS-C-PY | The C driver is Modbus TCP only, over tcp (c_modbus.scope). The Python driver is Modbus TCP only (python_modbus.protocol_code); generated RTU and ASCII ADUs and CRC and LRC helpers exist but no driver (python_modbus.notes). | No obligation. | deferred (no RTU or ASCII driver in C or Python) | none |
@@ -147,7 +154,7 @@ drop none (manifest `modbus_rtu.notes`: tags and optimizer shared).
 | Row id | Upstream behavior (manifest key or path:lines) | Planned Stonecrab behavior | Status | Test ids |
 | --- | --- | --- | --- | --- |
 | MBS-TYPE-SHARED | Decode and encode through the shared `ModbusRegisterCodec` (modbus_rtu.notes). | The typed decoder and encoder of S23 serve all three drivers; one RTU and one ASCII read per type family prove the wiring, the per-type cases stay under MB-TYPE-*. | planned (M2) | `planned:rtu_read_decodes_a_real_through_the_shared_decoder`, `planned:ascii_read_decodes_a_dint_through_the_shared_decoder` |
-| MBS-TYPE-STRING-TIME | Strings and the TIME and DATE family are deferred for TCP (MB-TYPE-STRING, MB-TYPE-TIME). | Follow the TCP decision. | deferred (follows MB-TYPE-STRING) | none |
+| MBS-TYPE-STRING-TIME | Strings and the TIME and DATE family are deferred for TCP (MB-TYPE-STRING, MB-TYPE-TIME). The shared `DataItem` has no TIME or DATE case, so for RTU and ASCII too a read of the family yields OK with a null value and a write throws (see the Data types section of `docs/parity/modbus.md`). | Follow the TCP decision. | deferred (follows MB-TYPE-STRING) | none |
 
 ## RTU framing
 Frames are `address, PDU, CRC-16` on the wire. The codec frames responses only
@@ -205,11 +212,12 @@ Observed in the pinned source and not reproduced.
 | MBS-QUIRK-COPY-PASTE | A comment in the RTU driver says "ASCII can use TCP for serial-to-IP gateways"; the ASCII driver has the same transports. | modbus_ascii.notes, `RtuDrv:82-85` | deferred (comment only) | none |
 | MBS-QUIRK-UDP-IMPORT | The `UDPTransport` import from BouncyCastle looks wrong for the project's own UDP class. | modbus_rtu.notes, `RtuDrv:44-122` | deferred (follows MB-QUIRK-A) | none |
 | MBS-QUIRK-DTR-RTS | DTR and RTS are asserted only when true and never cleared on the dedicated path. | transport_serial.notes, `SerI:86-135` | deferred (no observable difference planned) | none |
+| MBS-QUIRK-STALE-SERIAL-OPTIONS | The upstream manual RTU and ASCII tests (`ManualModbusRTUDriverTest.java:73`, `ManualModbusRTUSubscriptionTest.java:44`, and the ASCII pair) pass `serial.num-data-bits`, an unprefixed `num-stop-bits` and `serial.parity=EVEN_PARITY`. The declared names are `data-bits` and `stop-bits`, so the first two would only be warned about as unknown, and the parity value matches no case and fails the connection. | `SerialTransportConfiguration.java:41-52`; `SerI:260-274` | planned (M2); not reproduced | `planned:serial_stale_option_names_are_rejected` |
 | MBS-QUIRK-GO-CONNECT-TIMEOUT | Go parses `serial.connect-timeout-ms` and ignores it. | go_transport_serial.notes | deferred (see MBS-CFG-GO-CONNECT-TIMEOUT) | none |
 
 ## Divergences from upstream
 None planned yet. Candidates are recorded in the rows above (MBS-BUS-LATE-REPLY,
-MBS-TRANS-PORT-NAME, MBS-ASCII-RESYNC) and become divergence rows with an upstream issue
+MBS-TRANS-PORT-NAME, MBS-TRANS-TCP for the default port, MBS-ASCII-RESYNC) and become divergence rows with an upstream issue
 reference when the slice lands.
 
 ## Backlog from other languages
@@ -226,9 +234,13 @@ MBS-CFG-GO-CONNECT-TIMEOUT).
 ## UNVERIFIED
 - The Modbus serial line specification: the maximum RTU frame size (MBS-LIMIT-ADU), the
   3.5-character timing and the CRC and LRC definitions are stated from the specification,
-  not from the manifest. A copy is not in the repository.
+  not from the manifest. A copy is not in the repository. The S44 attempt to download the
+  Modbus Application Protocol V1.1b3 PDF from www.modbus.org was blocked (HTTP 403), so no
+  revision has been checked and no sha256 exists; the section numbers cited for the PDU
+  (in `docs/parity/modbus.md`) stay UNVERIFIED for the same reason.
 - The generated `rtuCrcCheck` and `asciiLrcCheck` helpers were not opened upstream.
-- The generated Constants values for the default TLS and UDP ports (502 / 802 assumed).
+- Whether the Go driver's serial transport applies the same value normalisation as the Java
+  one (not read in S44).
 - Whether the `test` transport and `udp` work for RTU at runtime.
 - The exact serial connection-string form for a port name. The transport passes the URL
   through as the port name (`SerT:34-61`); the manifest cites no example.

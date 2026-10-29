@@ -369,6 +369,7 @@ commit; gates named were run locally before that commit.
 | S37 | 2026-10-29 | Status-bit and alias validation (findings G02, G03): `validate` refuses a status bit of 64 or more (`StatusBitOutOfRange`); `validate_for` parses status-field addresses once (one `StatusAddressRejected` mapping shared with `tags`) and reports a bit beyond the parsed type's width, `OverlappingStatusBits` for two spellings of one canonical address and bit (equal text stays `validate`'s), and `StatusBitInBitField` when a status bit lies in the measurement's first-step `BitField` range on the same canonical address; measurements may still share a status word. Two new `ProfileError` variants, appended after the published ones; ADR-0016 addendum defines the shapes and their limits (canonical text includes the type and unit id); 18 tests in `sensors_overlap.rs` and a fuzz seed | check, coverage, lint-attrs, parity, examples |
 | S52 | 2026-10-29 | Benchmarks: criterion 0.8.2 as a dev-dependency only (default features off: no rayon or plotters; ADR-0009 addendum, DEPENDENCY_AUDIT entry, policy check clean; a C compiler is needed to build the benches); `benches/modbus_wire.rs` (address and connection-string parse, PDU and MBAP encode and decode, TypedDecoder over 62 REAL and 125 UINT, Batcher plans) and `benches/modbus_loopback.rs` (reads through the registry and the real TCP factory to a testkit ScriptedPeer on 127.0.0.1). Baseline on an Apple M2 Max recorded in `docs/evidence/benchmarks/` (a laptop baseline that the gate never reads). The 10% gate (`scripts/bench-compare.sh`, `mise run bench-compare`) builds a base and HEAD on the same runner, runs three alternating rounds and fails only when every round shows HEAD's lower bound above 1.10 times the base's upper bound; it runs in the weekly `scheduled` job only | check, lint-attrs, dependencies, machete, bench --no-run, one full local bench run, bench-compare self-test and an injected-slowdown trial |
 | S54 (fix) | 2026-10-29 | `packaging/stonecrab.txt`, the reviewed archive list, gains `src/subscribe_request.rs` and `src/subscription.rs`, which S54 added; the `package` gate found the gap before the push | package |
+| S44 | 2026-10-29 | The Modbus-specific pending items: TIME/DATE settled (the item's premise was wrong: the generated Java, Go and Python `DataItem` code is in the pinned checkout, and `modbus.mspec` has no TIME/DATE-family case, so upstream reads such tags as OK with a null value and throws on write; 8 bytes, 4 registers per element; recorded in the Data types rows and MB-QUIRK-K); the upstream test harness read end to end (whole-frame injection through the `test` transport, model comparison, the witness limits of the driver-suite vectors; a harness table under "Test vectors available upstream"); the Modbus part of the alias review closed with new rows (transport option prefixes, option value aliases, the config block, legacy array forms) and corrected default ports and a wrong URL-decoding claim in `core.md`; 20 evidence keys added to `[inventory.modbus_tcp]`. The spec-section item stays: modbus.org refused the automated download (HTTP 403), so it waits for a manual copy; docs only | parity, TOML parse; every finding re-opened in the pinned checkout before use |
 
 ## Verified evidence and reproduction
 
@@ -584,15 +585,15 @@ in its S31 addendum, the parity gate.
   (fingerprint, SHA-512 and the trust caveat are in the manifest's `[signature]` table);
   the archive contents were not inventoried against the pinned commit.
 - `inventory_complete = false`: S41 (2026-10-28) closed the source inventory and the
-  Modbus RTU/ASCII item, S04b the step-format comparison, S42 the non-Java inventory and
-  S43 the behavior-to-test mapping; the open items in the manifest `[pending]` table are:
-  1. Review all configuration and address aliases before implementation.
-  2. Inspect the generated `DataItem` behavior for the TIME/DATE family (generated code
-     is not in the repository).
-  3. Read the test transport internals of the upstream driver test-suite runner (S04b
-     settled which XML each Modbus IT loads).
-  4. Check the Modbus Application Protocol V1.1b section numbers cited in
-     `docs/parity/modbus.md` against a retained copy.
+  Modbus RTU/ASCII item, S04b the step-format comparison, S42 the non-Java inventory, S43
+  the behavior-to-test mapping and S44 the TIME/DATE `DataItem` and test-harness items;
+  the open items in the manifest `[pending]` table are:
+  1. Review all configuration and address aliases before implementation, for every
+     protocol except Modbus TCP, RTU and ASCII (S44 closed the Modbus part).
+  2. Check the Modbus Application Protocol section numbers and example bytes cited in
+     `docs/parity/modbus.md` and `fixtures/modbus/PROVENANCE.toml` against a retained copy
+     of the specification: modbus.org's firewall refused the automated download of
+     V1.1b3 (HTTP 403) on 2026-10-28, so this needs a manually downloaded copy.
 
 **M0 is not complete.** The manifest holds 101 `[inventory.*]` entries with file and line
 evidence at the pinned commit: from S41 the Java API and SPI, every PLC4J driver module

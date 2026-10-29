@@ -44,10 +44,8 @@ subscription_emulation = "plc4j/utils/subscription-emulation"
 
 [pending]
 items = [
-  "Review all configuration and address aliases before implementation",
-  "Inspect the generated DataItem behavior for the TIME/DATE family (generated code is not in the repository)",
-  "Read the test transport internals of the upstream driver test-suite runner (which XML each Modbus IT loads was settled in S04b)",
-  "Check the Modbus Application Protocol V1.1b section numbers cited in docs/parity/modbus.md against a retained copy",
+  "Review all configuration and address aliases before implementation, for every protocol except Modbus TCP, RTU and ASCII. The Modbus part was closed in S44: every option name (six driver options, allow-unsupported-transport, log.audit-log-file, and the tcp., udp., tls., tls-psk., serial. and test. transport keys), every option value alias and every address form (long, 0x/1x/3x/4x/6x and bare area-digit forms, :TYPE, [selection], {unit-id, byte-order}) is recorded in docs/parity/modbus.md and docs/parity/modbus-serial.md with its source line.",
+  "Check the Modbus Application Protocol section numbers cited in docs/parity/modbus.md and fixtures/modbus/PROVENANCE.toml (4.1, 4.2, 4.4, 6.1 to 6.4, 6.14, 7) and the quoted example bytes against a retained copy of the specification. The 2026-10-28 attempt to download Modbus_Application_Protocol_V1_1b3.pdf from www.modbus.org was blocked by its Web Application Firewall (HTTP 403, no PDF obtained). Needs a manually downloaded copy; state whether the repository's V1.1b and the current V1.1b3 number their sections identically.",
 ]
 
 # Policy: this table records what has been inventoried, not what Stonecrab may assume.
@@ -98,6 +96,28 @@ it_driver_suite = { path = "plc4j/drivers/modbus/src/test/java/org/apache/plc4x/
 it_all_datatypes = { path = "plc4j/drivers/modbus/src/test/java/org/apache/plc4x/java/modbus/tcp/ModbusTcpAllDatatypesIT.java", lines = "23-27", note = "loads Modbus-all-datatypes.xml (S04b)" }
 it_all_datatypes_little_endian = { path = "plc4j/drivers/modbus/src/test/java/org/apache/plc4x/java/modbus/tcp/ModbusTcpAllDatatypesLittleEndianIT.java", lines = "23-27", note = "loads Modbus-all-datatypes-little-endian.xml (S04b)" }
 driver_suite_runner = { path = "plc4j/utils/test-utils/src/main/java/org/apache/plc4x/java/utils/testutils/driver/DriverTestsuiteRunner.java", lines = "50-138", note = "the runner all three ITs extend (S04b)" }
+
+# S44 evidence (read 2026-10-28 at the pinned commit; the generated Java, Go and Python DataItem files are tracked in the checkout).
+data_item_typeswitch = { path = "protocols/modbus/src/main/resources/protocols/modbus/modbus.mspec", lines = "313-322, 356-367", note = "DataItem typeSwitch has 20 cases, BOOL to WSTRING; no TIME, LTIME, DATE, LDATE, TIME_OF_DAY, LTIME_OF_DAY, DATE_AND_TIME or LDATE_AND_TIME case" }
+data_type_enum_time_family = { path = "protocols/modbus/src/main/resources/protocols/modbus/modbus.mspec", lines = "376-404", note = "ModbusDataType: TIME(16) to LDATE_AND_TIME(23) exist only here, each dataTypeSize 8 (lines 396-403)" }
+generated_data_item_java = { path = "plc4j/drivers/modbus/src/main/generated/org/apache/plc4x/java/modbus/readwrite/DataItem.java", lines = "62-71, 224-234, 355-358, 474-483", note = "staticParse ends 'return null' (234) for any unlisted type; staticSerialize has no else branch and writes nothing; getLengthInBits returns 0" }
+generated_data_item_go = { path = "plc4go/protocols/modbus/readwrite/model/DataItem.go", lines = "206-217, 341-351", note = "WSTRING case then errors.New('unsupported type'); serialize default is the same error" }
+generated_data_item_python = { path = "plc4py/plc4py/protocols/modbus/readwrite/DataItem.py", lines = "156-166", note = "WSTRING then 'return None'; no TIME or DATE branch" }
+data_io_generator = { path = "code-generation/language/java/src/main/java/org/apache/plc4x/codegeneration/language/java/generators/DataIoGenerator.java", lines = "375-446, 488-493, 556-650", note = "emits a branch only for cases that exist in the mspec; TIME-family PlcValue factories are keyed by case name plus field names (other protocols); without a default case parse ends 'return null'" }
+register_codec_width_bits = { path = "plc4j/drivers/modbus/src/main/java/org/apache/plc4x/java/modbus/base/ModbusRegisterCodec.java", lines = "125-133, 163-195", note = "widthBits has no TIME or DATE case; default throws IllegalArgumentException 'Unsupported Modbus data type' (192), uncaught by fromPlcValue (ModbusTcpConnection 522-545 catches BufferException only)" }
+read_optimizer_parse = { path = "plc4j/drivers/modbus/src/main/java/org/apache/plc4x/java/modbus/base/optimizer/ModbusReadOptimizer.java", lines = "160-163, 184-194", note = "a TIME-family read parses to null (a PlcList of nulls for arrays) and is stored with response code OK; only BufferException maps to INTERNAL_ERROR" }
+tag_element_size = { path = "plc4j/drivers/modbus/src/main/java/org/apache/plc4x/java/modbus/base/tag/ModbusTag.java", lines = "95-97, 132-137, 262-272", note = "TIME-family tags are accepted and sized 8 bytes (4 registers) per element from ModbusDataType.dataTypeSize" }
+time_family_no_vectors = { path = "plc4j/drivers/modbus/src/test/java/org/apache/plc4x/java/modbus/tcp/manual/ManualModbusDriverTestModbusPal.java", lines = "49-59, 90-98", note = "TIME and DATE expectations only in commented-out lines ('TODO: These datatypes are not yet fully implemented'); no TIME or DATE in the six tcp XML suites" }
+harness_test_transport = { path = "plc4j/utils/test-utils/src/main/java/org/apache/plc4x/java/utils/testutils/driver/internal/ConnectionManager.java", lines = "73-99, 123-128", note = "URL modbus-tcp:test://localhost?...&allow-unsupported-transport=true; the transport instance is taken by reflection (getTransportInstance) before connect; plain byte pipe, no socket, no framing (TestTransportInstance 50-61, 75-88, 259-284)" }
+harness_polling_receive = { path = "plc4j/spi/drivers/src/main/java/org/apache/plc4x/java/spi/drivers/ConnectionBase.java", lines = "129-131, 169-187", note = "the test transport is not async, so the connection runs a daemon polling loop (Thread.onSpinWait); each injected ADU arrives as one whole frame (MessageCodecBase 125-135, 183-189)" }
+harness_outgoing_message = { path = "plc4j/utils/test-utils/src/main/java/org/apache/plc4x/java/utils/testutils/driver/internal/handlers/OutgoingPlcMessageHandler.java", lines = "71-91, 119-127, 128-153", note = "Java: waits up to 5 s for any byte, drains, parses the first ADU, compares the XML model; trailing bytes are never checked. Go runner (plc4go/spi/testutils/DriverTestRunner.go 304-334, 394-427) compares serialized bytes and only logs leftovers" }
+harness_transaction_ids = { path = "plc4j/drivers/modbus/src/main/java/org/apache/plc4x/java/modbus/tcp/ModbusTcpConnection.java", lines = "68, 140-143, 159-165, 242-252, 277-285", note = "transaction id is the driver's counter from 1, wrapping at 0xFFFF; one connection per test case, so retained suites witness id 1 (id 2 only for the second block in DriverTestsuite.xml)" }
+config_value_decoding = { path = "plc4j/spi/config/src/main/java/org/apache/plc4x/java/spi/config/ConfigurationFactory.java", lines = "66-82, 132-136, 232-263, 300-302, 319-339", note = "option values are URL-decoded; enums exact case (Enum.valueOf); boolean via Boolean.parseBoolean; first duplicate key wins; 'k=' and a bare key give a null value" }
+config_key_prefixes = { path = "plc4j/spi/drivers/src/main/java/org/apache/plc4x/java/spi/drivers/DriverBase.java", lines = "180-204, 231", note = "driver options unprefixed; transport options under '<transport-code>.'; audit log under 'log.'; allow-unsupported-transport unprefixed" }
+tcp_transport_default_port = { path = "plc4j/drivers/modbus/src/main/java/org/apache/plc4x/java/modbus/tcp/config/ModbusTcpTcpTransportConfiguration.java", lines = "24-29", note = "effective default port comes from the transport configuration class (502 here); DriverBase.defaultPorts has no caller in plc4j main code. TcpTransport 76-84 and UdpTransport 75-83 throw 'No port defined' when the class gives none" }
+tag_config_values = { path = "plc4j/spi/drivers/src/main/java/org/apache/plc4x/java/spi/drivers/tags/TagConfigParser.java", lines = "30-60", note = "every key:value pair is collected, quotes stripped; ModbusTag 222-229 reads only unit-id (Short.parseShort, negatives pass) and byte-order (exact-case valueOf); other keys ignored" }
+legacy_array_hint = { path = "plc4j/spi/drivers/src/main/java/org/apache/plc4x/java/spi/drivers/model/ArrayNotationParser.java", lines = "85-90, 120-138", note = "two legacy patterns (address:TYPE[n], address:TYPE:n); count <= 1 gives [0]; message ends 'The array notation moved before the type and a count became a range, so this address is now written ...' (ModbusTag 155-156 adds the expected-form text)" }
+discovery_unit_identifier = { path = "plc4j/drivers/modbus/src/main/java/org/apache/plc4x/java/modbus/tcp/discovery/ModbusPlcDiscoverer.java", lines = "219-222", note = "emits the undeclared option 'unit-identifier' (declared name is default-unit-identifier)" }
 
 [inventory.modbus_tcp.transports]
 default = "tcp"
@@ -514,10 +534,10 @@ notes = [
     transport's interframe-delay option, which only spaces writes.""",
   """\
     Wire model: ModbusRtuADU = uint8 address, ModbusPDU, uint16 crc checksum (modbus.mspec, DriverType MODBUS_RTU 0x02). TCP, TLS, PSK-TLS and UDP are accepted as carriers for serial-to-IP \
-    gateways; default ports map to the Modbus TCP, TLS and UDP constants.""",
+    gateways; the TLS and PSK-TLS transports default to the Modbus TLS port 802 (ModbusRtuTlsTransportConfiguration, ModbusRtuPskTlsTransportConfiguration); tcp and udp have no default port (empty subclasses ModbusRtuTcpTransportConfiguration and ModbusRtuUdpTransportConfiguration), so a connection string without a port fails with 'No port defined' (TcpTransport 76-84; UdpTransport 75-83). Same for ASCII.""",
   "Tags and optimizer are shared with Modbus TCP (ModbusTagHandler, ModbusTag, ModbusReadOptimizer); they are inventoried under modbus_tcp.",
   "ASCII and RTU connection, driver and configuration classes are line-for-line copies apart from naming (diffed in S41; only comments differ in the connection).",
-  "UNCERTAIN: the generated Constants values (MODBUSTCPDEFAULTPORT and the TLS and UDP ones) were not opened; 502 / 802 / UDP is assumed from the Modbus TCP inventory.",
+  "Generated Constants (modbus.mspec 24-28; Constants.java 23-27): MODBUSUDPDEFAULTPORT 502, MODBUSTCPDEFAULTPORT 502, MODBUSTCPTLSDEFAULTPORT 802 (settled S44).",
   """\
     UNCERTAIN: whether the 'test' transport and udp work for RTU at runtime is untested; they are only declared. The driver imports org.bouncycastle.tls.UDPTransport for the instanceof check, \
     which looks suspect against the project's own UDP transport class.""",
@@ -2213,8 +2233,8 @@ code = { path = "plc4j/transports/test/src/main/java/org/apache/plc4x/java/trans
 config = { path = "plc4j/transports/test/src/main/java/org/apache/plc4x/java/transport/test/config/TestTransportConfiguration.java", lines = "30-39", note = "TestTransportConfiguration: receive-buffer-size 81920" }
 instance = { path = "plc4j/transports/test/src/main/java/org/apache/plc4x/java/transport/test/TestTransportInstance.java", lines = "44-62", note = """\
   two ring buffers: readBuffer (fed by injectTestData) and writeBuffer (what the driver wrote)""" }
-inject = { path = "plc4j/transports/test/src/main/java/org/apache/plc4x/java/transport/test/TestTransportInstance.java", lines = "75-95", note = "injectTestData returns bytes actually accepted" }
-write = { path = "plc4j/transports/test/src/main/java/org/apache/plc4x/java/transport/test/TestTransportInstance.java", lines = "259-280", note = "write appends to writeBuffer; throws if it does not fit" }
+inject = { path = "plc4j/transports/test/src/main/java/org/apache/plc4x/java/transport/test/TestTransportInstance.java", lines = "75-88", note = "injectTestData returns bytes actually accepted" }
+write = { path = "plc4j/transports/test/src/main/java/org/apache/plc4x/java/transport/test/TestTransportInstance.java", lines = "259-284", note = "write appends to writeBuffer; throws if it does not fit" }
 notes = [
   "Implements plain TransportInstance (no async listeners); tests poke it with injectTestData / getWrittenData / waitForWrittenData.",
   "It is registered in META-INF/services of the module like a real transport, so it is selectable by code 'test' whenever the module is on the class path.",
@@ -2545,7 +2565,7 @@ scope = """\
   cycle and truncation checks, (3) the pcap round-trip runner. Skip the JUnit condition annotations (Jenkins, Docker, Parallels, internet)."""
 driver_runner = { path = "plc4j/utils/test-utils/src/main/java/org/apache/plc4x/java/utils/testutils/driver/DriverTestsuiteRunner.java", lines = "40-139", note = """\
   abstract JUnit5 runner: constructor (testsuite document path, basePackage, autoMigrate, ignored test cases); one DynamicTest per testcase with one connection each, or in sequential mode \
-  SequentialTestRunner shared-connection tests (lines 99-113)""" }
+  SequentialTestRunner shared-connection tests (lines 110-115)""" }
 step_types = { path = "plc4j/utils/test-utils/src/main/java/org/apache/plc4x/java/utils/testutils/driver/internal/StepType.java", lines = "24-43", note = """\
   step vocabulary: OUTGOING_PLC_MESSAGE, OUTGOING_PLC_BYTES, INCOMING_PLC_MESSAGE, INCOMING_PLC_BYTES, API_REQUEST, API_RESPONSE, API_EVENT, DELAY, TERMINATE""" }
 sequential = { path = "plc4j/utils/test-utils/src/main/java/org/apache/plc4x/java/utils/testutils/driver/internal/SequentialTestRunner.java", lines = "30-219", note = """\
