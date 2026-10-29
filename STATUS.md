@@ -349,6 +349,7 @@ commit; gates named were run locally before that commit.
 | S45 | 2026-10-28 | Modbus write PDUs as upstream emits them: `FunctionCode` gains FC06, FC15 and FC16; `ModbusPdu` gains the three requests and their responses, with V1.1b bounds checked before allocation (FC15 1..=1968 coils, FC16 1..=123 registers, the 65536 address span, 253-byte PDUs) and the response echo checked against the request; `ModbusPdu::write_request` picks FC15 for every coil write, FC06 for a 2-byte holding-register payload and FC16 otherwise, and refuses read-only areas. FC05 is never emitted (upstream quirk c) and stays refused. 54 new vectors (spec examples with sections, adversarial must_fail, exceptions; the old D3 must_fail write vectors became spec vectors), fuzz seeds; `Capabilities.write` stays false (S46 puts writes on the wire); `decode_member` in the connection gained the five new variants in its mismatch arm | check, coverage, lint-attrs, parity, fuzz (fuzz_modbus_pdu, 60 s) |
 | S47 | 2026-10-28 | Modbus ping: the connection overrides `Connection::ping` with one read of the configured `ping-address` (default `4x00001:BOOL`, its area's function code and width, the address's unit id) through the read slot and session, bounded by `timeouts.request`, no retry; `Capabilities.ping` is true. Quirk (d) decided: matched upstream, so any correlated reply, an exception PDU included, is success; silence is `Timeout`, a closed connection `Disconnected`, other failures keep their kinds (MB-QUIRK-D reproduced; MB-TCP-PING automated-verified, including a pymodbus case where a refused read still answers the ping). The contract suite has 26 cases (new: a supported ping answers and changes no state; a silent device makes it a Timeout), the interop job expects 12 tests, COMPATIBILITY splits ping from discover | check, coverage, lint-attrs, parity, examples, interop |
 | S36, S45 (fix) | 2026-10-29 | The blocking `semver` job failed on run 40793164568: S45 inserted the write variants and S36 `InvalidRange` in the middle of the published `ModbusPdu` and `ProfileError` enums, shifting implicit discriminants (`enum_no_repr_variant_discriminant_changed`). The new variants now follow the published ones (no behavior change); CODING_STANDARDS 9.10 says so, and cargo-semver-checks 0.51.0 is pinned in mise with a `semver` task so the check runs before a push | check, coverage, semver (local, cargo-semver-checks 0.51.0) |
+| S42 | 2026-10-29 | Non-Java inventory of PLC4X v1.0.0 from the pinned checkout: 39 more `[inventory.*]` entries (22 Go: the SPI, five transports, 14 drivers, two tools; 9 C: SPI, four drivers, three transports, the plc4x-server stub; 2 C#: generated KNXnet/IP model only, no driver; 6 Python: SPI, mock, Modbus, UMAS, two transports), each compared with its Java entry, and a `[[backlog]]` table of 52 capabilities that exist outside Java and are absent or weaker in Java (for example Go BACnet/IP read, write, discovery and COV, Go C-Bus, Python UMAS system-bit addresses). Pending item "non-Java implementations" closed; the plan's section 4 cells that waited on S42 are filled; S41's plc4x-server citation corrected; docs only | TOML parse, ASCII check, 90 spot checks (three Go claims dropped, one citation corrected) |
 
 ## Verified evidence and reproduction
 
@@ -564,28 +565,29 @@ in its S31 addendum, the parity gate.
   (fingerprint, SHA-512 and the trust caveat are in the manifest's `[signature]` table);
   the archive contents were not inventoried against the pinned commit.
 - `inventory_complete = false`: S41 (2026-10-28) closed the source inventory and the
-  Modbus RTU/ASCII item, and S04b the step-format comparison; the open items in the
-  manifest `[pending]` table are:
-  1. Inventory capabilities in non-Java implementations (S42).
-  2. Map every required behavior to a planned test ID (S43).
-  3. Review all configuration and address aliases before implementation.
-  4. Inspect the generated `DataItem` behavior for the TIME/DATE family (generated code
+  Modbus RTU/ASCII item, S04b the step-format comparison and S42 the non-Java inventory;
+  the open items in the manifest `[pending]` table are:
+  1. Map every required behavior to a planned test ID (S43).
+  2. Review all configuration and address aliases before implementation.
+  3. Inspect the generated `DataItem` behavior for the TIME/DATE family (generated code
      is not in the repository).
-  5. Read the test transport internals of the upstream driver test-suite runner (S04b
+  4. Read the test transport internals of the upstream driver test-suite runner (S04b
      settled which XML each Modbus IT loads).
-  6. Check the Modbus Application Protocol V1.1b section numbers cited in
+  5. Check the Modbus Application Protocol V1.1b section numbers cited in
      `docs/parity/modbus.md` against a retained copy.
 
-**M0 is not complete.** The manifest holds 62 `[inventory.*]` entries with file and line
-evidence at the pinned commit (S41): the API and SPI, every PLC4J driver module (22, plus
-DF1 as a spec only), the 12 transport modules, the four tools and the utilities, and
-pointers to the tools and integrations that live outside `apache/plc4x`
-(`apache/plc4x-extras` v1.0.0, `apache/camel`, `apache/streampipes`). Only the Modbus TCP
-subset has a parity record: `docs/parity/modbus.md` carries stable row ids with test ids,
-a divergence table with references and an UNVERIFIED list (S43 adds the other records).
-None of the open items gates the alpha. Every divergence row
-now cites a protocol section, a drafted upstream issue (`docs/evidence/upstream-issues/`,
-not filed: filing needs the maintainer's approval) or the reason none was drafted.
+**M0 is not complete.** The manifest holds 101 `[inventory.*]` entries with file and line
+evidence at the pinned commit: from S41 the Java API and SPI, every PLC4J driver module
+(22, plus DF1 as a spec only), the 12 transport modules, the four tools, the utilities
+and pointers to the tools and integrations outside `apache/plc4x` (`apache/plc4x-extras`
+v1.0.0, `apache/camel`, `apache/streampipes`); from S42 the Go, C, C# and Python
+implementations. Its `[[backlog]]` table (52 rows) lists what exists outside Java and is
+absent or weaker in Java. Only the Modbus TCP subset has a parity record:
+`docs/parity/modbus.md` carries stable row ids with test ids, a divergence table with
+references and an UNVERIFIED list (S43 adds the other records). None of the open items
+gates the alpha. Every divergence row now cites a protocol section, a drafted upstream
+issue (`docs/evidence/upstream-issues/`, not filed: filing needs the maintainer's
+approval) or the reason none was drafted.
 
 Verified Modbus pitfalls are recorded in `docs/parity/modbus.md`: numeric address
 groups are decimal; `x` in forms such as `4x00016` is an area marker, not hexadecimal.
