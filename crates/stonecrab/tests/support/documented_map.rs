@@ -1,6 +1,7 @@
 //! Documented device maps (`fixtures/modbus/devices/*.toml`, slice S52d) served through the
 //! first-party responder: the loader of a map, the device limits the vendor documents state,
-//! and the rig that connects `ModbusTcpDriver` to the replay over the fake transport.
+//! and the rig that connects the driver of the map's scheme (`ModbusTcpDriver` for
+//! `modbus-tcp`, `ModbusRtuDriver` for `modbus-rtu`) to the replay over the fake transport.
 //!
 //! A documented map is a transcription of a vendor's register tables. Serving it proves what
 //! Stonecrab does with those tables and nothing about the device: the replay is
@@ -11,6 +12,11 @@
 //! assumptions, because the documents name none (`ILLEGAL DATA VALUE` for a quantity over a
 //! limit, `ILLEGAL FUNCTION` for an unlisted function), and the hardware runbooks list them
 //! as open items.
+//!
+//! A serial map is served with RTU framing: the adapter around the responder checks the CRC
+//! of each request and puts one on each reply, with a CRC-16 written here bit by bit from the
+//! Modbus over Serial Line specification and not taken from the crate, so a driver and a
+//! codec that agreed on a wrong CRC would not pass.
 
 #![expect(
     unreachable_pub,
@@ -22,7 +28,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use serde::Deserialize;
-use stonecrab::modbus::{ExceptionCode, ModbusTcpDriver};
+use stonecrab::modbus::{ExceptionCode, ModbusRtuDriver, ModbusTcpDriver};
 use stonecrab::testkit::{
     BitRun, BlockSizes, FakeClock, FakeTransportFactory, InteropMap, Reaction, Reactor,
     RegisterEntry, Script, Step, block_on_with,
@@ -36,6 +42,9 @@ use crate::responder::Device;
 
 /// The length of the MBAP header, so the PDU of a request ADU starts here.
 const MBAP_LEN: usize = 7;
+
+/// The path of the serial port a serial map is reached on; the fake transport ignores it.
+const SERIAL_PORT: &str = "/dev/ttyUSB0";
 
 /// Transports the factory can hand out: a test connects a handful of times.
 const PLANS: usize = 16;
@@ -62,12 +71,36 @@ pub struct DeviceInfo {
     pub label: String,
     pub manufacturer: String,
     pub model: String,
-    /// The scheme the device is reached by (`modbus-rtu` for a serial device: the replay
-    /// serves it over TCP framing until RTU lands).
+    /// The scheme the device is reached by: `modbus-tcp`, or `modbus-rtu` for a serial device.
     pub scheme: String,
     pub unit_id: u8,
     pub address_reading: String,
     pub input_registers_mirror_holding: bool,
+    /// The line settings of a serial device, as the replay connects to it.
+    #[serde(default)]
+    pub serial: Option<Serial>,
+}
+
+/// The `[device.serial]` table: the line the device is reached on.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Serial {
+    pub baud_rate: u32,
+    pub data_bits: u8,
+    pub parity: String,
+    pub stop_bits: u8,
+}
+
+impl Serial {
+    /// The settings as the `serial.` keys of a connection string.
+    pub fn options(&self) -> Vec<String> {
+        vec![
+            format!("serial.baud-rate={}", self.baud_rate),
+            format!("serial.data-bits={}", self.data_bits),
+            format!("serial.parity={}", self.parity),
+            format!("serial.stop-bits={}", self.stop_bits),
+        ]
+    }
 }
 
 /// The `[source]` table: the vendor document the map is transcribed from.
@@ -277,35 +310,167 @@ impl Limits {
     }
 }
 
+/// CRC-16/MODBUS, bit by bit: reflected polynomial 0xA001, initial value 0xFFFF.
+fn crc(bytes: &[u8]) -> [u8; 2] {
+    let mut register: u16 = 0xFFFF;
+    for byte in bytes {
+        register ^= u16::from(*byte);
+        for _ in 0..8 {
+            let carry = register & 0x0001 != 0;
+            register >>= 1;
+            if carry {
+                register ^= 0xA001;
+            }
+        }
+    }
+    register.to_le_bytes()
+}
+
+/// An RTU frame: the address, the PDU, the CRC low byte first.
+pub fn rtu_frame(unit: u8, pdu: &[u8]) -> Vec<u8> {
+    let mut bytes = vec![unit];
+    bytes.extend_from_slice(pdu);
+    let check = crc(&bytes);
+    bytes.extend_from_slice(&check);
+    bytes
+}
+
+/// The unit and PDU of an RTU frame, `None` when the CRC does not match.
+fn rtu_parts(frame: &[u8]) -> Option<(u8, &[u8])> {
+    let body = frame.get(..frame.len().checked_sub(2)?)?;
+    if crc(body).as_slice() != frame.get(body.len()..)? {
+        return None;
+    }
+    body.split_first().map(|(unit, pdu)| (*unit, pdu))
+}
+
+/// An MBAP ADU of transaction 1 for `unit`.
+fn mbap_adu(unit: u8, pdu: &[u8]) -> Vec<u8> {
+    let length = u16::try_from(pdu.len().saturating_add(1)).unwrap_or(u16::MAX);
+    let mut bytes = vec![0, 1, 0, 0];
+    bytes.extend_from_slice(&length.to_be_bytes());
+    bytes.push(unit);
+    bytes.extend_from_slice(pdu);
+    bytes
+}
+
+/// The unit and PDU of an MBAP ADU.
+fn mbap_parts(adu: &[u8]) -> Option<(u8, &[u8])> {
+    Some((*adu.get(MBAP_LEN.saturating_sub(1))?, adu.get(MBAP_LEN..)?))
+}
+
+/// The device behind RTU framing: the CRC of a request is checked and its unit and PDU go to
+/// `inner` as an MBAP ADU; what `inner` answers comes back as an RTU frame.
+fn rtu_reactor(device_unit: u8, mut inner: Reactor) -> Reactor {
+    Box::new(move |bytes| {
+        let Some((unit, pdu)) = rtu_parts(bytes) else {
+            return Reaction::Silence;
+        };
+        if unit != device_unit {
+            // A slave on a serial line answers only its own network address.
+            return Reaction::Silence;
+        }
+        let wrap = |reply: Vec<u8>| {
+            let (unit, pdu) = mbap_parts(&reply).unwrap_or_default();
+            rtu_frame(unit, pdu)
+        };
+        match inner(&mbap_adu(unit, pdu)) {
+            Reaction::Reply(reply) => Reaction::Reply(wrap(reply)),
+            Reaction::ReplyThenClose(reply) => Reaction::ReplyThenClose(wrap(reply)),
+            other @ (Reaction::Silence | Reaction::Close) => other,
+        }
+    })
+}
+
+/// How a request is framed on the line of a map's scheme.
+#[derive(Debug, Clone, Copy)]
+enum Wire {
+    Tcp,
+    Rtu,
+}
+
+impl Wire {
+    /// The request ADU carrying `pdu` to `unit`.
+    fn request(self, unit: u8, pdu: &[u8]) -> Vec<u8> {
+        match self {
+            Self::Tcp => mbap_adu(unit, pdu),
+            Self::Rtu => rtu_frame(unit, pdu),
+        }
+    }
+
+    /// The PDU of a frame on this wire.
+    fn pdu(self, frame: &[u8]) -> Option<&[u8]> {
+        match self {
+            Self::Tcp => mbap_parts(frame),
+            Self::Rtu => rtu_parts(frame),
+        }
+        .map(|(_, pdu)| pdu)
+    }
+}
+
 /// A driver connected to the replay of a documented map over the fake transport and clock.
 pub struct Rig {
     pub clock: Arc<FakeClock>,
     pub factory: FakeTransportFactory,
     pub device: Device,
-    pub driver: ModbusTcpDriver,
+    pub driver: Box<dyn Driver>,
     limits: Limits,
     uri: String,
+    wire: Wire,
+    unit: u8,
 }
 
 impl Rig {
     /// A rig for `map` with `overrides` replacing documented words. `query` is added to the
-    /// connection string: the options a user of this device would set.
+    /// connection string: the options a user of this device would set. A map reached by
+    /// `modbus-rtu` is served with RTU framing on the line its `[device.serial]` table gives.
     pub fn new(map: &DocumentedMap, overrides: &[(u16, u16)], query: &str) -> Self {
         let clock = Arc::new(FakeClock::default());
         let device = map.device(overrides);
         let factory = FakeTransportFactory::new(FakeClock::clone(&clock));
+        let wire = if map.device.scheme == "modbus-rtu" {
+            Wire::Rtu
+        } else {
+            Wire::Tcp
+        };
         for _ in 0..PLANS {
-            factory.push_script(Script::new(vec![Step::React(
-                map.limits.guard(device.reactor()),
-            )]));
+            factory.push_script(Script::new(vec![Step::React(Self::reactor(
+                wire,
+                map.device.unit_id,
+                &map.limits,
+                &device,
+            ))]));
         }
-        let driver = ModbusTcpDriver::new()
-            .with_clock(Arc::<FakeClock>::clone(&clock))
-            .with_transport_factory(Arc::new(factory.clone()));
         let mut options = vec![
             format!("address-convention={}", map.device.address_reading),
             format!("default-unit-identifier={}", map.device.unit_id),
         ];
+        let (driver, prefix): (Box<dyn Driver>, String) = match wire {
+            Wire::Tcp => (
+                Box::new(
+                    ModbusTcpDriver::new()
+                        .with_clock(Arc::<FakeClock>::clone(&clock))
+                        .with_transport_factory(Arc::new(factory.clone())),
+                ),
+                "modbus-tcp://127.0.0.1:502".to_owned(),
+            ),
+            Wire::Rtu => {
+                let serial = map
+                    .device
+                    .serial
+                    .as_ref()
+                    .expect("a map with scheme modbus-rtu needs a [device.serial] table");
+                options.extend(serial.options());
+                (
+                    Box::new(
+                        ModbusRtuDriver::new()
+                            .with_clock(Arc::<FakeClock>::clone(&clock))
+                            .with_transport_factory(Arc::new(factory.clone())),
+                    ),
+                    format!("modbus-rtu://{SERIAL_PORT}"),
+                )
+            }
+        };
         options.extend(
             query
                 .split('&')
@@ -318,13 +483,42 @@ impl Rig {
             device,
             driver,
             limits: map.limits.clone(),
-            uri: format!("modbus-tcp://127.0.0.1:502?{}", options.join("&")),
+            uri: format!("{prefix}?{}", options.join("&")),
+            wire,
+            unit: map.device.unit_id,
         }
     }
 
-    /// The device as a peer answers a request ADU, for a test that sends frames by hand.
-    pub fn peer(&self) -> Reactor {
-        self.limits.guard(self.device.reactor())
+    /// The device as the fake transport reaches it: the vendor's limits around the responder,
+    /// behind the framing of `wire`.
+    fn reactor(wire: Wire, unit: u8, limits: &Limits, device: &Device) -> Reactor {
+        let guarded = limits.guard(device.reactor());
+        match wire {
+            Wire::Tcp => guarded,
+            Wire::Rtu => rtu_reactor(unit, guarded),
+        }
+    }
+
+    /// The device as a peer answers a request PDU, for a test that sends requests by hand: the
+    /// request goes in a frame of the rig's wire to the same reactor the driver reaches, and
+    /// the reply is the PDU of the frame that comes back (`None` for silence or a close).
+    pub fn peer(&self) -> impl FnMut(&[u8]) -> Option<Vec<u8>> + use<> {
+        let (wire, unit) = (self.wire, self.unit);
+        let mut reactor = Self::reactor(wire, unit, &self.limits, &self.device);
+        move |pdu| match reactor(&wire.request(unit, pdu)) {
+            Reaction::Reply(frame) => wire.pdu(&frame).map(<[u8]>::to_vec),
+            Reaction::ReplyThenClose(_) | Reaction::Silence | Reaction::Close => None,
+        }
+    }
+
+    /// Whether the device answers `frame` as the line delivers it, byte for byte: a frame with
+    /// a wrong CRC, or for another network address, gets silence from a serial slave.
+    pub fn answers_frame(&self, frame: &[u8]) -> bool {
+        let mut reactor = Self::reactor(self.wire, self.unit, &self.limits, &self.device);
+        matches!(
+            reactor(frame),
+            Reaction::Reply(_) | Reaction::ReplyThenClose(_)
+        )
     }
 
     /// Connect through the driver.
@@ -377,7 +571,7 @@ impl Rig {
         let mut requests = Vec::new();
         for probe in self.factory.probes() {
             for frame in probe.sent() {
-                let pdu = frame.get(MBAP_LEN..).unwrap_or_default();
+                let pdu = self.wire.pdu(&frame).unwrap_or_default();
                 if let [
                     function @ 1..=4,
                     start_hi,

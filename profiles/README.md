@@ -47,7 +47,7 @@ settle is listed in `docs/hardware/hw1-sio-mb04thms.md` and
 | `synthetic/modbus-tcp/` | `modbus-tcp` | PLC4X grammar, `address_convention = "plc4x"` declared in every file | interoperability-tested: the `interop` job runs each file against pymodbus 3.8.6 with `--expect-good` |
 | `synthetic/sim/` | `sim` | `STATE/<name>:<type>`, no convention | simulator-tested: the `examples` job runs each file against `sim://bench` with `--expect-good` |
 | `documented/modbus-tcp/` | `modbus-tcp` | PLC4X grammar, `address_convention = "zero-based"` | documented map, replayed: `modbus_device_replays` reads it against the first-party responder serving the vendor's map; not hardware-verified |
-| `documented/modbus-rtu/` | `modbus-rtu` (planned, S59) | PLC4X grammar, `address_convention = "zero-based"` | documented map, replayed over TCP framing at the PDU level; not hardware-verified |
+| `documented/modbus-rtu/` | `modbus-rtu` | PLC4X grammar, `address_convention = "zero-based"` | documented map, replayed: `modbus_device_replays` reads it through `ModbusRtuDriver` with RTU framing against the first-party responder; not hardware-verified |
 
 A profile belongs to one scheme (decision D17), so each synthetic device has two files with the
 same file name, one per directory. A documented device has one file, under its own scheme:
@@ -183,9 +183,10 @@ either (HW1 open item 13).
 Id `solo_slm1_c`, label documented map, not hardware-verified. Fixture
 `fixtures/modbus/devices/slm1-c.toml`; user manual 1st Edition 07/2023, sha256
 `830b99162dfbab23ed87c1778428747e65ce658dbce48e76899d4b948295d7cc`. Provenance row
-`MBS-DEVICE-SLM1C-SENTINEL`. The scheme `modbus-rtu` is the one planned for S59, so
-`SensorProfile::tags` refuses the file until a serial driver exists; the replay reads it
-through the TCP driver by changing the scheme in memory.
+`MBS-DEVICE-SLM1C-SENTINEL`. The scheme `modbus-rtu` is the one of `ModbusRtuDriver`, so
+`SensorProfile::tags` accepts the file; the replay reads it through that driver with RTU
+framing. The serial line the unit has once it speaks RTU (9600 baud, 8 data bits, even
+parity, one stop bit) is in the file's `[connection.options]`.
 
 | Measurement | Address (manual number) | Type | Scaling | Unit | Range | Quality mapping |
 | --- | --- | --- | --- | --- | --- | --- |

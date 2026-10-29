@@ -23,6 +23,17 @@ placeholder.
   half over a gateway; Modbus RTU over a gateway is interoperability-tested, over a serial
   port still simulator-tested. The shared interop `Peer` of the tests can now be built with
   any driver.
+- Test and docs only (slice S52e): the SOLO SLM1-C replay (`modbus_device_replays`, module
+  `slm1_c`) now runs through `ModbusRtuDriver` over the fake transport with RTU framing and
+  CRC-16, on the line the fixture gives (`[device.serial]`: 9600 baud, 8 data bits, even
+  parity, one stop bit, from the manual's factory defaults of 1073H, 1075H and 1076H and the
+  RTU write to 1074H), so every documented register, the eight-register limits and the
+  process variable error codes are exercised over RTU; the TCP-framed variant is gone. The
+  documented profile `profiles/documented/modbus-rtu/solo_slm1_c.toml` names `modbus-rtu`
+  and records that line in its options, and `SensorProfile::tags` accepts it with
+  `ModbusRtuDriver` (no schema change). The HW2 runbook gives the `modbus-rtu` connection
+  string of the hardware steps and a new parity row `MBS-DEVICE-SLM1C-RTU` cites the new
+  test. Still a replay: operating the device needs the maintainer's approval.
 - Board adapters, the ADXL345 accelerometer over I2C (ADR-0029, slice S64; additive): under
   the existing `boards` feature (no new feature, no new dependency), `stonecrab::boards`
   gains the `I2cBus` trait (`write` and `write_read`, deadline-bounded, a NACK is

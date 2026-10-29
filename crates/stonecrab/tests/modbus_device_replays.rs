@@ -1,17 +1,18 @@
-//! The documented maps of the two test devices, replayed (slice S52d). HW1 is the `AutomationDirect`
-//! STRIDE SIO-MB04THMS (Modbus TCP), HW2 the SOLO SLM1-C (Modbus RTU and ASCII). Each map is a
-//! transcription of the vendor's document (`fixtures/modbus/devices/*.toml`, labeled "documented
-//! map, not hardware-verified") and each suite runs through `ModbusTcpDriver` over the fake
-//! transport and clock against the first-party responder serving that map, with the vendor's
-//! limits enforced. It runs what the hardware record will run on the device: a read of every
-//! documented register and coil, the request limits, the documented quality flags and error
-//! codes through the device's sensor profile, and the documented write targets.
+//! The documented maps of the two test devices, replayed (slices S52d and S52e). HW1 is the
+//! `AutomationDirect` STRIDE SIO-MB04THMS (Modbus TCP), HW2 the SOLO SLM1-C (Modbus RTU and
+//! ASCII). Each map is a transcription of the vendor's document
+//! (`fixtures/modbus/devices/*.toml`, labeled "documented map, not hardware-verified") and each
+//! suite runs through the driver of the device's scheme (`ModbusTcpDriver`, or
+//! `ModbusRtuDriver` for the SOLO, with RTU framing and CRC on the line its fixture gives) over
+//! the fake transport and clock against the first-party responder serving that map, with the
+//! vendor's limits enforced. It runs what the hardware record will run on the device: a read of
+//! every documented register and coil, the request limits, the documented quality flags and
+//! error codes through the device's sensor profile, and the documented write targets.
 //!
 //! Nothing here is evidence about a device. The refusal codes and every behavior the documents
-//! leave open are the replay's assumptions, listed in `docs/hardware/`. The SOLO device speaks
-//! RTU and ASCII only and Stonecrab has no serial framing until slice S59, so its suite is a
-//! PDU-level replay over TCP framing: it proves the register map, the limits and the profile,
-//! not the serial line.
+//! leave open are the replay's assumptions, listed in `docs/hardware/`. The SOLO suite proves
+//! the register map, the limits, the profile and the RTU framing of the driver at the settings
+//! the manual gives; it proves nothing about the electrical line.
 #![cfg(all(feature = "modbus", feature = "testkit", feature = "sensors"))]
 #![forbid(unsafe_code)]
 
@@ -29,16 +30,18 @@ mod documented_map;
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::path::{Path, PathBuf};
-    use std::time::SystemTime;
+    use std::time::{Duration, SystemTime};
 
-    use stonecrab::modbus::{ExceptionCode, ModbusTcpDriver};
+    use stonecrab::modbus::{ExceptionCode, ModbusRtuDriver, ModbusTcpDriver};
     use stonecrab::sensors::{Measurement, Quality, SensorProfile, ValidationStatus};
-    use stonecrab::testkit::{Reaction, load_provenance};
-    use stonecrab::{ErrorKind, PlcValue, ProtocolStatus, TagId, UnknownReason, WriteOutcome};
+    use stonecrab::testkit::load_provenance;
+    use stonecrab::{
+        Clock, Driver, ErrorKind, PlcValue, ProtocolStatus, TagId, UnknownReason, WriteOutcome,
+    };
 
-    use crate::documented_map::{DocumentedMap, Rig, word_value};
+    use crate::documented_map::{DocumentedMap, Rig, rtu_frame, word_value};
 
     /// The label every documented map, profile and record carries.
     const LABEL: &str = "documented map, not hardware-verified";
@@ -53,19 +56,8 @@ mod tests {
         SensorProfile::from_toml(&text).expect("the profile loads")
     }
 
-    /// An ADU of unit 1 as it goes on the wire.
-    fn adu(txn: u16, pdu: &[u8]) -> Vec<u8> {
-        let length = u16::try_from(pdu.len().saturating_add(1)).expect("a short PDU");
-        let mut bytes = txn.to_be_bytes().to_vec();
-        bytes.extend_from_slice(&[0, 0]);
-        bytes.extend_from_slice(&length.to_be_bytes());
-        bytes.push(1);
-        bytes.extend_from_slice(pdu);
-        bytes
-    }
-
-    /// A request of function 15 or 16 for `quantity` items, all zero.
-    fn multiple_write(txn: u16, function: u8, start: u16, quantity: u16) -> Vec<u8> {
+    /// The PDU of a request of function 15 or 16 for `quantity` items, all zero.
+    fn multiple_write(function: u8, start: u16, quantity: u16) -> Vec<u8> {
         let data = if function == 16 {
             usize::from(quantity).saturating_mul(2)
         } else {
@@ -76,20 +68,20 @@ mod tests {
         pdu.extend_from_slice(&quantity.to_be_bytes());
         pdu.push(u8::try_from(data).expect("a byte count"));
         pdu.resize(pdu.len().saturating_add(data), 0);
-        adu(txn, &pdu)
+        pdu
     }
 
-    /// The reply of a device that refuses `function` with exception `code`.
-    fn refusal(txn: u16, function: u8, code: u8) -> Reaction {
-        Reaction::Reply(adu(txn, &[function | 0x80, code]))
+    /// The reply PDU of a device that refuses `function` with exception `code`.
+    fn refusal(function: u8, code: u8) -> Vec<u8> {
+        vec![function | 0x80, code]
     }
 
-    /// The echo a device sends for an accepted write of `quantity` items at `start`.
-    fn write_echo(txn: u16, function: u8, start: u16, quantity: u16) -> Reaction {
+    /// The echo PDU a device sends for an accepted write of `quantity` items at `start`.
+    fn write_echo(function: u8, start: u16, quantity: u16) -> Vec<u8> {
         let mut pdu = vec![function];
         pdu.extend_from_slice(&start.to_be_bytes());
         pdu.extend_from_slice(&quantity.to_be_bytes());
-        Reaction::Reply(adu(txn, &pdu))
+        pdu
     }
 
     /// The `(start, quantity)` runs of consecutive wire addresses, each run cut at `max`.
@@ -311,16 +303,22 @@ mod tests {
             Ok(()),
             "{fixture}: the profile validates"
         );
-        let driver = ModbusTcpDriver::new();
-        let mut as_tcp = profile.clone();
-        as_tcp.connection.scheme = "modbus-tcp".to_owned();
         assert_eq!(
-            as_tcp.validate_for(&driver),
+            profile.connection.scheme, map.device.scheme,
+            "{fixture}: the profile names the scheme the device is reached by"
+        );
+        let driver: Box<dyn Driver> = if map.device.scheme == "modbus-rtu" {
+            Box::new(ModbusRtuDriver::new())
+        } else {
+            Box::new(ModbusTcpDriver::new())
+        };
+        assert_eq!(
+            profile.validate_for(&*driver),
             Ok(()),
             "{fixture}: the driver accepts every address"
         );
         assert_eq!(
-            as_tcp.tags(&driver).map(|built| built.len()),
+            profile.tags(&*driver).map(|built| built.len()),
             Ok(tags),
             "{fixture}: one tag per measurement and per status field"
         );
@@ -463,11 +461,9 @@ mod tests {
     ) -> Vec<Measurement> {
         let rig = Rig::new(map, overrides, "");
         let connection = rig.connect();
-        let mut as_tcp = profile.clone();
-        as_tcp.connection.scheme = "modbus-tcp".to_owned();
-        let tags = as_tcp.tags(&rig.driver).expect("the profile builds tags");
+        let tags = profile.tags(&*rig.driver).expect("the profile builds tags");
         let response = rig.read(&*connection, tags).expect("the read resolves");
-        as_tcp.measurements(&response, SystemTime::UNIX_EPOCH)
+        profile.measurements(&response, SystemTime::UNIX_EPOCH)
     }
 
     /// Write each `(address, value, restore, word)` through a read-write connection, read it back
@@ -691,13 +687,13 @@ mod tests {
             let mut peer = rig.peer();
             for (function, limit) in [(16, 64), (15, 64)] {
                 assert_eq!(
-                    peer(&multiple_write(1, function, 100, limit)),
-                    write_echo(1, function, 100, limit),
+                    peer(&multiple_write(function, 100, limit)),
+                    Some(write_echo(function, 100, limit)),
                     "function {function}: {limit} items are accepted"
                 );
                 assert_eq!(
-                    peer(&multiple_write(2, function, 100, limit.saturating_add(1))),
-                    refusal(2, function, 3),
+                    peer(&multiple_write(function, 100, limit.saturating_add(1))),
+                    Some(refusal(function, 3)),
                     "function {function}: {} items are refused with exception 03 (assumed)",
                     limit.saturating_add(1)
                 );
@@ -710,8 +706,8 @@ mod tests {
             let rig = Rig::new(&map(), &[], "");
             let mut peer = rig.peer();
             assert_eq!(
-                peer(&adu(7, &[0x2B, 0x0E, 0x01, 0x00])),
-                refusal(7, 0x2B, 1),
+                peer(&[0x2B, 0x0E, 0x01, 0x00]),
+                Some(refusal(0x2B, 1)),
                 "function 0x2B is not in the guide's table (exception 01 is assumed)"
             );
         }
@@ -939,7 +935,7 @@ mod tests {
         }
     }
 
-    /// The SOLO SLM1-C, hardware record HW2, at the PDU level over TCP framing.
+    /// The SOLO SLM1-C, hardware record HW2, over Modbus RTU framing on the fake transport.
     mod slm1_c {
         use super::*;
 
@@ -1035,6 +1031,36 @@ mod tests {
             assert_eq!(word(0x1074), Some(1), "ships set to 7 data bits");
             assert_eq!(word(0x1075), Some(1), "ships set to even parity");
             assert_eq!(word(0x102F), Some(0x100), "V1.00 is 0x100");
+            // The line of the fixture is the one the registers give: the baud rate, the parity and
+            // the stop bits as the factory defaults say; 8 data bits because RTU needs 1074H
+            // written to 0 (the default 1 is 7 bits, for ASCII), and 1072H written to 1.
+            let serial = map
+                .device
+                .serial
+                .as_ref()
+                .expect("the SOLO's line is documented");
+            let table = |values: &[u32], wire: u16| {
+                word(wire).and_then(|word| values.get(usize::from(word)).copied())
+            };
+            assert_eq!(
+                Some(serial.baud_rate),
+                table(&[2_400, 4_800, 9_600, 19_200, 38_400], 0x1073),
+                "1073H: the baud rate the factory default selects"
+            );
+            assert_eq!(
+                (serial.parity.as_str(), table(&[0, 1, 2], 0x1075)),
+                ("even", Some(1)),
+                "1075H: 0 none, 1 even, 2 odd; the default is even"
+            );
+            assert_eq!(
+                (serial.stop_bits, table(&[2, 1], 0x1076)),
+                (1, Some(1)),
+                "1076H: 0 two stop bits, 1 one; the default is one"
+            );
+            assert_eq!(
+                serial.data_bits, 8,
+                "1074H written to 0 is 8 bits, as RTU needs"
+            );
             for (wire, default, what) in [
                 (0x1002, 6_000, "upper limit of the range, 0.1 degree"),
                 (0x1003, 0xFF38, "lower limit of the range, -200 as 16 bit"),
@@ -1083,13 +1109,13 @@ mod tests {
             );
             let mut peer = rig.peer();
             assert_eq!(
-                peer(&multiple_write(1, 16, 0x2000, 8)),
-                write_echo(1, 16, 0x2000, 8),
+                peer(&multiple_write(16, 0x2000, 8)),
+                Some(write_echo(16, 0x2000, 8)),
                 "function 16: eight registers are accepted"
             );
             assert_eq!(
-                peer(&multiple_write(2, 16, 0x2000, 9)),
-                refusal(2, 16, 3),
+                peer(&multiple_write(16, 0x2000, 9)),
+                Some(refusal(16, 3)),
                 "function 16: nine registers are refused with exception 03 (assumed)"
             );
         }
@@ -1128,20 +1154,94 @@ mod tests {
             assert_eq!(rig.device.applied(), 0, "nothing was written");
             let mut peer = rig.peer();
             assert_eq!(
-                peer(&adu(5, &[0x05, 0x08, 0x14, 0xFF, 0x00])),
-                refusal(5, 5, 1),
+                peer(&[0x05, 0x08, 0x14, 0xFF, 0x00]),
+                Some(refusal(5, 1)),
                 "function 05 is listed by the manual but the responder serves no function 05 (S45)"
             );
         }
 
         // covers: MBS-DEVICE-SLM1C-MAP / the profile is the map's profile
         #[test]
-        fn the_profile_is_documented_and_validates_for_the_planned_serial_scheme() {
+        fn the_profile_is_documented_and_validates_for_the_rtu_driver() {
             let profile = profile(PROFILE);
-            check_profile(&profile, &map(), FILE, 2);
+            let map = map();
+            check_profile(&profile, &map, FILE, 2);
+            assert_eq!(profile.connection.scheme, "modbus-rtu", "the serial driver");
+            let serial = map
+                .device
+                .serial
+                .as_ref()
+                .expect("the SOLO's line is documented");
+            let mut options = BTreeMap::from([
+                (
+                    "default-unit-identifier".to_owned(),
+                    map.device.unit_id.to_string(),
+                ),
+                ("max-registers-per-request".to_owned(), "8".to_owned()),
+            ]);
+            options.extend(serial.options().iter().filter_map(|option| {
+                option
+                    .split_once('=')
+                    .map(|(key, value)| (key.to_owned(), value.to_owned()))
+            }));
             assert_eq!(
-                profile.connection.scheme, "modbus-rtu",
-                "the scheme planned for S59"
+                profile.connection.options, options,
+                "the profile records the unit, the request limit and the line the replay uses"
+            );
+        }
+
+        // covers: MBS-DEVICE-SLM1C-RTU / the replay speaks RTU on the documented line
+        #[test]
+        fn the_replay_speaks_rtu_framing_on_the_documented_line() {
+            let rig = Rig::new(&map(), &[], OPTIONS);
+            let connection = rig.connect();
+            let start = rig.clock.now();
+            let response = rig
+                .read(
+                    &*connection,
+                    vec![rig.tag("pv", "holding-register:4096:INT")],
+                )
+                .expect("the read resolves");
+            assert_eq!(
+                response
+                    .get(&TagId::new("pv").expect("id"))
+                    .and_then(|item| item.outcome().as_ref().ok()),
+                Some(&PlcValue::I16(250)),
+                "register 1000H reads 250 over RTU"
+            );
+            let sent: Vec<Vec<u8>> = rig
+                .factory
+                .probes()
+                .iter()
+                .flat_map(stonecrab::testkit::FakeTransportProbe::sent)
+                .map(|bytes| bytes.to_vec())
+                .collect();
+            assert_eq!(
+                sent,
+                [rtu_frame(1, &[0x03, 0x10, 0x00, 0x00, 0x01])],
+                "one frame: network address 1, function 03, register 1000H, one register, CRC"
+            );
+            assert_eq!(
+                rig.clock.now().duration_since(start),
+                Duration::from_nanos(4_010_415),
+                "the request waited the crate's t3.5 for an 11 bit character at 9600 baud (about 4.01 ms)"
+            );
+            let request = rtu_frame(1, &[0x03, 0x10, 0x00, 0x00, 0x01]);
+            assert!(
+                rig.answers_frame(&request),
+                "a good frame for address 1 is answered"
+            );
+            let mut bad_crc = request.clone();
+            if let Some(last) = bad_crc.last_mut() {
+                *last ^= 0xFF;
+            }
+            assert!(
+                !rig.answers_frame(&bad_crc),
+                "a frame with a wrong CRC gets silence"
+            );
+            assert!(
+                !rig.answers_frame(&rtu_frame(2, &[0x03, 0x10, 0x00, 0x00, 0x01])),
+                "a frame for network address 2 gets silence"
             );
         }
 

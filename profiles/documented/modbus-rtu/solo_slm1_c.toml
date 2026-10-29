@@ -7,9 +7,16 @@
 # 0.1 degree, so divide by 10; the unit is Cel because the status bits of 102AH say the
 # display is in degrees C (bit 2) and the measurement is Bad when that bit is clear.
 #
-# The device speaks Modbus RTU and ASCII only, and Stonecrab has no serial driver until slice
-# S59, so the scheme below is the one planned for it. `SensorProfile::tags` refuses it until
-# then; the replay suite reads it through the TCP driver by changing the scheme in memory.
+# The device speaks Modbus RTU and ASCII only. The scheme below is `modbus-rtu`
+# (`ModbusRtuDriver`, ADR-0024), and the replay suite (slice S52e) reads this file through that
+# driver with RTU framing and CRC, as written, on the line of [connection.options]. The
+# options are informational (the connection comes from `STONECRAB_URL`) and record the line
+# the unit has once it speaks RTU: `serial.baud-rate` 9600 (register 1073H, default 2),
+# `serial.parity` even (1075H, default 1) and `serial.stop-bits` 1 (1076H, default 1) are the
+# manual's factory defaults, and `serial.data-bits` 8 is what RTU needs, reached by writing 1072H
+# to 1 (protocol RTU) and 1074H to 0 (8 bits; the default 1 is 7 bits, for ASCII), the writes of
+# step B2 of docs/hardware/hw2-slm1-c.md. The network address 1 is register 1071H (default 1).
+# The run on hardware decides whether the unit answers on this line (HW2 open item 7).
 #
 # Sentinel handling. A PV that cannot be measured reads as one of the error codes 8002H (not
 # acquired yet), 8003H (sensor not connected), 8004H (incorrect sensor type), 8006H (ADC
@@ -46,6 +53,10 @@ address_convention = "zero-based"
 default-unit-identifier = "1"
 # The manual's limit: at most eight registers a read (FC03) and a write (FC16).
 max-registers-per-request = "8"
+"serial.baud-rate" = "9600"
+"serial.data-bits" = "8"
+"serial.parity" = "even"
+"serial.stop-bits" = "1"
 
 [provenance]
 source = "Label: documented map, not hardware-verified. AutomationDirect SOLO Modular Temperature Controller User Manual, 1st Edition 07/2023, https://cdn.automationdirect.com/static/manuals/soloslm/soloslmman.pdf, sha256 830b99162dfbab23ed87c1778428747e65ce658dbce48e76899d4b948295d7cc (vendor documentation, not copied)"

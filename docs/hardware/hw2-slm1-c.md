@@ -2,23 +2,26 @@
 
 > This is a runbook, not a hardware record. Nothing in it has been run on a device, and no
 > device is owned yet (docs/POST_ALPHA_PLAN.md, decision E4 is deferred). The run also needs
-> Modbus RTU (slice S59) and, for the controller's factory settings, Modbus ASCII (slice
-> S60). **Operating the hardware needs the maintainer's separate approval** (STATUS.md);
-> writing this file does not give it. When the run is approved and done, copy the record table
-> below to `docs/hardware/slm1-c-<yyyy-mm-dd>.md` (the format of `TEMPLATE.md`) and fill every
-> field.
+> Modbus RTU (slice S59, shipped) and, for the controller's factory settings, Modbus ASCII
+> (slice S60, shipped). **Operating the hardware needs the maintainer's separate approval**
+> (STATUS.md); writing this file does not give it. When the run is approved and done, copy the
+> record table below to `docs/hardware/slm1-c-<yyyy-mm-dd>.md` (the format of `TEMPLATE.md`)
+> and fill every field.
 
 ## Support level evidenced
 
-Today: **simulator-tested against a documented map at the PDU level, not hardware-verified.**
-The register map is a hand transcription of the vendor's user manual, replayed through
-`ModbusTcpDriver` and the first-party responder over TCP framing (slice S52d), because
-Stonecrab has no serial framing yet. That shows what Stonecrab does with the manual's tables
-and limits. It shows nothing about the device or the serial line, and every behavior the
-manual leaves open (the section "What the documents leave open") is an assumption of the
-replay. `hardware-verified` for RTU needs both the real electrical behavior and the virtual
-framing (docs/SPEC.md, "Hardware evidence"); the virtual half is S58 to S60. This file is the
-electrical half. Sensor tests do not establish calibration accuracy.
+Today: **simulator-tested against a documented map, not hardware-verified.** The register
+map is a hand transcription of the vendor's user manual (slice S52d), replayed through
+`ModbusRtuDriver` and the first-party responder with RTU framing and CRC-16 over the fake
+transport, on the line the unit has once it speaks RTU: 9600 baud, 8 data bits, even parity,
+one stop bit, network address 1 (slice S52e; the registers each setting comes from are in the
+fixture `fixtures/modbus/devices/slm1-c.toml`). That shows what Stonecrab does with the
+manual's tables and limits and that its RTU framing reaches them. It shows nothing about the
+device or the electrical line, and every behavior the manual leaves open (the section "What
+the documents leave open") is an assumption of the replay. `hardware-verified` for RTU needs
+both the real electrical behavior and the virtual framing (docs/SPEC.md, "Hardware
+evidence"); the virtual half is S58 to S60. This file is the electrical half. Sensor tests do
+not establish calibration accuracy.
 
 ## Evidence behind this runbook
 
@@ -26,7 +29,7 @@ electrical half. Sensor tests do not establish calibration accuracy.
 | --- | --- |
 | Vendor document | SOLO Modular Temperature Controller User Manual, 1st Edition 07/2023, <https://cdn.automationdirect.com/static/manuals/soloslm/soloslmman.pdf>, sha256 `830b99162dfbab23ed87c1778428747e65ce658dbce48e76899d4b948295d7cc`, retrieved 2026-10-28. Vendor documentation, all rights reserved: pinned, never copied |
 | Documented map | `fixtures/modbus/devices/slm1-c.toml`; provenance in `fixtures/modbus/devices/PROVENANCE.toml` |
-| Device profile | `profiles/documented/modbus-rtu/solo_slm1_c.toml` (`validation = "documented"`, scheme `modbus-rtu`, planned for S59) |
+| Device profile | `profiles/documented/modbus-rtu/solo_slm1_c.toml` (`validation = "documented"`, scheme `modbus-rtu`, the serial line in its `[connection.options]`) |
 | Replay suite | `crates/stonecrab/tests/modbus_device_replays.rs`, module `slm1_c`; parity rows `MBS-DEVICE-SLM1C-*` in `docs/parity/modbus-serial.md` |
 | Plan | `docs/POST_ALPHA_PLAN.md`, section "Test hardware" (the SLM1-C and the Waveshare adapter) and the row `MBS-HW-RS485` |
 
@@ -55,10 +58,13 @@ another means, that text.
 4. **Host.** Linux x86_64 or aarch64, a Stonecrab build at a recorded commit that includes S59
    (and S60 for the ASCII steps), nothing else on the serial port. The record names the OS, the
    architecture, the library commit and the toolchain.
-5. **Connection.** The serial URL S59 defines, with the line settings of the step. Until then
-   the profile's addresses are `zero-based`: the manual's hexadecimal numbers are wire
-   addresses, and its appendix prints the one-based Modbus decimal beside them (1040H is
-   44161). Use `max-registers-per-request=8`, and `access=read-write` only for steps marked
+5. **Connection.** The string the replay and the profile use, with the adapter's device node
+   as the path:
+   `modbus-rtu:///dev/ttyUSB0?serial.baud-rate=9600&serial.data-bits=8&serial.parity=even&serial.stop-bits=1&address-convention=zero-based&default-unit-identifier=1&max-registers-per-request=8`
+   (RTU 8E1 after step B2; before it the unit speaks ASCII and the string is `modbus-ascii`
+   with `serial.data-bits=7`). The profile's addresses are `zero-based`: the manual's
+   hexadecimal numbers are wire addresses, and its appendix prints the one-based Modbus
+   decimal beside them (1040H is 44161). Add `access=read-write` only for steps marked
    "write".
 6. **Approval.** Obtain the maintainer's approval for the run in writing before step B1, and
    note its date in the record.
@@ -105,7 +111,7 @@ settles each, and the fixture, the profile and the parity rows change to match.
 | 8 | What a read of an address the manual does not list returns (for example 1017H and 1018H) | Zero | B3 |
 | 9 | Whether the hexadecimal numbers are wire addresses | Yes; the appendix's decimals are 40001 plus the hex | B3 |
 | 10 | The reply to broadcast address 0 and to a network address outside 1 to 247 | Not modeled | B13 |
-| 11 | The minimum gap between frames and the reply time | Not modeled (the replay has no serial line) | B13 |
+| 11 | The minimum gap between frames and the reply time | Not modeled (the replay waits the driver's t3.5 of an 8E1 line and the device answers at once on the fake clock) | B13 |
 | 12 | Whether function 04 is served although unlisted | Refused | B11 |
 | 13 | The power-on value of PV, and the state of the status registers 102AH and 102EH at rest | PV 25.0 and degrees C | B1, B7 |
 

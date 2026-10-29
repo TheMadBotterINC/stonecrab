@@ -9,9 +9,10 @@
 # basis = "placeholder": it only lets a replay tell one register from another and is not a
 # claim about the device. docs/hardware/hw2-slm1-c.md lists what the hardware must settle.
 #
-# The device speaks RTU and ASCII only. Stonecrab has no RTU framing until slice S59, so the
-# acceptance suite serves this map over Modbus TCP framing (the PDUs are the same bytes);
-# that proves the PDU level and the profile, not the serial line.
+# The device speaks RTU and ASCII only. The acceptance suite (slice S52e) serves this map
+# through ModbusRtuDriver with RTU framing and CRC-16 over the fake transport, on the line of
+# [device.serial] below; that proves the PDU level, the framing and the profile, not the
+# electrical line.
 #
 # First-party, Apache-2.0 (the transcription is ours; the manual is not copied). Read by
 # crates/stonecrab/tests/support/documented_map.rs, which rejects unknown keys. The shape
@@ -38,6 +39,18 @@ address_reading = "zero-based"
 # do not mirror them. ("Function Code 1 & 2 read the same memory area" for the bit
 # registers, so the discrete inputs are the coils, as in the other file.)
 input_registers_mirror_holding = false
+
+# The line the replay connects on, which is the line the unit has once it speaks RTU. The baud
+# rate, the parity and the stop bits are the factory defaults of the manual's serial registers
+# (1073H default 2 is 9,600 bps, 1075H default 1 is even, 1076H default 1 is one stop bit). The
+# 8 data bits are not the factory default (1074H defaults to 1, 7 bits, for ASCII): RTU needs
+# 1072H written to 1 and 1074H written to 0, the two writes of the runbook's step B2
+# (docs/hardware/hw2-slm1-c.md). A test checks these four against the register words above.
+[device.serial]
+baud_rate = 9600
+data_bits = 8
+parity = "even"
+stop_bits = 1
 
 [source]
 document = "SOLO Modular Temperature Controller User Manual, 1st Edition 07/2023 (SLM, 68 pages)"
