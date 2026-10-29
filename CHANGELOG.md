@@ -5,6 +5,26 @@ as `stonecrab` 0.2.0 (2026-10-27); `stonecrab` 0.1.0 is the specification-stage
 placeholder.
 
 ## Unreleased
+- Modbus RTU and Modbus ASCII through the drivers' serial carrier against an independent peer
+  (ADR-0024, slice S59c; no crate API change): on Linux, socat makes a pseudo-terminal pair,
+  diagslave 3.6 (the pinned archive, checked against its SHA-256 before it is unpacked, its
+  static binary run on the host, no container) opens one end as its serial port, and the
+  drivers open the other end by path (`modbus-rtu:///<dir>/ttyB`, `modbus-ascii:///<dir>/ttyB`,
+  `serial.baud-rate=19200`). The nine RTU tests (without the closed-connection one) and the
+  nine ASCII tests take a full connection string from their environment variable and run
+  unchanged over it; two new ignored tests in `modbus_interop_diagslave_serial` check what only a
+  serial port has: the silence before a request (the second of two requests waits at least t3.5
+  at 300 baud, and at least a 250 ms `serial.interframe-delay`, for both framings) and a lost
+  port (diagslave and the pair ended: `Disconnected`; the pair and a new diagslave back: the port
+  reopens). New host-side script `interop/diagslave/serial.sh`, task `mise run
+  interop-serial-port` (Linux only, so not part of `mise run interop`) and CI job
+  `interop-serial-port` (socat from the runner's package index, its version recorded in the
+  evidence). The script and the job have not run as written (the download, the Linux probe
+  and the job itself never ran end to end), so no parity row or evidence level is raised
+  before the first hosted run (ADR-0024 addendum). A Linux pseudo-terminal
+  forces eight data bits and no parity, so the line settings other than the baud rate are
+  accepted but not observed (the ASCII line is 19200 8N1 at the driver's end). No libmodbus
+  or modbus-tk RTU server was added (ADR-0024 addendum).
 - Modbus ASCII, and Modbus RTU on a serial device, against an independent peer (ADR-0024,
   slice S60b; no crate API change): the diagslave 3.6 image now has two more modes, `ascii`
   (`diagslave -m ascii -a 1 -b 19200 -d 7 -s 1 -p even`) and `rtu-pty` (`diagslave -m rtu -a 1

@@ -21,8 +21,13 @@ slave through its gateway carrier (job `interop-rtu`, S59b, first hosted run 408
 serial device behind socat (job `interop-rtu-pty`, 9 of 9, the same); the ASCII driver has
 met diagslave 3.6 as a Modbus ASCII slave on a serial device behind socat, through its
 gateway carrier (job `interop-ascii`, S60b, 9 of 9 locally and in the first hosted run
-40843548924 on 2026-10-29). Neither driver has been run through a serial port of its own
-against an independent peer.
+40843548924 on 2026-10-29). Since S59c a job is added that runs both drivers through a serial
+port of their own against diagslave 3.6: socat makes a pseudo-terminal pair on a Linux host,
+diagslave opens one end and the driver the other (job `interop-serial-port`, with the silence
+before a request and a lost port that is reopened). It has not run: the serial carrier stays
+`simulator-tested` until its first hosted run passes. That is a pseudo-terminal, not an
+electrical line: it keeps a baud rate and the stop bits and forces eight data bits and no
+parity.
 No independent server serves the file record function codes, so the extended registers are
 checked against the specification examples, the upstream PLC4X frames and a first-party
 device on the in-memory transport only.
@@ -217,7 +222,7 @@ assert!(driver.parse_config("modbus-rtu://COM3?default-unit-identifier=0").is_er
 | Read, write, ping and subscribe by polling over RTU framing, with the operations and limits of `modbus-tcp` | simulator-tested |
 | CRC errors, the silence before a request, the drain of a late reply, a lost serial link and its reopen, replies from another unit | simulator-tested |
 | RTU over a serial-to-IP gateway (`modbus-rtu:tcp://`): read of every area, writes read back, a range selection, frames of 255 bytes, ping, an exception, a unit the slave does not serve | interoperability-tested (jobs `interop-rtu`, diagslave 3.6 as `-m enc -a 1`, and `interop-rtu-pty`, as `-m rtu -a 1` on a serial device behind socat; 9 of 9 each locally and in their first hosted runs, 40838776577 and 40843548924, on 2026-10-29) |
-| Interoperability against an independent RTU server through a serial port of the driver | planned (a virtual serial pair with libmodbus or modbus-tk) |
+| RTU through a serial port of the driver (`modbus-rtu:///path`) on a pseudo-terminal pair: the same nine tests, the silence before a request at 300 baud and with an inter-frame delay, a lost port that is `Disconnected` and reopened | tests written, job `interop-serial-port` (diagslave 3.6 as `-m rtu -a 1`) added and not yet run; no libmodbus or modbus-tk server, see ADR-0024 |
 | Hardware verification on RS-485 | planned (HW2) |
 
 The RTU rows of the
@@ -273,7 +278,7 @@ assert!(driver.parse_config("modbus-ascii://COM3?serial.data-bits=6").is_err());
 | Read, write, ping and subscribe by polling over ASCII framing, with the operations and limits of `modbus-tcp` | simulator-tested |
 | LRC errors, bad digits, a missing CR or LF, noise before a colon, a frame split across reads, the drain of a late reply, a lost serial link and its reopen, replies from another unit | simulator-tested |
 | ASCII over a serial-to-IP gateway (`modbus-ascii:tcp://`): read of every area, writes read back, a range selection, frames of 511 characters, ping, an exception, a unit the slave does not serve | interoperability-tested (job `interop-ascii`, diagslave 3.6 as `-m ascii -a 1` on a serial device behind socat, first hosted run 40838776577, 9 of 9, on 2026-10-29) |
-| Interoperability against an independent ASCII server through a serial port of the driver | planned (a virtual serial pair with libmodbus or modbus-tk) |
+| ASCII through a serial port of the driver (`modbus-ascii:///path`) on a pseudo-terminal pair: the same nine tests, the inter-frame delay as the gap before a request, a lost port that is `Disconnected` and reopened | tests written, job `interop-serial-port` (diagslave 3.6 as `-m ascii -a 1`) added and not yet run; the pseudo-terminal forces 8N1, so the 7E1 of the line would not be observed |
 | Hardware verification on RS-485 | planned (HW2) |
 
 The ASCII rows of the serial parity record record every behavior and divergence with its test

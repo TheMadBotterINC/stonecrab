@@ -22,6 +22,13 @@
 //! silence on the device, so each run has its own test of it, and `interop.sh` leaves the
 //! other one out (a run of this file without that filter runs both, and one of them fails).
 //!
+//! Since slice S59c they run a third time over the serial carrier: the variable then holds a
+//! full connection string, `modbus-rtu:///<dir>/ttyB?serial.baud-rate=19200&...`, the second end
+//! of a pseudo-terminal pair on the host whose first end `diagslave -m rtu` opens (`mise run
+//! interop-serial-port`, the `interop-serial-port` job; `interop/diagslave/serial.sh`), with
+//! the same filter as the `interop-rtu-pty` run. What only a serial port shows is in
+//! `modbus_interop_diagslave_serial`.
+//!
 //! # What the server is
 //! diagslave 3.6 keeps its areas in memory, zero until written, and never forgets a write
 //! between connections. Its input registers are its holding registers and its discrete
@@ -73,9 +80,12 @@ mod tests {
                  {VARIABLE}=modbus-rtu:tcp://127.0.0.1:1503)"
             )
         });
+        // A gateway is named by host and port; a serial port by a connection string that
+        // already carries its line settings (`serial.sh`), to which the query goes on.
+        let separator = if base.contains('?') { '&' } else { '?' };
         Peer::connect_with(
             Box::new(ModbusRtuDriver::new()),
-            &format!("{base}?access=read-write&request-timeout-ms=2000{extra}"),
+            &format!("{base}{separator}access=read-write&request-timeout-ms=2000{extra}"),
             "Start it with `mise run interop-rtu` (or interop-rtu-pty) or point the variable at a diagslave -m enc -a 1 or a diagslave -m rtu -a 1 behind a socat pty bridge",
         )
         .await

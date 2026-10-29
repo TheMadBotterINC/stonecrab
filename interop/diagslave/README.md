@@ -1,4 +1,4 @@
-# Stonecrab diagslave interoperability peer (Modbus UDP, RTU over TCP, ASCII and RTU on a serial device)
+# Stonecrab diagslave interoperability peer (Modbus UDP, RTU over TCP, ASCII and RTU on a serial device, and the drivers' own serial port)
 
 The independent peer of `modbus-tcp:udp` (slice S61, ADR-0027) and of `modbus-rtu:tcp` (slice
 S59b, ADR-0024), and of `modbus-ascii:tcp` and `modbus-rtu:tcp` as diagslave frames them on a
@@ -30,6 +30,10 @@ proconX, in one image run in four modes. `serve.sh` takes the mode as its argume
   `mise run interop-rtu-pty` (both in `mise run interop`) run them. Containers
   `stonecrab-interop-diagslave-ascii` and `stonecrab-interop-diagslave-rtu-pty`, evidence in
   `diagslave-ascii/` and `diagslave-rtu-pty/`.
+
+- `serial.sh` (slice S59c, not a mode of the image): the same diagslave on a pseudo-terminal
+  pair on the host, with no container, for the drivers' own serial carrier. See "Build and run
+  (serial port)" below.
 
 ## First-party statement, license and provenance
 
@@ -254,3 +258,61 @@ the filter selects exactly nine tests, and write the evidence to
 `modbus_interop_diagslave_rtu` has to leave out `/_a_unit_the_slave_does_not_serve_is_silence$/`
 the same way (`interop.sh` does). No `NET_ADMIN` capability and no kernel module are needed:
 the container makes its own pseudo-terminals.
+
+## Build and run (serial port)
+
+`serial.sh` (slice S59c, ADR-0024 addendum) is the host-side script of the serial-port half:
+`modbus-rtu:///path` and `modbus-ascii:///path`, the serial carrier of the drivers with its
+`serial.*` options, the silence before a request and the reopen of a lost port, against
+diagslave's serial framing. Linux only: the archive holds Linux binaries and macOS refuses the
+baud-rate ioctl on a pseudo-terminal. It needs `socat`, `python3` and `tar` on the host, and
+`cargo nextest` for the tests.
+
+```sh
+interop/diagslave/serial.sh fetch   # download, check the SHA-256, take this machine's binary
+INTEROP_DIAGSLAVE_SERIAL_MODE=rtu interop/diagslave/serial.sh run   # or ascii
+```
+
+`mise run interop-serial-port` runs both modes, and so does the job of the same name. The
+steps are `fetch`, `start`, `wait`, `tests`, `evidence` and `stop` (`run` does all of them and
+always stops), and `line-down` and `line-up`, which the lost-port test calls. Everything is in
+`${TMPDIR:-/tmp}/stonecrab-interop-diagslave-serial-<uid>` (or `INTEROP_SERIAL_DIR`): the
+checked archive, the binary, `ttyA` and `ttyB` (socat's links to the two ends), pid files and
+the logs. `stop` ends the processes and removes the links and the pid files; the logs (which
+the next `start` truncates), the archive and the binary stay, and the next `fetch` checks the
+archive again.
+
+- The archive is the one of the Dockerfile (URL and SHA-256 are read from it); another archive
+  stops the run, removes the download and unpacks nothing.
+- diagslave runs with the options of `serve.sh`: `-m rtu -a 1 -b 19200 -d 8 -s 1 -p none -f 20`
+  or `-m ascii -a 1 -b 19200 -d 7 -s 1 -p even`, on `ttyA`, with stdin from `/dev/null`.
+- The driver end is `ttyB` at `serial.baud-rate=19200&serial.data-bits=8&serial.stop-bits=1&
+  serial.parity=none`: a Linux pseudo-terminal forces eight data bits and no parity, so an
+  ASCII line of 7E1 cannot be opened on it (`tests/transport_serial.rs`), and what diagslave
+  is told about parity changes nothing.
+- `wait` writes an FC03 read of register 0 (an RTU frame with its CRC, or an ASCII frame with
+  its LRC) to `ttyB` in raw mode and accepts only a valid reply, then reads on for 300 ms so
+  that the reply of an earlier probe does not reach the tests.
+- `tests` exports the full connection string in `STONECRAB_INTEROP_DIAGSLAVE_RTU` or
+  `STONECRAB_INTEROP_DIAGSLAVE_ASCII` (the nine tests of the file, minus the RTU test of `-m
+  enc`'s closed connection) and in `STONECRAB_INTEROP_DIAGSLAVE_SERIAL` (the two tests of
+  `modbus_interop_diagslave_serial`), and the path of the script in
+  `STONECRAB_INTEROP_DIAGSLAVE_SERIAL_CONTROL`; it fails unless the filter selects exactly 11
+  tests. The evidence is in `target/interop-evidence/diagslave-serial-rtu/` and
+  `diagslave-serial-ascii/`: `serial-evidence.txt` (host, connection string, archive and binary
+  checksums, socat and package versions, the command lines read from `/proc`, diagslave's
+  banner), `socat.log`, `server.log` and `nextest.txt`.
+- `line-down` ends diagslave and then socat, which closes both ends of the pair and removes the
+  links; `line-up` makes the pair again at the same paths, starts a new diagslave (its areas
+  are zero) and waits for it.
+
+Status: the script and the job `interop-serial-port` have not run as written. Never run end to
+end: the `curl` download and the SHA-256 check of the archive, the x86_64 selection, the Python
+probe on Linux, Ubuntu's socat and the CI job. The only run was a modified copy of the script
+in a scratchpad, in a Linux container of the S60b image on colima (an aarch64 binary whose
+banner reads "diagslave 3.5", not the "diagslave 3.6" archive; the copy's download and its
+Python probe replaced by the image's binary and a short sleep). It is a note, not evidence.
+In that run all nine tests of each framing and both new tests passed; a
+second request waited 155 ms at 300 baud (t3.5 is 116.7 ms) and 286 ms with
+`serial.interframe-delay=250`; diagslave logged each request as `readHoldingRegisters` or
+`writeHoldingRegisters`; socat 1.8.0.3 ended on SIGTERM and made new links when started again.

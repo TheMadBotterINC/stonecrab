@@ -189,6 +189,10 @@ name = "modbus_interop_diagslave_ascii"
 required-features = ["modbus", "testkit"]
 
 [[test]]
+name = "modbus_interop_diagslave_serial"
+required-features = ["modbus", "testkit"]
+
+[[test]]
 name = "modbus_interop_toxiproxy"
 required-features = ["modbus", "testkit"]
 

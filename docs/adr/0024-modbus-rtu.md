@@ -471,3 +471,93 @@ Both jobs of the S60b matrix ran with commit fc30f8c (CI run 40843548924) on
 a gap-framed RTU slave, reached through the drivers' TCP gateway carrier. The evidence the
 S60b addendum called the next step now exists; a serial port of the drivers is still the
 open item.
+
+## Addendum (S59c, 2026-10-29): the serial port of the drivers against diagslave on a pseudo-terminal
+### Status
+Accepted (2026-10-29), as slice S59c of docs/POST_ALPHA_PLAN.md. It adds the means to raise
+the evidence level that addenda S59b and S60b left at `simulator-tested` for "the driver's own
+serial port, the line settings, the silence before an RTU request, the reopen of a lost port"
+(the level itself waits for the first hosted run, decision 6); it changes no other decision.
+No code under `crates/stonecrab/src` changes.
+
+### Decision
+1. **Both ends on the host.** On Linux, `interop/diagslave/serial.sh` makes a pseudo-terminal
+   pair with `socat -d -d pty,raw,echo=0,link=<dir>/ttyA pty,raw,echo=0,link=<dir>/ttyB` under
+   a temporary directory, runs diagslave 3.6 (the pinned archive's static Linux binary, no
+   container) on `ttyA` with the options of `serve.sh` (`-m rtu -a 1 -b 19200 -d 8 -s 1 -p
+   none -f 20`, or `-m ascii -a 1 -b 19200 -d 7 -s 1 -p even`), and the tests open `ttyB`
+   through the serial carrier: `modbus-rtu:///<dir>/ttyB?serial.baud-rate=19200&...` and
+   `modbus-ascii:///<dir>/ttyB?...`. It is Linux only: the archive has Linux binaries only,
+   and macOS refuses the baud-rate ioctl that the serial transport applies to a
+   pseudo-terminal (`ENOTTY`, the reason `tests/transport_serial.rs` skips its pair there), so
+   the job runs on `ubuntu-latest` and `mise run interop-serial-port` is not part of `mise
+   run interop`.
+2. **Pins.** The archive is downloaded from the URL of `interop/diagslave/Dockerfile` and
+   checked against the SHA-256 recorded there, before anything is unpacked; another archive
+   stops the run and removes the download. socat is the runner's package (Ubuntu, installed
+   by `apt-get` in the job) and not a pinned Debian version as in the image: its version is
+   recorded in the evidence (`dpkg-query` and `socat -V`) and in the job log. The job's
+   own downloads are the archive and that package (the toolchain and nextest as in every job).
+3. **What the existing tests do over a serial port.** The nine tests of
+   `modbus_interop_diagslave_rtu` (not the one that expects `-m enc`'s closed connection) and
+   the nine of `modbus_interop_diagslave_ascii` take a full connection string, the
+   `serial.*` options included, from the variable they already read; the gateway runs set
+   a host and port and are unchanged. `serial.sh` fails unless its filter selects exactly 11
+   tests per framing (those nine and the two below).
+4. **What the serial carrier adds.** Two tests in `modbus_interop_diagslave_serial`.
+   *The silence*: the second of two back-to-back requests takes at least t3.5 at 300 baud 8N1
+   (116.7 ms; RTU) and at least a 250 ms `serial.interframe-delay` (both framings), with 20 ms
+   of slack for the clock and no upper bound. For ASCII, which has no t3.5, the 300 baud run
+   shows only that the line is opened and answered; that the driver adds no t3.5 of its own
+   needs an upper bound that a loaded runner could break, so it stays with the simulator
+   tests (`an_ascii_line_has_no_gap_of_its_own_and_drains_the_time_of_513_characters`). A pseudo-terminal does not throttle bytes to a
+   baud rate, so diagslave cannot show the silence; what the test shows is that the driver
+   keeps it on a real file descriptor with a live peer behind it. *A lost port*: the test
+   runs `serial.sh line-down`, which ends diagslave and then socat (both ends of the pair
+   close and the links go; it does not rely on socat exiting when diagslave does), and the
+   next request is `Disconnected` within its deadline; `serial.sh line-up` makes the pair at
+   the same path and starts a new diagslave, and the requests after it are `Disconnected` at
+   most three times and then answered by the new process, which the test knows because its
+   registers are zero where the test had written a value.
+5. **The line settings a pseudo-terminal can show.** The Linux pty keeps a baud rate and the
+   stop bits and forces eight data bits and no parity (`pty_set_termios`), so the driver end
+   of the ASCII run is 19200 8N1 (a 7E1 line fails the open, as `transport_serial.rs` shows)
+   while diagslave is started with its 7E1 defaults, which change nothing on a pty. The baud
+   rate is observable (it sets t3.5); `MBS-CFG-SERIAL-DATA-BITS`, `-STOP-BITS`, `-PARITY` and
+   `-FLOW` are accepted and opened on the pty but nothing observable follows, so they stay
+   `implemented` until HW2.
+6. **Evidence level.** Nothing is promoted yet. The script, the CI job and the tests are
+   added, and none of them has run as written: the `curl` download and the SHA-256 check of
+   the real archive, the x86_64 selection, the Python probe on Linux, Ubuntu's socat and the
+   job itself were never run end to end. The only run was a modified copy of `serial.sh` in a
+   scratchpad (its download replaced by the image's binary and its probe by a short sleep), in
+   a Linux container of the existing diagslave image on colima (the archive's aarch64 binary,
+   banner "diagslave 3.5", not the "diagslave 3.6" the script downloads), 11 of 11 for each
+   framing on 2026-10-29; the second request took 155 ms at 300 baud and 286 ms with the
+   250 ms delay. That is a note, not evidence. The rows `MBS-TRANS-SERIAL`,
+   `MBS-TRANS-PORT-NAME`, `MBS-CFG-SERIAL-BAUD`, `MBS-CFG-SERIAL-INTERFRAME`,
+   `MBS-RTU-SILENCE` and `MBS-ASCII-TIMING` stay `implemented` and say that the tests over a
+   serial port are written in the job `interop-serial-port`, which has not run; the rows of
+   S59b and S60b are unchanged; and the evidence level of RTU and ASCII on a serial port stays
+   `simulator-tested`. After the first hosted run of the job passes, RTU and ASCII through the
+   driver's own serial port on a pseudo-terminal pair against diagslave become
+   `interoperability-tested` and those six rows `automated-verified (S59c, ...)`; for
+   `MBS-ASCII-TIMING` only the inter-frame delay as the gap before an ASCII request would be
+   shown, not the absence of a t3.5. No electrical line, no RS-485 adapter and no device is
+   involved: `hardware-verified` stays HW2's.
+7. **No second peer.** libmodbus's `unit-test-server` in RTU mode opens the fixed device
+   `/dev/ttyUSB0` at 115200 baud 8N1 (read from the binary of the pinned image on 2026-10-29),
+   so a runner would need a root-made link to the pty and a build of the server from a
+   libmodbus package that is not the pinned trixie 3.1.11-2; modbus-tk's `RtuServer` needs
+   `pip install` of modbus-tk and pyserial. Both are downloads this slice does not make, and a
+   container cannot share the host's pty pair with the driver. A second serial peer is a later
+   slice if it is wanted.
+
+### Compliance
+- `interop/diagslave/serial.sh`, `crates/stonecrab/tests/modbus_interop_diagslave_serial.rs`
+  (the two tests), the full connection string in `modbus_interop_diagslave_rtu.rs` and
+  `modbus_interop_diagslave_ascii.rs`, the job `interop-serial-port` of
+  `.github/workflows/ci.yml`, `mise run interop-serial-port`.
+- `docs/parity/modbus-serial.md` (the six rows of decision 6, still `implemented`),
+  `docs/COMPATIBILITY.md`, `README.md`, `crates/stonecrab/README.md`,
+  `crates/stonecrab/docs/components/modbus.md`, `CHANGELOG.md`.

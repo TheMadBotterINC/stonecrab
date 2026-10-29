@@ -27,6 +27,9 @@
 #   mise run interop-rtu   = CI "interop-rtu" job alone (slice S59b)
 #   mise run interop-ascii = CI "interop-ascii" job alone (slice S60b)
 #   mise run interop-rtu-pty = CI "interop-rtu-pty" job alone (slice S60b)
+#   mise run interop-serial-port = CI "interop-serial-port" job (slice S59c; Linux only: diagslave
+#                            and socat on a pseudo-terminal pair of the host, the drivers' serial
+#                            carrier; not part of `mise run interop`, which also runs on macOS)
 #   mise run fuzz          = CI "fuzz-smoke" job (scripts/fuzz-smoke.sh; optional seconds argument)
 #   mise run machete       = CI "machete" job
 #   mise run dependencies  = CI "dependencies" job
@@ -205,6 +208,11 @@ run = "INTEROP_DIAGSLAVE_MODE=ascii interop/diagslave/interop.sh run"
 [tasks.interop-rtu-pty]
 description = "Build and run diagslave 3.6 as a Modbus RTU slave (diagslave -m rtu -a 1) on a pseudo-terminal that socat bridges to a TCP port in Docker, run the modbus-rtu:tcp interop tests against it (the same tests as interop-rtu, with the silence diagslave answers a unit it does not serve with), keep the evidence in target/interop-evidence/diagslave-rtu-pty/ (slice S60b, ADR-0024)"
 run = "INTEROP_DIAGSLAVE_MODE=rtu-pty interop/diagslave/interop.sh run"
+
+[tasks.interop-serial-port]
+description = "Run diagslave 3.6 (the pinned archive, checked against its SHA-256, no container) as a Modbus RTU and then a Modbus ASCII slave on one end of a pseudo-terminal pair that socat makes on this Linux host, and run the modbus-rtu and modbus-ascii interop tests against the other end through the drivers' serial carrier, with the line silence and a lost port reopened, keeping the evidence in target/interop-evidence/diagslave-serial-rtu/ and diagslave-serial-ascii/ (slice S59c, ADR-0024)"
+# Both modes always run, as in the CI job, where the ASCII step has `if: !cancelled()`.
+run = "INTEROP_DIAGSLAVE_SERIAL_MODE=rtu interop/diagslave/serial.sh run; rtu=$?; INTEROP_DIAGSLAVE_SERIAL_MODE=ascii interop/diagslave/serial.sh run || exit 1; exit $rtu"
 
 [tasks.fuzz]
 description = "cargo deny on the fuzz workspace, then every fuzz target for 60 s (ADR-0009)"

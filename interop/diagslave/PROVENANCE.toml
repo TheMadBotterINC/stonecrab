@@ -44,6 +44,11 @@
 # ("-m enc -a 1"); the pins and the terms above are unchanged. Slice S60b runs them as a
 # Modbus ASCII and a Modbus RTU slave on a pseudo-terminal bridged to TCP by socat ("-m ascii"
 # and "-m rtu"), adding the socat package above and nothing else.
+# Slice S59c runs the same archive, by the same checksum, as a Modbus RTU and a Modbus ASCII
+# slave on a pseudo-terminal pair on the host (serial.sh), with no container; the script reads
+# the pin and the URL from the Dockerfile and checks the archive before it unpacks anything. On
+# the CI runner socat is the Ubuntu package of the runner's index, not the pinned Debian
+# version of the image; its version is recorded in the evidence of each run.
 
 [[file]]
 path = "Dockerfile"
@@ -74,3 +79,9 @@ path = "README.md"
 origin = "Authored for S61"
 license = "Apache-2.0"
 note = "First-party."
+
+[[file]]
+path = "serial.sh"
+origin = "Authored for S59c in the shape of interop.sh and serve.sh, from the usage text of diagslave 3.6 (README.txt: -m rtu, -m ascii, -b, -d, -s, -p, -f) and the socat manual page"
+license = "Apache-2.0"
+note = "First-party. Fetches and checks the diagslave archive, makes a pseudo-terminal pair with socat under a temporary directory, runs diagslave on one end, probes, runs the interop tests over the serial carrier on the other end, writes the evidence and stops; shared by the CI job interop-serial-port and by mise run interop-serial-port."

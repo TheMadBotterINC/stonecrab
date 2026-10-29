@@ -53,9 +53,9 @@ operations.
 | `modbus`: write of coils and holding registers (FC15, FC06, FC16), refused unless the connection string says `access=read-write` | interoperability-tested |
 | `modbus`: text types `CHAR`, `WCHAR`, `STRING(n)` and `WSTRING(n)`, read and written | simulator-tested |
 | `modbus`: Modbus TCP over UDP (`modbus-tcp:udp`) reads, writes and ping, with lost, delayed, duplicated and reordered replies | interoperability-tested (job `interop-udp`, run 40830080420, 6 of 6); simulator-tested on loopback UDP |
-| `modbus`: Modbus RTU (`modbus-rtu`) reads, writes and ping over a gateway (`modbus-rtu:tcp`), every area, writes read back, frames of 255 bytes, an exception, a unit the slave does not serve | interoperability-tested (jobs `interop-rtu`, diagslave 3.6 as `-m enc -a 1`, and `interop-rtu-pty`, as `-m rtu -a 1` on a serial device behind socat, 9 of 9 each locally and in their first hosted runs, 40838776577 and 40843548924, on 2026-10-29) |
+| `modbus`: Modbus RTU (`modbus-rtu`) reads, writes and ping over a gateway (`modbus-rtu:tcp`) or a serial port (`modbus-rtu:///dev/ttyUSB0`), every area, writes read back, frames of 255 bytes, an exception, a unit the slave does not serve | interoperability-tested (jobs `interop-rtu`, diagslave 3.6 as `-m enc -a 1`, and `interop-rtu-pty`, as `-m rtu -a 1` on a serial device behind socat, 9 of 9 each locally and in their first hosted runs, 40838776577 and 40843548924, on 2026-10-29; through the driver's own serial port there is no interoperability evidence yet: the job `interop-serial-port`, over a pseudo-terminal pair, is added and has not run) |
 | `modbus`: Modbus RTU (`modbus-rtu`) reads, writes, ping and polling over a serial port or a gateway, with CRC errors, the silence before a request, late-reply drain and reopen | simulator-tested |
-| `modbus`: Modbus ASCII (`modbus-ascii`) reads, writes and ping over a gateway (`modbus-ascii:tcp`), every area, writes read back, frames of 511 characters, an exception, a unit the slave does not serve | interoperability-tested (job `interop-ascii`, diagslave 3.6 as `-m ascii -a 1` on a serial device behind socat, first hosted run 40838776577, 9 of 9, on 2026-10-29) |
+| `modbus`: Modbus ASCII (`modbus-ascii`) reads, writes and ping over a gateway (`modbus-ascii:tcp`) or a serial port (`modbus-ascii:///dev/ttyUSB0`), every area, writes read back, frames of 511 characters, an exception, a unit the slave does not serve | interoperability-tested (job `interop-ascii`, diagslave 3.6 as `-m ascii -a 1` on a serial device behind socat, first hosted run 40838776577, 9 of 9, on 2026-10-29; through the driver's own serial port there is no interoperability evidence yet: the job `interop-serial-port`, over a pseudo-terminal pair, is added and has not run) |
 | `modbus`: Modbus ASCII (`modbus-ascii`) reads, writes, ping and polling over a serial port (7 or 8 data bits) or a gateway, with LRC errors, noise before the colon, late-reply drain and reopen | simulator-tested |
 | Subscribe by polling (`sim` and `modbus`): cyclic and change-of-state, event refused; on a clock that never sleeps (the simulator's default) change-of-state is refused and the interval paces nothing | simulator-tested |
 | Connection cache (`ConnectionCache`, always built): one lease at a time per connection string, waiters in order, lease, wait, idle, ping and close bounds on the injected clock, `remove` and `close`; subscriptions are not restored on a replacement connection | simulator-tested |
@@ -74,7 +74,9 @@ diagslave 3.6 again (job `interop-rtu`, first hosted run 40838776577, 9 of 9 on
 2026-10-29), and for Modbus RTU and Modbus ASCII through a pseudo-terminal that
 socat bridges to a gateway carrier, diagslave 3.6 once more (jobs `interop-rtu-pty` and
 `interop-ascii`, 9 of 9 each passed locally on 2026-10-29; the hosted runs are the next
-evidence).
+evidence). For the serial carrier of both drivers, diagslave 3.6 and socat on a
+pseudo-terminal pair of a Linux host are the next evidence: the job `interop-serial-port` is
+added and has not run, so that carrier stays `simulator-tested`.
 The levels of each module are in its own documentation page (the component documents in
 `docs/components/` of this crate); the table above is the crate's view of the same
 evidence.

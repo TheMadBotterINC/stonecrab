@@ -466,6 +466,52 @@ jobs:
           path: target/interop-evidence/diagslave-${{ matrix.mode }}/
       - run: interop/diagslave/interop.sh stop
         if: ${{ always() }}
+  interop-serial-port:
+    # Modbus RTU and Modbus ASCII through the drivers' serial carrier against diagslave 3.6 on a
+    # serial port (slice S59c, ADR-0024). socat makes a pseudo-terminal pair on the runner,
+    # diagslave (the pinned archive, its static Linux binary, no container) opens one end as its
+    # serial port, and the tests open the other end with modbus-rtu:///<dir>/ttyB and
+    # modbus-ascii:///<dir>/ttyB, so the serial.* options, the silence before a request and the
+    # reopen of a lost port meet an independent peer, which the gateway runs of interop-rtu,
+    # interop-ascii and interop-rtu-pty cannot show. Each mode is one step of
+    # interop/diagslave/serial.sh, which `mise run interop-serial-port` also runs. No Docker,
+    # no tc, no kernel module.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
+        with:
+          toolchain: "1.99.1"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.148
+      # The runner's package index and Ubuntu's socat; the version it got goes into the evidence
+      # (serial-evidence.txt, from dpkg-query) and into the log here.
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends socat
+          dpkg-query -W socat
+      # Downloads https://www.modbusdriver.com/downloads/diagslave.tgz and fails, before it
+      # unpacks anything, on an archive whose SHA-256 is not the one pinned in
+      # interop/diagslave/Dockerfile and PROVENANCE.toml.
+      - run: interop/diagslave/serial.sh fetch
+      # start, wait (a real FC03 read through the second end of the pair), tests (the nine
+      # interop_ tests of the RTU file without the closed-connection one, and the two of
+      # modbus_interop_diagslave_serial: exactly 11 or the step fails), evidence, stop.
+      - run: INTEROP_DIAGSLAVE_SERIAL_MODE=rtu interop/diagslave/serial.sh run
+      # The same for ASCII (the nine tests of the ASCII file and the same two), also when the
+      # RTU step failed.
+      - run: INTEROP_DIAGSLAVE_SERIAL_MODE=ascii interop/diagslave/serial.sh run
+        if: ${{ !cancelled() }}
+      # The socat and diagslave versions and command lines, the connection strings, the logs
+      # and the test output of each mode.
+      - uses: actions/upload-artifact@v6
+        if: ${{ always() }}
+        with:
+          name: interop-serial-port-evidence
+          path: |
+            target/interop-evidence/diagslave-serial-rtu/
+            target/interop-evidence/diagslave-serial-ascii/
   machete:
     runs-on: ubuntu-latest
     steps:
