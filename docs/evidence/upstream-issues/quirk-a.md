@@ -32,9 +32,12 @@ not compile into a dependency on BouncyCastle for a Modbus driver.
 
 ## How Stonecrab handles it
 
-Not ported. Stonecrab does not support Modbus over UDP at the alpha; the driver rejects
+Not ported. Stonecrab did not support Modbus over UDP at the alpha; the driver rejected
 any transport other than TCP with `InvalidConfig`
-(`driver_rejects_other_transport_codes`, row `MB-QUIRK-A`).
+(`driver_rejects_other_transport_codes`, row `MB-QUIRK-A`). Since S61 (2026-10-29,
+ADR-0027) `modbus-tcp:udp://host[:port]` works and defaults to the declared port 502,
+where upstream fails with "No port defined"; transports other than `tcp` and `udp` are
+still refused.
 
 ## Provenance and status
 

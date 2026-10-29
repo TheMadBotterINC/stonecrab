@@ -15,8 +15,10 @@ use crate::{AddressOptions, ErrorKind, PlcError, ResourceLimits, Result, Secret}
 
 /// Where a connection is made.
 ///
-/// Only the variants the alpha transports need exist; `Udp` and `Serial` arrive with
-/// their transports. The enum is `#[non_exhaustive]`, so match with a wildcard arm.
+/// Only the variants the alpha transports need exist. The serial transport (S58) and the
+/// UDP transport (S61) take an [`Endpoint::Custom`] value, the port name or `host:port`,
+/// so there is no `Serial` or `Udp` variant (ADR-0027). The enum is `#[non_exhaustive]`,
+/// so match with a wildcard arm.
 ///
 /// The text of a [`Endpoint::Custom`] value is displayed verbatim (including by
 /// [`ConnectionConfig::redacted_display`]), so it must not embed credentials; pass them

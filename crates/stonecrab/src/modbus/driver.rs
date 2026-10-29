@@ -3,7 +3,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use crate::transport::{SystemClock, TcpFactory, TransportFactory};
+use crate::transport::{SystemClock, TcpFactory, TransportFactory, UdpFactory};
 use crate::{
     AddressOptions, Capabilities, Clock, Connection, ConnectionConfig, ConnectionUri, Driver,
     Endpoint, ErrorKind, OpFuture, PlcError, ProtocolAddress, Result, Timeouts,
@@ -15,10 +15,14 @@ use crate::modbus::{ConnectionDefaults, ModbusAddress, ModbusConnection, ModbusO
 /// The connection-string scheme of this driver.
 const SCHEME: &str = "modbus-tcp";
 
-/// The only transport code the scheme accepts after `modbus-tcp:`.
-const TRANSPORT: &str = "tcp";
+/// The transport code of TCP, the default.
+const TCP: &str = "tcp";
 
-/// The port of a connection string that names none (upstream `DEFAULT_TCP_PORT`).
+/// The transport code of Modbus TCP over UDP: the same MBAP frames, one per datagram.
+const UDP: &str = "udp";
+
+/// The port of a connection string that names none, for `tcp` and `udp` alike (upstream
+/// `DEFAULT_TCP_PORT` and `DEFAULT_UDP_PORT`).
 const DEFAULT_PORT: u16 = 502;
 
 /// The `Driver` of the `modbus-tcp` scheme: read-only Modbus TCP (function codes 01 to 04)
@@ -26,16 +30,22 @@ const DEFAULT_PORT: u16 = 502;
 ///
 /// The driver is a stateless factory. It holds the clock, the transport factory and the
 /// connection-wide [`ConnectionDefaults`] that every connection it opens starts from, and
-/// it keeps no per-connection state. [`new`](Self::new) uses the real TCP transport and
-/// the Tokio-backed [`SystemClock`]; [`with_clock`](Self::with_clock) and
+/// it keeps no per-connection state. [`new`](Self::new) uses the real TCP or UDP transport
+/// that the connection string names and the Tokio-backed [`SystemClock`];
+/// [`with_clock`](Self::with_clock) and
 /// [`with_transport_factory`](Self::with_transport_factory) replace them, which is how the
 /// testkit's `FakeClock` and `FakeTransportFactory` run the contract suite over this
 /// driver (ADR-0015, decision 14).
 ///
 /// # Connection strings
-/// `modbus-tcp://host[:port]` or `modbus-tcp:tcp://host[:port]`, with `host` a name, an
-/// IPv4 address or an IPv6 address in brackets (`[::1]:502`), and the port 1 to 65535,
-/// default 502. Any other transport code is [`ErrorKind::InvalidConfig`].
+/// `modbus-tcp://host[:port]` or `modbus-tcp:tcp://host[:port]` for TCP, and
+/// `modbus-tcp:udp://host[:port]` for Modbus TCP over UDP (the same MBAP frames, one per
+/// datagram, over a [`UdpFactory`] socket connected to the device; ADR-0027). `host` is a
+/// name, an IPv4 address or an IPv6 address in brackets (`[::1]:502`), and the port is 1 to
+/// 65535, default 502 for both. Any other transport code is [`ErrorKind::InvalidConfig`].
+/// Over UDP nothing is sent when the connection opens, a lost datagram is a request that
+/// times out at its deadline, and a reply that arrives twice or late is discarded by its
+/// transaction id.
 ///
 /// **Parameters.** After `?`, `key=value` pairs joined by `&`. The six upstream
 /// parameters are `request-timeout-ms` (positive integer, default 5000),
@@ -53,8 +63,10 @@ const DEFAULT_PORT: u16 = 502;
 /// # Compatibility: docs/parity/modbus.md#MB-TCP-CONNECT
 /// Protocol code `modbus-tcp`, transport `tcp`, port 502 as upstream
 /// (`MB-TCP-CONNECT`); request-driven reconnect is a Stonecrab extension recorded in the
-/// same row. [`capabilities`](Driver::capabilities) is the `MB-TCP-CAPABILITIES` value, the
-/// one every [`ModbusConnection`] reports
+/// same row. The `udp` transport with its default port 502 is
+/// docs/parity/modbus.md#MB-TCP-TRANSPORTS-UDP, where upstream's own default never applies
+/// (docs/parity/modbus.md#MB-QUIRK-A). [`capabilities`](Driver::capabilities) is the
+/// `MB-TCP-CAPABILITIES` value, the one every [`ModbusConnection`] reports
 /// (docs/parity/modbus.md#MB-TCP-CAPABILITIES).
 ///
 /// # Examples
@@ -85,13 +97,15 @@ const DEFAULT_PORT: u16 = 502;
 /// ```
 pub struct ModbusTcpDriver {
     clock: Arc<dyn Clock>,
-    factory: Arc<dyn TransportFactory>,
+    /// The factory every connection opens its transport with; `None` opens the transport
+    /// the connection string names.
+    factory: Option<Arc<dyn TransportFactory>>,
     defaults: ConnectionDefaults,
 }
 
 impl ModbusTcpDriver {
-    /// A driver over the real TCP transport and the [`SystemClock`], with the upstream
-    /// connection defaults (unit 1, `BIG_ENDIAN`).
+    /// A driver over the real TCP and UDP transports and the [`SystemClock`], with the
+    /// upstream connection defaults (unit 1, `BIG_ENDIAN`).
     ///
     /// Nothing is opened until a connection is requested, so constructing the driver does
     /// no I/O. Connections must be driven inside a Tokio runtime with the time driver
@@ -110,7 +124,7 @@ impl ModbusTcpDriver {
     pub fn new() -> Self {
         Self {
             clock: Arc::new(SystemClock::default()),
-            factory: Arc::new(TcpFactory::default()),
+            factory: None,
             defaults: ConnectionDefaults::default(),
         }
     }
@@ -141,7 +155,8 @@ impl ModbusTcpDriver {
         self
     }
 
-    /// Replace the factory that opens a transport for every connection.
+    /// Replace the factory that opens a transport for every connection, whatever transport
+    /// code the connection string names.
     ///
     /// This is the sanctioned way to run a Modbus connection without a socket: the
     /// testkit's `FakeTransportFactory` serves in-memory transports driven by a script or
@@ -175,7 +190,7 @@ impl ModbusTcpDriver {
     /// ```
     #[must_use]
     pub fn with_transport_factory(mut self, factory: Arc<dyn TransportFactory>) -> Self {
-        self.factory = factory;
+        self.factory = Some(factory);
         self
     }
 
@@ -238,11 +253,14 @@ impl Driver for ModbusTcpDriver {
         driver_capabilities()
     }
 
-    /// Read `modbus-tcp[:tcp]://host[:port][?parameters]` into a validated configuration.
+    /// Read `modbus-tcp[:tcp|:udp]://host[:port][?parameters]` into a validated
+    /// configuration.
     ///
     /// The text is parsed with [`ConnectionUri::parse`], which already refuses duplicate
-    /// and empty keys. The configuration has an [`Endpoint::Tcp`], the core defaults for
-    /// reconnect, retry and limits, a read-only access policy, and:
+    /// and empty keys. The configuration has an [`Endpoint::Tcp`] for TCP, or for `udp` an
+    /// [`Endpoint::Custom`] holding `host:port` (an IPv6 host in brackets) as
+    /// [`UdpFactory`] takes it; the core defaults for reconnect, retry and limits, a
+    /// read-only access policy, and:
     ///
     /// - `request-timeout-ms` as `Timeouts.request` (5000 ms by default);
     /// - `address-convention` (`plc4x`, `one-based-40001` or `zero-based`) as the
@@ -258,7 +276,7 @@ impl Driver for ModbusTcpDriver {
     ///
     /// # Errors
     /// Returns [`ErrorKind::InvalidConfig`] for text that is not a valid connection string,
-    /// another scheme, a transport code other than `tcp`, an authority that is not
+    /// another scheme, a transport code other than `tcp` and `udp`, an authority that is not
     /// `host[:port]` (an empty host, a port that is empty, not decimal digits, zero or above
     /// 65535, an IPv6 address without brackets, a path), and a parameter that is unknown,
     /// empty, not a whole number where one is required, outside its bounds, an unknown
@@ -278,17 +296,21 @@ impl Driver for ModbusTcpDriver {
     /// (docs/parity/modbus.md#MB-CFG-MAX-REGISTERS). Unknown keys are an error where
     /// upstream warns (`MB-CFG-UNKNOWN`), which includes the misspelt `unit-identifier` of
     /// the upstream test suite (docs/parity/modbus.md#MB-QUIRK-F); a transport other than
-    /// `tcp`, UDP included, is refused (docs/parity/modbus.md#MB-QUIRK-A). `access` is a
+    /// `tcp` and `udp` is refused (docs/parity/modbus.md#MB-TCP-TRANSPORTS), and `udp`
+    /// defaults to port 502 where upstream's default never applies
+    /// (docs/parity/modbus.md#MB-QUIRK-A). The `udp.` options are refused like every other
+    /// transport option (docs/parity/modbus.md#MB-CFG-TRANSPORT-OPTIONS). `access` is a
     /// Stonecrab parameter with no upstream counterpart (docs/parity/modbus.md#MB-CFG-ACCESS).
     fn parse_config(&self, uri: &str) -> Result<ConnectionConfig> {
         let parsed = ConnectionUri::parse(uri)?;
         if parsed.scheme() != SCHEME {
             return Err(invalid("not a modbus-tcp connection string"));
         }
-        if parsed.transport().is_some_and(|code| code != TRANSPORT) {
-            return Err(invalid("the transport code of modbus-tcp is tcp"));
-        }
-        let endpoint = endpoint(parsed.authority())?;
+        let endpoint = match parsed.transport() {
+            None | Some(TCP) => endpoint(parsed.authority())?,
+            Some(UDP) => Endpoint::Custom(endpoint(parsed.authority())?.to_string()),
+            Some(_) => return Err(invalid("the transport code of modbus-tcp is tcp or udp")),
+        };
         let (options, convention, access) = ModbusOptions::from_parameters(
             ModbusOptions::from_defaults(self.defaults),
             parsed.options(),
@@ -328,8 +350,10 @@ impl Driver for ModbusTcpDriver {
 
     /// Open a [`ModbusConnection`] to the configured endpoint.
     ///
-    /// This is [`ModbusConnection::open`] with the driver's factory and clock, boxed: the
-    /// whole attempt is bounded by `config.timeouts().connect`. The unit, byte order and
+    /// This is [`ModbusConnection::open`] with the driver's clock and a transport factory,
+    /// boxed: the whole attempt is bounded by `config.timeouts().connect`. The factory is the
+    /// injected one when there is one, else [`UdpFactory`] for an [`Endpoint::Custom`] (the
+    /// `udp` transport) and [`TcpFactory`] for any other endpoint. The unit, byte order and
     /// request-size limits come from the [`ModbusOptions`] of the configuration, else from
     /// the driver's own [`ConnectionDefaults`].
     ///
@@ -345,7 +369,8 @@ impl Driver for ModbusTcpDriver {
     /// and no connection to close. The deadline source is `config.timeouts().connect`.
     ///
     /// # Wire effects
-    /// Opens a transport and sends no application bytes, as [`ModbusConnection::open`].
+    /// Opens a transport and sends no application bytes, as [`ModbusConnection::open`]; a
+    /// UDP socket sends nothing at all.
     ///
     /// # Compatibility: docs/parity/modbus.md#MB-TCP-CONNECT
     /// The counterpart of upstream `connect()` (`onConnect`); the reconnect behavior of
@@ -356,12 +381,12 @@ impl Driver for ModbusTcpDriver {
         let defaults = config
             .driver_options_as::<ModbusOptions>()
             .map_or(self.defaults, ModbusOptions::connection_defaults);
-        let opening = ModbusConnection::open(
-            config,
-            Arc::clone(&self.factory),
-            Arc::clone(&self.clock),
-            defaults,
-        );
+        let factory: Arc<dyn TransportFactory> = match (&self.factory, config.endpoint()) {
+            (Some(factory), _) => Arc::clone(factory),
+            (None, Endpoint::Custom(_)) => Arc::new(UdpFactory::default()),
+            (None, _) => Arc::new(TcpFactory::default()),
+        };
+        let opening = ModbusConnection::open(config, factory, Arc::clone(&self.clock), defaults);
         Box::pin(async move {
             let connection: Box<dyn Connection> = Box::new(opening.await?);
             Ok(connection)
@@ -557,13 +582,16 @@ mod tests {
     }
 
     #[test]
-    fn parse_config_refuses_another_scheme_and_any_transport_but_tcp() {
+    fn parse_config_refuses_another_scheme_and_any_transport_but_tcp_and_udp() {
         for uri in [
             "sim://bench",
             "modbus-rtu://host",
-            "modbus-tcp:udp://host",
             "modbus-tcp:tls://host",
             "modbus-tcp:TCP://host",
+            "modbus-tcp:UDP://host",
+            "modbus-tcp:udp://host:0",
+            "modbus-tcp:udp://::1",
+            "modbus-tcp:udp://host?udp.local-port=5020",
             "not a connection string",
             "modbus-tcp:://host",
         ] {

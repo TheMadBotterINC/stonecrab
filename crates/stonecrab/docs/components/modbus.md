@@ -7,11 +7,14 @@ refused unless the connection says `access=read-write`), the extended registers 
 file record function codes 20 (read) and 21 (write) since S50, a ping that reads one
 address, and polling subscriptions (cyclic and change-of-state, since S55). Since S59 the
 same operations run over Modbus RTU on a serial line or a serial-to-IP gateway (see "Modbus
-RTU" below), and since S49 the text types `CHAR`, `WCHAR`, `STRING(n)` and `WSTRING(n)`
-are read and written (see "Text" below). ASCII, TLS, UDP, browse and discovery are out of
-scope for the alpha and are listed under "Not in the alpha" below.
+RTU" below), since S49 the text types `CHAR`, `WCHAR`, `STRING(n)` and `WSTRING(n)` are
+read and written (see "Text" below), and since S61 Modbus TCP also runs over UDP
+(`modbus-tcp:udp`, ADR-0027). ASCII, TLS, browse and discovery are out of scope for the
+alpha and are listed under "Not in the alpha" below.
 The TCP driver has been checked against an independent server, pymodbus 3.8.6, and no
-physical device; the RTU driver on the in-memory transport and over a loopback socket only.
+physical device; over UDP it runs on loopback sockets, and its `interop-udp` job against
+diagslave 3.6 with `tc netem` faults has its first hosted run pending as of 2026-10-29; the
+RTU driver on the in-memory transport and over a loopback socket only.
 No independent server serves the file record function codes, so the extended registers are
 checked against the specification examples, the upstream PLC4X frames and a first-party
 device on the in-memory transport only.
@@ -51,11 +54,17 @@ tests run the driver over an in-memory transport and over loopback sockets.
   string says `access=read-write`.
 
 ### Connection strings
-`modbus-tcp://host[:port]` or `modbus-tcp:tcp://host[:port]`, followed by an optional
+`modbus-tcp://host[:port]` or `modbus-tcp:tcp://host[:port]` for TCP, and
+`modbus-tcp:udp://host[:port]` for Modbus TCP over UDP, followed by an optional
 `?key=value&key=value`. The host is a name, an IPv4 address or an IPv6 address in brackets
-(`[::1]:502`); the port is 1 to 65535 and defaults to 502; `tcp` is the only transport code
-(`udp`, `tls` and the rest are `InvalidConfig`). The text may not contain whitespace,
-control characters or `%`, nor a `user:password@` part, and is at most 4096 bytes.
+(`[::1]:502`); the port is 1 to 65535 and defaults to 502 for both transport codes (`tls`
+and the rest are `InvalidConfig`). Over UDP the same MBAP frames travel one per datagram on a
+socket connected to the device (`UdpFactory`, ADR-0027): connecting sends nothing, a lost
+datagram is a request that times out at its deadline, a reply that arrives twice or after
+its request timed out is discarded by its transaction id, and no `udp.` option is offered
+(upstream's default UDP port never applies, `MB-QUIRK-A`; Stonecrab uses 502). The text may
+not contain whitespace, control characters or `%`, nor a `user:password@` part, and is at
+most 4096 bytes.
 
 The six upstream parameters, the shared `address-convention` key and Stonecrab's `access`
 key are the only keys. A
@@ -265,7 +274,8 @@ error rather than ignoring it; operations that have no API at all do not exist:
 - the extended registers on any independent server: none of pymodbus 3.8.6, libmodbus
   3.1.11 and modbus-tk serves function codes 20 and 21 (`MB-ADDR-EXTENDED` is
   `implemented`, not `automated-verified`);
-- UDP, TLS and TLS-PSK transports (`MB-TCP-TRANSPORTS-*`); Modbus ASCII is slice S60, and
+- TLS and TLS-PSK transports (`MB-TCP-TRANSPORTS-TLS`, `MB-TCP-TRANSPORTS-TLS-PSK`) and the
+  `udp.` transport options (`MB-CFG-TRANSPORT-OPTIONS`); Modbus ASCII is slice S60, and
   the RTU items that are deferred (broadcast, shared ports, the serial read and write
   timeouts, DTR and RTS) are listed in the serial parity record;
 - the upstream gap-filling read optimizer, by decision (S51, ADR-0015 addendum): Stonecrab

@@ -126,6 +126,43 @@ pub trait Transport: Send {
     /// The budgets this transport enforces: `max_frame_bytes` on `send` and
     /// `max_buffered_bytes` on `recv`.
     fn limits(&self) -> &ResourceLimits;
+
+    /// Whether every `recv` appends exactly one whole datagram, so that bytes a datagram
+    /// leaves after its last whole frame can never be completed by the next one.
+    ///
+    /// The default, `false`, is a byte stream (TCP, a serial line): a frame may arrive over
+    /// several `recv` calls. [`UdpTransport`](crate::transport::UdpTransport) returns `true`.
+    /// [`FramedTransport`](crate::transport::FramedTransport) then never reads past the end
+    /// of a datagram that held part of a frame: it drops those bytes and fails the read with
+    /// `MalformedData` instead of joining them to the next datagram, and its `resync` drops
+    /// every buffered byte instead of searching them.
+    ///
+    /// # Compatibility: docs/parity/transport.md#UTR-UDP-RING
+    /// Upstream's UDP transport appends datagrams to one byte ring and loses their
+    /// boundaries; keeping them is a recorded difference.
+    ///
+    /// # Examples
+    /// ```
+    /// use std::time::{Duration, Instant};
+    /// use stonecrab::{Deadline, Endpoint, ResourceLimits};
+    /// use stonecrab::transport::{TransportFactory, UdpFactory};
+    /// use tokio::net::UdpSocket;
+    ///
+    /// let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+    /// runtime.block_on(async {
+    ///     let device = UdpSocket::bind("127.0.0.1:0").await?;
+    ///     let endpoint = Endpoint::Custom(device.local_addr()?.to_string());
+    ///     let deadline = Deadline::after(Instant::now(), Duration::from_secs(5))?;
+    ///     let limits = ResourceLimits::builder().build()?;
+    ///     let transport = UdpFactory::default().open(&endpoint, limits, deadline).await?;
+    ///     assert!(transport.delivers_datagrams());
+    ///     Ok::<(), Box<dyn std::error::Error>>(())
+    /// })?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    fn delivers_datagrams(&self) -> bool {
+        false
+    }
 }
 
 /// Opens [`Transport`]s for endpoints of one kind.

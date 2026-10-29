@@ -25,7 +25,7 @@ workspace = true
 default = ["sim", "modbus", "sensors"]
 # The three things most applications want, spelled out (the same set as the default).
 full = ["sim", "modbus", "sensors"]
-# Deadline-bounded byte transports and the Tokio TCP transport (`stonecrab::transport`).
+# Deadline-bounded byte transports and the Tokio TCP and UDP transports (`stonecrab::transport`).
 transport = ["dep:tokio"]
 # The serial transport on a blocking worker thread (`stonecrab::transport::SerialTransport`).
 # Needs the transport. `modbus` enables it for Modbus RTU (ADR-0024).
@@ -156,7 +156,15 @@ name = "modbus_interop_modbus_tk"
 required-features = ["modbus", "testkit"]
 
 [[test]]
+name = "modbus_interop_diagslave"
+required-features = ["modbus", "testkit"]
+
+[[test]]
 name = "modbus_interop_toxiproxy"
+required-features = ["modbus", "testkit"]
+
+[[test]]
+name = "modbus_udp"
 required-features = ["modbus", "testkit"]
 
 [[test]]
@@ -317,6 +325,10 @@ required-features = ["serial"]
 
 [[test]]
 name = "transport_tcp"
+required-features = ["testkit"]
+
+[[test]]
+name = "transport_udp"
 required-features = ["testkit"]
 
 # Benchmarks (slice S52, ADR-0009 addendum): Criterion supplies its own `main`, so the default

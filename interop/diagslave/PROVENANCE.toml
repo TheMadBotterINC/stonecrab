@@ -1,0 +1,67 @@
+# Provenance of the first-party files under interop/diagslave (CODING_STANDARDS 13.6).
+#
+# A separate file for the reason given in interop/pymodbus/PROVENANCE.toml: the loader
+# (stonecrab::testkit::load_provenance) reads only files below the directory of the provenance
+# file, and these files are outside fixtures/modbus. Same schema, no [[vector]].
+#
+# The peer is not in this repository, and no image that contains it is published. The
+# Dockerfile downloads it, inside the image build, from the vendor:
+#
+#   base image   debian:trixie-slim, the multi-architecture index digest
+#                sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4,
+#                pulled on 2026-10-28 (Debian 13.7), the base of interop/libmodbus as well
+#   package      iproute2 6.15.0-1 from the trixie archive, by exact version, for tc netem
+#   archive      https://www.modbusdriver.com/downloads/diagslave.tgz, fetched on 2026-10-29:
+#                SHA-256 01c87fe49d86848d61ddfdd703c0f9f76f5e80e46f233d5ee16998811f2fe97e,
+#                1 503 303 bytes, gzip member name diagslave-3.6.tgz; its README.txt is
+#                "Revision 3.6, 2026-10-10". The URL carries no version, so the vendor can
+#                replace the archive under the same name: the build then fails on the
+#                checksum (ADD --checksum) and the pin must be reviewed and moved by hand.
+#                The aarch64 binary's start-up banner reads "diagslave 3.5" although the
+#                archive is 3.6; the server log of every run keeps the banner as evidence.
+#   simulator    diagslave, FieldTalk Modbus Diagnostic Slave Simulator, Copyright (c)
+#                2002-2024 proconX Pty Ltd: statically linked Linux binaries
+#                (x86_64-linux-gnu and aarch64-linux-gnu are used), under proconX's "Free
+#                Software License for Binary Distributions", revision 5, October 2026
+#                (LICENSE-FREE.txt in the archive). Its terms, as read on 2026-10-29: use for
+#                commercial or non-commercial purposes without charge; binary copies for your
+#                own purpose without restriction; redistribution only of the whole,
+#                unmodified distribution with its notices and documentation; no warranty;
+#                Queensland law. Stonecrab only downloads and runs it in a local or CI
+#                container and never redistributes it: neither the archive nor an image
+#                holding it is committed or pushed. The image keeps LICENSE-FREE.txt and
+#                README.txt beside the binary in /opt/diagslave/.
+#
+# diagslave is proprietary freeware, not open source: it is an independent peer for
+# interoperability evidence (interoperability-tested at most) and nothing of it is copied
+# into the repository. The register values the tests expect are written by the tests first.
+
+[[file]]
+path = "Dockerfile"
+origin = "Authored for S61 from the pinned base image debian:trixie-slim, the Debian package iproute2 6.15.0-1 and the diagslave 3.6 archive of proconX (docs/POST_ALPHA_PLAN.md, Until hardware arrives)"
+license = "Apache-2.0"
+note = "First-party recipe. The base image is pinned by digest, the package by version, the archive by SHA-256; the simulator itself is not stored here."
+
+[[file]]
+path = "Dockerfile.dockerignore"
+origin = "Authored for S61"
+license = "Apache-2.0"
+note = "First-party. Keeps the build context to the file the Dockerfile copies."
+
+[[file]]
+path = "serve.sh"
+origin = "Authored for S61 from the usage text of diagslave 3.6 (README.txt: -m udp, -p)"
+license = "Apache-2.0"
+note = "First-party. Runs diagslave as a Modbus UDP slave on port 1502."
+
+[[file]]
+path = "interop.sh"
+origin = "Authored for S61, in the shape of interop/libmodbus/interop.sh"
+license = "Apache-2.0"
+note = "First-party. Build, run, probe, test and collect evidence; shared by the CI job and mise run interop-udp."
+
+[[file]]
+path = "README.md"
+origin = "Authored for S61"
+license = "Apache-2.0"
+note = "First-party."

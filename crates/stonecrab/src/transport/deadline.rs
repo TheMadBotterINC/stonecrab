@@ -98,6 +98,30 @@ impl Site {
     };
 }
 
+/// The UDP transport's sites, so that a failure names the datagram transport.
+impl Site {
+    /// Opening a UDP socket and connecting it to its peer.
+    pub(crate) const UDP_CONNECT: Self = Self {
+        name: "udp connect",
+        operation: Some(Operation::Connect),
+    };
+    /// Sending one datagram.
+    pub(crate) const UDP_SEND: Self = Self {
+        name: "udp send",
+        operation: None,
+    };
+    /// Receiving one datagram.
+    pub(crate) const UDP_RECV: Self = Self {
+        name: "udp receive",
+        operation: None,
+    };
+    /// Closing a UDP socket.
+    pub(crate) const UDP_SHUTDOWN: Self = Self {
+        name: "udp shutdown",
+        operation: Some(Operation::Close),
+    };
+}
+
 /// The monotonic reading deadlines are judged against: Tokio's clock, which is the plain
 /// `std::time::Instant::now()` unless a test has paused time.
 #[expect(

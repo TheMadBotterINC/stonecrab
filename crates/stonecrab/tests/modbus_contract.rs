@@ -312,7 +312,7 @@ mod tests {
     #[test]
     fn the_suite_reports_a_connection_string_the_driver_rejects_as_failures() {
         let bench = Bench::new();
-        let report = bench.run("modbus-tcp:udp://127.0.0.1:5020");
+        let report = bench.run("modbus-tcp:tls://127.0.0.1:5020");
         assert_eq!(report.passed(), 0, "nothing can pass:\n{report}");
         assert!(report.failed() > 0, "failures are reported:\n{report}");
         assert!(!report.is_green(), "the report is not green");

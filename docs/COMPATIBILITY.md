@@ -34,7 +34,7 @@ tests while its status in `docs/parity/` stays `implemented`; this table names t
 | --- | --- |
 | `build-tested` | compiles on the platform, with unit and documentation tests; no peer involved |
 | `simulator-tested` | exercised against the in-process simulator, the in-memory `FakeTransport` with a fake clock, or a loopback `ScriptedPeer` |
-| `interoperability-tested` | exercised against an independent implementation: pymodbus 3.8.6 in the `interop` CI job, libmodbus 3.1.11 in the `interop-libmodbus` job, both of them behind Toxiproxy 2.13.0 for the failure paths in the `interop-toxiproxy` job, and, for unit-ID correlation, a first-party multi-unit script on modbus-tk 1.1.5 in the `interop-modbus-tk` job |
+| `interoperability-tested` | exercised against an independent implementation: pymodbus 3.8.6 in the `interop` CI job, libmodbus 3.1.11 in the `interop-libmodbus` job, both of them behind Toxiproxy 2.13.0 for the failure paths in the `interop-toxiproxy` job, for unit-ID correlation, a first-party multi-unit script on modbus-tk 1.1.5 in the `interop-modbus-tk` job, and, for Modbus over UDP, diagslave 3.6 with `tc netem` in the `interop-udp` job (first hosted run pending as of 2026-10-29) |
 | `hardware-verified` | exercised against a physical device, with a record from `docs/hardware/TEMPLATE.md` |
 | `planned` | not shipped; the owner is named where one is known (hardware evidence: milestone M2S) |
 | `not supported` | not shipped and rejected with a typed error rather than ignored |
@@ -68,7 +68,8 @@ hardware record exists.
 | Modbus TCP | browse | `modbus` | not supported | `MB-TCP-BROWSE` | upstream has no Modbus browse |
 | Modbus TCP | discover | `modbus` | not supported | `MB-TCP-DISCOVER` | deferred |
 | Modbus TCP | ping | `modbus` | interoperability-tested | `MB-TCP-PING`, `MB-CFG-PING-ADDRESS`, `MB-QUIRK-D` | one read of `ping-address`; any correlated reply, an exception included, is success as upstream's; pymodbus 3.8.6 via the `interop` job |
-| Modbus TCP | UDP, TLS, TLS-PSK, `test` transports | `modbus` | not supported | `MB-TCP-TRANSPORTS-*` | deferred; `InvalidConfig` |
+| Modbus TCP | over UDP (`modbus-tcp:udp://host[:port]`, default port 502): connect (sends nothing), read, write, ping and polling over one socket connected to the device; a lost reply is `Timeout` at the deadline, a duplicated, late or reordered reply is discarded by transaction id, a datagram that is not one frame is `MalformedData` | `modbus` | simulator-tested; interoperability-tested once the first hosted `interop-udp` run passes | `MB-TCP-TRANSPORTS-UDP`, `MB-CFG-TRANSPORT-OPTIONS`, `MB-QUIRK-A`; `UTR-UDP`, `UTR-UDP-RING`, `UTR-UDP-OPTIONS` in [`parity/transport.md`](parity/transport.md) | S61, ADR-0027: the contract suite and the `modbus_udp` tests over loopback UDP; written for diagslave 3.6 with `tc netem` loss, delay, duplication and reordering (job `interop-udp`, first hosted run pending as of 2026-10-29): `interop_udp_writes_and_reads_back_registers_and_coils`, `interop_udp_netem_loss_of_every_reply_times_out_at_the_deadline`, `interop_udp_netem_delay_below_the_deadline_still_answers`, `interop_udp_netem_delay_past_the_deadline_times_out_and_the_late_reply_is_discarded`, `interop_udp_netem_duplicated_replies_are_discarded_by_correlation`, `interop_udp_netem_reordered_replies_never_answer_the_wrong_request`; no `udp.` option is offered |
+| Modbus TCP | TLS, TLS-PSK, `test` transports | `modbus` | not supported | `MB-TCP-TRANSPORTS-TLS`, `MB-TCP-TRANSPORTS-TLS-PSK`, `MB-TCP-TRANSPORTS-TEST` | deferred; `InvalidConfig` |
 | Modbus TCP | extended registers (FC20 read, FC21 write) | `modbus` | simulator-tested | `MB-ADDR-EXTENDED`, `MB-LIMIT-EXT`, `MB-QUIRK-B` | no interop peer serves FC20 or FC21; strict fake-transport scripts and the first-party responder |
 | Modbus RTU | connect, close, read, write, ping and subscribe by polling over RTU framing (CRC-16) on a serial port (`modbus-rtu://<port>`) or a serial-to-IP gateway (`modbus-rtu:tcp://`), with the operations and limits of Modbus TCP | `modbus` | simulator-tested | `MBS-OP-*`, `MBS-RTU-*`, `MBS-TRANS-SERIAL`, `MBS-TRANS-TCP` in [`parity/modbus-serial.md`](parity/modbus-serial.md) | S59, ADR-0024: `FakeTransport` and fake clock, the contract suite (`the_suite_is_green_against_modbus_rtu_over_the_fake_transport`), the upstream RTU parser vectors, `fuzz_modbus_rtu`, RTU over a loopback socket; no independent RTU server yet (a virtual serial pair with libmodbus or modbus-tk is a later slice) and no hardware (HW2) |
 | Modbus RTU | CRC errors, the silence before a request (t3.5, `serial.interframe-delay`), the drain of a late reply after a timeout, a lost serial link and its reopen, replies from another unit or function | `modbus` | simulator-tested | `MBS-RTU-CRC`, `MBS-RTU-SILENCE`, `MBS-BUS-LATE-REPLY`, `MBS-BUS-CORRELATION` | `a_reply_with_a_bad_crc_fails_the_read_and_the_next_read_is_answered`, `serial_write_waits_for_the_interframe_gap`, `serial_late_reply_after_timeout_does_not_answer_the_next_request`, `a_lost_serial_link_is_disconnected_and_the_next_read_reopens_it`, `serial_response_from_another_unit_or_function_is_ignored` |
@@ -102,7 +103,7 @@ where this table says otherwise. Counts of rows per record are in the records th
 
 | Upstream driver (code) | Stonecrab support | Level | Parity record | Milestone |
 | --- | --- | --- | --- | --- |
-| Modbus TCP (`modbus-tcp`) | `modbus` feature | see the operations table above | [`parity/modbus.md`](parity/modbus.md) | M1 (read path and ping shipped); writes, polling subscriptions (S55), extended registers, UDP and TLS per the table above |
+| Modbus TCP (`modbus-tcp`) | `modbus` feature | see the operations table above | [`parity/modbus.md`](parity/modbus.md) | M1 (read path and ping shipped); writes, polling subscriptions (S55), extended registers, UDP (S61) and TLS per the table above |
 | Modbus RTU (`modbus-rtu`) | `modbus` feature, `ModbusRtuDriver` | simulator-tested; see the operations table above | [`parity/modbus-serial.md`](parity/modbus-serial.md) | M2: shipped in S59; an interop peer on a virtual serial pair and HW2 to come |
 | Modbus ASCII (`modbus-ascii`) | none | not supported | [`parity/modbus-serial.md`](parity/modbus-serial.md) | M2 (S60, HW2) |
 | OPC UA (`opcua`) | none | not supported | [`parity/opcua.md`](parity/opcua.md) | M3 |
@@ -131,7 +132,7 @@ where this table says otherwise. Counts of rows per record are in the records th
 | Upstream transport (code) | Stonecrab support | Level | Parity record | Milestone |
 | --- | --- | --- | --- | --- |
 | TCP (`tcp`) | `TcpFactory` | interoperability-tested through Modbus TCP | [`parity/transport.md`](parity/transport.md): `TRANSPORT-TCP-CONNECT`, `UTR-TCP`, `UTR-TCP-OPTIONS` | shipped; the upstream option names are planned for M5 |
-| UDP (`udp`) | none | not supported | [`parity/transport.md`](parity/transport.md): `UTR-UDP` | M2 (S61) |
+| UDP (`udp`) | `UdpFactory`, `transport` feature (on through `modbus`) | simulator-tested (loopback sockets, alone and under Modbus TCP over UDP); interoperability-tested through Modbus TCP over UDP once the first hosted run of job `interop-udp` (diagslave 3.6 with `tc netem`) passes, pending as of 2026-10-29 | [`parity/transport.md`](parity/transport.md): `UTR-UDP`, `UTR-UDP-OPTIONS`, `UTR-UDP-RING`, `UTR-UDP-SHARED` | shipped (S61, ADR-0027); no upstream option is offered, no shared socket |
 | TLS (`tls`), TLS-PSK (`tls-psk`) | none | not supported | [`parity/transport.md`](parity/transport.md): `UTR-TLS`, `UTR-TLS-PSK` | M3 |
 | COTP (`cotp`) | none | not supported | [`parity/transport.md`](parity/transport.md): `UTR-COTP`; wire rows in [`parity/s7.md`](parity/s7.md) | M4 with S7 |
 | Serial (`serial`) | `SerialFactory`, `serial` feature (on through `modbus` since S59) | simulator-tested (a virtual pseudo-terminal pair on Linux, S58; through Modbus RTU on the in-memory transport, S59) | [`parity/transport.md`](parity/transport.md): `UTR-SERIAL`, `TRANSPORT-SERIAL-CONFIG`, `TRANSPORT-SERIAL-WORKER` | shipped (S58); no hardware |
@@ -374,7 +375,7 @@ and why.
 | `MB-ADDR-EXTENDED`, `MB-LIMIT-EXT` | an extended read is at most 120 registers, a selection there included (upstream allows 125, whose answer no device may send), every FC20 sub-response is used, an FC21 write is confirmed only by the echo of the whole request, and the last extended address is 655349999 (upstream's 655359999 would name file 65536) |
 | `MB-READ-GAP` | no gap reads: only adjacent or overlapping tags merge (decided S51: a hole in a device map would fail the whole merged request) |
 | `MB-LIMIT-ADU` | the MBAP length is bounded (2..=254, ADU at most 260 bytes) before the body is read |
-| `MB-QUIRK-A`, `MB-QUIRK-B`, `MB-QUIRK-C` | the bogus `UDPTransport` import, the split FC20 second-item loss and the dead FC05 branch are not ported |
+| `MB-QUIRK-A`, `MB-QUIRK-B`, `MB-QUIRK-C` | the bogus `UDPTransport` import, the split FC20 second-item loss and the dead FC05 branch are not ported; `modbus-tcp:udp` takes the declared default port 502 where upstream fails for want of a port (S61) |
 | `MB-QUIRK-D` | ported on purpose: `ping` reports success for any reply that answers it, an exception included, as upstream's `onPing` does |
 | `MB-QUIRK-F` | the undeclared `unit-identifier` of the upstream test suite is an error |
 | `MB-QUIRK-G` | `4x:INT` is a typed `InvalidAddress`, not a `NumberFormatException` (inferred) |
@@ -390,7 +391,7 @@ byte-order names (`MB-ADDR-CONFIG-BLOCK`). Inferences about upstream behavior ar
 
 ## Known gaps
 
-Strings, calendar types, Modbus ASCII, RTU against an independent server, UDP and TLS,
+Strings, calendar types, Modbus ASCII, RTU against an independent server, TLS,
 and hardware verification are listed above; Modbus subscriptions poll since S55 and
 extended registers are read and written since S50. Also not done: a mutation
 threshold as a gate (one recorded run, `docs/evidence/alpha.md`), soak and benchmark

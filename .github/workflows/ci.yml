@@ -327,6 +327,49 @@ jobs:
           path: target/interop-evidence/toxiproxy/
       - run: interop/toxiproxy/interop.sh stop
         if: ${{ always() }}
+  interop-udp:
+    # Modbus TCP over UDP (modbus-tcp:udp) against an independent peer: diagslave 3.6, the free
+    # Modbus slave simulator of proconX, as a Modbus UDP slave in Docker, built from
+    # interop/diagslave/ on the Debian trixie image pinned by digest, with the diagslave archive
+    # checked by SHA-256 (slice S61, ADR-0027). The tests put tc netem on the container's
+    # interface for loss, delay, duplication and reordering, which Toxiproxy cannot do for UDP.
+    # The steps are the subcommands of interop/diagslave/interop.sh, which
+    # `mise run interop-udp` also runs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
+        with:
+          toolchain: "1.99.1"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.148
+      # tc netem inside the container runs on the runner's kernel, which must have the sch_netem
+      # module; load it first, so that a kernel without it fails here and not in a test.
+      - run: sudo modprobe sch_netem
+      # docker build -f interop/diagslave/Dockerfile -t stonecrab-interop-diagslave:local .
+      # Fails on a diagslave archive whose SHA-256 is not the pinned one.
+      - run: interop/diagslave/interop.sh build
+      # docker run -d --cap-add NET_ADMIN on 127.0.0.1:1502/udp, then put a netem discipline on
+      # the container's eth0 and remove it again, which fails when the kernel cannot do netem.
+      - run: interop/diagslave/interop.sh start
+      # Probe until 60 s have elapsed (a real Modbus read over UDP, see interop.sh).
+      - run: interop/diagslave/interop.sh wait
+      # cargo nextest run --locked -p stonecrab --all-features --run-ignored ignored-only
+      #   -E 'binary(modbus_interop_diagslave) & test(/^tests::interop_/)' --test-threads 1
+      # The netem discipline belongs to the container, hence one test at a time. The step fails
+      # when the filter does not select exactly EXPECTED_TESTS (in interop.sh) tests.
+      - run: interop/diagslave/interop.sh tests
+      # Image id, base, archive checksum, iproute2 version and server log next to the test output.
+      - run: interop/diagslave/interop.sh evidence
+        if: ${{ always() }}
+      - uses: actions/upload-artifact@v6
+        if: ${{ always() }}
+        with:
+          name: interop-udp-evidence
+          path: target/interop-evidence/diagslave/
+      - run: interop/diagslave/interop.sh stop
+        if: ${{ always() }}
   machete:
     runs-on: ubuntu-latest
     steps:

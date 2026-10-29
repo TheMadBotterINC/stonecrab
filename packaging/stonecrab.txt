@@ -110,6 +110,7 @@ src/transport/serial.rs
 src/transport/serial_worker.rs
 src/transport/tcp.rs
 src/transport/traits.rs
+src/transport/udp.rs
 src/transport.rs
 src/uri.rs
 src/value.rs

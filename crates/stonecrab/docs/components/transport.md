@@ -24,7 +24,8 @@ types are Stonecrab's own contract. The behavior that is specified is recorded i
 | `SystemClock` (Tokio timer) | interoperability-tested |
 | `Jitter` (xorshift64* sample source for `ReconnectPolicy::next_delay`) | build-tested |
 | `SerialTransport` and `SerialFactory` (feature `serial`) | simulator-tested |
-| UDP and TLS transports | planned |
+| `UdpTransport` and `UdpFactory`, `Transport::delivers_datagrams` | simulator-tested; interoperability-tested once the first hosted `interop-udp` run passes |
+| TLS transport | planned |
 | Hardware verification | planned |
 
 How the levels were reached. The TCP transport has byte-level tests over real loopback
@@ -48,6 +49,15 @@ pair tests run on Unix other than macOS: `serial2` builds its pair with a baud-r
 that a macOS pseudo-terminal refuses, and Windows has no pseudo-terminals. Where they do not
 run, the in-memory tests still do.
 
+The UDP transport (S61, ADR-0027) has datagram tests over real loopback sockets (the source
+filter, kept boundaries, an oversize datagram, the send bound, a closed port, timeouts) and,
+through `stonecrab::modbus` (`modbus-tcp:udp`), carries the reads, writes and ping of its
+`interop-udp` job against diagslave 3.6, an independent Modbus UDP slave, with `tc netem`
+losing, delaying, duplicating and reordering the replies on a real clock. Its first local run
+went through a UDP-over-TCP relay, because colima's default port forwarder does not forward
+UDP; the hosted job publishes the UDP port directly, and its first run is pending as of
+2026-10-29.
+
 ## Feature
 The module exists only with the `transport` feature, which is the only thing that brings
 Tokio into the crate: `rt`, `net`, `time`, `sync` and `io-util` are scoped on, and the
@@ -60,7 +70,8 @@ guard aborts it (ADR-0014, addendum S57).
 
 The `serial` feature adds `SerialTransport` and `SerialFactory` to the module and turns on
 `transport` and the `serial2` crate. No other feature enables it, so a build without it has
-no `serial2` in its dependency graph. See [Serial](#serial).
+no `serial2` in its dependency graph. See [Serial](#serial). The UDP transport needs nothing
+beyond Tokio's `net`, so it is part of `transport` itself. See [UDP](#udp).
 
 ## The deadline rule
 Every call that waits takes the `Deadline` it must finish by, and that argument is the
@@ -111,6 +122,29 @@ no-background-work rule of decision D15 holds here too.
   the bytes are handed to the operating system, not when the last bit has left the line.
   The port is not opened exclusively: keep one transport per port.
 
+## UDP
+`UdpFactory::open` takes an `Endpoint::Custom` holding `host:port` (an IPv6 host in brackets),
+resolves it, and connects a new socket on an ephemeral port to the first address (ADR-0027).
+The operating system then delivers datagrams from that address only; a datagram from any
+other address is never seen, as upstream. Every open makes a new socket, so a reply sent to
+an earlier one never reaches a later one.
+
+- **One datagram per call.** `send` sends one datagram; one above `max_frame_bytes` or
+  65 507 bytes (the largest UDP payload over IPv4) is `ResourceLimit` before any I/O. `recv`
+  appends exactly one whole datagram, so boundaries are kept; one longer than the free space
+  of the buffer is consumed and reported as `ResourceLimit` with nothing appended, where
+  upstream drops it and only logs a warning. An empty datagram is skipped, so `recv` never
+  returns `0`. `Transport::delivers_datagrams` is true, which tells `FramedTransport` where
+  a datagram ends (see [Framing](#framing)).
+- **No connection.** Opening and `shutdown` send nothing. A peer that does not listen is
+  noticed only when the operating system reports an ICMP port-unreachable message for an
+  earlier datagram, as `Disconnected` on a later call (the transport is then unusable and
+  the guard opens a new socket); where ICMP is filtered the request times out. A send cut
+  short by its deadline leaves the transport usable, since a datagram goes whole or not at
+  all. Nothing retransmits: a lost datagram is a request that times out.
+- **No options.** Upstream's `udp.` options are not offered; why each is refused or
+  deferred is recorded in ADR-0027 and the transport record (`UTR-UDP-OPTIONS`).
+
 ## Framing
 A `Framer<F>` turns bytes into frames (`decode`, `encode`, `max_frame_bytes`) and does no
 I/O. `FramedTransport<F, R>` joins a `Box<dyn Transport>` with a framer `R` and owns the
@@ -119,7 +153,9 @@ receive buffer, bounded by `max_buffered_bytes`:
 - `next_frame(deadline)` receives until the framer yields a whole frame. Fragmented
   frames are assembled, coalesced frames come out of successive calls, a frame over the
   framer's maximum fails with `ResourceLimit` as soon as its header is in, and a peer that
-  closes mid-frame is `Disconnected`.
+  closes mid-frame is `Disconnected`. Over a transport that delivers datagrams (UDP), a
+  datagram that ends inside a frame is never joined to the next one: its bytes are dropped
+  and the read fails with `MalformedData`.
 - `send_frame(&frame, deadline)` encodes into a scratch buffer and sends one transport
   frame; a frame over the smaller of the framer's and the transport's frame limit fails
   with `ResourceLimit` before anything is sent.
@@ -128,7 +164,8 @@ receive buffer, bounded by `max_buffered_bytes`:
   receiving. It fails with `Disconnected` when the deadline passes without a frame
   boundary. A framer whose `Framer::resync_discards` is true (Modbus RTU since S59, where
   a byte-wise search could wait for a frame tail that never comes) has the whole buffer
-  dropped instead, counted in `GuardStats::resyncs`. Its deadline is the remaining deadline of the request whose timeout triggered
+  dropped instead, counted in `GuardStats::resyncs`, and so does a transport that delivers
+  datagrams, whose buffered bytes no later datagram continues. Its deadline is the remaining deadline of the request whose timeout triggered
   it, or `Deadline::after(clock.now(), timeouts.request)` from close or recovery.
 
 ## The connection guard
@@ -198,7 +235,8 @@ it and does the correlation. Observe it with `state()` and `watch_state()`, coun
 `ErrorKind::ResourceLimit` when the buffer is already full. `send` carries one frame and
 refuses more than `ResourceLimits::max_frame_bytes`. A `send` that is cut short may have
 put a prefix of the frame on the wire, so the transport poisons itself and the owner
-reopens it.
+reopens it; a datagram cannot be cut short, so a UDP `send` cut short leaves the transport
+usable.
 
 ```rust
 # fn main() -> Result<(), Box<dyn std::error::Error>> {

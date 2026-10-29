@@ -212,6 +212,10 @@ impl Transport for CountingTransport {
     fn limits(&self) -> &ResourceLimits {
         self.inner.limits()
     }
+
+    fn delivers_datagrams(&self) -> bool {
+        self.inner.delivers_datagrams()
+    }
 }
 
 #[cfg(test)]
@@ -319,6 +323,26 @@ mod tests {
             block_on_with(&clock, factory.open(&target, limits(), deadline(&clock))).expect("open");
         assert_eq!(transport.peer(), &target, "peer");
         assert_eq!(transport.limits(), &limits(), "limits");
+        assert!(!transport.delivers_datagrams(), "a byte stream stays one");
+    }
+
+    #[tokio::test]
+    async fn the_wrapper_keeps_the_datagram_boundaries_of_a_udp_transport() {
+        let device = tokio::net::UdpSocket::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let target = Endpoint::Custom(device.local_addr().expect("address").to_string());
+        let factory = CountingFactory::new(Arc::new(crate::transport::UdpFactory::default()));
+        let deadline = Deadline::after(std::time::Instant::now(), Duration::from_secs(5))
+            .expect("representable");
+        let transport = factory
+            .open(&target, limits(), deadline)
+            .await
+            .expect("open");
+        assert!(
+            transport.delivers_datagrams(),
+            "FramedTransport must still see datagrams"
+        );
     }
 
     #[test]

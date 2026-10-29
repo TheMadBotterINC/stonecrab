@@ -73,16 +73,48 @@ mod tests {
         );
     }
 
+    // covers: S61 / MB-TCP-TRANSPORTS-UDP, MB-QUIRK-A udp accepted with the declared port 502
+    #[test]
+    fn driver_accepts_the_udp_transport_and_defaults_port_502() {
+        let custom = |text: &str| Endpoint::Custom(text.to_owned());
+        assert_eq!(
+            config("modbus-tcp:udp://192.0.2.10").endpoint(),
+            &custom("192.0.2.10:502")
+        );
+        assert_eq!(
+            config("modbus-tcp:udp://plc-1.line_2:1502?request-timeout-ms=100").endpoint(),
+            &custom("plc-1.line_2:1502")
+        );
+        assert_eq!(
+            config("modbus-tcp:udp://[::1]:5020").endpoint(),
+            &custom("[::1]:5020")
+        );
+        let options = options("modbus-tcp:udp://192.0.2.10?default-unit-identifier=9");
+        assert_eq!(
+            options.unit_id,
+            UnitId::from(9),
+            "the parameters apply as for tcp"
+        );
+        for uri in [
+            "modbus-tcp:udp://192.0.2.10:0",
+            "modbus-tcp:udp://:502",
+            "modbus-tcp:udp://::1",
+            "modbus-tcp:udp://host/path",
+        ] {
+            assert_refused(uri);
+        }
+    }
+
     // covers: ALPHA_PLAN S26 / MB-TCP-TRANSPORTS, MB-QUIRK-A other transports refused
     #[test]
     fn driver_rejects_other_transport_codes() {
-        for code in ["udp", "tls", "tls-psk", "test", "TCP", "tcp2", ""] {
+        for code in ["tls", "tls-psk", "test", "TCP", "UDP", "tcp2", "udp6", ""] {
             assert_refused(&format!("modbus-tcp:{code}://192.0.2.10"));
         }
         assert_refused("modbus-rtu://192.0.2.10");
         assert_refused("sim://bench");
         assert_refused("192.0.2.10");
-        assert_refused("modbus-tcp:udp://192.0.2.10?request-timeout-ms=100");
+        assert_refused("modbus-tcp:tls://192.0.2.10?request-timeout-ms=100");
     }
 
     // covers: ALPHA_PLAN S26 / MB-TCP-TRANSPORTS port bounds
@@ -419,6 +451,10 @@ mod tests {
             "surprise",
             "allow-unsupported-transport",
             "tcp.keep-alive",
+            "udp.local-port",
+            "udp.max-packet-size",
+            "udp.multicast-ttl",
+            "udp.read-timeout-ms",
             "REQUEST-TIMEOUT-MS",
             "request-timeout",
             "unit-id",

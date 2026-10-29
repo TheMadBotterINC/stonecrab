@@ -267,6 +267,10 @@ impl<F: Send, R: Framer<F>> FramedTransport<F, R> {
     ///   discarded; call [`resync`](Self::resync) to move past the bytes.
     /// - [`ErrorKind::MalformedData`] if the framer rejects the header. Nothing is
     ///   discarded and the same error is returned until [`resync`](Self::resync).
+    /// - [`ErrorKind::MalformedData`] also when the transport delivers datagrams
+    ///   ([`Transport::delivers_datagrams`]) and a datagram ends inside a frame: no later
+    ///   datagram can complete it, so its remaining bytes are dropped and nothing more is
+    ///   read for this call.
     ///
     /// # Cancel safety
     /// Cancel-safe. A dropped or timed-out call loses nothing: received bytes are already
@@ -318,6 +322,12 @@ impl<F: Send, R: Framer<F>> FramedTransport<F, R> {
                     .map_err(frame_failure)?
                 {
                     return Ok(frame);
+                }
+                if self.transport.delivers_datagrams() && !self.buffer.is_empty() {
+                    // The last datagram ended inside a frame; joining the next one to it
+                    // would merge two datagrams into one frame.
+                    self.buffer.clear();
+                    return Err(frame_failure(FrameError::Truncated));
                 }
                 self.fill(deadline).await?;
             }
@@ -406,7 +416,9 @@ impl<F: Send, R: Framer<F>> FramedTransport<F, R> {
     /// A framer whose [`Framer::resync_discards`] is true (Modbus RTU, where only silence
     /// separates frames) is not searched: every buffered byte is dropped, nothing is
     /// received and the call returns at once with no frame held, so the next
-    /// [`next_frame`](Self::next_frame) reads what arrives after it.
+    /// [`next_frame`](Self::next_frame) reads what arrives after it. The same holds over a
+    /// transport whose [`Transport::delivers_datagrams`] is true: buffered bytes are the
+    /// rest of a datagram that no later datagram continues.
     ///
     /// A frame held by an earlier `resync` is dropped first. A framer with no sync marker
     /// (a bare length prefix) can lock onto a false header in garbage; `resync` is best
@@ -476,7 +488,7 @@ impl<F: Send, R: Framer<F>> FramedTransport<F, R> {
     pub fn resync(&mut self, deadline: Deadline) -> OpFuture<'_, ()> {
         Box::pin(async move {
             self.ready = None;
-            if self.framer.resync_discards() {
+            if self.framer.resync_discards() || self.transport.delivers_datagrams() {
                 self.buffer.clear();
                 return Ok(());
             }

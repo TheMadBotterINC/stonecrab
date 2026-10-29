@@ -51,6 +51,27 @@ placeholder.
   `MB-TYPE-CHAR`, `MB-TYPE-WCHAR`, `MB-TYPE-STRING`, `MB-TYPE-WSTRING` (implemented),
   `MB-INTEROP-TEXT` (new), divergence rows `MB-TYPE-STRING` and `MB-TYPE-CHAR` (new),
   `MB-ADDR-STRING` (retired) and `CORE-VALUE-BYTES` (deferred).
+- UDP transport and Modbus TCP over UDP (ADR-0027; additive): `stonecrab::transport::UdpFactory`
+  and `UdpTransport` open one socket per connection, connected to the first address of an
+  `Endpoint::Custom` holding `host:port`, so datagrams from any other address are ignored.
+  `send` sends one datagram and refuses one above `max_frame_bytes` or 65 507 bytes with
+  `ResourceLimit`; `recv` appends exactly one whole datagram, a datagram longer than the free
+  space is consumed and reported as `ResourceLimit` (upstream drops it and logs a warning), and
+  an empty one is skipped. Opening and `shutdown` send nothing; a port the operating system
+  reports unreachable is `Disconnected`. New provided method `Transport::delivers_datagrams`
+  (default `false`): over such a transport `FramedTransport::next_frame` never joins the rest of
+  one datagram to the next (the bytes are dropped and the read is `MalformedData`) and `resync`
+  drops the buffer instead of searching it; the testkit's `CountingFactory` passes it through.
+  `modbus-tcp:udp://host[:port]` (default port 502, where upstream's declared default never
+  applies, `MB-QUIRK-A`) uses the MBAP framing and session of `tcp`, one frame per datagram:
+  duplicated and late replies are discarded by transaction id. `ModbusTcpDriver::new` now opens
+  `UdpFactory` for that transport code and `TcpFactory` otherwise; an injected factory still
+  serves every code. No `udp.` option is offered: every such key stays `InvalidConfig`. Interop:
+  diagslave 3.6 (proconX freeware, downloaded at build time and checked by SHA-256, never
+  redistributed) as a Modbus UDP slave with `tc netem` loss, delay, duplication and reordering,
+  in the new `interop-udp` CI job and `mise run interop-udp`, which `mise run interop` now
+  includes. Parity rows `UTR-UDP` (automated-verified), `UTR-UDP-RING`, `UTR-UDP-OPTIONS`
+  (implemented) and `MB-TCP-TRANSPORTS-UDP` (automated-verified).
 - Lists and Modbus array selections (ADR-0022; additive): `PlcValue::List(Vec<PlcValue>)`
   and `PlcValueType::List`, appended after `DateTime`; equality compares the elements in
   order, and nothing is coerced. Modbus addresses take the upstream array notation on every
