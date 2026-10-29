@@ -633,45 +633,74 @@ mod tests {
         );
     }
 
-    // covers: SPEC mandatory-failure-cases / F3 invalid register
+    // covers: SPEC mandatory-failure-cases / F3 invalid register; MB-TYPE-STRING,
+    // MB-TYPE-WSTRING (upstream ModbusStringTest.refusesAStringWithoutALength)
     #[test]
-    fn string_type_is_rejected_at_parse_time() {
-        assert_rejected_naming("holding-register:1:STRING", "string and character types");
-        assert_rejected_naming(
-            "holding-register:1:STRING(20)",
-            "string and character types",
+    fn a_string_without_a_length_is_rejected_at_parse_time() {
+        assert_rejected_naming("holding-register:8:STRING", "STRING(20)");
+        assert_rejected_naming("input-register:1:WSTRING", "WSTRING(20)");
+        assert_rejected_naming("holding-register:1[0..2]:STRING", "requires the length");
+    }
+
+    // covers: SPEC mandatory-failure-cases / F3 invalid register; MB-TYPE-STRING (upstream
+    // ModbusTagTest.aStringLengthTooWideToBeANumberIsAlsoAnInvalidTag and the `\d{1,5}` of
+    // the tag pattern)
+    #[test]
+    fn a_string_length_is_one_to_five_digits_from_1_to_65535() {
+        assert_eq!(
+            accept("holding-register:1:STRING(1)")
+                .string_length()
+                .map(std::num::NonZeroU16::get),
+            Some(1)
         );
-        assert_rejected_naming(
-            "holding-register:1[0..2]:STRING(20)",
-            "string and character types",
+        assert_eq!(
+            accept("holding-register:1:WSTRING(00125)")
+                .string_length()
+                .map(std::num::NonZeroU16::get),
+            Some(125),
+            "leading zeros, as upstream's Integer.parseInt reads them"
         );
+        for (text, needle) in [
+            ("holding-register:1:STRING(0)", "1 to 65535"),
+            ("holding-register:1:STRING(99999)", "1 to 65535"),
+            (
+                "holding-register:1:STRING(99999999999)",
+                "1 to 5 decimal digits",
+            ),
+            ("holding-register:1:STRING()", "1 to 5 decimal digits"),
+            ("holding-register:1:STRING(20", "1 to 5 decimal digits"),
+            ("holding-register:1:STRING(x)", "1 to 5 decimal digits"),
+            ("holding-register:1:STRING(-1)", "1 to 5 decimal digits"),
+            ("holding-register:1:STRING(20)(4)", "unexpected text"),
+            ("holding-register:1:STRING(251)", "MB-LIMIT-REGISTERS"),
+            ("holding-register:1:WSTRING(126)", "MB-LIMIT-REGISTERS"),
+            ("extended-register:1:STRING(241)", "MB-LIMIT-REGISTERS"),
+        ] {
+            assert_rejected_naming(text, needle);
+        }
     }
 
-    // covers: SPEC mandatory-failure-cases / F3 invalid register
+    // covers: SPEC mandatory-failure-cases / F3 invalid register; MB-ADDR-BIT-TYPES,
+    // MB-TYPE-CHAR, MB-TYPE-WCHAR, MB-TYPE-STRING, MB-TYPE-WSTRING
     #[test]
-    fn wstring_type_is_rejected_at_parse_time() {
-        assert_rejected_naming("holding-register:1:WSTRING", "WSTRING");
-        assert_rejected_naming("input-register:1:WSTRING(8)", "WSTRING");
+    fn text_types_on_a_bit_area_are_rejected_at_parse_time() {
+        for text in [
+            "coil:1:CHAR",
+            "discrete-input:1:WCHAR",
+            "coil:1:STRING(2)",
+            "1x00001:WSTRING(2)",
+        ] {
+            assert_rejected_naming(text, "bit areas read BOOL only");
+        }
     }
 
-    // covers: SPEC mandatory-failure-cases / F3 invalid register
-    #[test]
-    fn char_type_is_rejected_at_parse_time() {
-        assert_rejected_naming("holding-register:1:CHAR", "CHAR");
-        assert_rejected_naming("coil:1:CHAR", "CHAR");
-    }
-
-    // covers: SPEC mandatory-failure-cases / F3 invalid register
-    #[test]
-    fn wchar_type_is_rejected_at_parse_time() {
-        assert_rejected_naming("holding-register:1:WCHAR", "WCHAR");
-    }
-
-    // covers: SPEC mandatory-failure-cases / F3 invalid register
+    // covers: SPEC mandatory-failure-cases / F3 invalid register; MB-TYPE-STRING (upstream
+    // ModbusStringTest.refusesALengthOnANonStringType)
     #[test]
     fn parenthesised_length_is_rejected() {
-        assert_rejected_naming("holding-register:1:INT(2)", "parenthesised length");
-        assert_rejected_naming("coil:1:BOOL(1)", "parenthesised length");
+        assert_rejected_naming("holding-register:8:INT(20)", "only supported for STRING");
+        assert_rejected_naming("holding-register:1:CHAR(2)", "not for CHAR");
+        assert_rejected_naming("coil:1:BOOL(1)", "only supported for STRING");
     }
 
     // covers: SPEC mandatory-failure-cases / F3 invalid register

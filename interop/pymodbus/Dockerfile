@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY interop/pymodbus/server.py /app/server.py
 COPY fixtures/modbus/interop/register-map.toml /app/register-map.toml
+COPY fixtures/modbus/interop/text-registers.toml /app/text-registers.toml
 
 # The server needs no privileges: port 5020 is above 1023 and it writes nothing.
 RUN useradd --system --no-create-home --uid 10001 modbus

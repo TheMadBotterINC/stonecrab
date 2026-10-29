@@ -24,6 +24,33 @@ placeholder.
   retrieved while this was written, no converter was read, and the bench record is a runbook,
   `docs/hardware/max31855-spi.md`, that needs the maintainer's approval. No change to any
   industrial parity status.
+- Modbus text types (ADR-0025, finding G08; additive): `CHAR`, `WCHAR`, `STRING(n)` and
+  `WSTRING(n)` read and write on holding, input (read) and extended registers.
+  `ModbusDataType` gains `Char`, `WChar`, `String` and `WString`, appended after `LReal`;
+  `ModbusAddress::string_length`, `ModbusAddressBuilder::string_length` and a
+  `string_length` field on the batcher's `Member` carry the declared length, which the
+  address text writes in parentheses (`holding-register:1:STRING(20)`, 1 to 5 digits, 1 to
+  65535, required for the two strings and refused elsewhere). `CHAR` (one byte of UTF-8)
+  and `WCHAR` (one UTF-16BE code unit) are `PlcValue::Char`; `STRING(n)` (`n` bytes of
+  UTF-8) and `WSTRING(n)` (`n` code units) are `PlcValue::String`, read up to the first NUL
+  with trailing spaces kept and written padded with NUL. Bytes that are not UTF-8 or UTF-16
+  fail the item with `MalformedData` and the bytes kept in its status; nothing is replaced,
+  where upstream substitutes U+FFFD. A write that does not fit, a string holding NUL, a
+  `CHAR` above U+007F and a `WCHAR` outside the Basic Multilingual Plane are the item's
+  `InvalidConfig` rejection with no request, and a string wider than one write (more than
+  123 registers) its `ResourceLimit` rejection. Text is bytes in register order, each
+  register swapped only under the two byte-swap modes, as upstream. A text address takes
+  the registers its bytes fill, which the batcher and the read limits count (`STRING(250)`
+  and `WSTRING(125)` fit one read); `CHAR`s pack two to a register and strings back to
+  back in a list, and a selection that starts inside a register (`[1]:CHAR`) is
+  `InvalidAddress`, as upstream refuses it. `TypedDecoder` reads and writes one register of
+  a text type. Behavior change: the four names, refused at parse time since the alpha,
+  are accepted; the message of a parenthesised length on another type changed. Not added:
+  `PlcValue::Bytes`, which waits for a type that needs it. The pymodbus peer serves text
+  registers from `fixtures/modbus/interop/text-registers.toml`. Parity rows
+  `MB-TYPE-CHAR`, `MB-TYPE-WCHAR`, `MB-TYPE-STRING`, `MB-TYPE-WSTRING` (implemented),
+  `MB-INTEROP-TEXT` (new), divergence rows `MB-TYPE-STRING` and `MB-TYPE-CHAR` (new),
+  `MB-ADDR-STRING` (retired) and `CORE-VALUE-BYTES` (deferred).
 - Lists and Modbus array selections (ADR-0022; additive): `PlcValue::List(Vec<PlcValue>)`
   and `PlcValueType::List`, appended after `DateTime`; equality compares the elements in
   order, and nothing is coerced. Modbus addresses take the upstream array notation on every

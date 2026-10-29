@@ -63,6 +63,7 @@ hardware record exists.
 | Modbus TCP | unit-ID correlation: a separate map per unit on one connection, tags of several units in one batch, the unit in the address block over `default-unit-identifier`, silence from an unknown unit ending in `Timeout` at the deadline | `modbus` | interoperability-tested | `MB-READ-MATCH`, `MB-READ-TIMEOUT`, `MB-READ-MERGE`, `MB-CFG-UNIT-ID`, `MB-ADDR-CONFIG-BLOCK` | first-party multi-unit server on modbus-tk 1.1.5 (units 1, 2 and 247; every other unit is silent), job `interop-modbus-tk`: `interop_each_unit_on_one_connection_answers_with_its_own_map`, `interop_one_batch_across_units_gets_each_tag_its_own_units_value`, `interop_requests_to_alternating_units_and_functions_get_the_right_answers`, `interop_an_unknown_unit_times_out_at_the_deadline_and_the_connection_goes_on`, `interop_a_batch_with_an_unknown_unit_ends_in_the_timeout`, `interop_the_unit_in_the_address_block_overrides_the_default_unit_identifier`; a first-party peer, so this level at most |
 | Modbus TCP | write coils (FC15) and holding registers (FC06, FC16); FC05 is never sent | `modbus` | interoperability-tested | `MB-TCP-WRITE`, `MB-CFG-ACCESS`, `MB-WRITE-ACCESS`, `MB-WRITE-UNKNOWN`, `MB-WRITE-HALT`, `MB-WRITE-ECHO` | `Capabilities.write = true`; refused before any I/O unless the connection string says `access=read-write`; one request per item, as upstream; an echo is `Confirmed`, an exception `Rejected`, a request that went out without a usable answer `Unknown` and never replayed; pymodbus 3.8.6 via the `interop` job (`interop_writes_*`); the 29 upstream write exchanges Stonecrab can address replay byte for byte |
 | Modbus TCP | subscriptions by polling: cyclic and change-of-state (1000 ms), event refused | `modbus` | simulator-tested | `MB-TCP-SUBSCRIBE` | `Capabilities.subscribe = Polling` (S55); `FakeTransport` and fake clock, the six subscription contract cases, `a_polling_read_and_a_user_read_never_run_together`; the event refusal and the close of a subscription also run against pymodbus 3.8.6 in the `interop` job's contract run, the timed cases do not (D21) |
+| Modbus TCP | read and write `CHAR`, `WCHAR`, `STRING(n)` and `WSTRING(n)` on holding, input (read) and extended registers, alone and as packed lists | `modbus` | simulator-tested | `MB-TYPE-CHAR`, `MB-TYPE-WCHAR`, `MB-TYPE-STRING`, `MB-TYPE-WSTRING`, ADR-0025 | `FakeTransport` and fake clock (`tests/modbus_text.rs`), the upstream string tests of plc4j and plc4go transcribed; `interop_reads_and_writes_text_registers` against pymodbus 3.8.6 passed with `mise run interop` on 2026-10-29, not yet on the hosted runner |
 | Any physical device | everything | none yet | planned | none | milestone M2S (board adapters, hardware runner, hardware records); no record exists |
 | Modbus TCP | browse | `modbus` | not supported | `MB-TCP-BROWSE` | upstream has no Modbus browse |
 | Modbus TCP | discover | `modbus` | not supported | `MB-TCP-DISCOVER` | deferred |
@@ -174,14 +175,15 @@ pinned baseline or in plc4x-extras `v1.0.0`; they are rows `INTEG-KARAF` and `TO
 ## Data types
 
 Registers are 16 bits. A multi-register value is laid out by the byte-order mode below.
-`ModbusDataType` has the 15 numeric and bit types; one element per tag.
+`ModbusDataType` has the 15 numeric and bit types and, since S49, the four text types
+(ADR-0025); one element per tag, or a list through a selection.
 
 | Modbus area | Function code | Types accepted | Values |
 | --- | --- | --- | --- |
 | `coil` (`0x`) | 01 | `BOOL` only | `Bool` |
 | `discrete-input` (`1x`) | 02 | `BOOL` only | `Bool` |
-| `holding-register` (`4x`) | 03 | all 15 | see below |
-| `input-register` (`3x`) | 04 | all 15 | see below |
+| `holding-register` (`4x`) | 03 | all 19 | see below |
+| `input-register` (`3x`) | 04 | all 19 | see below |
 
 | Type | Registers | `PlcValue` |
 | --- | --- | --- |
@@ -196,18 +198,33 @@ Registers are 16 bits. A multi-register value is laid out by the byte-order mode
 | `LWORD`, `ULINT` | 4 | `U64` |
 | `LINT` | 4 | `I64` |
 | `LREAL` | 4 | `F64` (bit for bit) |
+| `CHAR` | 1 (the first byte; two per register in a list) | `Char`, one byte of UTF-8 (U+0000 to U+007F) |
+| `WCHAR` | 1 | `Char`, one UTF-16BE code unit |
+| `STRING(n)` | `ceil(n / 2)` | `String`, `n` bytes of UTF-8 up to the first NUL |
+| `WSTRING(n)` | `n` | `String`, `n` UTF-16BE code units up to the first NUL |
+
+Text (`MB-TYPE-CHAR` to `MB-TYPE-WSTRING`, ADR-0025): `STRING` and `WSTRING` need their
+length, `STRING(20)`, 1 to 5 digits, and a string must fit one read (`STRING(250)`,
+`WSTRING(125)`). Text is bytes in register order; the two bytes of each register are
+swapped only under `BIG_ENDIAN_BYTE_SWAP` and `LITTLE_ENDIAN_BYTE_SWAP`, as upstream reads
+strings. Bytes that are not UTF-8 or UTF-16 fail the item with `MalformedData` and the
+bytes kept, where upstream substitutes U+FFFD; trailing spaces are kept. A write is padded
+with NUL bytes to the declared length and refused, with nothing sent, when it does not fit
+or holds a NUL.
 
 Not supported, and rejected at parse time with `InvalidAddress`: a type other than `BOOL`
-on a bit area (`MB-ADDR-BIT-TYPES`), `STRING`, `WSTRING`, `CHAR`, `WCHAR`
-(`MB-ADDR-STRING`), the `TIME`, `LTIME`, `DATE`, `LDATE`, `TIME_OF_DAY`, `LTIME_OF_DAY`,
-`DATE_AND_TIME` and `LDATE_AND_TIME` names (`MB-TYPE-TIME`). The extended registers
-(`extended-register`, `6x`, FC20 and FC21) take the 15 types of the holding registers
-(`MB-ADDR-EXTENDED`). An array selection, `[i]` or `[lo..hi]` with an optional `;base`
-between the number and the type, is accepted on every area, the extended registers
-included (`MB-ADDR-SELECTION`, ADR-0022 and its addendum of 2026-10-29): an index is the
-element's own address and reads a scalar, a range reads and writes one `PlcValue::List`.
+on a bit area (`MB-ADDR-BIT-TYPES`), the `TIME`, `LTIME`, `DATE`, `LDATE`,
+`TIME_OF_DAY`, `LTIME_OF_DAY`, `DATE_AND_TIME` and `LDATE_AND_TIME` names
+(`MB-TYPE-TIME`). The extended registers (`extended-register`, `6x`, FC20 and FC21) take
+the 19 types of the holding registers (`MB-ADDR-EXTENDED`). An array selection, `[i]` or
+`[lo..hi]` with an optional `;base` between the number and the type, is accepted on every
+area, the extended registers included (`MB-ADDR-SELECTION`, ADR-0022 and its addendum of
+2026-10-29): an index is the element's own address and reads a scalar, a range reads and
+writes one `PlcValue::List`; `CHAR`s pack two to a register and strings back to back, and
+a selection that starts inside a register (`[1]:CHAR`) is refused, as upstream refuses it.
 Core has `List` (ADR-0022) and the calendar value variants (ADR-0021),
-which no Modbus type maps to yet, and no `Bytes`, `Struct` or `Raw` variant (ADR-0006).
+which no Modbus type maps to yet, and no `Bytes`, `Struct` or `Raw` variant (ADR-0006;
+`Bytes` waits for a type that needs it, ADR-0025 decision 9).
 
 Address text: the long form `holding-register:16:INT` and the prefixed short form
 `4x00016:INT` are always accepted; the bare short forms (`40001`) are accepted only when
@@ -260,7 +277,7 @@ unlimited attempts; `RetryPolicy` one attempt, retrying `Timeout`, `Disconnected
 
 | Peer | What ran | Where | Level it supports |
 | --- | --- | --- | --- |
-| pymodbus 3.8.6 on `python:3.12-slim` (pinned by digest), first-party `server.py` over the register map in `fixtures/modbus/interop/register-map.toml`, TCP port 5020 | fifteen `interop_` tests (writes of a holding register, a coil and the multi-register types, read back, included), the `modbus_tcp_read` example, `profile_read --expect-good` for each `modbus-tcp` synthetic profile, the common driver contract suite (17 passed, 16 skipped by name) | the CI job `interop` (ubuntu, every push and pull request) and `mise run interop` | `interoperability-tested` |
+| pymodbus 3.8.6 on `python:3.12-slim` (pinned by digest), first-party `server.py` over the register map in `fixtures/modbus/interop/register-map.toml` and the text registers of `text-registers.toml` beside it (S49), TCP port 5020 | sixteen `interop_` tests (writes of a holding register, a coil, the multi-register types and the text types, read back, included), the `modbus_tcp_read` example, `profile_read --expect-good` for each `modbus-tcp` synthetic profile, the common driver contract suite (17 passed, 16 skipped by name) | the CI job `interop` (ubuntu, every push and pull request) and `mise run interop` | `interoperability-tested` |
 | libmodbus 3.1.11 `unit-test-server` (C, Debian trixie package 3.1.11-2 on `debian:trixie-slim`, pinned by digest), built from the test source the package ships, TCP port 1502, restarted after each connection | ten `interop_` tests: the input bits and input register of `unit-test.h`, coils and holding registers written and read back (FC15, FC06, FC16, a REAL in the four word orders), exception 06, a reply with the wrong transaction id and unit id, a 500 ms delayed reply inside and beyond a deadline, a reply sent one byte at a time, and a short reply to a two-register read | the CI job `interop-libmodbus` (ubuntu, every push and pull request) and `mise run interop` | `interoperability-tested` |
 | modbus-tk 1.1.5 (LGPL-2.1-or-later) running the first-party `interop/modbus-tk/server.py` on `python:3.12-slim` (pinned by digest), units 1, 2 and 247 with a map each, TCP port 5030 | eight `interop_` tests: each unit's map on one connection, one batch across the three units, alternating units and function codes, a unit with a shorter map refusing an address (exception 02), an unknown unit (9, 255) timing out at the deadline with the connection still good, a batch with an unknown unit, the address block's unit over `default-unit-identifier`, and a write to one unit | the CI job `interop-modbus-tk` (ubuntu, every push and pull request) and `mise run interop` | `interoperability-tested` (the server is first-party code, so no named device profile rests on it) |
 | Toxiproxy 2.13.0 (MIT, pinned by digest) in front of pymodbus and libmodbus, `docker pause`, `docker kill` and `docker start` on the pymodbus container, and tshark 4.4 (Debian trixie) decoding the capture | ten `interop_toxi_` tests on a real clock (the failure paths of the row above); the capture of the run, taken in the Toxiproxy container's network namespace, holds no malformed packet, every driver request is one well-formed Modbus/TCP frame and every peer segment is Modbus/TCP | the CI job `interop-toxiproxy` (ubuntu, every push and pull request) and `mise run interop-toxiproxy` | `interoperability-tested` (the faults are injected; the peers are the same) |
@@ -351,7 +368,8 @@ and why.
 | `MB-EXC-03` | exception 3 is `DeviceException` with the raw code, not `INVALID_DATA` |
 | `MB-EXC-05` | exception 5 (ACKNOWLEDGE) is `DeviceException`, never success |
 | `MB-EXC-UNKNOWN` | an exception code outside the ten defined ones is refused as malformed |
-| `MB-ADDR-STRING`, `MB-TYPE-TIME` | deferred address features are typed `InvalidAddress` rejections |
+| `MB-TYPE-TIME` | the calendar names are typed `InvalidAddress` rejections |
+| `MB-TYPE-STRING`, `MB-TYPE-CHAR` | text that is not UTF-8 or UTF-16 is an item error, not U+FFFD; trailing spaces and U+FEFF are kept and a NUL `CHAR` is `'\0'`; a lone `CHAR` and an odd-length string are written padded to a whole register, where upstream's write fails its own length check; the byte-swap modes swap whole registers, also for the last byte of an odd-length value |
 | `MB-ADDR-SELECTION` | every element of a range takes the registers it takes alone (no packing of 8-bit and `BOOL` elements), `[4..4]` is a list of one, and a list wider than one write PDU is refused with no request |
 | `MB-ADDR-EXTENDED`, `MB-LIMIT-EXT` | an extended read is at most 120 registers, a selection there included (upstream allows 125, whose answer no device may send), every FC20 sub-response is used, an FC21 write is confirmed only by the echo of the whole request, and the last extended address is 655349999 (upstream's 655359999 would name file 65536) |
 | `MB-READ-GAP` | no gap reads: only adjacent or overlapping tags merge (decided S51: a hole in a device map would fail the whole merged request) |

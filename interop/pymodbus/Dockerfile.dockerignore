@@ -3,3 +3,4 @@
 !interop/pymodbus/requirements.txt
 !interop/pymodbus/server.py
 !fixtures/modbus/interop/register-map.toml
+!fixtures/modbus/interop/text-registers.toml

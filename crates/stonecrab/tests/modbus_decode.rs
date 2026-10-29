@@ -1393,7 +1393,11 @@ mod tests {
             ModbusDataType::LInt => PlcValue::I64(-7),
             ModbusDataType::Real => PlcValue::F32(7.5),
             ModbusDataType::LReal => PlcValue::F64(7.5),
-            _ => panic!("the 15 types of the alpha"),
+            ModbusDataType::Char
+            | ModbusDataType::WChar
+            | ModbusDataType::String
+            | ModbusDataType::WString
+            | _ => panic!("the 15 numeric and bit types"),
         }
     }
 
@@ -1502,7 +1506,11 @@ mod tests {
             ModbusDataType::LInt => PlcValue::I64(text.parse().expect("i64")),
             ModbusDataType::Real => PlcValue::F32(text.parse().expect("f32")),
             ModbusDataType::LReal => PlcValue::F64(text.parse().expect("f64")),
-            _ => panic!("the 15 types of the alpha"),
+            ModbusDataType::Char
+            | ModbusDataType::WChar
+            | ModbusDataType::String
+            | ModbusDataType::WString
+            | _ => panic!("the 15 numeric and bit types"),
         }
     }
 

@@ -7,8 +7,9 @@ refused unless the connection says `access=read-write`), the extended registers 
 file record function codes 20 (read) and 21 (write) since S50, a ping that reads one
 address, and polling subscriptions (cyclic and change-of-state, since S55). Since S59 the
 same operations run over Modbus RTU on a serial line or a serial-to-IP gateway (see "Modbus
-RTU" below). ASCII, TLS, UDP, string types, browse and discovery are out of scope for the
-alpha and are listed under "Not in the alpha" below.
+RTU" below), and since S49 the text types `CHAR`, `WCHAR`, `STRING(n)` and `WSTRING(n)`
+are read and written (see "Text" below). ASCII, TLS, UDP, browse and discovery are out of
+scope for the alpha and are listed under "Not in the alpha" below.
 The TCP driver has been checked against an independent server, pymodbus 3.8.6, and no
 physical device; the RTU driver on the in-memory transport and over a loopback socket only.
 No independent server serves the file record function codes, so the extended registers are
@@ -220,6 +221,7 @@ device has been tried.
 | --- | --- |
 | Read: coils, discrete inputs, holding registers and input registers (function codes 01 to 04) as the 15 numeric and bit types | interoperability-tested |
 | Array selections `[i]`, `[lo..hi]` and `;base`: a range read and written as one `PlcValue::List`, on every area (the extended registers included) | simulator-tested |
+| Text: `CHAR`, `WCHAR`, `STRING(n)` and `WSTRING(n)` read and written as `PlcValue::Char` and `PlcValue::String` (the pymodbus interop test passed locally in S49 and is not yet a hosted-runner result) | simulator-tested |
 | Ping: one read of `ping-address` (`Connection::ping`) | interoperability-tested |
 | Write: coils and holding registers (function codes 15, 06 and 16), `Unknown` after a request that went out unanswered | interoperability-tested |
 | Extended registers: read by function code 20 and write by function code 21, cut at the end of each 10000-register file (`extended-register:N`, `6x`, bare `6`) | simulator-tested |
@@ -257,8 +259,9 @@ error rather than ignoring it; operations that have no API at all do not exist:
   other writes, extended registers included, are in the driver (see "Connection");
 - browse and discovery (`MB-TCP-BROWSE`, `MB-TCP-DISCOVER`): these operations do not
   exist in the API; subscriptions poll since S55 (`MB-TCP-SUBSCRIBE`, see "Connection");
-- `STRING`, `WSTRING`, `CHAR`, `WCHAR`, the `TIME` and `DATE` family, a selection of more
-  than one dimension and the legacy array form (`MB-ADDR-*`, `MB-TYPE-*`);
+- the `TIME` and `DATE` family, a selection of more than one dimension and the legacy
+  array form (`MB-ADDR-*`, `MB-TYPE-TIME`); a bytes value (`PlcValue::Bytes`, ADR-0025
+  decision 9);
 - the extended registers on any independent server: none of pymodbus 3.8.6, libmodbus
   3.1.11 and modbus-tk serves function codes 20 and 21 (`MB-ADDR-EXTENDED` is
   `implemented`, not `automated-verified`);
@@ -281,7 +284,7 @@ error rather than ignoring it; operations that have no API at all do not exist:
 The `interop` job of the repository's CI builds `interop/pymodbus/` (a first-party Modbus
 TCP server on pymodbus 3.8.6, `python:3.12-slim` pinned by digest, serving the register
 map of `fixtures/modbus/interop/register-map.toml`), starts it on `127.0.0.1:5020` and
-runs fifteen tests of `tests/modbus_interop_pymodbus.rs` plus the `modbus_tcp_read` example
+runs sixteen tests of `tests/modbus_interop_pymodbus.rs` plus the `modbus_tcp_read` example
 against it. The tests are `#[ignore]`d and run only when `STONECRAB_INTEROP_MODBUS` names the
 server, so `cargo test` needs no container and no network.
 
@@ -304,6 +307,11 @@ What the run verifies against the independent server:
   address one below the logical address.
 - The little-endian REAL at registers 300 and 301, by address block and by connection
   parameter.
+- The text registers from 310 (`fixtures/modbus/interop/text-registers.toml`, S49): a
+  `STRING(10)`, a `WSTRING(6)`, a `CHAR`, a `WCHAR`, a list of three `CHAR`s and a
+  byte-swapped `STRING(4)` read as documented, a `STRING(4)` whose bytes are not UTF-8
+  fails alone with its bytes kept, and each text written to the write area lands as the
+  documented register words and reads back.
 - A read past the map yields a device exception (input register 22: exception 02, status
   code 2 on the item), and a good tag in another chunk still succeeds.
 - Batches split at 125 registers and 2000 coils and say so in `split_into`; 125 registers
@@ -357,6 +365,48 @@ What the run verifies against it, with unit id 17:
 Not verified: dropped links, a server that refuses a unit id, and anything the server does
 not do (it never receives function code 07, which makes 3.1.11 exit without a reply).
 
+## Text
+`CHAR`, `WCHAR`, `STRING(n)` and `WSTRING(n)` (ADR-0025) are register types: a bit area
+refuses them. `CHAR` is one byte of UTF-8 and `WCHAR` one UTF-16BE code unit, each a
+`PlcValue::Char`; `STRING(n)` is `n` bytes of UTF-8 in `ceil(n / 2)` registers and
+`WSTRING(n)` `n` UTF-16BE code units in `n` registers, each a `PlcValue::String`. The length
+is part of the address, `ModbusAddress::string_length`, 1 to 5 digits, and the string must
+fit one read (`STRING(250)`, `WSTRING(125)`, 240 and 120 on the extended registers).
+
+- Reading: a string ends at its first NUL; what follows is padding. Trailing spaces are
+  text and are kept. A `CHAR` is the first byte of its register. Bytes that are not UTF-8,
+  or a UTF-16 surrogate without its pair, fail the item with `MalformedData` and the
+  register bytes in its status; nothing is replaced, and the other items of the request are
+  not affected.
+- Writing: the value must be a `Char` for `CHAR` and `WCHAR` and a `String` for the
+  strings. A `CHAR` takes U+0000 to U+007F, a `WCHAR` one code unit; a `STRING(n)` takes at
+  most `n` bytes of UTF-8 and a `WSTRING(n)` at most `n` code units, without NUL, and is
+  padded with NUL to its length. The rest of the last register is written as zero. What
+  does not fit is the item's `Rejected` with `InvalidConfig`, or with `ResourceLimit` above
+  the 123 registers one write carries (`STRING(247)` and `WSTRING(124)` read but are not
+  written), and nothing is sent.
+- Byte order: text is bytes in register order; the word order never reverses it. The two
+  bytes of each register are swapped under `BIG_ENDIAN_BYTE_SWAP` and
+  `LITTLE_ENDIAN_BYTE_SWAP` only, as upstream reads strings.
+- Selections: `CHAR`s pack two to a register and strings back to back, so
+  `holding-register:1[2..3]:CHAR` starts one register in and `holding-register:1[1]:CHAR`,
+  which would start inside a register, is refused.
+
+```rust
+use stonecrab::{AddressOptions, PlcValueType, ProtocolAddress};
+use stonecrab::modbus::{ModbusAddress, ModbusDataType};
+
+let none = AddressOptions::default();
+let name = ModbusAddress::parse("holding-register:40:STRING(20)", &none)?;
+assert_eq!(name.data_type(), ModbusDataType::String);
+assert_eq!(name.string_length().map(|length| length.get()), Some(20));
+assert_eq!(name.value_type_hint(), Some(PlcValueType::String));
+let letters = ModbusAddress::parse("holding-register:1[2..3]:CHAR", &none)?;
+assert_eq!(letters.offset(), 1, "two characters are one register");
+assert!(ModbusAddress::parse("holding-register:1[1]:CHAR", &none).is_err());
+# Ok::<(), stonecrab::PlcError>(())
+```
+
 ## Address grammar
 `ModbusAddress::parse(text, &AddressOptions)` reads the grammar of the upstream PLC4X Modbus
 driver, with the divergences listed below. Everything is case-sensitive and decimal, and
@@ -375,11 +425,13 @@ Under `zero-based` the number is the wire offset itself, see the conventions bel
 `extended-register`, and the prefixes are `0x` coil, `1x` discrete input, `3x` input
 register, `4x` holding register and `6x` extended register; there is no `2x`. `0x0010` is coil 10, a decimal number that happens to start with the coil prefix,
 not hexadecimal. When no type is written it is `BOOL` for the bit areas (coil, discrete
-input) and `INT` for the register areas. `TYPE` is one of the 15 upper-case names `BOOL`,
+input) and `INT` for the register areas. `TYPE` is one of the 19 upper-case names `BOOL`,
 `BYTE`, `WORD`, `DWORD`, `LWORD`, `SINT`, `USINT`, `INT`, `UINT`, `DINT`, `UDINT`, `LINT`,
-`ULINT`, `REAL`, `LREAL`; the bit areas accept `BOOL` only, and a type whose registers pass
-wire address 65535 is refused (`LREAL` at `holding-register:65534`). The last address is
-`holding-register:65536`, wire address 65535.
+`ULINT`, `REAL`, `LREAL`, `CHAR`, `WCHAR`, `STRING(n)`, `WSTRING(n)`; `STRING` and
+`WSTRING` take their length in parentheses (see "Text" below); the bit areas accept `BOOL`
+only, and a type whose registers pass wire address 65535 is refused (`LREAL` at
+`holding-register:65534`). The last address is `holding-register:65536`, wire address
+65535.
 
 The explicit-convention rule: a bare number such as `40001` could be holding register 1
 under the PLC4X convention or a zero-based wire address, so the parser accepts the bare
@@ -419,7 +471,7 @@ file 65535. Address `A` is record `A % 10000` of file `A / 10000 + 1` (files cou
 the wire), so a value that starts in the last registers of a file continues at record 0 of
 the next, and one read or write carries it as one request of a sub-request per file. A chunk
 of tags is at most 120 registers, not 125, so that the response fits the 245 data bytes of a
-file record reply. The 15 types of the holding registers are accepted, `INT` by default.
+file record reply. The 19 types of the holding registers are accepted, `INT` by default.
 
 ```rust
 use stonecrab::AddressOptions;
@@ -499,8 +551,10 @@ Rejected with `ErrorKind::InvalidAddress`, each message naming the reason:
 - the legacy `AREA:N:INT[4]` and `AREA:N:INT:4` forms (the message gives the replacement
   `AREA:N[0..3]:INT`, `[0]` for a count of 1, and only when that replacement parses;
   otherwise the general example);
-- the features deferred past the alpha: `STRING`, `WSTRING`, `CHAR`, `WCHAR` and
-  `STRING(n)`, and the `TIME` and `DATE` family;
+- a `STRING` or `WSTRING` without its length, a length on any other type, a length of 0,
+  of more than 5 digits or above 65535, and a selection that starts inside a register
+  (`[1]:CHAR`);
+- the `TIME` and `DATE` family;
 - a malformed config block: unterminated, unknown or repeated key, `unit-id` outside
   0..=255, unquoted or unknown `byte-order`.
 

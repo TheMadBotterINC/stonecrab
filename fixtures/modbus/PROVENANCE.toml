@@ -142,6 +142,12 @@ origin = "docs/parity/modbus.md, section \"Interop register map\" (rows MB-INTER
 license = "Apache-2.0"
 note = "First-party. Read by the S25 contract fixture and the S27 pymodbus server generator through stonecrab::testkit::InteropMap. Nothing is copied from upstream's modbus_server.py."
 
+# interop/text-registers.toml (S49, ADR-0025) is first-party, Apache-2.0, authored from
+# docs/parity/modbus.md (rows MB-TYPE-CHAR to MB-TYPE-WSTRING and MB-INTEROP-TEXT) with its
+# bytes written out from the UTF-8 and UTF-16 tables; its own header says so. It has no
+# [[file]] entry yet because a testkit unit test (golden_dir_lists_every_vector_in_provenance)
+# pins the list of [[file]] entries and the testkit is outside slice S49.
+
 [[vector]]
 name = "tcp/read-coils-request"
 source = "protocol_spec"

@@ -581,15 +581,11 @@ mod tests {
             NonZeroU16::new(62)
         );
         // aSelectionStartingInsideARegisterIsRejected and stringsAdvanceByTheirDeclaredLength
-        // name CHAR and STRING, which stay deferred (MB-ADDR-STRING): refused whatever the
-        // selection, before the odd byte offset could matter.
-        for text in [
-            "holding-register:1[1..2]:CHAR",
-            "holding-register:1[2..3]:CHAR",
-            "holding-register:1[2]:STRING(20)",
-        ] {
-            assert_rejected_naming(text, "string and character types");
-        }
+        // (since S49, ADR-0025; aSubRegisterValueStillOccupiesARegister is in
+        // tests/modbus_text.rs, which can plan a read)
+        assert_rejected_naming("holding-register:1[1..2]:CHAR", "odd byte offset");
+        assert_eq!(accept("holding-register:1[2..3]:CHAR").offset(), 1);
+        assert_eq!(accept("holding-register:1[2]:STRING(20)").offset(), 20);
         // aRangeIsAnArrayEvenWhenItSpansOneElement, noSelectionIsAScalar,
         // aRangeReportsItsElements
         assert_eq!(accept("holding-register:1[4]:INT").elements(), None);

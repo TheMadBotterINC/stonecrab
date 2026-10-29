@@ -255,13 +255,17 @@ impl ModbusArea {
     }
 }
 
-/// A scalar type the alpha reads from a Modbus device: the 15 numeric and bit types of
-/// the 27 upstream `ModbusDataType` names.
+/// A type Stonecrab reads from a Modbus device: the 15 numeric and bit types and the four
+/// text types (`CHAR`, `WCHAR`, `STRING`, `WSTRING`, ADR-0025) of the 27 upstream
+/// `ModbusDataType` names.
 ///
-/// The other 12 upstream names (`STRING`, `WSTRING`, `CHAR`, `WCHAR` and the `TIME` and
-/// `DATE` family) are recognised by [`ModbusDataType::from_upstream_name`] and refused
-/// with a message that names the deferral. The enum is `#[non_exhaustive]` because the
-/// string and character types join it in a later milestone.
+/// The other 8 upstream names (the `TIME` and `DATE` family) are recognised by
+/// [`ModbusDataType::from_upstream_name`] and refused with a message that names the
+/// reason. The enum is `#[non_exhaustive]`.
+///
+/// A `STRING` or `WSTRING` has a declared length that is part of its address, not of the
+/// type: `STRING(20)` is [`ModbusDataType::String`] with
+/// [`ModbusAddress::string_length`] 20, as upstream keeps the length on the tag.
 ///
 /// # Examples
 /// ```
@@ -278,14 +282,15 @@ impl ModbusArea {
 ///
 /// # Compatibility: docs/parity/modbus.md#MB-TYPE-BOOL
 /// The `:TYPE` part of the address text is row `MB-ADDR-LONG` (names, case and defaults)
-/// and `MB-ADDR-BIT-TYPES` (bit areas accept `BOOL` only). Rows `MB-TYPE-BOOL` to `MB-TYPE-LREAL` give the register width of each accepted type
-/// and `MB-TYPE-CHAR` to `MB-TYPE-LDATE-AND-TIME` the deferred ones. Upstream resolves
+/// and `MB-ADDR-BIT-TYPES` (bit areas accept `BOOL` only). Rows `MB-TYPE-BOOL` to
+/// `MB-TYPE-LREAL` give the register width of each numeric type, `MB-TYPE-CHAR` to
+/// `MB-TYPE-WSTRING` the text types (docs/parity/modbus.md#MB-TYPE-STRING) and
+/// `MB-TYPE-TIME` to `MB-TYPE-LDATE-AND-TIME` the deferred ones. Upstream resolves
 /// the name with the case-sensitive `ModbusDataType.valueOf`, so lowercase names are
 /// unknown here too (docs/parity/modbus.md#MB-ADDR-LONG). The type is the optional last
 /// part of an address text; non-`BOOL` types on bit areas are refused by
-/// [`ModbusAddress::parse`] (docs/parity/modbus.md#MB-ADDR-BIT-TYPES) and the string and
-/// calendar names are typed rejections (docs/parity/modbus.md#MB-ADDR-STRING,
-/// docs/parity/modbus.md#MB-TYPE-TIME).
+/// [`ModbusAddress::parse`] (docs/parity/modbus.md#MB-ADDR-BIT-TYPES) and the calendar
+/// names are typed rejections (docs/parity/modbus.md#MB-TYPE-TIME).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum ModbusDataType {
@@ -321,12 +326,32 @@ pub enum ModbusDataType {
     Real,
     /// IEEE 754 double precision value in four registers.
     LReal,
+    /// One character in one byte of UTF-8 (U+0000 to U+007F), read as
+    /// [`PlcValue::Char`](crate::PlcValue::Char): alone the first byte of one register on
+    /// the wire, in a list packed two to a register (docs/parity/modbus.md#MB-TYPE-CHAR).
+    Char,
+    /// One character in one UTF-16BE code unit, one register, read as
+    /// [`PlcValue::Char`](crate::PlcValue::Char); a surrogate is not a character
+    /// (docs/parity/modbus.md#MB-TYPE-WCHAR).
+    WChar,
+    /// `STRING(n)`: text of `n` bytes of UTF-8 in `ceil(n / 2)` registers, read as
+    /// [`PlcValue::String`](crate::PlcValue::String) up to the first NUL byte; `n` is
+    /// [`ModbusAddress::string_length`] (docs/parity/modbus.md#MB-TYPE-STRING).
+    String,
+    /// `WSTRING(n)`: text of `n` UTF-16BE code units in `n` registers, read as
+    /// [`PlcValue::String`](crate::PlcValue::String) up to the first NUL unit; `n` is
+    /// [`ModbusAddress::string_length`] (docs/parity/modbus.md#MB-TYPE-WSTRING).
+    WString,
 }
 
 impl ModbusDataType {
     /// How many 16-bit registers one element occupies when read alone: 1, 2 or 4.
     ///
-    /// A `BOOL` counts as one even on a bit area, where it is one bit at one address.
+    /// A `BOOL` counts as one even on a bit area, where it is one bit at one address. A
+    /// `CHAR` and a `WCHAR` take one register. A `STRING` and a `WSTRING` take one register
+    /// per declared length of one; the address scales that by its
+    /// [`string_length`](ModbusAddress::string_length), `ceil(n / 2)` registers for
+    /// `STRING(n)` and `n` for `WSTRING(n)`.
     ///
     /// # Examples
     /// ```
@@ -347,10 +372,49 @@ impl ModbusDataType {
             | Self::SInt
             | Self::USInt
             | Self::Int
-            | Self::UInt => 1,
+            | Self::UInt
+            | Self::Char
+            | Self::WChar
+            | Self::String
+            | Self::WString => 1,
             Self::DWord | Self::DInt | Self::UDInt | Self::Real => 2,
             Self::LWord | Self::LInt | Self::ULInt | Self::LReal => 4,
         }
+    }
+
+    /// The bytes one element occupies on a register area: the mspec's `dataTypeSize`
+    /// (`Mspec:380-408`) times the declared `length` of a `STRING` or `WSTRING`, which is 1
+    /// for every other type. `CHAR` is 1 byte, so its elements pack two to a register.
+    pub(crate) fn element_bytes(self, length: u16) -> u32 {
+        let length = u32::from(length);
+        match self {
+            Self::Char | Self::String => length,
+            Self::WChar | Self::WString => length.saturating_mul(2),
+            Self::Bool
+            | Self::Byte
+            | Self::Word
+            | Self::DWord
+            | Self::LWord
+            | Self::SInt
+            | Self::USInt
+            | Self::Int
+            | Self::UInt
+            | Self::DInt
+            | Self::UDInt
+            | Self::LInt
+            | Self::ULInt
+            | Self::Real
+            | Self::LReal => u32::from(self.register_size()).saturating_mul(2),
+        }
+    }
+
+    /// True for the four text types, whose values are laid out byte by byte rather than as
+    /// numbers (ADR-0025).
+    pub(crate) const fn is_text(self) -> bool {
+        matches!(
+            self,
+            Self::Char | Self::WChar | Self::String | Self::WString
+        )
     }
 
     /// The upstream spelling of the type, as written after the last colon of an address.
@@ -381,6 +445,10 @@ impl ModbusDataType {
             Self::ULInt => "ULINT",
             Self::Real => "REAL",
             Self::LReal => "LREAL",
+            Self::Char => "CHAR",
+            Self::WChar => "WCHAR",
+            Self::String => "STRING",
+            Self::WString => "WSTRING",
         }
     }
 
@@ -388,7 +456,9 @@ impl ModbusDataType {
     ///
     /// `BYTE`, `WORD`, `DWORD` and `LWORD` are bit strings upstream, encoded as unsigned
     /// integers (`uint 8`, `uint 16`, `uint 32`, `uint 64` in the mspec), so they map to
-    /// the unsigned core types.
+    /// the unsigned core types. `CHAR` and `WCHAR` are [`PlcValueType::Char`], `STRING`
+    /// and `WSTRING` [`PlcValueType::String`]: the value does not record the encoding,
+    /// the address does (ADR-0025).
     ///
     /// # Examples
     /// ```
@@ -414,20 +484,22 @@ impl ModbusDataType {
             Self::LInt => PlcValueType::I64,
             Self::Real => PlcValueType::F32,
             Self::LReal => PlcValueType::F64,
+            Self::Char | Self::WChar => PlcValueType::Char,
+            Self::String | Self::WString => PlcValueType::String,
         }
     }
 
     /// Resolve one of the 27 upstream `ModbusDataType` names.
     ///
     /// The match is case-sensitive, like upstream's `valueOf`. The 15 numeric and bit
-    /// names succeed. The 12 deferred names fail with a message that says what is
-    /// deferred and why; any other text fails as an unknown name.
+    /// names and the four text names succeed; `STRING` and `WSTRING` resolve to the type
+    /// alone, and an address gives them their length (`STRING(20)`). The 8 calendar names
+    /// fail with a message that says why; any other text fails as an unknown name.
     ///
     /// # Errors
-    /// Returns [`ErrorKind::InvalidAddress`] for `STRING`, `WSTRING`, `CHAR` and `WCHAR`
-    /// (deferred to a later milestone), for `TIME`, `LTIME`, `DATE`, `LDATE`,
+    /// Returns [`ErrorKind::InvalidAddress`] for `TIME`, `LTIME`, `DATE`, `LDATE`,
     /// `TIME_OF_DAY`, `LTIME_OF_DAY`, `DATE_AND_TIME` and `LDATE_AND_TIME` (calendar types
-    /// the alpha cannot represent), and for any name upstream does not define.
+    /// that Modbus does not encode), and for any name upstream does not define.
     ///
     /// # Examples
     /// ```
@@ -435,16 +507,17 @@ impl ModbusDataType {
     /// use stonecrab::modbus::ModbusDataType;
     ///
     /// assert_eq!(ModbusDataType::from_upstream_name("REAL")?, ModbusDataType::Real);
-    /// let refused = ModbusDataType::from_upstream_name("STRING");
+    /// assert_eq!(ModbusDataType::from_upstream_name("WSTRING")?, ModbusDataType::WString);
+    /// let refused = ModbusDataType::from_upstream_name("TIME");
     /// assert_eq!(refused.map_err(|e| e.kind()), Err(ErrorKind::InvalidAddress));
     /// # Ok::<(), stonecrab::PlcError>(())
     /// ```
     ///
     /// # Compatibility: docs/parity/modbus.md#MB-TYPE-BOOL
-    /// The accepted names are rows `MB-TYPE-BOOL` to `MB-TYPE-LREAL`. The deferred names
-    /// are `MB-TYPE-CHAR` to `MB-TYPE-LDATE-AND-TIME`; refusing the calendar names is a
-    /// divergence (docs/parity/modbus.md#MB-TYPE-TIME) and refusing the string and
-    /// character names another (docs/parity/modbus.md#MB-ADDR-STRING).
+    /// The accepted names are rows `MB-TYPE-BOOL` to `MB-TYPE-LREAL` and `MB-TYPE-CHAR` to
+    /// `MB-TYPE-WSTRING` (docs/parity/modbus.md#MB-TYPE-CHAR). The refused names are
+    /// `MB-TYPE-TIME` to `MB-TYPE-LDATE-AND-TIME`; refusing them is a divergence
+    /// (docs/parity/modbus.md#MB-TYPE-TIME).
     pub fn from_upstream_name(name: &str) -> Result<Self> {
         match name {
             "BOOL" => Ok(Self::Bool),
@@ -462,11 +535,10 @@ impl ModbusDataType {
             "ULINT" => Ok(Self::ULInt),
             "REAL" => Ok(Self::Real),
             "LREAL" => Ok(Self::LReal),
-            "STRING" | "WSTRING" | "CHAR" | "WCHAR" => Err(invalid_address(format!(
-                "data type {name} is not supported in the alpha: string and character \
-                 types are deferred to a later milestone \
-                 (docs/parity/modbus.md#MB-ADDR-STRING)"
-            ))),
+            "CHAR" => Ok(Self::Char),
+            "WCHAR" => Ok(Self::WChar),
+            "STRING" => Ok(Self::String),
+            "WSTRING" => Ok(Self::WString),
             "TIME" | "LTIME" | "DATE" | "LDATE" | "TIME_OF_DAY" | "LTIME_OF_DAY"
             | "DATE_AND_TIME" | "LDATE_AND_TIME" => Err(invalid_address(format!(
                 "data type {name} is not supported: calendar types cannot be encoded \
@@ -609,6 +681,7 @@ impl AddressConvention {
 /// both as `{unit-id: 10, byte-order: 'LITTLE_ENDIAN'}`. The block has no space before
 /// the opening brace, keys come in that order and enum values are single-quoted, as in
 /// the upstream examples. The type is always written, even when it is the area default,
+/// a `STRING` or `WSTRING` with its declared length (`holding-register:1:STRING(20)`),
 /// and the bare short forms (`40016`) are never produced because they are ambiguous. The
 /// byte order is written with the upstream mode name derived from the
 /// ([`ByteOrder`], [`WordOrder`]) pair:
@@ -669,6 +742,8 @@ pub struct ModbusAddress {
     byte_order: Option<(ByteOrder, WordOrder)>,
     convention: AddressConvention,
     elements: Option<NonZeroU16>,
+    /// The declared length of a `STRING` or `WSTRING`; `None` for every other type.
+    string_length: Option<NonZeroU16>,
 }
 
 impl ModbusAddress {
@@ -684,6 +759,7 @@ impl ModbusAddress {
         byte_order: None,
         convention: AddressConvention::Plc4xCompatible,
         elements: None,
+        string_length: None,
     };
 
     /// Start building an address at a zero-based wire `offset` of `area`.
@@ -849,15 +925,44 @@ impl ModbusAddress {
         ))
     }
 
-    /// How many registers or bits a read of the address covers: the element count times
-    /// one bit, or times the data type's register count.
-    pub(crate) const fn width(&self) -> u16 {
-        let element = element_width(self.area, self.data_type);
-        // `build` bounded the product by the per-request maximum.
-        match self.elements {
-            Some(count) => element.saturating_mul(count.get()),
-            None => element,
-        }
+    /// The declared length of a `STRING` or `WSTRING`: bytes of UTF-8 for `STRING(n)`,
+    /// UTF-16 code units for `WSTRING(n)`. `None` for every other type, which has no
+    /// length.
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab::AddressOptions;
+    /// use stonecrab::modbus::{ModbusAddress, ModbusDataType};
+    ///
+    /// let none = AddressOptions::default();
+    /// let name = ModbusAddress::parse("holding-register:1:STRING(20)", &none)?;
+    /// assert_eq!(name.data_type(), ModbusDataType::String);
+    /// assert_eq!(name.string_length().map(|length| length.get()), Some(20));
+    /// let count = ModbusAddress::parse("holding-register:1:INT", &none)?;
+    /// assert_eq!(count.string_length(), None);
+    /// # Ok::<(), stonecrab::PlcError>(())
+    /// ```
+    ///
+    /// # Compatibility: docs/parity/modbus.md#MB-TYPE-STRING
+    /// Upstream keeps the length on the tag (`getStringLength`), and reports 1 for a type
+    /// that is not a string, where this is `None`.
+    #[must_use]
+    pub const fn string_length(&self) -> Option<NonZeroU16> {
+        self.string_length
+    }
+
+    /// How many registers or bits a read of the address covers: one bit per element on a
+    /// bit area; on a register area the bytes of its elements, packed, rounded up to whole
+    /// registers.
+    pub(crate) fn width(&self) -> u16 {
+        // `build` bounded the span by the per-request maximum.
+        u16::try_from(span(
+            self.area,
+            self.data_type,
+            self.string_length,
+            self.elements,
+        ))
+        .unwrap_or(u16::MAX)
     }
 
     /// The logical address people write: the wire offset plus one, 1 to 65536, or for an
@@ -918,7 +1023,7 @@ impl ProtocolAddress for ModbusAddress {
             "{}:{}{range}:{}",
             self.area.long_name(),
             self.logical_address(),
-            self.data_type.upstream_name()
+            type_text(self.data_type, self.string_length)
         );
         let mut fields: Vec<String> = Vec::new();
         if let Some(unit_id) = self.unit_id {
@@ -982,6 +1087,7 @@ pub struct ModbusAddressBuilder {
     byte_order: Option<(ByteOrder, WordOrder)>,
     convention: AddressConvention,
     elements: Option<NonZeroU16>,
+    string_length: Option<NonZeroU16>,
 }
 
 impl ModbusAddressBuilder {
@@ -997,6 +1103,7 @@ impl ModbusAddressBuilder {
             byte_order: None,
             convention: AddressConvention::Plc4xCompatible,
             elements: None,
+            string_length: None,
         }
     }
 
@@ -1059,22 +1166,52 @@ impl ModbusAddressBuilder {
         self
     }
 
+    /// Declare the length of a `STRING` (bytes of UTF-8) or `WSTRING` (UTF-16 code units),
+    /// as the parenthesised `(n)` of `STRING(n)` does. [`build`](Self::build) requires it
+    /// for those two types and refuses it for every other.
+    ///
+    /// # Examples
+    /// ```
+    /// use std::num::NonZeroU16;
+    /// use stonecrab::ProtocolAddress;
+    /// use stonecrab::modbus::{ModbusAddress, ModbusArea, ModbusDataType};
+    ///
+    /// let length = NonZeroU16::new(20).ok_or("twenty")?;
+    /// let address = ModbusAddress::builder(ModbusArea::HoldingRegister, 0)
+    ///     .data_type(ModbusDataType::String)
+    ///     .string_length(length)
+    ///     .build()?;
+    /// assert_eq!(address.canonical(), "holding-register:1:STRING(20)");
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    ///
+    /// # Compatibility: docs/parity/modbus.md#MB-TYPE-STRING
+    /// The `stringLength` of the upstream tag (`Tag:45-47, 203-221`).
+    pub const fn string_length(mut self, length: NonZeroU16) -> Self {
+        self.string_length = Some(length);
+        self
+    }
+
     /// Validate the parts and create the address.
     ///
-    /// Three checks run: the data type must fit the area, the registers or bits the address
-    /// occupies must end at or before the last wire address 65535 (for an extended register,
-    /// the last address 655349999, and the address may not be 0), and a list must fit one
-    /// read request (2000 bits or 125 registers, and on the extended registers the 120 of
-    /// one file record read). Nothing else is checked; in particular the unit identifier and
-    /// byte order are always valid.
+    /// Four checks run: the data type must fit the area, a `STRING` or `WSTRING` must have
+    /// a [`string_length`](Self::string_length) and no other type may, the registers or
+    /// bits the address occupies must end at or before the last wire address 65535 (for an
+    /// extended register, the last address 655349999, and the address may not be 0), and
+    /// the address must fit one read request (2000 bits or 125 registers, and on the
+    /// extended registers the 120 of one file record read). A register area counts the
+    /// bytes of the elements packed and rounded up to whole registers, so three `CHAR`s
+    /// are two registers and `STRING(251)` is 126. Nothing else is checked; in particular
+    /// the unit identifier and byte order are always valid.
     ///
     /// # Errors
     /// Returns [`ErrorKind::InvalidAddress`] when a bit area (coil or discrete input) is
-    /// given any type other than `BOOL`, when `offset` plus the width passes the end of the
+    /// given any type other than `BOOL`, when a `STRING` or `WSTRING` has no length or
+    /// another type has one, when `offset` plus the width passes the end of the
     /// 65536-address map (for example `REAL` at wire offset 65535, `LREAL` at 65533, or
     /// two `INT`s at 65535), when an extended register has address 0 or its width passes
-    /// address 655349999, or when a list is wider than one read carries (2001 coils, 63
-    /// `DINT`s, or 61 `DINT`s on the extended registers).
+    /// address 655349999, or when the address is wider than one read carries (2001 coils,
+    /// 63 `DINT`s, `STRING(251)`, or 61 `DINT`s on the extended registers).
     ///
     /// # Examples
     /// ```
@@ -1105,7 +1242,10 @@ impl ModbusAddressBuilder {
     /// extended register has no one-based shift, its address 0 is refused as upstream refuses
     /// it, and its limit is docs/parity/modbus.md#MB-LIMIT-EXT; a list there must fit one
     /// file record read, 120 registers where upstream allows 125
-    /// (docs/parity/modbus.md#MB-ADDR-EXTENDED).
+    /// (docs/parity/modbus.md#MB-ADDR-EXTENDED). A string's length is required, and refused
+    /// on the other types, as upstream's tag constructor does (`Tag:203-221`), and text is
+    /// counted in bytes packed into registers as upstream counts it (`Tag:91-137`;
+    /// docs/parity/modbus.md#MB-TYPE-STRING).
     pub fn build(self) -> Result<ModbusAddress> {
         let data_type = self
             .data_type
@@ -1118,16 +1258,33 @@ impl ModbusAddressBuilder {
                 self.area.long_name()
             )));
         }
-        let element = element_width(self.area, data_type);
+        let is_string = matches!(data_type, ModbusDataType::String | ModbusDataType::WString);
+        match (is_string, self.string_length) {
+            (true, None) => {
+                return Err(invalid_address(format!(
+                    "{name} requires the length of one string, for example '{name}(20)' \
+                     (docs/parity/modbus.md#MB-TYPE-STRING)",
+                    name = data_type.upstream_name()
+                )));
+            }
+            (false, Some(_)) => {
+                return Err(invalid_address(format!(
+                    "a length in parentheses is only supported for STRING and WSTRING, not \
+                     for {} (docs/parity/modbus.md#MB-TYPE-STRING)",
+                    data_type.upstream_name()
+                )));
+            }
+            (true, Some(_)) | (false, None) => {}
+        }
         let (unit, limit, row) = read_limit(self.area);
-        let (count, what) = match self.elements {
-            Some(count) => (
-                count.get(),
-                format!("a list of {count} {}", data_type.upstream_name()),
+        let what = match self.elements {
+            Some(count) => format!(
+                "a list of {count} {}",
+                type_text(data_type, self.string_length)
             ),
-            None => (1, data_type.upstream_name().to_owned()),
+            None => type_text(data_type, self.string_length),
         };
-        let size = u32::from(element).saturating_mul(u32::from(count));
+        let size = span(self.area, data_type, self.string_length, self.elements);
         let (offset, file) = if self.area == ModbusArea::ExtendedRegister {
             self.extended_position(&what, size)?
         } else {
@@ -1159,7 +1316,37 @@ impl ModbusAddressBuilder {
             byte_order: self.byte_order,
             convention: self.convention,
             elements: self.elements,
+            string_length: self.string_length,
         })
+    }
+}
+
+/// The bits or registers that `elements` (one when `None`) of `data_type`, of declared
+/// `length` for a string, occupy in `area`: one bit each on a bit area; on a register area
+/// their bytes packed one after another and rounded up to whole registers, never fewer
+/// than one (`Tag:125-137`).
+fn span(
+    area: ModbusArea,
+    data_type: ModbusDataType,
+    length: Option<NonZeroU16>,
+    elements: Option<NonZeroU16>,
+) -> u32 {
+    let count = u32::from(elements.map_or(1, NonZeroU16::get));
+    if area.is_bit_area() {
+        return count;
+    }
+    data_type
+        .element_bytes(length.map_or(1, NonZeroU16::get))
+        .saturating_mul(count)
+        .div_ceil(2)
+}
+
+/// The type as an address writes it: the upstream name, and the declared length of a
+/// `STRING` or `WSTRING` in parentheses.
+fn type_text(data_type: ModbusDataType, length: Option<NonZeroU16>) -> String {
+    match length {
+        Some(length) => format!("{}({length})", data_type.upstream_name()),
+        None => data_type.upstream_name().to_owned(),
     }
 }
 
@@ -1258,6 +1445,9 @@ const BYTE_ORDERS: [(ByteOrder, WordOrder); 4] = [
 /// Most digits in the number of a long form (`\d{1,9}` upstream).
 const MAX_LONG_DIGITS: usize = 9;
 
+/// Most digits in the length of a string (`\d{1,5}` upstream, `Tag:47`).
+const MAX_LENGTH_DIGITS: usize = 5;
+
 /// The last wire offset.
 const LAST_WIRE: u32 = 65_535;
 
@@ -1290,11 +1480,14 @@ impl ModbusAddress {
     /// | `;base` inside either | `holding-register:1[4..7;1]:INT` | indices counted from a declared lower bound, default 0 |
     ///
     /// The number names element 0 (with `;base`, element `base`), and element `k` starts
-    /// `k` bits further on a coil or discrete input and `k` times
-    /// [`ModbusDataType::register_size`] registers further on a register area, the
-    /// extended registers included; so `holding-register:1[4]:DINT` is wire offset 8,
-    /// `extended-register:1[4]:DINT` is extended address 9, and `[4..7;1]` reads the
-    /// elements at offsets 3 to 6. A range is one address with
+    /// `k` bits further on a coil or discrete input and `k` times the element's bytes
+    /// further on a register area, the extended registers included: two bytes per
+    /// register of [`ModbusDataType::register_size`], one per `CHAR`, `n` per
+    /// `STRING(n)`, `2n` per `WSTRING(n)`. So `holding-register:1[4]:DINT` is wire offset 8,
+    /// `extended-register:1[4]:DINT` is extended address 9, `holding-register:1[2]:CHAR` is
+    /// wire offset 1, and `[4..7;1]` reads the elements at offsets 3 to 6. A selection that
+    /// starts inside a register (`[1]:CHAR`, `[1]:STRING(3)`) is refused. A range is one
+    /// address with
     /// [`elements`](Self::elements) set: it is read and written as one
     /// [`PlcValue::List`](crate::PlcValue::List), must end at or before wire address 65535
     /// (on the extended registers, address 655349999) and must fit one read (2000 bits or
@@ -1312,8 +1505,10 @@ impl ModbusAddress {
     /// exception: the number is the register address under every convention, 1 to
     /// 655349999, with no shift, and the convention only decides whether the bare form is
     /// accepted. When the type is omitted it is `BOOL` for the bit areas and `INT` for the
-    /// register areas. `TYPE` is one of the 15 upper-case names of
-    /// [`ModbusDataType`]. An address may end with a block
+    /// register areas. `TYPE` is one of the 19 upper-case names of [`ModbusDataType`];
+    /// `STRING` and `WSTRING` must be followed by their length in parentheses, 1 to 5
+    /// digits (`STRING(20)`, ADR-0025), and no other type takes one. An address may end
+    /// with a block
     /// `{unit-id: N, byte-order: 'NAME'}` holding either key or both, in any order:
     /// `unit-id` is a decimal integer from 0 to 255 and `byte-order` a quoted (single or
     /// double quotes) `BIG_ENDIAN`, `LITTLE_ENDIAN`, `BIG_ENDIAN_BYTE_SWAP` or
@@ -1349,8 +1544,10 @@ impl ModbusAddress {
     /// `[index]` or `[lo..hi]` with an optional `;base` in decimal digits, has a second
     /// dimension (a second bracket group or a comma), an upper bound below its lower bound,
     /// an index below its base or a number beyond `u32`, or a range wider than one read
-    /// carries (2001 bits, 126 registers, or 121 on the extended registers); `STRING`,
-    /// `WSTRING`, `CHAR`, `WCHAR`, a parenthesised length and the `TIME` and `DATE` family;
+    /// carries (2001 bits, 126 registers, or 121 on the extended registers); a selection
+    /// that starts an odd number of bytes into the address; a `STRING` or `WSTRING`
+    /// without a length, a length of 0, of more than 5 digits or above 65535, a length on
+    /// another type; the `TIME` and `DATE` family;
     /// an extended-register number of 0 or past 655349999, or a type or selection that
     /// ends past it; the legacy `AREA:N:TYPE[n]` and `AREA:N:TYPE:n` forms (the message
     /// gives the replacement spelling when it parses, otherwise a general example); and a
@@ -1401,8 +1598,9 @@ impl ModbusAddress {
     /// `unit-id` outside 0..=255 is rejected (docs/parity/modbus.md#MB-CFG-UNIT-ID),
     /// `4x:INT` is a typed error (docs/parity/modbus.md#MB-QUIRK-G), the extended-register
     /// forms are docs/parity/modbus.md#MB-ADDR-EXTENDED (limit
-    /// docs/parity/modbus.md#MB-LIMIT-EXT) and the deferred forms are typed rejections
-    /// (docs/parity/modbus.md#MB-ADDR-STRING, docs/parity/modbus.md#MB-TYPE-TIME). The
+    /// docs/parity/modbus.md#MB-LIMIT-EXT), the calendar names are typed rejections
+    /// (docs/parity/modbus.md#MB-TYPE-TIME) and a string's length is
+    /// docs/parity/modbus.md#MB-TYPE-STRING. The
     /// selection is docs/parity/modbus.md#MB-ADDR-SELECTION and the legacy array forms
     /// docs/parity/modbus.md#MB-ADDR-LEGACY-ARRAY.
     /// Limits: docs/parity/modbus.md#MB-LIMIT-ADDR, docs/parity/modbus.md#MB-LIMIT-SPAN
@@ -1441,7 +1639,7 @@ impl ModbusAddress {
         }
         let (area, number, rest) = locate(head, convention.is_some())?;
         let (selection, rest) = split_selection(rest)?;
-        let data_type = parse_type(head, rest, area, selection.is_none(), options)?;
+        let (data_type, length) = parse_type(head, rest, area, selection.is_none(), options)?;
         // An extended register is its own number under every convention. The number is
         // checked before a selection moves it, on every area.
         let start = if area == ModbusArea::ExtendedRegister {
@@ -1450,7 +1648,7 @@ impl ModbusAddress {
             u32::from(wire_offset(number, convention.unwrap_or_default())?)
         };
         let (start, elements) = match selection {
-            Some(selection) => selection.resolve(area, start, element_width(area, data_type))?,
+            Some(selection) => selection.resolve(area, start, data_type, length)?,
             None => (start, None),
         };
         let mut builder = ModbusAddressBuilder::at(area, start)
@@ -1458,6 +1656,9 @@ impl ModbusAddress {
             .convention(AddressConvention::Plc4xCompatible);
         if let Some(count) = elements {
             builder = builder.elements(count);
+        }
+        if let Some(length) = length {
+            builder = builder.string_length(length);
         }
         if let Some(body) = block {
             let block = parse_block(body)?;
@@ -1671,7 +1872,8 @@ fn wire_offset(number: u32, convention: AddressConvention) -> Result<u16> {
     Ok(u16::try_from(offset).unwrap_or(u16::MAX))
 }
 
-/// Parse what follows the number and the selection: nothing, or `:TYPE`.
+/// Parse what follows the number and the selection: nothing, or `:TYPE` with an optional
+/// parenthesised length, `:STRING(20)`, whose fit to the type the builder checks.
 ///
 /// `head` is the whole head, used to spell the legacy-form replacement; `rest` is its
 /// unparsed suffix. `legacy` is false when a selection was written, so a count after the
@@ -1683,9 +1885,9 @@ fn parse_type(
     area: ModbusArea,
     legacy: bool,
     options: &AddressOptions,
-) -> Result<ModbusDataType> {
+) -> Result<(ModbusDataType, Option<NonZeroU16>)> {
     if rest.is_empty() {
-        return Ok(area.default_data_type());
+        return Ok((area.default_data_type(), None));
     }
     let Some(after) = rest.strip_prefix(':') else {
         return Err(unexpected(rest));
@@ -1697,14 +1899,18 @@ fn parse_type(
         ));
     }
     let data_type = ModbusDataType::from_upstream_name(token)?;
+    let (length, tail) = match tail.strip_prefix('(') {
+        Some(inside) => {
+            let (digits, after) = split_run(inside, |c| c.is_ascii_digit());
+            let Some(after) = after.strip_prefix(')') else {
+                return Err(invalid_length(tail));
+            };
+            (Some(string_length(digits, tail)?), after)
+        }
+        None => (None, tail),
+    };
     if tail.is_empty() {
-        Ok(data_type)
-    } else if tail.starts_with('(') {
-        Err(invalid_address(
-            "a parenthesised length is not supported: only STRING and WSTRING take one and \
-             both are deferred (docs/parity/modbus.md#MB-ADDR-STRING)"
-                .to_owned(),
-        ))
+        Ok((data_type, length))
     } else if legacy
         && (tail.starts_with('[') || tail.strip_prefix(':').is_some_and(starts_with_digit))
     {
@@ -1712,6 +1918,32 @@ fn parse_type(
     } else {
         Err(unexpected(tail))
     }
+}
+
+/// The declared length of a string, 1 to 5 decimal digits (`\d{1,5}`, `Tag:47`) whose
+/// value is 1 to 65535; `text` is the parenthesised part, for the message.
+fn string_length(digits: &str, text: &str) -> Result<NonZeroU16> {
+    if digits.is_empty() || digits.len() > MAX_LENGTH_DIGITS {
+        return Err(invalid_length(text));
+    }
+    u16::try_from(decimal_value(digits))
+        .ok()
+        .and_then(NonZeroU16::new)
+        .ok_or_else(|| {
+            invalid_address(format!(
+                "the string length in '{}' must be 1 to 65535, and the string must fit one \
+                 read (docs/parity/modbus.md#MB-TYPE-STRING)",
+                excerpt(text)
+            ))
+        })
+}
+
+fn invalid_length(text: &str) -> PlcError {
+    invalid_address(format!(
+        "invalid length '{}': expected 1 to 5 decimal digits in parentheses, for example \
+         STRING(20) (docs/parity/modbus.md#MB-TYPE-STRING)",
+        excerpt(text)
+    ))
 }
 
 /// The legacy `AREA:N:TYPE[n]` or `AREA:N:TYPE:n` form, with the migration hint: the
@@ -1760,19 +1992,35 @@ struct Selection {
 
 impl Selection {
     /// The address of the first element and, for a range, the element count, from the
-    /// address the number of `area` names and the width of one element. The address is a
-    /// wire offset, or on the extended registers a register address; a first element past
-    /// the last address of the area is refused here, and the end of the span is the
-    /// builder's check.
+    /// address the number of `area` names and the type of its elements (`length` declared
+    /// for a string). The address is a wire offset, or on the extended registers a register
+    /// address; an element is one bit on a bit area and its bytes on a register area
+    /// ([`ModbusDataType::element_bytes`]). A selection that starts an odd number of bytes
+    /// in, inside a register, and a first element past the last address of the area are
+    /// refused here; the end of the span is the builder's check.
     fn resolve(
         self,
         area: ModbusArea,
         start: u32,
-        width: u16,
+        data_type: ModbusDataType,
+        length: Option<NonZeroU16>,
     ) -> Result<(u32, Option<NonZeroU16>)> {
-        let moved = u64::from(self.first)
-            .saturating_mul(u64::from(width))
-            .saturating_add(u64::from(start));
+        let skipped = if area.is_bit_area() {
+            u64::from(self.first)
+        } else {
+            let bytes = u64::from(self.first).saturating_mul(u64::from(
+                data_type.element_bytes(length.map_or(1, NonZeroU16::get)),
+            ));
+            if !bytes.is_multiple_of(2) {
+                return Err(invalid_address(format!(
+                    "the selection starts {bytes} bytes into the address, inside a register: \
+                     a read starts at a register, so an odd byte offset cannot be addressed \
+                     (docs/parity/modbus.md#MB-ADDR-SELECTION)"
+                )));
+            }
+            bytes.div_ceil(2)
+        };
+        let moved = skipped.saturating_add(u64::from(start));
         let (last, place, row) = if area == ModbusArea::ExtendedRegister {
             (LAST_EXTENDED, "extended-register address", "MB-LIMIT-EXT")
         } else {

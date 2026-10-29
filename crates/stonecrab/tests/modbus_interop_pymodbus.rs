@@ -9,7 +9,8 @@
 //! here touches the network.
 //!
 //! The expected values are the `value` text of each entry of
-//! `fixtures/modbus/interop/register-map.toml`, parsed here as the entry's type; they are
+//! `fixtures/modbus/interop/register-map.toml` and, for the text types (S49), of
+//! `fixtures/modbus/interop/text-registers.toml`, parsed here as the entry's type; they are
 //! not the register words the server holds and not the output of any decoder under test.
 //! A test therefore fails when the server serves the wrong words, when the driver decodes
 //! them wrongly or when the wire address is off by one.
@@ -731,6 +732,160 @@ mod tests {
                 .collect::<Vec<_>>();
             for zero in zeros {
                 let restored = peer.write(vec![zero]).await;
+                assert_eq!(restored.confirmed_count(), 1, "{text}: restored");
+            }
+        }
+        peer.close().await;
+    }
+
+    /// One entry of `fixtures/modbus/interop/text-registers.toml` (S49).
+    #[derive(Debug, serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct TextEntry {
+        row: String,
+        address: u16,
+        #[serde(rename = "type")]
+        data_type: String,
+        byte_order: Option<String>,
+        value: Option<String>,
+        words: Vec<u16>,
+    }
+
+    /// The text registers file: the holding registers that hold text.
+    #[derive(Debug, serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct TextRegisters {
+        holding_text: Vec<TextEntry>,
+    }
+
+    fn text_registers() -> TextRegisters {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/modbus/interop/text-registers.toml");
+        let text = std::fs::read_to_string(&path).expect("the text registers file reads");
+        toml::from_str(&text).expect("the text registers file parses")
+    }
+
+    impl TextEntry {
+        /// The address text of the entry at holding register `at`: the selection and the
+        /// type with its length from `type`, and the byte order block when it names one.
+        fn address_at(&self, at: u16) -> String {
+            let (selection, kind) = self
+                .data_type
+                .split_once(':')
+                .unwrap_or(("", self.data_type.as_str()));
+            let block = self
+                .byte_order
+                .as_ref()
+                .map(|order| format!("{{byte-order: '{order}'}}"))
+                .unwrap_or_default();
+            format!("holding-register:{at}{selection}:{kind}{block}")
+        }
+
+        /// The value the entry documents, parsed from its `value` text: a character list
+        /// as its characters, a `CHAR` or `WCHAR` as its one character, a string as itself;
+        /// `None` when the bytes are not valid text.
+        fn expected(&self) -> Option<PlcValue> {
+            let text = self.value.as_deref()?;
+            Some(if self.data_type.starts_with('[') {
+                PlcValue::List(text.chars().map(PlcValue::Char).collect())
+            } else if self.data_type.ends_with("CHAR") {
+                PlcValue::Char(text.chars().next()?)
+            } else {
+                PlcValue::String(text.to_owned())
+            })
+        }
+    }
+
+    // covers: SPEC mandatory-failure-cases / F5 Modbus level, F7 malformed data;
+    // MB-INTEROP-TEXT, MB-TYPE-CHAR, MB-TYPE-WCHAR, MB-TYPE-STRING, MB-TYPE-WSTRING,
+    // MB-BYTEORDER-BE-SWAP, MB-TCP-WRITE / the server's text registers read as the file
+    // documents them, the one that is not UTF-8 fails alone with its bytes kept, and each
+    // text written to the write area lands as the documented words and reads back
+    #[tokio::test(flavor = "current_thread")]
+    #[ignore = "interop: set STONECRAB_INTEROP_MODBUS"]
+    async fn interop_reads_and_writes_text_registers() {
+        let file = text_registers();
+        assert_eq!(file.holding_text.len(), 7, "seven text entries");
+        let peer = connect("access=read-write").await;
+
+        // The server holds the documented words, read as plain registers.
+        for entry in &file.holding_text {
+            assert!(
+                entry.row.starts_with("MB-INTEROP-"),
+                "{}: a row id",
+                entry.row
+            );
+            let count = u16::try_from(entry.words.len()).expect("a few registers");
+            assert_eq!(
+                words_at(&peer, entry.address, count).await,
+                entry.words,
+                "{}: the words the server holds",
+                entry.address_at(entry.address)
+            );
+        }
+
+        // Every entry in one request, contiguous from 310: one chunk; the bad one fails alone.
+        let tags = file
+            .holding_text
+            .iter()
+            .map(|entry| {
+                peer.tag(
+                    &format!("t{}", entry.address),
+                    &entry.address_at(entry.address),
+                )
+            })
+            .collect();
+        let response = peer.read(tags).await;
+        assert_eq!(
+            response.split_into().get(),
+            1,
+            "registers 310..=328 are one request"
+        );
+        for entry in &file.holding_text {
+            let id = format!("t{}", entry.address);
+            if let Some(expected) = entry.expected() {
+                assert_eq!(
+                    value_of(&response, &id),
+                    Some(expected),
+                    "{}: the documented text",
+                    entry.address_at(entry.address)
+                );
+            } else {
+                let error = failure(&response, &id);
+                assert_eq!(error.kind(), ErrorKind::MalformedData, "not UTF-8");
+                let raw: Vec<u8> = entry.words.iter().flat_map(|w| w.to_be_bytes()).collect();
+                assert_eq!(
+                    error.status().and_then(ProtocolStatus::raw),
+                    Some(raw.as_slice()),
+                    "the bytes the server sent"
+                );
+            }
+        }
+
+        // Each text written into the write area from 160 lands as the documented words.
+        for entry in &file.holding_text {
+            let Some(value) = entry.expected() else {
+                continue;
+            };
+            let at = entry.address.saturating_sub(310).saturating_add(160);
+            let text = entry.address_at(at);
+            let count = u16::try_from(entry.words.len()).expect("a few registers");
+            let written = peer
+                .write(vec![(peer.tag("text", &text), value.clone())])
+                .await;
+            assert_eq!(written.confirmed_count(), 1, "{text}: {written:?}");
+            assert_eq!(
+                words_at(&peer, at, count).await,
+                entry.words,
+                "{text}: the words"
+            );
+            let back = peer.read(vec![peer.tag("text", &text)]).await;
+            assert_eq!(value_of(&back, "text"), Some(value), "{text}: read back");
+            for offset in 0..count {
+                let register = format!("holding-register:{}:UINT", at.saturating_add(offset));
+                let restored = peer
+                    .write(vec![(peer.tag("zero", &register), PlcValue::U16(0))])
+                    .await;
                 assert_eq!(restored.confirmed_count(), 1, "{text}: restored");
             }
         }

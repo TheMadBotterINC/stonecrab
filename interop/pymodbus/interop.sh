@@ -8,7 +8,7 @@
 #   build     docker build the image of interop/pymodbus/ as stonecrab-interop:local
 #   start     run it detached as container stonecrab-interop on 127.0.0.1:5020
 #   wait      probe until 60 s have elapsed (about 1 s apart) with a real Modbus FC03 read (python3)
-#   tests     cargo nextest run the fifteen interop_ tests against the server
+#   tests     cargo nextest run the sixteen interop_ tests against the server
 #   example   cargo run the modbus_tcp_read example against the server (must exit 0)
 #   profiles  cargo run the profile_read example with --expect-good against the server for
 #             each profiles/synthetic/modbus-tcp/*.toml (must exit 0; output in profiles.txt)
@@ -34,7 +34,7 @@ URL="modbus-tcp://127.0.0.1:${PORT}"
 # nextest names a test by its module path, so the integration test's tests are tests::interop_*;
 # the binary name pins the filter to the one interop test file (tests/modbus_interop_pymodbus.rs).
 FILTER='binary(modbus_interop_pymodbus) & test(/^tests::interop_/)'
-EXPECTED_TESTS=15
+EXPECTED_TESTS=16
 EXPECTED_PROFILES=3
 
 die() {

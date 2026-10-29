@@ -220,6 +220,10 @@ name = "modbus_session"
 required-features = ["modbus", "testkit"]
 
 [[test]]
+name = "modbus_text"
+required-features = ["modbus", "testkit"]
+
+[[test]]
 name = "sensors_acquisition"
 required-features = ["sim", "modbus", "sensors", "testkit"]
 

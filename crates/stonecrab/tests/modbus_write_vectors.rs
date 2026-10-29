@@ -151,7 +151,11 @@ mod tests {
             ModbusDataType::LInt => PlcValue::I64(parse(text)),
             ModbusDataType::Real => PlcValue::F32(parse(text)),
             ModbusDataType::LReal => PlcValue::F64(parse(text)),
-            other => panic!("{other:?} is not a type of these suites"),
+            other @ (ModbusDataType::Char
+            | ModbusDataType::WChar
+            | ModbusDataType::String
+            | ModbusDataType::WString
+            | _) => panic!("{other:?} is not a type of these suites"),
         }
     }
 

@@ -4,9 +4,11 @@
 # Stonecrab interoperability peer: a Modbus TCP server on pymodbus 3.8.6.
 #
 # First-party. Authored from two sources only: the register map
-# fixtures/modbus/interop/register-map.toml (rows MB-INTEROP-*) and the section "Interop
-# register map" of docs/parity/modbus.md. Nothing is copied from Apache PLC4X, and its
-# modbus_server.py was not consulted for this file (decision D8 of docs/ALPHA_PLAN.md).
+# fixtures/modbus/interop/register-map.toml (rows MB-INTEROP-*) with its sibling
+# fixtures/modbus/interop/text-registers.toml (row MB-INTEROP-TEXT, slice S49), and the
+# section "Interop register map" of docs/parity/modbus.md. Nothing is copied from Apache
+# PLC4X, and its modbus_server.py was not consulted for this file (decision D8 of
+# docs/ALPHA_PLAN.md).
 #
 # What it serves
 #   The four data blocks (holding registers, coils, discrete inputs, input registers) are
@@ -29,7 +31,12 @@
 #   FC03 and FC04 reads and accepts one when wire + 1 + count <= slots, so logical address
 #   N + 1 and beyond is refused with exception code 2 (ILLEGAL DATA ADDRESS). The holding
 #   block is enlarged where the map places entries beyond its size (the little-endian
-#   region at 300 and 301, MB-INTEROP-LE).
+#   region at 300 and 301, MB-INTEROP-LE, and the text registers from 310, MB-INTEROP-TEXT).
+#
+# Text registers
+#   The `holding_text` entries of the text file hold their words at their logical address
+#   like any other entry. Their width is the length of `words`, which the Rust test checks
+#   against the type; the server does not decode text.
 #   Bits. pymodbus 3.8.6 does not validate FC01 and FC02 reads at all: a read past the end
 #   of a block is answered with a short or empty bit list instead of exception 2, which is
 #   a malformed reply on the wire. So that every bit read the driver can send is answered
@@ -68,6 +75,8 @@ WIDTHS = {
 
 DEFAULT_MAP = "/app/register-map.toml"
 
+DEFAULT_TEXT = "/app/text-registers.toml"
+
 # Slots of a bit block: logical addresses 1 to 65536, plus the unreachable slot 0.
 BIT_SLOTS = 65537
 
@@ -76,13 +85,18 @@ class MapError(Exception):
     """The register map cannot be loaded or does not describe a usable server."""
 
 
-def load_map(path):
-    """Read and check the register map; raise MapError naming the problem."""
+def read_toml(path):
+    """Read one TOML file; raise MapError naming the problem."""
     try:
         with open(path, "rb") as handle:
-            data = tomllib.load(handle)
+            return tomllib.load(handle)
     except (OSError, tomllib.TOMLDecodeError) as error:
         raise MapError(f"cannot read the register map {path}: {error}") from error
+
+
+def load_map(path):
+    """Read and check the register map; raise MapError naming the problem."""
+    data = read_toml(path)
     sizes = data.get("sizes")
     if not isinstance(sizes, dict):
         raise MapError("the register map has no [sizes] table")
@@ -93,14 +107,19 @@ def load_map(path):
     return data
 
 
-def place_registers(slots, entries, area):
-    """Write each entry's words at its logical address; return the slots needed."""
+def place_registers(slots, entries, area, typed=True):
+    """Write each entry's words at its logical address; return the slots needed.
+
+    A typed entry must have the register count of its numeric type; an untyped one (text)
+    must have at least one word."""
     needed = 0
     for entry in entries:
         kind = entry.get("type")
         words = entry.get("words")
         address = entry.get("address")
-        if kind not in WIDTHS or not isinstance(words, list) or len(words) != WIDTHS[kind]:
+        if not isinstance(words, list) or not words:
+            raise MapError(f"{area} entry {entry.get('row')}: no words")
+        if typed and (kind not in WIDTHS or len(words) != WIDTHS[kind]):
             raise MapError(f"{area} entry {entry.get('row')}: type and words disagree")
         if not isinstance(address, int) or address < 1:
             raise MapError(f"{area} entry {entry.get('row')}: bad address")
@@ -114,13 +133,14 @@ def place_registers(slots, entries, area):
     return needed
 
 
-def build_blocks(data):
-    """Build the four pymodbus data blocks from the parsed map."""
+def build_blocks(data, text):
+    """Build the four pymodbus data blocks from the parsed map and text file."""
     sizes = data["sizes"]
 
     holding = [0] * (sizes["holding_registers"] + 1)
     place_registers(holding, data.get("holding_registers", []), "holding_registers")
     place_registers(holding, data.get("holding_extension", []), "holding_extension")
+    place_registers(holding, text.get("holding_text", []), "holding_text", typed=False)
 
     inputs = [0] * (sizes["input_registers"] + 1)
     place_registers(inputs, data.get("input_registers", []), "input_registers")
@@ -190,6 +210,7 @@ async def serve(blocks, host, port):
 def main(argv):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--map", default=DEFAULT_MAP, help="register map (TOML)")
+    parser.add_argument("--text", default=DEFAULT_TEXT, help="text registers (TOML)")
     parser.add_argument("--host", default="0.0.0.0")  # noqa: S104 (a test server)
     parser.add_argument("--port", type=int, default=5020)
     args = parser.parse_args(argv)
@@ -199,7 +220,7 @@ def main(argv):
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     try:
-        blocks = build_blocks(load_map(args.map))
+        blocks = build_blocks(load_map(args.map), read_toml(args.text))
     except MapError as error:
         LOG.error("%s", error)
         return 2

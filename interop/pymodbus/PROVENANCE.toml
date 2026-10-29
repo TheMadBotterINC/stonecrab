@@ -13,7 +13,7 @@
 
 [[file]]
 path = "server.py"
-origin = "fixtures/modbus/interop/register-map.toml and docs/parity/modbus.md, section \"Interop register map\" (rows MB-INTEROP-*); pymodbus 3.8.6 API documentation"
+origin = "fixtures/modbus/interop/register-map.toml, fixtures/modbus/interop/text-registers.toml (S49) and docs/parity/modbus.md, section \"Interop register map\" (rows MB-INTEROP-*); pymodbus 3.8.6 API documentation"
 license = "Apache-2.0"
 note = "First-party. Serves the register map over Modbus TCP on pymodbus 3.8.6. Not derived from upstream's modbus_server.py."
 

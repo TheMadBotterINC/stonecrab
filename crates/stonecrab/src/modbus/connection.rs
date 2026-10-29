@@ -22,6 +22,7 @@ use tracing::Instrument;
 
 use crate::modbus::address::element_width;
 use crate::modbus::batch::resolve_order;
+use crate::modbus::decode::{decode_text, encode_text};
 use crate::modbus::session::{Wire, exception_error};
 use crate::modbus::{
     BatchLimits, Batcher, Chunk, MAX_PDU_BYTES, Member, ModbusAddress, ModbusArea, ModbusOptions,
@@ -675,7 +676,8 @@ impl Link {
                 word_order.unwrap_or(self.defaults.word_order),
             )
         };
-        // A list goes out element after element, each laid out as it would be alone.
+        // A list goes out element after element, each laid out as it would be alone; text
+        // packs its elements byte after byte into one run of registers.
         let elements = match (address.elements(), item.value()) {
             (None, value) => std::slice::from_ref(value),
             (Some(count), PlcValue::List(elements))
@@ -694,13 +696,29 @@ impl Link {
                 )));
             }
         };
-        let registers = elements
-            .iter()
-            .map(|value| {
-                TypedDecoder::encode_registers(value, address.data_type(), byte_order, word_order)
-            })
-            .collect::<Result<Vec<_>>>()
-            .map_err(refuse)?;
+        let registers = if address.data_type().is_text() {
+            encode_text(
+                elements,
+                address.data_type(),
+                address.string_length(),
+                byte_order,
+                word_order,
+            )
+            .map(|run| vec![run])
+        } else {
+            elements
+                .iter()
+                .map(|value| {
+                    TypedDecoder::encode_registers(
+                        value,
+                        address.data_type(),
+                        byte_order,
+                        word_order,
+                    )
+                })
+                .collect::<Result<Vec<_>>>()
+        }
+        .map_err(refuse)?;
         let built = if let Some(file) = address.file_number() {
             // One request carries the whole value, the elements of a list in order, cut at
             // the end of each file; one wider than a request carries is refused unsent.
@@ -1120,7 +1138,8 @@ fn read_pdu(
 /// An exception reply fails every member the same way ([`exception_item_error`]). A data
 /// reply is cut at the member's offset and decoded with the member's type and the order it
 /// resolved to, `defaults` standing in for what the tag and address left unset; the reply
-/// of a file record read is the registers of its sub-requests joined in order. A reply of
+/// of a file record read is the registers of its sub-requests joined in order. A text
+/// member, a list included, is decoded in one piece from its packed bytes. A reply of
 /// the wrong shape for the area cannot come out of the session, which proves every reply
 /// against its request; it is `MalformedData` here rather than a panic.
 fn decode_member(
@@ -1142,19 +1161,16 @@ fn decode_member(
     } else {
         Vec::new()
     };
-    // The value of the element at `offset` registers or bits into the reply.
-    let element = |offset: usize| match reply {
+    // The registers of a register reply.
+    let words = || match reply {
         ModbusPdu::Exception { function, code } => Err(exception_item_error(*function, *code)),
-        ModbusPdu::ReadBitsResponse { bytes, .. } if area.is_bit_area() => {
-            TypedDecoder::decode_bits(bytes, offset, member.data_type, RAW_BUDGET)
-        }
         ModbusPdu::ReadRegistersResponse { registers, .. }
             if !area.is_bit_area() && area != ModbusArea::ExtendedRegister =>
         {
-            decode_registers_at(registers, offset, member, defaults)
+            Ok(registers.as_slice())
         }
         ModbusPdu::ReadFileRecordResponse { .. } if area == ModbusArea::ExtendedRegister => {
-            decode_registers_at(&joined, offset, member, defaults)
+            Ok(joined.as_slice())
         }
         ModbusPdu::ReadBitsResponse { .. }
         | ModbusPdu::ReadRegistersResponse { .. }
@@ -1172,7 +1188,28 @@ fn decode_member(
         | ModbusPdu::WriteSingleRegisterResponse { .. }
         | ModbusPdu::WriteMultipleResponse { .. } => Err(mismatch()),
     };
+    // The value of the element at `offset` registers or bits into the reply.
+    let element = |offset: usize| {
+        if let (ModbusPdu::ReadBitsResponse { bytes, .. }, true) = (reply, area.is_bit_area()) {
+            TypedDecoder::decode_bits(bytes, offset, member.data_type, RAW_BUDGET)
+        } else {
+            words().and_then(|registers| decode_registers_at(registers, offset, member, defaults))
+        }
+    };
     let first = usize::from(member.offset);
+    if member.data_type.is_text() {
+        return words().and_then(|registers| {
+            decode_text(
+                registers.get(first..).unwrap_or_default(),
+                member.data_type,
+                member.string_length,
+                member.elements,
+                member.byte_order.unwrap_or(defaults.byte_order),
+                member.word_order.unwrap_or(defaults.word_order),
+                RAW_BUDGET,
+            )
+        });
+    }
     match member.elements {
         None => element(first),
         // A list is its elements one width apart, each decoded as it would be alone; the
@@ -1699,6 +1736,7 @@ mod tests {
             byte_order: None,
             word_order: None,
             elements: None,
+            string_length: None,
         }
     }
 

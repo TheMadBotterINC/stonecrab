@@ -1,0 +1,75 @@
+# Text registers of the Stonecrab pymodbus peer (slice S49, ADR-0025).
+#
+# First-party, Apache-2.0. Authored from docs/parity/modbus.md, rows MB-TYPE-CHAR,
+# MB-TYPE-WCHAR, MB-TYPE-STRING, MB-TYPE-WSTRING and MB-INTEROP-TEXT; the bytes are written
+# out from the character tables of UTF-8 and UTF-16, not produced by Stonecrab's encoder.
+# Nothing here is copied from Apache PLC4X.
+#
+# A sibling of register-map.toml rather than a part of it: stonecrab::testkit::InteropMap
+# reads that file with unknown keys and types refused and pins its entry counts, so text
+# entries there would need a change to the testkit, which slice S49 does not make.
+# interop/pymodbus/server.py serves both files; tests/modbus_interop_pymodbus.rs reads this
+# one with its own schema.
+#
+# Conventions
+#   address  the logical holding-register address of the first register; the wire address
+#            is one less, as in register-map.toml. The entries lie outside the upstream
+#            block of 201 registers and after the little-endian region at 300 and 301, so
+#            the server enlarges its holding block to cover them.
+#   type     the type as an address writes it after the colon, with its selection and its
+#            length: "STRING(10)", "[0..2]:CHAR".
+#   byte_order  absent for the connection default BIG_ENDIAN, else an upstream mode name.
+#   value    the text the registers hold; for a CHAR list each character is one element.
+#            Absent when the bytes are not valid text and the read must fail.
+#   words    the register words, each sent high byte first.
+
+[[holding_text]]
+row = "MB-INTEROP-TEXT"
+address = 310
+type = "STRING(10)"
+value = "Stonecrab"
+words = [0x5374, 0x6F6E, 0x6563, 0x7261, 0x6200]
+
+[[holding_text]]
+row = "MB-INTEROP-TEXT"
+address = 315
+type = "WSTRING(6)"
+value = "Grüße"
+words = [0x0047, 0x0072, 0x00FC, 0x00DF, 0x0065, 0x0000]
+
+[[holding_text]]
+row = "MB-INTEROP-TEXT"
+address = 321
+type = "CHAR"
+value = "A"
+words = [0x4100]
+
+[[holding_text]]
+row = "MB-INTEROP-TEXT"
+address = 322
+type = "WCHAR"
+value = "Ω"
+words = [0x03A9]
+
+[[holding_text]]
+row = "MB-INTEROP-TEXT"
+address = 323
+type = "[0..2]:CHAR"
+value = "xyz"
+words = [0x7879, 0x7A00]
+
+[[holding_text]]
+row = "MB-INTEROP-TEXT"
+address = 325
+type = "STRING(4)"
+byte_order = "BIG_ENDIAN_BYTE_SWAP"
+value = "ABCD"
+words = [0x4241, 0x4443]
+
+# "a", the byte 0xFF that begins no UTF-8 sequence, "b", NUL: the read fails, nothing is
+# replaced.
+[[holding_text]]
+row = "MB-INTEROP-TEXT"
+address = 327
+type = "STRING(4)"
+words = [0x61FF, 0x6200]

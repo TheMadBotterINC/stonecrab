@@ -37,7 +37,14 @@ mod tests {
         (ModbusDataType::LReal, "LREAL", 4, PlcValueType::F64),
     ];
 
-    const DEFERRED_STRING_NAMES: [&str; 4] = ["STRING", "WSTRING", "CHAR", "WCHAR"];
+    /// The four text types (S49, ADR-0025): name, registers of one element of declared
+    /// length 1, and the value type.
+    const TEXT_TABLE: [(ModbusDataType, &str, u16, PlcValueType); 4] = [
+        (ModbusDataType::Char, "CHAR", 1, PlcValueType::Char),
+        (ModbusDataType::WChar, "WCHAR", 1, PlcValueType::Char),
+        (ModbusDataType::String, "STRING", 1, PlcValueType::String),
+        (ModbusDataType::WString, "WSTRING", 1, PlcValueType::String),
+    ];
 
     const DEFERRED_CALENDAR_NAMES: [&str; 8] = [
         "TIME",
@@ -203,25 +210,18 @@ mod tests {
         }
     }
 
-    // covers: MB-ADDR-STRING, MB-TYPE-CHAR, MB-TYPE-WCHAR, MB-TYPE-STRING, MB-TYPE-WSTRING
+    // covers: MB-TYPE-CHAR, MB-TYPE-WCHAR, MB-TYPE-STRING, MB-TYPE-WSTRING
     #[test]
-    fn string_and_character_names_are_recognised_and_refused_as_deferred() {
-        for name in DEFERRED_STRING_NAMES {
-            let error = rejection_of_name(name);
-            assert_eq!(error.kind(), ErrorKind::InvalidAddress, "{name}: kind");
-            let text = error.to_string();
-            assert!(
-                text.contains(name),
-                "{name}: message names the type: {text}"
+    fn the_text_names_resolve_to_the_four_text_types() {
+        for (kind, name, size, value_type) in TEXT_TABLE {
+            assert_eq!(
+                ModbusDataType::from_upstream_name(name).expect("a text name"),
+                kind,
+                "{name}"
             );
-            assert!(
-                text.contains("deferred"),
-                "{name}: message names the deferral: {text}"
-            );
-            assert!(
-                text.contains("MB-ADDR-STRING"),
-                "{name}: message cites the row: {text}"
-            );
+            assert_eq!(kind.upstream_name(), name, "{name}: name");
+            assert_eq!(kind.register_size(), size, "{name}: size");
+            assert_eq!(kind.value_type(), value_type, "{name}: value type");
         }
     }
 
@@ -248,12 +248,12 @@ mod tests {
     }
 
     #[test]
-    fn the_twenty_seven_upstream_names_split_fifteen_and_twelve() {
-        let accepted = TYPE_TABLE.len();
-        let deferred = DEFERRED_STRING_NAMES.len() + DEFERRED_CALENDAR_NAMES.len();
+    fn the_twenty_seven_upstream_names_split_nineteen_and_eight() {
+        let accepted = TYPE_TABLE.len() + TEXT_TABLE.len();
+        let deferred = DEFERRED_CALENDAR_NAMES.len();
         assert_eq!(accepted + deferred, 27, "upstream defines 27 names");
-        assert_eq!(accepted, 15, "fifteen accepted");
-        assert_eq!(deferred, 12, "twelve deferred");
+        assert_eq!(accepted, 19, "nineteen accepted since S49");
+        assert_eq!(deferred, 8, "eight calendar names refused");
     }
 
     // covers: MB-ADDR-LONG
@@ -784,7 +784,7 @@ mod tests {
             format!("{address:?}"),
             "ModbusAddress { unit_id: Some(UnitId(10)), area: HoldingRegister, offset: 15, \
              file: None, data_type: Int, byte_order: Some((LittleEndian, LowWordFirst)), \
-             convention: Plc4xCompatible, elements: None }",
+             convention: Plc4xCompatible, elements: None, string_length: None }",
             "derived Debug text"
         );
         let bare = ModbusAddress::builder(ModbusArea::Coil, 0)

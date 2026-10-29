@@ -7,7 +7,8 @@ run the driver against it and keep the evidence (slice S27, ADR-0015 decision 16
 ## First-party statement
 
 Every file in this directory is first-party and Apache-2.0 (`PROVENANCE.toml` lists them).
-`server.py` was authored from `fixtures/modbus/interop/register-map.toml` and the section
+`server.py` was authored from `fixtures/modbus/interop/register-map.toml` (with its
+sibling `text-registers.toml` since S49) and the section
 "Interop register map" of `docs/parity/modbus.md`. Nothing is copied from Apache PLC4X:
 upstream's `modbus_server.py`, its Dockerfile and its test vectors are not in this
 repository (decision D8). The facts shared with upstream's setup are the base image family
@@ -17,8 +18,10 @@ parity record.
 ## What it serves
 
 - Holding registers 1 to 31, the little-endian REAL at 300 and 301, input registers 1 to
-  7, coils 1 to 10 and discrete inputs 1 to 10, with the values and words of the map.
-  Every other position holds zero or false.
+  7, coils 1 to 10 and discrete inputs 1 to 10, with the values and words of the map, and
+  the text registers 310 to 328 of `fixtures/modbus/interop/text-registers.toml` (slice
+  S49: `STRING`, `WSTRING`, `CHAR`, `WCHAR`, a byte-swapped string and one string whose
+  bytes are not UTF-8). Every other position holds zero or false.
 - Any unit id is answered. Logical address T is wire address T - 1; pymodbus 3.8.6 adds
   one before it indexes a block, so a block that starts at address 0 holds logical T at
   list index T.

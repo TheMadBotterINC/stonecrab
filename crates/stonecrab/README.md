@@ -51,6 +51,7 @@ operations.
 | `modbus`: Modbus TCP connect, close and reads of coils, discrete inputs, holding registers and input registers (FC01 to FC04) | interoperability-tested |
 | `modbus`: reconnect, retry, cancellation, timeout, late-reply discard | simulator-tested |
 | `modbus`: write of coils and holding registers (FC15, FC06, FC16), refused unless the connection string says `access=read-write` | interoperability-tested |
+| `modbus`: text types `CHAR`, `WCHAR`, `STRING(n)` and `WSTRING(n)`, read and written | simulator-tested |
 | `modbus`: Modbus RTU (`modbus-rtu`) reads, writes, ping and polling over a serial port or a gateway, with CRC errors, the silence before a request, late-reply drain and reopen | simulator-tested |
 | Subscribe by polling (`sim` and `modbus`): cyclic and change-of-state, event refused; on a clock that never sleeps (the simulator's default) change-of-state is refused and the interval paces nothing | simulator-tested |
 | Browse and discover | not supported |

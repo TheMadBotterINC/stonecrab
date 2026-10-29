@@ -179,9 +179,11 @@ impl Default for BatchLimits {
 ///
 /// `offset` counts registers (register areas) or bits (bit areas) from the chunk's
 /// `start`, so a member occupies `offset..offset + width` of the chunk's data, where the
-/// width of one element is `data_type.register_size()` on register areas and 1 on bit
-/// areas, times `elements` for a list. On the extended registers the chunk's data is the
-/// registers of all its sub-requests, joined in order.
+/// width is one bit per element on bit areas and, on register areas, the bytes of its
+/// elements packed and rounded up to whole registers: `data_type.register_size()` per
+/// element for the numeric types, one byte per `CHAR`, `n` per `STRING(n)` and `2n` per
+/// `WSTRING(n)` (ADR-0025). On the extended registers the chunk's data is the registers
+/// of all its sub-requests, joined in order.
 ///
 /// # Compatibility: docs/parity/modbus.md#MB-BYTEORDER-PRECEDENCE
 /// `byte_order` and `word_order` are each resolved tag field over address block; a field
@@ -206,6 +208,9 @@ pub struct Member {
     /// another into a [`PlcValue::List`](crate::PlcValue::List); `None` for one element,
     /// decoded as a scalar.
     pub elements: Option<NonZeroU16>,
+    /// The declared length of a `STRING` or `WSTRING`
+    /// ([`ModbusAddress::string_length`]); `None` for every other type.
+    pub string_length: Option<NonZeroU16>,
 }
 
 /// One contiguous wire read covering one or more tags of the same unit and area.
@@ -294,8 +299,9 @@ impl Batcher {
     /// whole plan is refused above that count. Chunks are ordered by (unit identifier, area,
     /// start), members by offset; tags with equal offsets keep their input order. Every
     /// input [`TagId`] appears in exactly one member. A bit area tag occupies one bit; a
-    /// register area tag occupies `data_type.register_size()` registers; a list
-    /// ([`ModbusAddress::elements`]) is one tag that occupies that many times as much.
+    /// register area tag occupies `data_type.register_size()` registers, a text tag the
+    /// registers its bytes fill; a list ([`ModbusAddress::elements`]) is one tag that
+    /// occupies the registers of all its elements, packed.
     ///
     /// # Examples
     /// ```
@@ -440,6 +446,7 @@ impl Entry<'_> {
             byte_order,
             word_order,
             elements: self.address.elements(),
+            string_length: self.address.string_length(),
         }
     }
 }
