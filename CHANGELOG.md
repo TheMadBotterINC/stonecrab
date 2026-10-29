@@ -33,6 +33,12 @@ placeholder.
   Findings: the SOLO manual lists function codes 05 and 16 but not 15, so a Stonecrab coil
   write cannot reach it yet, and schema version 1 cannot make a process variable error code
   `Bad` (it is `Uncertain`). New parity rows `MB-DEVICE-SIO-*` and `MBS-DEVICE-SLM1C-*`.
+- Fixed (ADR-0014 addendum S57, note S57b): on a multi-thread runtime a `close` that
+  overtook the supervisor's idle close could drop that transport without shutting it down;
+  the idle close now keeps the transport in the guard until its shutdown has returned, and
+  `close` shuts down what it finds there. `GuardStats` gains `discarded_frames` (additive;
+  the struct is `#[non_exhaustive]`): frames the guard read and dropped between exchanges,
+  such as a late reply the supervisor drops before the Modbus session can count it.
 - New `serial` feature (off by default; `modbus` does not enable it yet): a serial transport
   on a blocking worker thread, `stonecrab::transport::{SerialFactory, SerialTransport}` with
   `DataBits`, `Parity`, `StopBits` and `FlowControl` (upstream's option names and defaults:

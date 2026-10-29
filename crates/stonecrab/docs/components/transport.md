@@ -161,7 +161,10 @@ it and does the correlation. Observe it with `state()` and `watch_state()`, coun
   not: when no exchange has run for that long the transport is shut down (with whatever
   it buffered), the state stays `Connected`, and the next request opens a new transport
   without backoff, while `next_reply` fails `Disconnected`. A zero bound closes the
-  transport after every exchange. Without a supervisor `idle` is ignored.
+  transport after every exchange. Without a supervisor `idle` is ignored. The transport
+  leaves the guard only once its shutdown has returned, so a `close` that overtakes an
+  idle close shuts it down itself; only a transport lost to a failure (a peer close, an
+  I/O error, a send cut short, a failed resync) is dropped without a shutdown.
 - **One in flight, a bounded line behind it.** At most `max_pending_requests` requests
   are owned at once, the running one included; one more is `Backpressure` before any
   I/O. The rest wait in arrival order on `tokio::sync` primitives and leave the line when
@@ -175,8 +178,9 @@ it and does the correlation. Observe it with `state()` and `watch_state()`, coun
   runs `resync` within its own deadline and drops the frame found; if none is found in
   time that request fails with `Disconnected` and the guard reconnects. A reply that
   arrives whole later is the next request's reply (with a supervisor, one that arrives
-  between two requests is read and dropped by the supervisor instead), and the session
-  discards it by correlation. A session does that with
+  between two requests is read and dropped by the supervisor instead, and counted in
+  `stats().discarded_frames` with every other frame the guard drops between exchanges),
+  and the session discards it by correlation. A session does that with
   `request_matching(frame, deadline, token, accept)`, which keeps the in-flight slot from
   the send to the first frame `accept` takes, so neither the supervisor nor the idle bound
   comes between its reads; `next_reply(deadline, token)` reads one further frame without

@@ -108,6 +108,7 @@ impl From<&ConnectionConfig> for GuardConfig {
 ///
 /// let stats = GuardStats::default();
 /// assert_eq!((stats.reconnects, stats.resyncs, stats.requests, stats.timeouts), (0, 0, 0, 0));
+/// assert_eq!(stats.discarded_frames, 0);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
@@ -123,6 +124,15 @@ pub struct GuardStats {
     pub requests: u64,
     /// Requests that failed with [`ErrorKind::Timeout`], whatever phase they were in.
     pub timeouts: u64,
+    /// Whole frames the guard read and dropped between exchanges, never handed to a
+    /// caller: after an abandoned exchange, its late reply or the frame a resync found,
+    /// dropped by the supervisor's reader or by the next request; and a frame nobody asked
+    /// for that the reader kept, once the next request, an idle close, a lost link or
+    /// `close` drops it. Frames that
+    /// [`request_matching`](ConnectionGuard::request_matching) refuses are not counted
+    /// here: its caller sees them (the Modbus session counts them as late or mismatched
+    /// replies).
+    pub discarded_frames: u64,
 }
 
 #[derive(Debug, Default)]
@@ -131,6 +141,7 @@ struct Counters {
     resyncs: AtomicU64,
     requests: AtomicU64,
     timeouts: AtomicU64,
+    discarded_frames: AtomicU64,
 }
 
 fn bump(counter: &AtomicU64) {
@@ -323,7 +334,8 @@ async fn race<A: Future, B: Future>(first: A, second: B) -> Race<A::Output, B::O
 /// slot from it in arrival order. A link that stays up for a whole read counts as a
 /// reply for the retry budget: the attempt count starts over. A frame the reader finds
 /// after an abandoned exchange (a timeout, a cancel) is that exchange's reply and is
-/// dropped. A frame it finds while nothing is owed is kept for the next
+/// dropped, and counted in [`GuardStats::discarded_frames`] like every frame the guard
+/// drops between exchanges. A frame it finds while nothing is owed is kept for the next
 /// [`next_reply`](Self::next_reply) (a caller may be between two guard calls) and dropped
 /// by the next request; behind it the reader only buffers what arrives, so a peer close is
 /// still noticed. With a supervisor, `timeouts.idle` is enforced, a kept frame or not: when
@@ -366,7 +378,21 @@ async fn race<A: Future, B: Future>(first: A, second: B) -> Race<A::Output, B::O
 /// and discarding it is the session's job, by correlation (the transaction id), with
 /// [`request_matching`](Self::request_matching) or [`next_reply`](Self::next_reply). With
 /// a supervisor, a reply that arrives whole between two requests after a timeout is read
-/// and dropped by the supervisor instead.
+/// and dropped by the supervisor instead, and counted in
+/// [`GuardStats::discarded_frames`].
+///
+/// # Shutdown
+/// A transport the guard lets go of while it still works is shut down before it is
+/// dropped (once: a shutdown that fails is not retried). The idle bound shuts it down
+/// where it is and only then takes it out of the slot, and `close` shuts down whatever
+/// the slot holds, so a `close` that overtakes an idle close (from another thread, or
+/// while that shutdown waits) cuts it short and shuts the transport down itself. A
+/// transport lost to a failure (the peer closed, an I/O error, a send cut short, a resync
+/// that found no frame boundary in time) is dropped without a shutdown: its stream is over
+/// or can no longer be trusted, and dropping the transport closes the connection. The
+/// same holds for a transport that `close` could not shut down by its deadline (it then
+/// reports `Timeout`) and for one in a guard dropped without `close` (a drop performs no
+/// I/O).
 ///
 /// # Compatibility: docs/parity/transport.md#TRANSPORT-GUARD-LIFECYCLE
 /// Upstream has no equivalent: its Netty channel reconnect logic is outside the
@@ -675,6 +701,7 @@ impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
             resyncs: counters.resyncs.load(Ordering::Relaxed),
             requests: counters.requests.load(Ordering::Relaxed),
             timeouts: counters.timeouts.load(Ordering::Relaxed),
+            discarded_frames: counters.discarded_frames.load(Ordering::Relaxed),
         }
     }
 
@@ -1089,9 +1116,10 @@ impl<F: Send, R: Framer<F>> ConnectionGuard<F, R> {
     /// passed, so the shutdown is attempted once and `close` never waits.
     ///
     /// A [supervisor](Self::supervise) is stopped the same way: whatever it waits on (a
-    /// backoff, an open, a read of the idle stream) ends, it releases the slot, and after
-    /// the shutdown `close` joins it within the same deadline. A supervisor still running
-    /// at the deadline is aborted and the call reports `Timeout`.
+    /// backoff, an open, a read of the idle stream, the shutdown of an idle transport)
+    /// ends and it releases the slot, leaving any transport in it for `close` to shut
+    /// down; after the shutdown `close` joins it within the same deadline. A supervisor
+    /// still running at the deadline is aborted and the call reports `Timeout`.
     ///
     /// # Compatibility: docs/parity/transport.md#TRANSPORT-GUARD-LIFECYCLE
     /// No upstream parity claim (see the type).
@@ -1401,17 +1429,15 @@ impl<F: Send, R: Framer<F>> Shared<F, R> {
         token: Option<&CancellationToken>,
         site: &Site,
     ) -> std::result::Result<(), Fault> {
-        if framed.parked() {
-            // The supervisor kept a frame nobody asked for: a new request does not want it.
-            drop(framed.next_frame(Deadline::at(self.clock.now())).await);
-        }
+        // A frame the supervisor kept for a `next_reply` that never came: a new request
+        // does not want it.
+        self.discard_held(framed);
         if framed.buffered_len() > 0 {
             bump(&self.counters.resyncs);
             match self.until(framed.resync(deadline), token, None, true).await {
                 Ok(Ok(())) => {
-                    // `resync` holds the frame it recognised, so this returns it at once
-                    // even with an elapsed deadline; it is the abandoned reply or debris.
-                    drop(framed.next_frame(Deadline::at(self.clock.now())).await);
+                    // `resync` holds the frame it recognised: the abandoned reply, or debris.
+                    self.discard_held(framed);
                 }
                 Ok(Err(error)) => {
                     return Err(Fault::lose(self.annotate(error, site, book.failures)));
@@ -1666,9 +1692,11 @@ impl<F: Send, R: Framer<F>> Shared<F, R> {
     async fn finish(&self, deadline: Deadline, site: &Site) -> Result<()> {
         let mut guard = self.link.lock().await;
         guard.book.next_at = None;
-        let Some(framed) = guard.transport.take() else {
+        let Some(mut framed) = guard.transport.take() else {
             return Ok(());
         };
+        // A frame the supervisor kept goes with the transport.
+        self.discard_held(&mut framed);
         let mut transport = framed.into_inner();
         match transport.shutdown(deadline).await {
             Err(error) if error.kind() != ErrorKind::Disconnected => {
@@ -1746,6 +1774,14 @@ impl<F: Send, R: Framer<F>> Shared<F, R> {
             bump(&self.counters.timeouts);
         }
         result
+    }
+
+    /// Drop the frame `framed` holds for the next `next_frame`, if any (one the
+    /// supervisor's reader kept, or the one a resync found), and count it.
+    fn discard_held(&self, framed: &mut FramedTransport<F, R>) {
+        if framed.unpark() {
+            bump(&self.counters.discarded_frames);
+        }
     }
 
     /// The next jitter sample.
@@ -2010,6 +2046,7 @@ impl<F: Send, R: Framer<F>> Shared<F, R> {
                 Race::Second(Ok(Some(frame))) => {
                     if owed {
                         drop(frame);
+                        bump(&self.counters.discarded_frames);
                         link.book.phase = Phase::Idle;
                     } else {
                         framed.park(frame);
@@ -2025,7 +2062,7 @@ impl<F: Send, R: Framer<F>> Shared<F, R> {
                         ErrorKind::ResourceLimit | ErrorKind::MalformedData
                     ) =>
                 {
-                    framed.unpark();
+                    self.discard_held(framed);
                     link.book.phase = Phase::Resyncing;
                     return Ok(());
                 }
@@ -2035,6 +2072,8 @@ impl<F: Send, R: Framer<F>> Shared<F, R> {
                     if error.kind() != ErrorKind::Timeout
                         && !(realign && self.clock.now() >= until) =>
                 {
+                    // A frame the reader kept goes with the transport.
+                    self.discard_held(framed);
                     link.transport = None;
                     self.schedule_reconnect(&mut link.book);
                     return Ok(());
@@ -2045,19 +2084,36 @@ impl<F: Send, R: Framer<F>> Shared<F, R> {
                 Race::Second(Err(_)) => link.book.failures = 0,
             }
         }
-        // The idle bound: a kept frame and buffered bytes go with the transport.
+        self.close_if_idle(link, idle_at).await
+    }
+
+    /// The idle bound, at the end of a reader turn: once `idle_at` has passed, shut the
+    /// transport down where it is, then let go of it with a frame the reader kept and
+    /// whatever it buffered.
+    ///
+    /// The transport leaves the slot only once its shutdown has returned. A `close` that
+    /// begins meanwhile (on another thread it can begin after this task took the slot and
+    /// before the shutdown ran) cuts the shutdown short, then finds the transport still in
+    /// the slot and shuts it down itself, so neither of them drops it unclosed.
+    async fn close_if_idle(
+        &self,
+        link: &mut Link<F, R>,
+        idle_at: Option<Instant>,
+    ) -> std::result::Result<(), Cut> {
         if idle_at.is_some_and(|at| self.clock.now() >= at)
-            && let Some(framed) = link.transport.take()
+            && let Some(framed) = link.transport.as_mut()
         {
             let now = self.clock.now();
             let deadline =
                 Deadline::after(now, self.config.timeouts.request).unwrap_or(Deadline::at(now));
-            let mut transport = framed.into_inner();
-            // The link is let go either way; a peer that is already gone is no news.
+            // A peer that is already gone is no news, and a shutdown that failed has nothing
+            // left to try: the transport is let go either way.
             drop(
-                self.until(transport.shutdown(deadline), None, None, true)
+                self.until(framed.shutdown(deadline), None, None, true)
                     .await?,
             );
+            self.discard_held(framed);
+            link.transport = None;
         }
         Ok(())
     }
@@ -2067,5 +2123,65 @@ impl<F: Send, R: Framer<F>> Shared<F, R> {
         let news = race(self.wanted.notified(), watch.changed());
         drop(self.until(news, None, None, true).await?);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "testkit")]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+    use crate::testkit::{
+        FakeClock, FakeTransportFactory, FakeTransportProbe, LengthPrefixedFramer, Script,
+        block_on_with,
+    };
+
+    // covers: SPEC mandatory-failure-cases / F5 reconnect (shutdown during reconnect)
+    // `close` overtaking the supervisor's idle close, with the interleaving that a
+    // multi-thread runtime produces now and then made explicit: the task has taken the slot
+    // to close an idle link when `close` begins on another thread and cancels every wait,
+    // before the task's shutdown ran. The idle close gives way and leaves the transport in
+    // the slot, where `close` finds it and shuts it down. Taking the transport out of the
+    // slot first, as S57 did, dropped it without a shutdown.
+    #[test]
+    fn a_close_that_overtakes_an_idle_close_still_shuts_the_transport_down() {
+        let clock = FakeClock::default();
+        let factory = FakeTransportFactory::new(clock.clone());
+        factory.push_script(Script::default());
+        let limits = ResourceLimits::builder().build().expect("valid limits");
+        let mut config = GuardConfig::new(Endpoint::Custom("fake://plc".to_owned()), limits);
+        config.timeouts.idle = Some(Duration::ZERO);
+        let guard: ConnectionGuard<Vec<u8>, LengthPrefixedFramer> = ConnectionGuard::new(
+            config,
+            Arc::new(factory.clone()),
+            Box::new(|| LengthPrefixedFramer::new(64)),
+            Arc::new(clock.clone()),
+        );
+        block_on_with(&clock, guard.connect()).expect("connect");
+        let shared = &guard.shared;
+        // The supervisor holds the slot and has found the link idle...
+        let mut link = shared.link.try_lock().expect("the slot is free");
+        // ...when `close` signals every wait the guard owns.
+        shared.closing.cancel();
+        let idle = block_on_with(&clock, shared.close_if_idle(&mut link, Some(clock.now())));
+        assert!(
+            matches!(idle, Err(Cut::Closing)),
+            "the idle close gives way to close"
+        );
+        assert!(
+            link.transport.is_some(),
+            "and leaves the transport in the slot"
+        );
+        // The task ends there and lets go of the slot; `close` takes it.
+        drop(link);
+        block_on_with(&clock, guard.close()).expect("close");
+        assert_eq!(guard.state(), ConnectionState::Closed, "closed");
+        let probes = factory.probes();
+        assert_eq!(probes.len(), 1, "one transport");
+        assert!(
+            probes.iter().all(FakeTransportProbe::is_shut_down),
+            "close shut the transport down"
+        );
     }
 }

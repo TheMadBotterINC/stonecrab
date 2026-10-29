@@ -188,9 +188,21 @@ impl<F: Send, R: Framer<F>> FramedTransport<F, R> {
         self.ready.is_some()
     }
 
-    /// Drop the frame held for the next [`next_frame`](Self::next_frame), if any.
-    pub(crate) fn unpark(&mut self) {
-        self.ready = None;
+    /// Drop the frame held for the next [`next_frame`](Self::next_frame), if any: one the
+    /// guard's supervisor kept, or the one [`resync`](Self::resync) recognised. True if a
+    /// frame was dropped, so the guard can count it.
+    pub(crate) fn unpark(&mut self) -> bool {
+        self.ready.take().is_some()
+    }
+
+    /// Shut the transport down where it is, keeping the buffered bytes and a held frame.
+    ///
+    /// The guard's idle bound uses it so that the transport stays in the guard's in-flight
+    /// slot until its shutdown has returned; [`into_inner`](Self::into_inner) followed by
+    /// `shutdown` would take it out first. Errors and cancel safety are the transport's
+    /// [`Transport::shutdown`].
+    pub(crate) fn shutdown(&mut self, deadline: Deadline) -> OpFuture<'_, ()> {
+        self.transport.shutdown(deadline)
     }
 
     /// Receive once more into the buffer, without decoding, within `deadline`. The guard's

@@ -40,7 +40,10 @@ const PROTOCOL: &str = "modbus";
 /// `mismatched_replies` count the replies the session discarded without accepting: a
 /// late reply carries the transaction id of a request the session had already given up
 /// on (timeout, cancellation, lost connection), a mismatched one carries any other
-/// transaction id, or the current id with the wrong unit id or function code.
+/// transaction id, or the current id with the wrong unit id or function code. A reply the
+/// guard drops before the session sees it (with a supervisor, a late reply that arrives
+/// between two requests) is counted in
+/// [`guard.discarded_frames`](GuardStats::discarded_frames) instead.
 ///
 /// # Compatibility: docs/parity/modbus.md#MB-READ-MATCH
 /// Upstream drops an unknown transaction id with a log line and keeps no counter; the
@@ -64,7 +67,7 @@ pub struct SessionStats {
     /// another transaction id, or the right id with the wrong unit id or function code.
     pub mismatched_replies: u64,
     /// The counters of the connection guard underneath (requests sent, timeouts,
-    /// resyncs, reconnects).
+    /// resyncs, reconnects, frames discarded between exchanges).
     pub guard: GuardStats,
 }
 

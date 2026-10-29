@@ -15,8 +15,8 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use stonecrab::testkit::{
-        FakeClock, FakeTransportFactory, LengthPrefixedFramer, Script, Step, block_on_with,
-        poll_once, poll_once_with,
+        FakeClock, FakeTransportFactory, FakeTransportProbe, LengthPrefixedFramer, Script, Step,
+        block_on_with, poll_once, poll_once_with,
     };
     use stonecrab::transport::{ConnectionGuard, GuardConfig, GuardStats};
     use stonecrab::{
@@ -285,6 +285,12 @@ mod tests {
         stats.resyncs = resyncs;
         stats.requests = requests;
         stats.timeouts = timeouts;
+        stats
+    }
+
+    /// `stats` with `frames` whole frames discarded between exchanges.
+    fn discarding(mut stats: GuardStats, frames: u64) -> GuardStats {
+        stats.discarded_frames = frames;
         stats
     }
 
@@ -1021,7 +1027,11 @@ mod tests {
         let reply = rig.request(b"two", 5).expect("the next request succeeds");
         assert_eq!(reply, frame(b"second"), "its own reply, not the late one");
         assert_eq!(rig.sent(0), vec![wire(b"one"), wire(b"two")], "the wire");
-        assert_eq!(rig.guard.stats(), stats(0, 1, 2, 1), "one resync");
+        assert_eq!(
+            rig.guard.stats(),
+            discarding(stats(0, 1, 2, 1), 1),
+            "one resync, which dropped the late reply it completed"
+        );
         assert_eq!(
             rig.clock.now(),
             rig.at(3000),
@@ -1221,7 +1231,11 @@ mod tests {
         );
         let reply = rig.request(b"two", 1).expect("the next request succeeds");
         assert_eq!(reply, frame(b"second"), "reply");
-        assert_eq!(rig.guard.stats(), stats(0, 1, 2, 0), "resynced once");
+        assert_eq!(
+            rig.guard.stats(),
+            discarding(stats(0, 1, 2, 0), 1),
+            "resynced once, dropping the debris frame it found"
+        );
     }
 
     // covers: SPEC mandatory-failure-cases / F4 cancellation (awaiting)
@@ -2151,7 +2165,11 @@ mod tests {
         let deadline = rig.deadline(5);
         let reply = rig.guard.request(frame(b"ping"), deadline, None).await;
         assert_eq!(reply.expect("reply"), b"pong", "the junk did not answer it");
-        assert_eq!(rig.guard.stats(), stats(0, 0, 1, 0), "no resync was needed");
+        assert_eq!(
+            rig.guard.stats(),
+            discarding(stats(0, 0, 1, 0), 1),
+            "no resync was needed; the request dropped the kept junk"
+        );
         rig.guard.close().await.expect("close");
     }
 
@@ -2179,8 +2197,9 @@ mod tests {
         assert_eq!(reply.expect("reply"), b"pong", "reply");
         assert_eq!(
             rig.guard.stats(),
-            stats(0, 0, 1, 0),
-            "the reader found the boundary itself: the request had no resync to do"
+            discarding(stats(0, 0, 1, 0), 1),
+            "the reader found the boundary itself and dropped the frame there: the request had \
+             no resync to do"
         );
         rig.guard.close().await.expect("close");
     }
@@ -2421,8 +2440,70 @@ mod tests {
             ConnectionState::Connected,
             "still available"
         );
-        assert_eq!(rig.guard.stats(), stats(0, 0, 1, 1), "stats");
+        assert_eq!(
+            rig.guard.stats(),
+            discarding(stats(0, 0, 1, 1), 1),
+            "the reader dropped the late reply"
+        );
         rig.guard.close().await.expect("close");
+    }
+
+    // covers: SPEC mandatory-failure-cases / F2 delayed replies after timeout
+    // Without a supervisor the late reply comes out of the next request and the session
+    // discards and counts it. With one, the reader drops it between the two requests, so
+    // the guard counts it; an exchange that gets its own reply counts nothing.
+    #[tokio::test]
+    async fn a_late_reply_the_reader_drops_is_counted_and_a_normal_exchange_is_not() {
+        let rig = Rig::new();
+        rig.push(vec![
+            Step::Expect(wire(b"ping")),
+            Step::Delay(secs(2)),
+            Step::Reply(wire(b"pong")),
+            Step::Expect(wire(b"next")),
+            Step::Reply(wire(b"next")),
+        ]);
+        rig.supervised().await;
+        rig.times_out_at_one_second().await;
+        assert_eq!(
+            rig.guard.stats().discarded_frames,
+            0,
+            "nothing has arrived yet"
+        );
+
+        assert!(rig.clock.set(rig.at(2_000)), "the late reply arrives");
+        settle(
+            || rig.guard.stats().discarded_frames == 1,
+            "the reader dropped the late reply",
+        )
+        .await;
+
+        let deadline = rig.deadline(5);
+        let reply = rig.guard.request(frame(b"next"), deadline, None).await;
+        assert_eq!(reply.expect("reply"), b"next", "its own reply");
+        assert_eq!(
+            rig.guard.stats(),
+            discarding(stats(0, 0, 2, 1), 1),
+            "the normal exchange discarded nothing"
+        );
+        rig.guard.close().await.expect("close");
+    }
+
+    // A frame the reader kept for a `next_reply` that never came is dropped by close, and
+    // counted.
+    #[tokio::test]
+    async fn a_kept_frame_that_close_drops_is_counted() {
+        let rig = Rig::new();
+        rig.push(vec![Step::Delay(secs(1)), Step::Reply(wire(b"junk"))]);
+        rig.supervised().await;
+        assert!(rig.clock.set(rig.at(1_000)), "the junk arrives and is kept");
+        // The reader holds the slot throughout: yield until it has read and kept the frame.
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(rig.guard.stats().discarded_frames, 0, "kept, not dropped");
+        rig.guard.close().await.expect("close");
+        assert_eq!(rig.guard.stats().discarded_frames, 1, "close dropped it");
+        assert!(rig.shut_down(0), "and shut the link down");
     }
 
     // covers: SPEC mandatory-failure-cases / F5 reconnect (device restart)
@@ -2467,6 +2548,11 @@ mod tests {
             ConnectionState::Connected,
             "still available"
         );
+        assert_eq!(
+            rig.guard.stats().discarded_frames,
+            1,
+            "the kept frame went with the transport"
+        );
 
         let deadline = rig.deadline(5);
         let error = error_of(rig.guard.next_reply(deadline, None).await);
@@ -2499,6 +2585,11 @@ mod tests {
         }
         assert!(rig.clock.set(rig.at(2_000)), "the peer closes");
         rig.reaches(reconnecting(1, rig.at(2_250))).await;
+        assert_eq!(
+            rig.guard.stats().discarded_frames,
+            1,
+            "the kept frame went with the lost link"
+        );
         rig.guard.close().await.expect("close");
     }
 
@@ -2531,8 +2622,9 @@ mod tests {
         assert_eq!(reply.expect("reply"), b"pong", "reply");
         assert_eq!(
             rig.guard.stats(),
-            stats(0, 0, 1, 0),
-            "the reader realigned the stream itself"
+            discarding(stats(0, 0, 1, 0), 2),
+            "the reader realigned the stream itself, dropping the kept frame and the frame its \
+             resync found"
         );
         assert_eq!(rig.factory.opens().len(), 1, "the link was kept");
         rig.guard.close().await.expect("close");
@@ -2561,7 +2653,7 @@ mod tests {
         config.timeouts.idle = Some(Duration::ZERO);
         let guard: Guard = ConnectionGuard::new(
             config,
-            Arc::new(factory),
+            Arc::new(factory.clone()),
             Box::new(|| LengthPrefixedFramer::new(64)),
             Arc::new(clock.clone()),
         );
@@ -2583,6 +2675,21 @@ mod tests {
             tokio::task::yield_now().await;
         }
         guard.close().await.expect("close");
+        // Nothing failed, so every link was let go while it still worked: by the idle bound,
+        // or by close, which on these threads may overtake the last idle close and must
+        // then shut that link down itself.
+        assert!(
+            factory
+                .probes()
+                .iter()
+                .all(FakeTransportProbe::is_shut_down),
+            "every link was shut down"
+        );
+        assert_eq!(
+            guard.stats().discarded_frames,
+            0,
+            "the refused frames are the caller's to count"
+        );
     }
 
     // covers: SPEC mandatory-failure-cases / F2 delayed replies after timeout

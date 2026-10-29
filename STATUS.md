@@ -394,6 +394,7 @@ commit; gates named were run locally before that commit.
 | S52c | 2026-10-28 | A third interop peer that answers by unit id: a first-party Apache-2.0 script `interop/modbus-tk/server.py` on modbus-tk 1.1.5 (LGPL-2.1-or-later; its dependency pyserial 3.5 is pinned too) in a `python:3.12-slim` image pinned by digest, serving units 1, 2 and 247 with a map each on port 5030 and no reply to any other unit. Eight tests (`modbus_interop_modbus_tk.rs`, a new CI job `interop-modbus-tk`; `mise run interop` now runs all three peers): each unit's map on one connection, one batch across units, alternating units and function codes, exception 02 from the unit with the shorter map, units 9 and 255 ending in `Timeout` at the deadline with the connection still good, a batch with an unknown unit, the address-block unit over `default-unit-identifier`, and a write to one unit. The server is first-party, so the evidence is `interoperability-tested` at most; the discard of a wrong-unit reply stays with libmodbus and the scripted peers | check, lint-attrs, parity, semver, fmt, interop for all three peers |
 | S52b | 2026-10-28 | Failure paths on a real clock: Toxiproxy 2.13.0 (MIT, pinned by digest, API and proxies on 127.0.0.1 only) in front of pymodbus and libmodbus on a Docker network of their own, toxics driven from the test process over the Toxiproxy HTTP API by a small `std::net` client (no dependency). Ten tests (`modbus_interop_toxiproxy.rs`, CI job `interop-toxiproxy`, `mise run interop-toxiproxy`): resets in each direction, black holes (`Timeout` at the deadline, twice, then recovery), latency below and above a deadline, slicer toxics, `limit_data` after one reply and inside a header, a disabled proxy, and `docker pause`, `kill` and `start` on pymodbus; each ends in `Timeout` or `Disconnected` within its deadline and the next request reads. tshark 4.4 (Debian trixie, unpinned by package version, recorded per run) captures in the proxy's namespace and fails on a malformed packet or a request that is not one well-formed Modbus/TCP frame. Finding: removing a timeout-0 toxic closes the connection | check, lint-attrs, parity, semver, interop for every peer; at landing the Toxiproxy run again on master with S57's supervisor (10 of 10, capture clean) |
 | parity gate | 2026-10-28 | The parity gate gains a fourth check: every backticked snake_case test name in the test-id column of an implemented or automated-verified row, or of a divergence row, must be a word of a Rust source, example or fuzz target (ADR-0005 addendum). Two stale names it would have caught were fixed first (the S58 Linux serial test, the S52b Toxiproxy reset test); all 1,301 cited names resolve. Also: CI moves to actions/checkout@v5 and actions/upload-artifact@v6, the first majors that run on Node 24 (ab87b0b) | parity and its self-test (9 fixtures) |
+| S57b | 2026-10-28 | The flaky `under_a_zero_idle_bound_a_read_keeps_the_reply_behind_a_mismatched_one` (about 3.5% alone, 10% under `cargo test`): on a multi-thread runtime a `close` that overtook the supervisor's idle close cut the shutdown of a transport already taken out of the slot, and the transport was dropped without a shutdown. The idle close now shuts the transport down where it is (`FramedTransport::shutdown`, crate-private) and empties the slot only afterwards, so `close` shuts down what it finds; a deterministic in-crate test reproduces the interleaving. The rustdoc of `ConnectionGuard` gains a Shutdown section (a transport lost to a failure is dropped without one). `GuardStats::discarded_frames` (additive) counts every frame the guard reads and drops between exchanges, closing the S57 gap "frames dropped between exchanges are uncounted"; `ModbusConnection` still exposes no stats | check, coverage (transport 98.97%), lint-attrs, parity, examples, semver; the formerly flaky test 300 of 300 alone and 200 of 200 under load, the full suite 10 of 10 |
 
 ## Verified evidence and reproduction
 
@@ -684,18 +685,19 @@ Deferred features, each a deferred row in `docs/parity/modbus.md` or an item of 
   (S52a) surfaces as a whole-read `MalformedData` from the byte-count check, without the
   raw bytes the plan expected an item error to keep; keeping them is a small follow-up in
   the session's decode path.
-- **The background reader is quiet** (S57): frames a supervised guard drops between
-  exchanges (a late reply to a timed-out request, an unsolicited frame) are not counted
-  in `GuardStats` or the session's late and mismatched counters, and the supervisor emits
-  no tracing events (the `transport` feature does not depend on `tracing`); its state
-  changes are visible through `watch_state`. A follow-up adds the counter.
+- **The background reader is quiet** (S57): since S57b the frames a supervised guard drops
+  between exchanges (a late reply to a timed-out request, an unsolicited frame) are counted
+  in `GuardStats::discarded_frames`, but `ModbusConnection` exposes no stats, so a Modbus
+  caller cannot read the count; and the supervisor emits no tracing events (the
+  `transport` feature does not depend on `tracing`); its state changes are visible
+  through `watch_state`.
 - **SOLO bit writes**: the SOLO SLM1-C manual (S52d) lists only FC05 for writing a bit
   register, and Stonecrab sends FC15 for every coil write as upstream does (S45, quirk c),
   so its bits cannot be written yet; and profile schema version 1 cannot map its PV
   sentinels (8002H to 8007H) to `Bad`, so the documented profile reports `Uncertain`.
-- **Not verified by the interop run**: timing over a real clock, dropped links and device
-  exceptions on demand (a stock pymodbus has no fault hooks), unit-id correlation, and any
-  server other than pymodbus 3.8.6.
+- **Not verified by the interop runs**: a third-party server that refuses a unit id (the
+  modbus-tk server of S52c is our own script), a peer that misbehaves on its own
+  (Toxiproxy, S52b, injects faults between healthy peers), and any physical device.
 - A queued-cancellation case is exercised on `ConnectionGuard` only, not on the simulator
   (which has no wait queue); the real-socket connect-timeout arm of the transport is
   uncovered and named in ADR-0014.

@@ -634,8 +634,10 @@ mod tests {
             "still available"
         );
         connection.close().await.expect("close");
-        // A read reopens only a link that is gone: each one before the last was closed by
-        // the idle bound, and close shut the last one down.
+        // Nothing failed, so the guard let go of every link while it still worked, and it
+        // shuts such a link down first: each one before the last was closed by the idle
+        // bound, and the last one by the idle bound or by close, which on these threads may
+        // overtake that idle close and then shuts the link down itself (ADR-0014, S57b).
         assert!(
             factory
                 .probes()

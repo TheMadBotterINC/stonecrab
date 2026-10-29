@@ -730,6 +730,30 @@ the guard that this ADR already defines.
   transport at 1476 of 1480 lines (99.73%, up from 1224 of 1228 before the slice). The
   lcov file lists two zero-hit lines, the S19 arms of `transmit` named above; the other two
   are the S16 arms in `deadline.rs` and `tcp.rs`.
+- **Fix (S57b, 2026-10-28): `close` racing the idle close; a count of discarded frames.**
+  The idle bound took the transport out of the slot, then shut it down in a wait that
+  polls the closing signal first. On a multi-thread runtime `close` could cancel that
+  signal after the task took the transport and before the shutdown was polled: the task
+  ended `Closing` and dropped the transport unclosed, and `close` found the slot empty
+  (the zero-idle Modbus test failed 7 of 200 runs alone and 10 of 100 under `cargo test`,
+  where a binary's tests share one process; after the fix, none of several hundred). The
+  idle close now shuts the transport down where it is (a crate-private
+  `FramedTransport::shutdown`) and takes it out of the slot only once that has returned;
+  cut short, it leaves the transport for `close`, which shuts down whatever the slot
+  holds. The guarantee is on `ConnectionGuard`'s rustdoc ("Shutdown"): a transport let
+  go while it still works is shut down first; one lost to a failure, one `close` could
+  not shut down by its deadline, and one in a guard dropped without `close` are dropped
+  without a shutdown. A unit test in `guard.rs` makes the interleaving explicit, and the
+  guard's multi-thread zero-idle test now asserts that every link was shut down.
+  `GuardStats` (non-exhaustive) gains `discarded_frames`: whole frames the guard read and
+  dropped between exchanges without handing them to a caller (a late reply the reader
+  drops, the frame a resync finds, a kept frame that the next request, an idle close, a
+  lost link or `close` drops). Before S57 the Modbus session counted such a late reply in
+  `late_replies`; under a supervisor the reader drops it first, and it shows in
+  `SessionStats::guard` instead. Frames `request_matching` refuses stay the caller's to
+  count, and the tracing gap above is unchanged. No new uncovered line:
+  `scripts/coverage-gate.sh` reports transport at 2303 of 2327 lines (98.97%, from 2251
+  of 2275 at the S57 commit, which already included the S58 serial transport).
 
 
 ## Alternatives considered
