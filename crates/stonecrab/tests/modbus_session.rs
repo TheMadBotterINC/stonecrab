@@ -1174,6 +1174,11 @@ mod tests {
     /// Run `body` and return the spans and events it made on this thread.
     fn traced(body: impl FnOnce()) -> (Vec<Recorded>, Vec<Recorded>) {
         let collector = collector();
+        // tracing-core files a callsite before it asks the default subscriber for its
+        // interest, so a callsite another test first hits while `collector` installs the
+        // tap can keep the `never` it got from no subscriber, and its spans are lost.
+        // Recompute every interest now that the tap is the global default.
+        tracing::callsite::rebuild_interest_cache();
         let start = collector.seq.load(Ordering::Relaxed);
         let me = thread::current().id();
         body();
