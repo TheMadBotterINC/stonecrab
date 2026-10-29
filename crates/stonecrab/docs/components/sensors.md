@@ -111,13 +111,15 @@ checks:
   `min <= max`, and a bit field of width 1 or more that ends at or before bit 64;
 - a unit that is not empty and is in the fixed unit table;
 - a range, when present, with finite bounds and `min <= max` (equal bounds are valid);
-- no two status fields of one measurement on the same address text and bit;
+- no two status fields of one measurement on the same address text and bit, and no
+  status bit of 64 or more;
 - quality mappings that name only the measurement's own status fields.
 
 Validation is independent of any driver: address text is compared for equality only, and
-the driver's `parse_address` validates it when `SensorProfile::tags` builds the tags.
+the driver's `parse_address` validates it in `validate_for` and when `SensorProfile::tags`
+builds the tags.
 
-`SensorProfile::validate_for(&driver)` adds the one rule that needs a driver. It runs
+`SensorProfile::validate_for(&driver)` adds the rules that need a driver. It runs
 every rule above, then parses each measurement's address with the driver under the
 profile's `address_convention` and reports, in document order, `AddressRejected` for an
 address the driver refuses and `MissingByteOrder` and `MissingWordOrder` when the parsed
@@ -125,7 +127,27 @@ address spans more than one of the protocol's words
 (`ProtocolAddress::spans_multiple_words`) and the definition sets no such order. Word
 order is never inferred, and the driver, not the `data_type` text, says which values span
 words: a Modbus `REAL`, `DINT` or `LREAL` address does, an `INT`, a `WORD` or a coil does
-not, and a simulator address never does. `SensorProfile::tags` runs `validate_for` first,
+not, and a simulator address never does.
+
+The same pass parses each measurement's status field addresses (`StatusAddressRejected`)
+and checks their bits, in field order, against what the driver says the addresses are:
+
+- a status bit lies inside the width of its data (`StatusBitOutOfRange`): bit 0 only for a
+  coil or discrete input, below 16 for a `WORD` or `INT`, below 32 for a `DWORD`, below 64
+  for an `LWORD` (a bit of 64 or more is refused by `validate` already). A type with no bit
+  width, such as a float, is not checked;
+- no bit is claimed twice under different spellings (`OverlappingStatusBits`):
+  `4x00001:WORD`, `4x0001:WORD`, `400001:WORD` and `holding-register:1:WORD` are one
+  address. Addresses are compared as the driver's canonical text, so one register read
+  under two data types, or in two units, is two addresses;
+- a status bit does not sit inside the bits the measurement itself extracts
+  (`StatusBitInBitField`): when the first scaling step is a `bit_field` and the status
+  address is the measurement's address, the status bit is not in `[shift, shift + width)`.
+  Later `bit_field` steps work on the extracted value and compose, so they raise no
+  overlap.
+
+Measurements may still share a status word. The errors of `validate` come first, then those
+of the driver, measurement by measurement. `SensorProfile::tags` runs `validate_for` first,
 so a Modbus profile that lacks the orders is still refused there. Until 2026-10-28
 `validate` applied this rule by Modbus type names; a profile that relied on `validate`
 alone to find a missing order must now call `validate_for`.

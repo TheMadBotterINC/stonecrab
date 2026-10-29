@@ -494,3 +494,55 @@ changes one behavior above and no type.
    must call `validate_for` or `tags`. The change is additive in API terms (a provided
    trait method and a new method) and is recorded in `CHANGELOG.md` and in the
    `SENSORS-VALIDATION` row of `docs/parity/sensors.md`.
+
+## Addendum: status bits and overlap follow the parsed address (slice S37, 2026-10-28)
+This addendum records the S37 decision for findings G02 and G03 of
+`docs/POST_ALPHA_PLAN.md`. It supersedes the S28b sentences that status-field bit positions
+are not checked and that status addresses are compared as text only, and the S36 note that
+bit positions stay unchecked until S37. `ProfileError` gains two variants,
+`StatusBitOutOfRange { measurement, status_field }` and
+`StatusBitInBitField { measurement, status_field }`; both name indices only, never echo the
+document and convert to `InvalidConfig`.
+
+1. **Reason.** A status bit past the data's width (bit 64, or bit 16 of a `WORD`) passed
+   validation. The bit is not in the data: at 64 or more it reads as `Quality::Unknown`, below
+   64 it reads as zero or a sign-extension copy, and a `Bool` ignores it, so the rule is
+   stricter than the runtime on purpose. The overlap rule compared
+   address text, so `4x00001:WORD` and `holding-register:1:WORD` were two addresses. The
+   width and the canonical form are the driver's to say, so the precise rules sit in
+   `validate_for`, which now also parses each status field's address. The refusal maps to
+   `StatusAddressRejected` once, in a helper shared with `tags`.
+2. **Bit bounds.** `validate` refuses a status bit of 64 or more
+   (`StatusBitOutOfRange`): no value is wider, whatever the driver. `validate_for` refuses a
+   bit at or beyond the width of the value type of the parsed status address: 1 for a
+   `Bool` (a coil or discrete input has only bit 0), 8, 16, 32 or 64 for the integer types.
+   A type with no bit width (a float, text, a duration, or no type hint) is not checked. A
+   bit of 64 or more is reported by `validate` only, so no error is duplicated.
+3. **Overlap shapes.** Addresses are equal when `ProtocolAddress::canonical()` is equal.
+   Within one measurement:
+   - two status fields with the same canonical address and the same bit are
+     `OverlappingStatusBits`, reported for the later field. Equal text is still found by
+     `validate`; `validate_for` adds only pairs whose text differs, so a pair is never
+     reported twice, and the errors of `validate` precede those of the driver;
+   - a status bit inside `[shift, shift + width)` of the measurement's first scaling step,
+     when that step is a `BitField` and the status address has the measurement's own
+     canonical address, is `StatusBitInBitField`. Only the first step reads the raw word
+     the status address names; a `BitField` after another step reads a derived value and
+     claims no bit;
+   - two `BitField` steps are possible, but they compose (the second reads the value the
+     first extracted), so their ranges are in different coordinates and a second step is
+     not an overlap. The first step's range is the claim.
+
+   Measurements may share a status word: the same address and bit in two measurements is
+   valid, as `measurements_may_share_a_status_word` pins.
+4. **Limits.** Canonical text includes the data type and the unit id, so one Modbus
+   register named as `WORD` and as `INT`, or in two units, is two addresses and passes. A
+   rule on the register itself needs a location the `ProtocolAddress` trait does not offer;
+   it is a candidate for a later provided method, not part of this slice. A measurement
+   whose own address the driver refuses claims no bit (`AddressRejected` stands alone for
+   it), and the width of the measurement's value against its `BitField` is not checked.
+5. **Tests.** `tests/sensors_overlap.rs` covers every alias spelling of a register, a coil
+   and a discrete input, each overlap shape, the widths 1, 8, 16, 32 and 64, error order,
+   no echo, and a property test against an independent restatement of the overlap rule;
+   the `validate` property test's oracle gains the bit bound. The runtime guard in the
+   pipeline stays for profiles that were never validated.

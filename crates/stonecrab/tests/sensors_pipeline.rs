@@ -768,9 +768,15 @@ mod tests {
             ok("boiler_temperature.healthy", PlcValue::Bool(true)),
             ok("boiler_temperature.drift", PlcValue::Bool(false)),
         ];
+        // Validation refuses bit 64, so the profile cannot make tags; the tags of the
+        // valid profile still feed `measurements`, which stays total on any profile.
         let text = BOILER.replace("bit = 3", "bit = 64");
+        let response = respond(&tags_of(&profile(BOILER)), beyond_the_word);
         assert_eq!(
-            measure(&profile(&text), beyond_the_word).remove(0).quality,
+            profile(&text)
+                .measurements(&response, wall())
+                .remove(0)
+                .quality,
             Quality::Unknown,
             "bit 64 does not exist"
         );

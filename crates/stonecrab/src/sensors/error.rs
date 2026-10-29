@@ -10,13 +10,16 @@ use crate::{ErrorKind, PlcError};
 /// configuration that the library must not repeat into logs.
 ///
 /// The first four variants come from the loader, which checks the schema only (decision
-/// D17, slice S28a). The next eleven check the meaning of a loaded profile: all but `MissingByteOrder` and
-/// `MissingWordOrder` come from [`SensorProfile::validate`](crate::sensors::SensorProfile::validate)
-/// (slice S28b), and those two come from
+/// D17, slice S28a). The next ones check the meaning of a loaded profile: all but
+/// `MissingByteOrder`, `MissingWordOrder` and `StatusBitInBitField` come from
+/// [`SensorProfile::validate`](crate::sensors::SensorProfile::validate)
+/// (slice S28b), and those three come from
 /// [`SensorProfile::validate_for`](crate::sensors::SensorProfile::validate_for), which asks a
-/// driver which addresses span several words. The last four come from
-/// [`SensorProfile::tags`](crate::sensors::SensorProfile::tags) (slice S29), which asks a driver to
-/// parse the profile's addresses; `AddressRejected` also comes from `validate_for`. Validation errors name
+/// driver which addresses span several words and what the addresses are
+/// (`OverlappingStatusBits` and `StatusBitOutOfRange` come from both). The last four come from
+/// [`SensorProfile::tags`](crate::sensors::SensorProfile::tags) (slice S29), which asks a driver
+/// to parse the profile's addresses; `AddressRejected` and `StatusAddressRejected` also come
+/// from `validate_for`. Validation errors name
 /// the offending measurement by its 0-based index in
 /// [`SensorProfile::measurements`](crate::sensors::SensorProfile::measurements), not by its name,
 /// which keeps the type `Copy`; `profile.measurements[index].name` gives the name. The
@@ -99,7 +102,12 @@ pub enum ProfileError {
         /// Index of the measurement.
         measurement: usize,
     },
-    /// Two status fields of one measurement name the same address and bit.
+    /// Two status fields of one measurement name the same address and bit. Addresses are
+    /// the same when their text is equal ([`SensorProfile::validate`]) or when the driver
+    /// parses them to the same canonical address ([`SensorProfile::validate_for`]).
+    ///
+    /// [`SensorProfile::validate`]: crate::sensors::SensorProfile::validate
+    /// [`SensorProfile::validate_for`]: crate::sensors::SensorProfile::validate_for
     OverlappingStatusBits {
         /// Index of the measurement.
         measurement: usize,
@@ -172,6 +180,33 @@ pub enum ProfileError {
         /// Index of the measurement.
         measurement: usize,
     },
+    /// A status field's `bit` does not exist in its data: it is 64 or more
+    /// ([`SensorProfile::validate`]), or it is at or beyond the width of the value type the
+    /// driver parses the status address to, 1 for a bit address and 16 for a 16-bit word
+    /// ([`SensorProfile::validate_for`]). Such a bit is not in the data. At runtime a bit of 64
+    /// or more reads as `Quality::Unknown`, a bit below 64 reads as zero or as a sign-extension
+    /// copy, and a `Bool` ignores the bit; the rule is stricter than the runtime on purpose.
+    ///
+    /// [`SensorProfile::validate`]: crate::sensors::SensorProfile::validate
+    /// [`SensorProfile::validate_for`]: crate::sensors::SensorProfile::validate_for
+    StatusBitOutOfRange {
+        /// Index of the measurement.
+        measurement: usize,
+        /// Index of the status field in the measurement's `status_fields`.
+        status_field: usize,
+    },
+    /// A status field names a bit of the word the measurement's own first scaling step
+    /// extracts: the step is a `BitField` whose `[shift, shift + width)` range holds the
+    /// bit, and the status address is the measurement's address
+    /// ([`SensorProfile::validate_for`]).
+    ///
+    /// [`SensorProfile::validate_for`]: crate::sensors::SensorProfile::validate_for
+    StatusBitInBitField {
+        /// Index of the measurement.
+        measurement: usize,
+        /// Index of the status field in the measurement's `status_fields`.
+        status_field: usize,
+    },
 }
 
 impl fmt::Display for ProfileError {
@@ -227,6 +262,20 @@ impl fmt::Display for ProfileError {
             } => write!(
                 f,
                 "status field {status_field} of measurement {measurement} repeats an address and bit"
+            ),
+            Self::StatusBitOutOfRange {
+                measurement,
+                status_field,
+            } => write!(
+                f,
+                "status field {status_field} of measurement {measurement} names a bit beyond the width of its data"
+            ),
+            Self::StatusBitInBitField {
+                measurement,
+                status_field,
+            } => write!(
+                f,
+                "status field {status_field} of measurement {measurement} names a bit the measurement's bit field extracts"
             ),
             Self::UnsupportedCount { measurement, count } => write!(
                 f,
@@ -345,6 +394,20 @@ mod tests {
                     status_field: 2,
                 },
                 "status field 2 of measurement 0 repeats an address and bit",
+            ),
+            (
+                ProfileError::StatusBitOutOfRange {
+                    measurement: 1,
+                    status_field: 0,
+                },
+                "status field 0 of measurement 1 names a bit beyond the width of its data",
+            ),
+            (
+                ProfileError::StatusBitInBitField {
+                    measurement: 3,
+                    status_field: 2,
+                },
+                "status field 2 of measurement 3 names a bit the measurement's bit field extracts",
             ),
             (
                 ProfileError::UnsupportedCount {

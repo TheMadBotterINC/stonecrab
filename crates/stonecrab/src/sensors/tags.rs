@@ -63,6 +63,28 @@ impl MeasurementDef {
     }
 }
 
+impl StatusField {
+    /// Parse this status field's address with `driver`; `measurement` and `position` name
+    /// the field in the error, which never repeats the address text. Like
+    /// [`MeasurementDef::parse_address`], this is the one place
+    /// [`SensorProfile::validate_for`] and [`SensorProfile::tags`] map a refusal, so they
+    /// refuse the same addresses.
+    pub(super) fn parse_address(
+        &self,
+        measurement: usize,
+        position: usize,
+        driver: &dyn Driver,
+        options: &AddressOptions,
+    ) -> Result<Arc<dyn ProtocolAddress>, ProfileError> {
+        driver
+            .parse_address(&self.address, options)
+            .map_err(|_error| ProfileError::StatusAddressRejected {
+                measurement,
+                status_field: position,
+            })
+    }
+}
+
 /// What a status tag identity that `TagId` refuses reports; the limits make it unreachable.
 const STATUS_TAG_NAME: ProfileError = ProfileError::InvalidIdentifier {
     field: "status tag name",
@@ -236,12 +258,7 @@ impl SensorProfile {
                     });
                 }
                 seen.push(&field.name);
-                let address = driver
-                    .parse_address(&field.address, &options)
-                    .map_err(|_error| ProfileError::StatusAddressRejected {
-                        measurement: index,
-                        status_field: position,
-                    })?;
+                let address = field.parse_address(index, position, driver, &options)?;
                 tags.push(Tag::new(definition.status_tag_id(field)?, address));
             }
         }

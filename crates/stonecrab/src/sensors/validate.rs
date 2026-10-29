@@ -2,8 +2,10 @@ use std::collections::BTreeMap;
 
 use crate::Driver;
 use crate::sensors::{
-    ConnectionRequirements, MeasurementDef, ProfileError, ScaleStep, SensorProfile, Unit,
+    ConnectionRequirements, MeasurementDef, ProfileError, ScaleStep, SensorProfile, StatusField,
+    Unit,
 };
+use crate::{AddressOptions, PlcValueType};
 
 /// The one address convention that exists at alpha.
 const PLC4X_CONVENTION: &str = "plc4x";
@@ -11,7 +13,8 @@ const PLC4X_CONVENTION: &str = "plc4x";
 /// The connection scheme whose profiles must declare an address convention (decision D17).
 const MODBUS_TCP_SCHEME: &str = "modbus-tcp";
 
-/// Largest bit position plus one that a `BitField` step may reach (values are 64 bits).
+/// Largest bit position plus one that a `BitField` step or a status bit may reach (values
+/// are 64 bits).
 const VALUE_BITS: u16 = 64;
 
 impl SensorProfile {
@@ -39,7 +42,8 @@ impl SensorProfile {
     /// - a range, when present, has finite bounds and `min <= max`; equal bounds are valid
     ///   (`InvalidRange`);
     /// - no two status fields of one measurement name the same address text and bit
-    ///   (`OverlappingStatusBits`; two measurements may share a status word);
+    ///   (`OverlappingStatusBits`; two measurements may share a status word), and no
+    ///   status bit is 64 or more (`StatusBitOutOfRange`);
     /// - every name in the quality mapping is a status field of the same measurement
     ///   (`UnknownQualityReference`).
     ///
@@ -49,19 +53,20 @@ impl SensorProfile {
     ///
     /// Validation is independent of any driver. Whether `address` and `data_type` are
     /// meaningful to the driver, and whether status fields name real addresses, is the
-    /// driver's `parse_address` to say when tags are built; this method only compares
-    /// address text for equality. The rule that a value spanning several words needs a
-    /// declared `byte_order` and `word_order` needs the driver to say which addresses
-    /// those are, so it lives in [`SensorProfile::validate_for`], which
-    /// [`SensorProfile::tags`] runs.
+    /// driver's `parse_address` to say; this method only compares address text for
+    /// equality and bounds a status bit by 64. The rules that need the parsed address live
+    /// in [`SensorProfile::validate_for`], which [`SensorProfile::tags`] runs: a value
+    /// spanning several words needs a declared `byte_order` and `word_order`, a status
+    /// bit lies inside the width of its data, and no bit is claimed twice under
+    /// different spellings.
     ///
     /// # Errors
     /// Returns every [`ProfileError`] found, never an empty list: the validation variants
     /// are `DuplicateMeasurementName`, `UnknownUnit`, `EmptyUnit`,
-    /// `OverlappingStatusBits`, `UnsupportedCount`, `InvalidScaleStep`, `InvalidRange`,
-    /// `UnknownQualityReference`, `UnknownAddressConvention` and
-    /// `MissingAddressConvention`. Each converts into a [`PlcError`](crate::PlcError)
-    /// of kind `InvalidConfig`.
+    /// `OverlappingStatusBits`, `StatusBitOutOfRange`, `UnsupportedCount`,
+    /// `InvalidScaleStep`, `InvalidRange`, `UnknownQualityReference`,
+    /// `UnknownAddressConvention` and `MissingAddressConvention`. Each converts into a
+    /// [`PlcError`](crate::PlcError) of kind `InvalidConfig`.
     ///
     /// # Examples
     /// ```
@@ -127,24 +132,40 @@ impl SensorProfile {
     /// Check the meaning of a loaded profile against the driver that will read it.
     ///
     /// This runs every rule of [`SensorProfile::validate`], then parses each measurement's
-    /// address with `driver` under [`SensorProfile::address_options`], exactly as
-    /// [`SensorProfile::tags`] does, and appends, in document order:
+    /// address and then its status field addresses with `driver` under
+    /// [`SensorProfile::address_options`], exactly as [`SensorProfile::tags`] does, and
+    /// appends, measurement by measurement in document order:
     /// - `AddressRejected` when the driver refuses the address;
     /// - `MissingByteOrder` and `MissingWordOrder` when the parsed address
     ///   [spans several words](crate::ProtocolAddress::spans_multiple_words) and the
     ///   definition does not set that order. Word order is never inferred (docs/SPEC.md),
-    ///   and the driver, not the `data_type` text, says which values span words.
+    ///   and the driver, not the `data_type` text, says which values span words;
+    /// - for each status field in order, `StatusAddressRejected` when the driver refuses
+    ///   its address; otherwise `StatusBitOutOfRange` when the bit is at or beyond the
+    ///   width of the parsed address's value type (1 for a bit, 8, 16, 32 or 64 for an
+    ///   integer; a type with no such width is not checked), `OverlappingStatusBits` when
+    ///   an earlier field has the same bit at an address with the same
+    ///   [canonical](crate::ProtocolAddress::canonical) text but different source text
+    ///   (`4x00001:WORD` and `holding-register:1:WORD`), and `StatusBitInBitField` when
+    ///   the measurement's first scaling step is a `BitField` whose
+    ///   `[shift, shift + width)` range holds the bit and the status address has the
+    ///   measurement's canonical address.
     ///
-    /// When the declared address convention is unusable the addresses are not parsed, and
-    /// `validate`'s `UnknownAddressConvention` stands alone. Status field addresses are
-    /// parsed by [`SensorProfile::tags`]. The connection scheme is not compared with the
-    /// driver's, so pass the driver the profile names; `tags` checks the scheme first.
+    /// The errors of `validate` come first, so an overlap of two spellings is listed after
+    /// an overlap of equal text even when its field is earlier. Addresses are compared as
+    /// canonical text, so two spellings collide but one register
+    /// read under two data types (`holding-register:1:INT` and `holding-register:1:WORD`)
+    /// does not, and neither do two unit ids. When the declared address convention is
+    /// unusable the addresses are not parsed, and `validate`'s `UnknownAddressConvention`
+    /// stands alone. The connection scheme is not compared with the driver's, so pass the
+    /// driver the profile names; `tags` checks the scheme first.
     ///
     /// # Errors
     /// Returns every [`ProfileError`] found, never an empty list: those of
-    /// [`SensorProfile::validate`] plus `AddressRejected`, `MissingByteOrder` and
-    /// `MissingWordOrder`. Each converts into a [`PlcError`](crate::PlcError) of kind
-    /// `InvalidConfig`.
+    /// [`SensorProfile::validate`] plus `AddressRejected`, `StatusAddressRejected`,
+    /// `MissingByteOrder`, `MissingWordOrder`, `StatusBitOutOfRange`,
+    /// `OverlappingStatusBits` and `StatusBitInBitField`. Each converts into a
+    /// [`PlcError`](crate::PlcError) of kind `InvalidConfig`.
     ///
     /// # Examples
     /// ```
@@ -193,7 +214,8 @@ impl SensorProfile {
         let mut errors = self.validate().err().unwrap_or_default();
         if let Ok(options) = self.address_options() {
             for (index, measurement) in self.measurements.iter().enumerate() {
-                match measurement.parse_address(index, driver, &options) {
+                let value = measurement.parse_address(index, driver, &options);
+                match &value {
                     Ok(address) if address.spans_multiple_words() => {
                         if measurement.byte_order.is_none() {
                             errors.push(ProfileError::MissingByteOrder { measurement: index });
@@ -203,8 +225,17 @@ impl SensorProfile {
                         }
                     }
                     Ok(_) => {}
-                    Err(error) => errors.push(error),
+                    Err(error) => errors.push(*error),
                 }
+                let value = value.ok().map(|address| address.canonical());
+                check_status_fields(
+                    index,
+                    measurement,
+                    value.as_deref(),
+                    driver,
+                    &options,
+                    &mut errors,
+                );
             }
         }
         if errors.is_empty() {
@@ -252,12 +283,13 @@ fn check_measurement(index: usize, measurement: &MeasurementDef, errors: &mut Ve
         errors.push(ProfileError::InvalidRange { measurement: index });
     }
     for (position, field) in measurement.status_fields.iter().enumerate() {
-        let repeats = measurement
-            .status_fields
-            .iter()
-            .take(position)
-            .any(|earlier| earlier.address == field.address && earlier.bit == field.bit);
-        if repeats {
+        if u16::from(field.bit) >= VALUE_BITS {
+            errors.push(ProfileError::StatusBitOutOfRange {
+                measurement: index,
+                status_field: position,
+            });
+        }
+        if repeats_earlier_text(&measurement.status_fields, position) {
             errors.push(ProfileError::OverlappingStatusBits {
                 measurement: index,
                 status_field: position,
@@ -278,6 +310,88 @@ fn check_measurement(index: usize, measurement: &MeasurementDef, errors: &mut Ve
                 });
             }
         }
+    }
+}
+
+/// True when an earlier status field has the address text and the bit of field `position`.
+fn repeats_earlier_text(fields: &[StatusField], position: usize) -> bool {
+    fields.get(position).is_some_and(|field| {
+        fields
+            .iter()
+            .take(position)
+            .any(|earlier| earlier.address == field.address && earlier.bit == field.bit)
+    })
+}
+
+/// The status-field rules that need the parsed addresses (`validate_for`). `value` is the
+/// canonical text of the measurement's own address, when the driver accepted it.
+fn check_status_fields(
+    index: usize,
+    measurement: &MeasurementDef,
+    value: Option<&str>,
+    driver: &dyn Driver,
+    options: &AddressOptions,
+    errors: &mut Vec<ProfileError>,
+) {
+    let extracted = match measurement.scaling.first() {
+        Some(&ScaleStep::BitField { shift, width }) => {
+            u16::from(shift)..u16::from(shift).saturating_add(u16::from(width))
+        }
+        _ => 0..0,
+    };
+    let mut claimed: Vec<(String, u8)> = Vec::new();
+    for (position, field) in measurement.status_fields.iter().enumerate() {
+        let address = match field.parse_address(index, position, driver, options) {
+            Ok(address) => address,
+            Err(error) => {
+                errors.push(error);
+                continue;
+            }
+        };
+        let canonical = address.canonical();
+        let narrow = address
+            .value_type_hint()
+            .and_then(bit_width)
+            .is_some_and(|width| field.bit >= width);
+        if narrow && u16::from(field.bit) < VALUE_BITS {
+            errors.push(ProfileError::StatusBitOutOfRange {
+                measurement: index,
+                status_field: position,
+            });
+        }
+        if !repeats_earlier_text(&measurement.status_fields, position)
+            && claimed.contains(&(canonical.clone(), field.bit))
+        {
+            errors.push(ProfileError::OverlappingStatusBits {
+                measurement: index,
+                status_field: position,
+            });
+        }
+        if value == Some(canonical.as_str()) && extracted.contains(&u16::from(field.bit)) {
+            errors.push(ProfileError::StatusBitInBitField {
+                measurement: index,
+                status_field: position,
+            });
+        }
+        claimed.push((canonical, field.bit));
+    }
+}
+
+/// The number of bits a status word of this type has; `None` for a type that is not a bit
+/// or an integer.
+const fn bit_width(value_type: PlcValueType) -> Option<u8> {
+    match value_type {
+        PlcValueType::Bool => Some(1),
+        PlcValueType::I8 | PlcValueType::U8 => Some(8),
+        PlcValueType::I16 | PlcValueType::U16 => Some(16),
+        PlcValueType::I32 | PlcValueType::U32 => Some(32),
+        PlcValueType::I64 | PlcValueType::U64 => Some(64),
+        PlcValueType::Null
+        | PlcValueType::F32
+        | PlcValueType::F64
+        | PlcValueType::Char
+        | PlcValueType::String
+        | PlcValueType::Duration => None,
     }
 }
 
@@ -331,7 +445,7 @@ mod tests {
         (
             prop::sample::select(vec!["s0", "s1", "s2"]),
             prop::sample::select(vec!["w1", "w2"]),
-            0..3u8,
+            prop_oneof![0..3u8, 62..66u8, Just(255u8)],
             any::<bool>(),
         )
             .prop_map(|(name, address, bit, invert)| StatusField {
@@ -447,6 +561,7 @@ mod tests {
             .iter()
             .map(|f| (f.address.as_str(), f.bit))
             .collect();
+        let bits_exist = m.status_fields.iter().all(|f| f.bit < 64);
         let declared: BTreeSet<&str> = m.status_fields.iter().map(|f| f.name.as_str()).collect();
         let steps_ok = m.scaling.iter().all(|step| match *step {
             ScaleStep::Multiply(c) | ScaleStep::Offset(c) => c.is_finite(),
@@ -471,6 +586,7 @@ mod tests {
             ["Cel", "kPa", "1"].contains(&m.unit.as_str()),
             range_ok,
             pairs.len() == m.status_fields.len(),
+            bits_exist,
             quality_ok,
         ];
         clauses.iter().all(|clause| *clause)

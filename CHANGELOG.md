@@ -13,6 +13,11 @@ placeholder.
   `Connection` gains a provided `subscribe` that returns `Unsupported(Subscribe)` with no
   I/O; no driver overrides it yet. The contract suite gains the case "an unsupported
   subscribe performs no I/O and changes no state" (27 cases).
+- `SensorProfile::validate_for` checks status bits (findings G02 and G03): a bit beyond the width of
+  its status address's type is `ProfileError::StatusBitOutOfRange` (bit 64 or more already in
+  `validate`), two spellings of one address and bit are `OverlappingStatusBits`, and a status bit
+  inside the measurement's own leading `bit_field` is the new `StatusBitInBitField`; a refused
+  status address is now reported there too. Additive: two `#[non_exhaustive]` variants.
 - CI (no crate changes): the `semver` job is blocking against the published 0.2.0, with
   cargo-semver-checks pinned to 0.51.0.
 - `SensorProfile::validate` rejects a measurement range with a NaN or infinite bound or

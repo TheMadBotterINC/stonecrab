@@ -1,0 +1,21 @@
+id = "hostile_bits"
+schema_version = 1
+validation = "synthetic"
+[connection]
+scheme = "modbus-tcp"
+address_convention = "plc4x"
+[provenance]
+source = "x"
+[[measurements]]
+name = "m"
+address = "holding-register:30:WORD"
+data_type = "WORD"
+unit = "1"
+scaling = [{ bit_field = { shift = 4, width = 2 } }, { bit_field = { shift = 0, width = 255 } }]
+status_fields = [
+    { name = "a", address = "holding-register:1:WORD", bit = 3 },
+    { name = "b", address = "4x00001:WORD", bit = 3 },
+    { name = "c", address = "400001:WORD", bit = 64 },
+    { name = "d", address = "4x00030:WORD", bit = 5 },
+    { name = "e", address = "coil:1", bit = 255 },
+]

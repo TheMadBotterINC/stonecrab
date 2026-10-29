@@ -170,6 +170,30 @@ mod tests {
         );
     }
 
+    // covers: SENSORS-VALIDATION / a status bit is a bit of a 64-bit value at most
+    #[test]
+    fn a_status_bit_of_64_or_more_is_reported_without_a_driver() {
+        let fields = "status_fields = [\n\
+             { name = \"top\", address = \"w:1\", bit = 63 },\n\
+             { name = \"past\", address = \"w:1\", bit = 64 },\n\
+             { name = \"far\", address = \"w:2\", bit = 255 },\n\
+             ]";
+        assert_eq!(
+            one(fields),
+            [
+                ProfileError::StatusBitOutOfRange {
+                    measurement: 0,
+                    status_field: 1
+                },
+                ProfileError::StatusBitOutOfRange {
+                    measurement: 0,
+                    status_field: 2
+                },
+            ],
+            "bit 63 exists; narrower types are the driver's to bound (validate_for)"
+        );
+    }
+
     #[test]
     fn measurements_may_share_a_status_word() {
         let status = "status_fields = [{ name = \"fault\", address = \"w:1\", bit = 0 }]";
