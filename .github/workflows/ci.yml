@@ -66,7 +66,7 @@ jobs:
       - run: scripts/coverage-gate.sh
         env:
           NEXTEST_PROFILE: ci
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
         with:
           name: coverage
@@ -206,7 +206,7 @@ jobs:
       # Image id, pip freeze and server log next to the contract report the test wrote.
       - run: interop/pymodbus/interop.sh evidence
         if: ${{ always() }}
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: ${{ always() }}
         with:
           name: interop-evidence
@@ -244,7 +244,7 @@ jobs:
       # Image id, the server certificate's summary and the server log (never a key).
       - run: interop/pymodbus/tls.sh evidence
         if: ${{ always() }}
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: ${{ always() }}
         with:
           name: interop-tls-evidence
@@ -280,7 +280,7 @@ jobs:
       # Image id, package version and server log next to the test output.
       - run: interop/libmodbus/interop.sh evidence
         if: ${{ always() }}
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: ${{ always() }}
         with:
           name: interop-libmodbus-evidence
@@ -317,7 +317,7 @@ jobs:
       # Image id, pip freeze and server log next to the test output.
       - run: interop/modbus-tk/interop.sh evidence
         if: ${{ always() }}
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: ${{ always() }}
         with:
           name: interop-modbus-tk-evidence
@@ -362,7 +362,7 @@ jobs:
       # Image digests, tshark and Toxiproxy versions, the capture counts and the container logs.
       - run: interop/toxiproxy/interop.sh evidence
         if: ${{ always() }}
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: ${{ always() }}
         with:
           name: interop-toxiproxy-evidence
@@ -405,7 +405,7 @@ jobs:
       # Image id, base, archive checksum, iproute2 version and server log next to the test output.
       - run: interop/diagslave/interop.sh evidence
         if: ${{ always() }}
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: ${{ always() }}
         with:
           name: interop-udp-evidence
@@ -448,7 +448,7 @@ jobs:
       # next to the test output.
       - run: interop/diagslave/interop.sh evidence
         if: ${{ always() }}
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: ${{ always() }}
         with:
           name: interop-rtu-evidence
@@ -501,7 +501,7 @@ jobs:
       # diagslave and socat ran with and the server log next to the test output.
       - run: interop/diagslave/interop.sh evidence
         if: ${{ always() }}
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: ${{ always() }}
         with:
           name: interop-${{ matrix.mode }}-evidence
@@ -547,7 +547,7 @@ jobs:
         if: ${{ !cancelled() }}
       # The socat and diagslave versions and command lines, the connection strings, the logs
       # and the test output of each mode.
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: ${{ always() }}
         with:
           name: interop-serial-port-evidence
@@ -684,7 +684,7 @@ jobs:
           toolchain: "1.99.1"
       - name: Mutation testing (mutants.toml scope; a survivor fails the step)
         run: scripts/mutants.sh 4
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: ${{ always() }}
         with:
           name: mutants-outcomes
@@ -702,7 +702,7 @@ jobs:
           else
             scripts/bench-compare.sh "$base"
           fi
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: ${{ always() }}
         with:
           name: bench-compare
@@ -716,7 +716,7 @@ jobs:
         if: ${{ !cancelled() }}
         continue-on-error: true
         run: scripts/branch-coverage.sh
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: ${{ always() }}
         with:
           name: branch-coverage
