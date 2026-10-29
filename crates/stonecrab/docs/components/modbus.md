@@ -13,7 +13,7 @@ read and written (see "Text" below), and since S61 Modbus TCP also runs over UDP
 alpha and are listed under "Not in the alpha" below.
 The TCP driver has been checked against an independent server, pymodbus 3.8.6, and no
 physical device; over UDP it runs on loopback sockets, and its `interop-udp` job against
-diagslave 3.6 with `tc netem` faults has its first hosted run pending as of 2026-10-29; the
+diagslave 3.6 with `tc netem` faults passed its first hosted run (2026-10-29, run 40830080420, 6 of 6); the
 RTU driver on the in-memory transport and over a loopback socket only.
 No independent server serves the file record function codes, so the extended registers are
 checked against the specification examples, the upstream PLC4X frames and a first-party

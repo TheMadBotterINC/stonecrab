@@ -182,3 +182,13 @@ rest of one datagram to the next one.
 - `docs/parity/transport.md` (`UTR-UDP`, `UTR-UDP-OPTIONS`, `UTR-UDP-RING`, `UTR-UDP-SHARED`)
   and `docs/parity/modbus.md` (`MB-TCP-TRANSPORTS`, `MB-TCP-TRANSPORTS-UDP`,
   `MB-CFG-TRANSPORT-OPTIONS`, `MB-QUIRK-A`) record the rows with their test ids.
+
+## Addendum (2026-10-29): the first hosted run of `interop-udp`
+
+The hosted job ran with the commit that added this ADR (d208261, CI run 40830080420) on
+`ubuntu-latest`: `sudo modprobe sch_netem`, the diagslave image built from the pinned base
+and archive, the netem preflight passed, and all six `interop_udp_*` tests passed (write
+and read back, loss of every reply, delay below and past the deadline, duplication,
+reordering). The `interoperability-tested` level of the UDP rows in
+`docs/COMPATIBILITY.md` and the `automated-verified` statuses of `UTR-UDP` and
+`MB-TCP-TRANSPORTS-UDP` now rest on that run, as the Consequences above anticipated.

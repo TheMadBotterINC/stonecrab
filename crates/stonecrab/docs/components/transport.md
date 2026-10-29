@@ -24,7 +24,7 @@ types are Stonecrab's own contract. The behavior that is specified is recorded i
 | `SystemClock` (Tokio timer) | interoperability-tested |
 | `Jitter` (xorshift64* sample source for `ReconnectPolicy::next_delay`) | build-tested |
 | `SerialTransport` and `SerialFactory` (feature `serial`) | simulator-tested |
-| `UdpTransport` and `UdpFactory`, `Transport::delivers_datagrams` | simulator-tested; interoperability-tested once the first hosted `interop-udp` run passes |
+| `UdpTransport` and `UdpFactory`, `Transport::delivers_datagrams` | interoperability-tested (job `interop-udp`, run 40830080420, 6 of 6); simulator-tested on loopback sockets |
 | TLS transport | planned |
 | Hardware verification | planned |
 
@@ -55,8 +55,8 @@ through `stonecrab::modbus` (`modbus-tcp:udp`), carries the reads, writes and pi
 `interop-udp` job against diagslave 3.6, an independent Modbus UDP slave, with `tc netem`
 losing, delaying, duplicating and reordering the replies on a real clock. Its first local run
 went through a UDP-over-TCP relay, because colima's default port forwarder does not forward
-UDP; the hosted job publishes the UDP port directly, and its first run is pending as of
-2026-10-29.
+UDP; the hosted job publishes the UDP port directly, and its first run passed on
+2026-10-29 (run 40830080420, 6 of 6).
 
 ## Feature
 The module exists only with the `transport` feature, which is the only thing that brings

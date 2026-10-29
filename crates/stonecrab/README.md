@@ -52,7 +52,7 @@ operations.
 | `modbus`: reconnect, retry, cancellation, timeout, late-reply discard | simulator-tested |
 | `modbus`: write of coils and holding registers (FC15, FC06, FC16), refused unless the connection string says `access=read-write` | interoperability-tested |
 | `modbus`: text types `CHAR`, `WCHAR`, `STRING(n)` and `WSTRING(n)`, read and written | simulator-tested |
-| `modbus`: Modbus TCP over UDP (`modbus-tcp:udp`) reads, writes and ping, with lost, delayed, duplicated and reordered replies | simulator-tested (loopback UDP); interoperability-tested once the first hosted `interop-udp` run passes |
+| `modbus`: Modbus TCP over UDP (`modbus-tcp:udp`) reads, writes and ping, with lost, delayed, duplicated and reordered replies | interoperability-tested (job `interop-udp`, run 40830080420, 6 of 6); simulator-tested on loopback UDP |
 | `modbus`: Modbus RTU (`modbus-rtu`) reads, writes, ping and polling over a serial port or a gateway, with CRC errors, the silence before a request, late-reply drain and reopen | simulator-tested |
 | Subscribe by polling (`sim` and `modbus`): cyclic and change-of-state, event refused; on a clock that never sleeps (the simulator's default) change-of-state is refused and the interval paces nothing | simulator-tested |
 | Browse and discover | not supported |
@@ -63,7 +63,7 @@ operations.
 
 `interoperability-tested` means an interop CI job ran the code against an independent
 server: pymodbus 3.8.6 (job `interop`) and, over UDP, diagslave 3.6 (job `interop-udp`,
-first hosted run pending as of 2026-10-29).
+first hosted run 40830080420, 6 of 6 on 2026-10-29).
 The levels of each module are in its own documentation page (the component documents in
 `docs/components/` of this crate); the table above is the crate's view of the same
 evidence.
