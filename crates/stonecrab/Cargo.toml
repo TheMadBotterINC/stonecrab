@@ -102,6 +102,10 @@ name = "modbus_decode"
 required-features = ["modbus", "testkit"]
 
 [[test]]
+name = "modbus_device_replays"
+required-features = ["modbus", "sensors", "testkit"]
+
+[[test]]
 name = "modbus_feature"
 required-features = ["modbus"]
 

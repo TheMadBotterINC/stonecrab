@@ -1,0 +1,22 @@
+# Provenance of the documented device maps in this directory (slice S52d, CODING_STANDARDS
+# 13.6). The schema is that of ../PROVENANCE.toml (stonecrab::testkit::load_provenance); this
+# directory holds no wire vectors, so there are only [[file]] entries, one per map.
+#
+# LABEL: documented map, not hardware-verified. Each map is a hand transcription of a vendor's
+# register tables. The vendor documents are vendor documentation (all rights reserved): they are
+# pinned here by URL and sha256 (computed from the file downloaded on the retrieval date) and are
+# never copied into the repository. The transcription itself is first-party, Apache-2.0. No device
+# was read. tests/modbus_device_replays.rs checks that the URL and sha256 of each entry equal
+# those in the map itself.
+
+[[file]]
+path = "sio-mb04thms.toml"
+origin = "Label: documented map, not hardware-verified. Transcribed by hand from the AutomationDirect SIO-MB04THMS User Guide, 1st Edition, Rev. C (12 pages), https://cdn.automationdirect.com/static/manuals/stridefio/siomb04thmsug.pdf, sha256 0800b63b890638626cc359e6b539d3fe14e315c1749a47f28063fd5ecbc53854, retrieved 2026-10-28; slice S52d, hardware record HW1"
+license = "Apache-2.0"
+note = "First-party transcription (S52d); the document is vendor documentation (AutomationDirect, all rights reserved), pinned by URL and sha256 and not copied. Register numbers, access, types and defaults are the guide's; a value the guide does not state is marked basis = placeholder. Read by tests/modbus_device_replays.rs through tests/support/documented_map.rs. No device was read."
+
+[[file]]
+path = "slm1-c.toml"
+origin = "Label: documented map, not hardware-verified. Transcribed by hand from the AutomationDirect SOLO Modular Temperature Controller User Manual, 1st Edition 07/2023 (68 pages), chapter 7, https://cdn.automationdirect.com/static/manuals/soloslm/soloslmman.pdf, sha256 830b99162dfbab23ed87c1778428747e65ce658dbce48e76899d4b948295d7cc, retrieved 2026-10-28; slice S52d, hardware record HW2"
+license = "Apache-2.0"
+note = "First-party transcription (S52d); the document is vendor documentation (AutomationDirect, all rights reserved), pinned by URL and sha256 and not copied. Register numbers, access, types and defaults are the manual's; a value the manual does not state is marked basis = placeholder. Read by tests/modbus_device_replays.rs through tests/support/documented_map.rs. No device was read."

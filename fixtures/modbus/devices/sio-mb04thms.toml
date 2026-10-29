@@ -1,0 +1,313 @@
+# Documented map of the AutomationDirect STRIDE SIO-MB04THMS, a 4-channel thermocouple
+# input module with a Modbus TCP server (plan slice S52d, hardware record HW1).
+#
+# LABEL: documented map, not hardware-verified. Nothing here was read from a device. Every
+# entry is transcribed from the vendor's user guide, which is pinned by URL and sha256 in
+# [source] and is not retained in this repository. The guide's register tables are on page
+# 1 and the register descriptions on pages 3 and 4. The table also lists 40004 and 40005
+# as Reserved (read-only); they are deliberately not mapped, so the replay reads them as
+# zero. A value the guide does not state is marked basis = "placeholder": it only lets a
+# replay tell one register from another and is not a claim about the device.
+# docs/hardware/hw1-sio-mb04thms.md lists what the hardware must settle.
+#
+# First-party, Apache-2.0 (the transcription is ours; the guide is not copied). Read by
+# crates/stonecrab/tests/support/documented_map.rs, which rejects unknown keys. The shape
+# follows fixtures/modbus/interop/register-map.toml, with the document's own number, access
+# and meaning added to each entry.
+#
+# Conventions
+#   number   the number the guide prints (a Modicon style 4xxxx register or 0xxxx coil).
+#   wire     the zero-based address of the request under the reading in
+#            [device].address_reading. The guide prints one hex datum: coil 00161 is 0x00A1
+#            (161), so a coil's wire address is its decimal number. The guide prints no hex
+#            for registers; the replay reads them the same way (40041 is wire 41, the
+#            Stonecrab convention "zero-based"). A device that counts from one instead
+#            moves every register by one: HW1 settles it (docs/hardware).
+#   words    the register words in register order, high byte first (hexadecimal).
+#   basis    "documented" (the guide states the value), "default" (the guide states it as
+#            the default), "example" (the guide's worked example) or "placeholder".
+
+[device]
+label = "documented map, not hardware-verified"
+manufacturer = "AutomationDirect"
+model = "STRIDE SIO-MB04THMS"
+scheme = "modbus-tcp"
+unit_id = 1                  # node id 40007, default 1 (page 3)
+address_reading = "zero-based"
+# "The group of 0xxxx addresses mirrors the group of 1xxxx addresses; the group of 3xxxx
+# addresses mirrors the 4xxxx addresses" (page 1). The replay always serves the discrete
+# inputs as the coils; this key says whether it also serves the input registers as the
+# holding registers.
+input_registers_mirror_holding = true
+
+[source]
+document = "SIO-MB04THMS User Guide, 1st Edition, Rev. C (manual number SIO-MB04THMS-UG, 12 pages)"
+url = "https://cdn.automationdirect.com/static/manuals/stridefio/siomb04thmsug.pdf"
+sha256 = "0800b63b890638626cc359e6b539d3fe14e315c1749a47f28063fd5ecbc53854"
+retrieved = "2026-10-28"
+license = "vendor documentation (AutomationDirect), all rights reserved; pinned by URL and sha256, never copied"
+
+# Page 1, notes under the register table, and the function code table.
+[limits]
+functions = [1, 2, 3, 4, 5, 6, 15, 16]
+read_bits = 128         # FC01 and FC02
+read_registers = 64     # FC03 and FC04
+write_bits = 64         # FC15
+write_registers = 64    # FC16
+
+# ---- Registers 40002 to 40044 ---------------------------------------------------------
+
+[[registers]]
+number = "40002"
+wire = 2
+name = "Firmware [0]"
+type = "UINT"
+access = "RO"
+basis = "placeholder"
+words = [0x5AA5]
+meaning = "First of two read-only registers holding the firmware version. The guide gives no encoding."
+
+[[registers]]
+number = "40003"
+wire = 3
+name = "Firmware [1]"
+type = "UINT"
+access = "RO"
+basis = "placeholder"
+words = [0xA55A]
+meaning = "Second firmware register. The guide gives no encoding."
+
+[[registers]]
+number = "40007"
+wire = 7
+name = "Node ID"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0001]
+meaning = "Modbus address of the device, 1 to 245. Default 1; INIT mode forces 245 (F5 hex)."
+
+[[registers]]
+number = "40011"
+wire = 11
+name = "System Flags"
+type = "WORD"
+access = "R/W"
+basis = "documented"
+words = [0x0400]
+meaning = "Bit 8 (coil 161) watchdog event enable, bit 9 (coil 162) watchdog event, bit 10 (coil 163) power-up event. The power-up event is forced to 1 at power-on, so a fresh device reads 0x0400 if the enable bit is clear (the guide does not say what the enable bit is at power-on)."
+
+[[registers]]
+number = "40013"
+wire = 13
+name = "Watchdog timer"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x000A]
+meaning = "Watchdog timer in seconds. Default 10."
+
+[[registers]]
+number = "40031"
+wire = 31
+name = "Input Type, Channel 0"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0005]
+meaning = "Sensor type: 0 disabled, 1 250 mV, 4 TC J, 5 TC K, 6 TC R, 7 TC S, 8 TC T, 9 TC B, 10 TC E, 11 TC N. Default TC K."
+
+[[registers]]
+number = "40032"
+wire = 32
+name = "Input Type, Channel 1"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0005]
+meaning = "Sensor type, as register 40031. Default TC K."
+
+[[registers]]
+number = "40033"
+wire = 33
+name = "Input Type, Channel 2"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0005]
+meaning = "Sensor type, as register 40031. Default TC K."
+
+[[registers]]
+number = "40034"
+wire = 34
+name = "Input Type, Channel 3"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0005]
+meaning = "Sensor type, as register 40031. Default TC K."
+
+[[registers]]
+number = "40041"
+wire = 41
+name = "Analog Input (0) - Ch0"
+type = "INT"
+access = "RO"
+basis = "example"
+words = [0x00F6]
+value = "246"
+meaning = "Signed 16 bit, one implied decimal for a thermocouple: 246 is 24.6 degrees C (the guide's example). Not updated while INIT mode is active."
+
+[[registers]]
+number = "40042"
+wire = 42
+name = "Analog Input (1) - Ch1"
+type = "INT"
+access = "RO"
+basis = "placeholder"
+words = [0xFFCC]
+value = "-52"
+meaning = "As 40041. The replay value -52 is -5.2 degrees C, a negative reading."
+
+[[registers]]
+number = "40043"
+wire = 43
+name = "Analog Input (2) - Ch2"
+type = "INT"
+access = "RO"
+basis = "placeholder"
+words = [0x03E8]
+value = "1000"
+meaning = "As 40041. The replay value 1000 is 100.0 degrees C."
+
+[[registers]]
+number = "40044"
+wire = 44
+name = "Analog Input (3) - Ch3"
+type = "INT"
+access = "RO"
+basis = "placeholder"
+words = [0x09C5]
+value = "2501"
+meaning = "As 40041. The replay value 2501 is 250.1 degrees C."
+
+[[registers]]
+number = "40050"
+wire = 50
+name = "Break Status"
+type = "WORD"
+access = "RO"
+basis = "documented"
+words = [0x0000]
+meaning = "One bit per channel, set to 1 on a break (broken sensor, disconnected cable or over temperature): bit 0 channel 0, bit 2 channel 1, bit 4 channel 2, bit 6 channel 3 (the odd bits are unused). The replay holds no break."
+
+# ---- Registers 41218 to 41244 ---------------------------------------------------------
+
+[[registers]]
+number = "41218"
+wire = 1218
+name = "Degree Units Channel 0"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0000]
+meaning = "Temperature units: 0 Celsius (default), 1 Fahrenheit, 2 Kelvin. Unsigned 16 bit."
+
+[[registers]]
+number = "41219"
+wire = 1219
+name = "Degree Units Channel 1"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0000]
+meaning = "Temperature units, as register 41218."
+
+[[registers]]
+number = "41220"
+wire = 1220
+name = "Degree Units Channel 2"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0000]
+meaning = "Temperature units, as register 41218."
+
+[[registers]]
+number = "41221"
+wire = 1221
+name = "Degree Units Channel 3"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0000]
+meaning = "Temperature units, as register 41218."
+
+[[registers]]
+number = "41241"
+wire = 1241
+name = "Offset Channel 0"
+type = "INT"
+access = "R/W"
+basis = "placeholder"
+words = [0x0000]
+meaning = "Offset added to the raw reading: signed 16 bit, one implied decimal for temperature, two for millivolts. The guide states no default; zero is the replay's."
+
+[[registers]]
+number = "41242"
+wire = 1242
+name = "Offset Channel 1"
+type = "INT"
+access = "R/W"
+basis = "placeholder"
+words = [0x0000]
+meaning = "Offset, as register 41241."
+
+[[registers]]
+number = "41243"
+wire = 1243
+name = "Offset Channel 2"
+type = "INT"
+access = "R/W"
+basis = "placeholder"
+words = [0x0000]
+meaning = "Offset, as register 41241."
+
+[[registers]]
+number = "41244"
+wire = 1244
+name = "Offset Channel 3"
+type = "INT"
+access = "R/W"
+basis = "placeholder"
+words = [0x0000]
+meaning = "Offset, as register 41241."
+
+# ---- Coils 161 to 163 (and the same bits as discrete inputs) ---------------------------
+
+[[coils]]
+number = "00161"
+wire = 161                   # 0x00A1, printed in the guide
+name = "Watchdog Enable"
+access = "R/W"
+basis = "placeholder"
+value = false
+meaning = "Mirrors bit 8 of System Flags (40011). The guide's table puts coil 161 at bit 8; whether the coils really mirror the register in that order is an open item."
+
+[[coils]]
+number = "00162"
+wire = 162                   # 0x00A2
+name = "Watchdog Event"
+access = "R/W"
+basis = "placeholder"
+value = false
+meaning = "Mirrors bit 9 of System Flags. Set to 1 when the watchdog timer expires before a command arrives; reset manually."
+
+[[coils]]
+number = "00163"
+wire = 163                   # 0x00A3
+name = "Power Up Event"
+access = "R/W"
+basis = "documented"
+value = true
+meaning = "Mirrors bit 10 of System Flags. Forced to 1 at each power-on; reset manually."

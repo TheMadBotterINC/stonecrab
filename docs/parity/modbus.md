@@ -36,6 +36,9 @@ Status vocabulary, as used in the Status column:
   documented layouts and cross-checked against first-party vectors. No retained upstream
   vector configures either mode (the two all-datatypes files use `BIG_ENDIAN` and
   `LITTLE_ENDIAN`), so they stay below `automated-verified`.
+- `implemented (documented map, not hardware-verified)`: the `MB-DEVICE-*` rows of S52d. The
+  behavior is checked against a hand transcription of a vendor's document served by the
+  first-party responder, never against the device, so it stays below `automated-verified`.
 - `deferred (<owner>)`: recorded for completeness; the alpha rejects or omits the
   behavior. `; rejection implemented` after it means the parser or driver already
   refuses the form with a typed error and the listed test proves it.
@@ -54,6 +57,8 @@ every such row id is named in a `# Compatibility` section or a test, and every
 Row count (after S51): 9 `automated-verified`, 74 `implemented`, 25 `deferred`, 11 `not
 reproduced` and 1 `reproduced; implemented` (MB-QUIRK-D) rows, plus 29 divergence rows that
 reuse the ids of the rows they qualify.
+S52d adds four `implemented (documented map, not hardware-verified)` rows and one `deferred`
+row (the `MB-DEVICE-SIO-*` rows), which this count does not include.
 
 How row ids are used: the first column of every table is a stable id. Rustdoc carries a
 `# Compatibility: docs/parity/modbus.md#<row-id>` section on each public item whose
@@ -573,6 +578,38 @@ layouts of `MB-BYTEORDER-BE-SWAP` and `MB-BYTEORDER-LE-SWAP`, which no upstream 
 configures, but the rows stay `implemented`: moving them is the maintainer's decision. The
 tests never send function code 07, which makes libmodbus 3.1.11 exit without a reply.
 
+## Documented device maps (S52d)
+Slice S52d replays the documented register maps of two test devices, so that the hardware
+records HW1 and HW2 are replays with known differences. The first device is the
+AutomationDirect STRIDE SIO-MB04THMS (Modbus TCP); the second, the SOLO SLM1-C, is serial and
+its rows are in `docs/parity/modbus-serial.md` (`MBS-DEVICE-SLM1C-*`). Both carry the label
+**documented map, not hardware-verified**: the map is a hand transcription of the vendor's
+document, which is vendor documentation (all rights reserved), pinned by URL and sha256 in
+`fixtures/modbus/devices/PROVENANCE.toml` and never copied here. No device was read, so none of these
+rows says more than what Stonecrab does with the document's tables.
+
+| Item | Value |
+| --- | --- |
+| Document | SIO-MB04THMS User Guide, 1st Edition, Rev. C, `https://cdn.automationdirect.com/static/manuals/stridefio/siomb04thmsug.pdf`, sha256 `0800b63b890638626cc359e6b539d3fe14e315c1749a47f28063fd5ecbc53854`, retrieved 2026-10-28 |
+| Fixture | `fixtures/modbus/devices/sio-mb04thms.toml`: 22 registers and 3 coils, each with the guide's number, access, type, meaning and the basis of its value (documented, default, example or placeholder) |
+| Profile | `profiles/documented/modbus-tcp/stride_sio_mb04thms.toml` (`validation = "documented"`) |
+| Suite | `crates/stonecrab/tests/modbus_device_replays.rs`, module `sio_mb04thms`, through `ModbusTcpDriver` over the fake transport and the first-party responder with the guide's limits enforced |
+| Runbook | `docs/hardware/hw1-sio-mb04thms.md`: setup, the acceptance steps and every item the guide leaves open |
+
+What the replay assumes where the guide is silent (each is an open item of the runbook): the
+wire address of a printed number is the number without its leading digit (`zero-based`; the
+guide's one hex datum, coil 00161 is 0x00A1, points this way), an oversize request is refused
+with exception 03, an unmapped address with 02 and an unlisted function with 01, unmapped
+registers read zero, the firmware words are placeholders, and the unit id is not checked.
+
+| Row id | What the document says | Stonecrab behavior | Status | Test ids |
+| --- | --- | --- | --- | --- |
+| MB-DEVICE-SIO-MAP | The register and coil tables (page 1) and the register descriptions (pages 3 and 4): firmware 40002 and 40003, node id 40007, system flags 40011, watchdog 40013, input type 40031 to 40034, analog inputs 40041 to 40044 (signed 16 bit, one implied decimal for temperature), break status 40050, degree units 41218 to 41221, offsets 41241 to 41244, coils 161 to 163; "the group of 0xxxx addresses mirrors the group of 1xxxx addresses; the group of 3xxxx addresses mirrors the 4xxxx addresses" | The transcription is checked against its own rules (the label, the pinned URL and sha256 equal to the entry of `PROVENANCE.toml`, the wire address that follows from every printed number, one entry per address). Every documented register is read through function 03 and 04 and every coil through 01 and 02 with the transcribed value, and the requests that reach the device are exactly the runs of documented addresses cut at the limit, so no hole is read (`MB-READ-GAP`). The profile loads, validates against the driver and builds one tag per measurement and status field | implemented (documented map, not hardware-verified) | `the_map_is_a_consistent_transcription_of_the_pinned_guide`, `every_documented_register_and_coil_reads_back_through_both_mirrors`, `the_profile_is_documented_and_validates_against_the_driver`, `every_documented_profile_is_a_labeled_documented_map_with_a_fixture` |
+| MB-DEVICE-SIO-LIMITS | "A maximum of 128 coils can be read through Modbus function codes 01 and 02", "64 registers ... 03 and 04", "64 registers can be written by Modbus function code 16", "64 coils ... 15"; the function table lists 01 to 06, 15 and 16 | With `max-registers-per-request=64` and `max-coils-per-request=128` a read of 65 registers or 129 coils is two requests cut at the limit; without them the replay refuses the one request with exception 03 (assumed) and every item fails typed; function 16 and 15 accept 64 and refuse 65; a function outside the table is refused with exception 01 (assumed). The documents name no exception code | implemented (documented map, not hardware-verified) | `the_documented_request_limits_cut_reads_and_refuse_larger_requests`, `an_unlisted_function_is_refused_with_exception_01` |
+| MB-DEVICE-SIO-BREAK | "When a break condition is detected (e.g., broken sensor, disconnected cable, or over temperature) the bit corresponding to the channel is set to 1": bits 0, 2, 4 and 6 of 40050 for channels 0 to 3; degree units 0 Celsius, 1 Fahrenheit, 2 Kelvin | Through the profile, a set break bit makes exactly its channel `Bad` and no other, the guide's unused bits break nothing, and a unit other than Celsius makes that channel `Bad` instead of reading as `Cel`. A measurement keeps its unscaled `INT` and carries `origin` `Documented` | implemented (documented map, not hardware-verified) | `a_break_bit_makes_that_channel_bad_and_no_other`, `a_degree_unit_other_than_celsius_makes_that_channel_bad` |
+| MB-DEVICE-SIO-WRITE | Input type, degree units, offsets and coils 161 to 163 are R/W | With `access=read-write`, a write to each target is confirmed, applied once, read back from the wire and from the device, and restored to its documented default; a device that applies a write and loses the confirmation (by silence or by closing the socket) gives `Unknown`, the device state shows the write was applied, and nothing is replayed; a silent device times out, a refusal is a typed item error carrying its code and a closed socket is `Disconnected` and the next read reconnects | implemented (documented map, not hardware-verified) | `the_documented_write_targets_take_a_write_and_read_back`, `device_side_faults_end_in_typed_outcomes_and_a_lost_confirmation_is_unknown` |
+| MB-DEVICE-SIO-HW1 | The guide leaves the TCP port, the exception codes, the reply to a wrong unit id, the firmware encoding, the coil mirror order and the address base open | Hardware record HW1 settles them (`docs/hardware/hw1-sio-mb04thms.md`); nothing is hardware-verified until it exists | deferred (HW1: needs the device and the maintainer's approval) | none |
+
 ## Upstream quirks
 Observed in the pinned source and not reproduced, except (d), which Stonecrab ports on
 purpose (S47). Letters follow the order of the source audit; `l` was added while reading
@@ -814,7 +851,8 @@ checks that its serializer turns those 56 models into exactly their `<raw>` byte
 - Whether a server other than pymodbus 3.8.6 and libmodbus 3.1.11 agrees. Both answer a
   request's unit id with the same one (pymodbus answers every unit id); no server has
   yet refused an id.
-- Hardware behavior: no Modbus device has been tested; hardware status is none.
+- Hardware behavior: no Modbus device has been tested; hardware status is none. The
+  `MB-DEVICE-*` rows replay a vendor's document, they do not test a device.
 
 ## Required evidence before a read capability claim
 Each bullet is the requirement and where the alpha meets it.

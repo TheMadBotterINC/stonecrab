@@ -1,0 +1,735 @@
+# Documented map of the AutomationDirect SOLO Modular SLM1-C temperature controller (main
+# unit, DC current output, universal input), a Modbus RTU and ASCII server on RS-485 (plan
+# slice S52d, hardware record HW2).
+#
+# LABEL: documented map, not hardware-verified. Nothing here was read from a device. Every
+# entry is transcribed from the vendor's manual, which is pinned by URL and sha256 in
+# [source] and is not retained in this repository. The register tables are in chapter 7
+# (printed pages 7-2 to 7-6). A value the manual does not state is marked
+# basis = "placeholder": it only lets a replay tell one register from another and is not a
+# claim about the device. docs/hardware/hw2-slm1-c.md lists what the hardware must settle.
+#
+# The device speaks RTU and ASCII only. Stonecrab has no RTU framing until slice S59, so the
+# acceptance suite serves this map over Modbus TCP framing (the PDUs are the same bytes);
+# that proves the PDU level and the profile, not the serial line.
+#
+# First-party, Apache-2.0 (the transcription is ours; the manual is not copied). Read by
+# crates/stonecrab/tests/support/documented_map.rs, which rejects unknown keys. The shape
+# is that of fixtures/modbus/devices/sio-mb04thms.toml; read its header for the keys.
+#
+# Conventions
+#   number   the address the manual prints, in hexadecimal ("1000H"); a range such as
+#            "1040H~1047H" is one entry of eight registers with one word each.
+#   wire     the address a request carries: the manual's hexadecimal number as it is. The
+#            appendix (pages A-2 to A-4) prints the Modbus decimal beside the hex for the
+#            ramp/soak registers: 1040H is 44161 and 2000H is 48193, so the decimal is
+#            40001 plus the hex, a one-based Modicon number, and the hex is the zero-based
+#            wire address. A test checks the eight decimals this file transcribes.
+#   basis    as in the SIO-MB04THMS file.
+
+[device]
+label = "documented map, not hardware-verified"
+manufacturer = "AutomationDirect"
+model = "SOLO Modular SLM1-C"
+scheme = "modbus-rtu"
+unit_id = 1                  # Network Address 1071H, default 1
+address_reading = "zero-based"
+# The manual does not list function code 04 for the data registers, so the input registers
+# do not mirror them. ("Function Code 1 & 2 read the same memory area" for the bit
+# registers, so the discrete inputs are the coils, as in the other file.)
+input_registers_mirror_holding = false
+
+[source]
+document = "SOLO Modular Temperature Controller User Manual, 1st Edition 07/2023 (SLM, 68 pages)"
+url = "https://cdn.automationdirect.com/static/manuals/soloslm/soloslmman.pdf"
+sha256 = "830b99162dfbab23ed87c1778428747e65ce658dbce48e76899d4b948295d7cc"
+retrieved = "2026-10-28"
+license = "vendor documentation (AutomationDirect), all rights reserved; pinned by URL and sha256, never copied"
+
+# Chapter 7, "Registers": data registers take 03, 06 and 16 (a read of at most eight
+# registers, a write of at most eight); bit registers take 01, 02 and 05. The manual states
+# no limit on bits. Function codes 04 and 15 are not listed.
+[limits]
+functions = [1, 2, 3, 5, 6, 16]
+read_registers = 8
+write_registers = 8
+
+# ---- Process variable error codes -----------------------------------------------------
+# "The read values below indicate the occurrence of errors" (register 1000H). 8005H is not
+# listed.
+
+[[sentinels]]
+word = 0x8002
+meaning = "Temperature not acquired yet"
+
+[[sentinels]]
+word = 0x8003
+meaning = "Temperature sensor not connected"
+
+[[sentinels]]
+word = 0x8004
+meaning = "Incorrect sensor type"
+
+[[sentinels]]
+word = 0x8006
+meaning = "Unable to acquire temperature, ADC input error"
+
+[[sentinels]]
+word = 0x8007
+meaning = "Unable to read/write the memory"
+
+# ---- Bit registers --------------------------------------------------------------------
+# The manual prints these five addresses after the register table, without an access
+# column. They are single-bit flags, so the replay serves them as coils; whether the device
+# does is an open item.
+
+[[coils]]
+number = "0811H"
+wire = 0x0811
+name = "Temperature unit display"
+access = "R/W"
+basis = "default"
+value = true
+meaning = "0 degrees F, 1 degrees C (default)."
+
+[[coils]]
+number = "0813H"
+wire = 0x0813
+name = "Read/write auto-tuning status"
+access = "R/W"
+basis = "default"
+value = false
+meaning = "0 end (default), 1 start."
+
+[[coils]]
+number = "0814H"
+wire = 0x0814
+name = "Run/Stop setting"
+access = "R/W"
+basis = "default"
+value = true
+meaning = "0 stop, 1 run (default)."
+
+[[coils]]
+number = "0815H"
+wire = 0x0815
+name = "Program stop flag"
+access = "R/W"
+basis = "placeholder"
+value = false
+meaning = "1 program stop."
+
+[[coils]]
+number = "0816H"
+wire = 0x0816
+name = "Program hold flag"
+access = "R/W"
+basis = "placeholder"
+value = false
+meaning = "1 program hold."
+
+# ---- Data registers -------------------------------------------------------------------
+
+[[registers]]
+number = "1000H"
+wire = 4096
+name = "Process Variable (PV)"
+type = "INT"
+access = "R"
+basis = "placeholder"
+words = [0x00FA]
+value = "250"
+meaning = "Unit 0.1 degree (analog input: 1 EU). The values 8002H, 8003H, 8004H, 8006H and 8007H are error codes, not temperatures (see [[sentinels]]). The replay value 250 is 25.0 degrees. The manual does not say how a negative PV is stored."
+
+[[registers]]
+number = "1001H"
+wire = 4097
+name = "Set point (SV)"
+type = "INT"
+access = "R/W"
+basis = "default"
+words = [0x0000]
+value = "0"
+meaning = "Unit 0.1 degree. Default 0."
+
+[[registers]]
+number = "1002H"
+wire = 4098
+name = "Upper-limit of temperature range"
+type = "INT"
+access = "R/W"
+basis = "default"
+words = [0x1770]
+value = "6000"
+meaning = "Unit 0.1 degree. Default 6,000. The content shall not be bigger than the range."
+
+[[registers]]
+number = "1003H"
+wire = 4099
+name = "Lower-limit of temperature range"
+type = "INT"
+access = "R/W"
+basis = "default"
+words = [0xFF38]
+value = "-200"
+meaning = "Unit 0.1 degree. Default -200. The content shall not be smaller than the range."
+
+[[registers]]
+number = "1004H"
+wire = 4100
+name = "Input type"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x000C]
+meaning = "0 TC K, 1 TC J, 2 TC T, 3 TC E, 4 TC N, 5 TC R, 6 TC S, 7 TC B, 8 TC L, 9 TC U, 10 TC TXK, 11 JPt100, 12 Pt100 (default), 13 0-5 V, 14 0-10 V, 15 0-20 mA, 16 4-20 mA, 17 0-50 mV. A thermocouple needs this written first."
+
+[[registers]]
+number = "1005H"
+wire = 4101
+name = "Control method"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0000]
+meaning = "0 PID (default), 1 ON/OFF, 2 Manual, 3 RAMP/SOAK."
+
+[[registers]]
+number = "1006H"
+wire = 4102
+name = "Control selection of Output 1"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0000]
+meaning = "0 Heating (default), 1 Cooling, 2 Alarm, 3 Retransmit output."
+
+[[registers]]
+number = "1007H"
+wire = 4103
+name = "Control cycle of Output 1"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0004]
+meaning = "0 to 99, 0 is 0.5 s. Default 4."
+
+[[registers]]
+number = "1008H"
+wire = 4104
+name = "Control cycle of Output 2"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0004]
+meaning = "0 to 99, 0 is 0.5 s. Default 4. Invalid when the two outputs are the same control."
+
+[[registers]]
+number = "1009H"
+wire = 4105
+name = "Proportional band value"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x01DC]
+meaning = "1 to 9,999, unit 0.1 degree. Default 476."
+
+[[registers]]
+number = "100AH"
+wire = 4106
+name = "Integral Time"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0104]
+meaning = "0 to 9,999. Default 260."
+
+[[registers]]
+number = "100BH"
+wire = 4107
+name = "Derivative Time"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0029]
+meaning = "0 to 9,999. Default 41."
+
+[[registers]]
+number = "100CH"
+wire = 4108
+name = "Integral Offset"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0000]
+meaning = "0 to 1,000, unit 0.1 percent. Default 0."
+
+[[registers]]
+number = "100DH"
+wire = 4109
+name = "PD Control Offset"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0000]
+meaning = "Offset compensation for proportional control (when I=0), 0 to 1,000, unit 0.1 percent. Default 0."
+
+[[registers]]
+number = "100EH"
+wire = 4110
+name = "Proportion Band Coefficient"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0064]
+meaning = "COEF setting in dual control output, 1 to 9,999, unit 0.01. Default 100."
+
+[[registers]]
+number = "100FH"
+wire = 4111
+name = "Dead Band"
+type = "INT"
+access = "R/W"
+basis = "default"
+words = [0x0000]
+meaning = "Dead band in dual control output, -999 to 9,999, unit 0.1 degree or 1 EU. Default 0."
+
+[[registers]]
+number = "1010H"
+wire = 4112
+name = "Hysteresis of Output 1"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0000]
+meaning = "0 to 9,999, unit 0.1 degree or 1 EU. Default 0."
+
+[[registers]]
+number = "1011H"
+wire = 4113
+name = "Hysteresis of Output 2"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0000]
+meaning = "0 to 9,999, unit 0.1 degree or 1 EU. Default 0."
+
+[[registers]]
+number = "1012H"
+wire = 4114
+name = "Output 1 Level"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0000]
+meaning = "Output percentage of Output 1, unit 0.1 percent. A write is only applicable in manual mode."
+
+[[registers]]
+number = "1013H"
+wire = 4115
+name = "Output 2 Level"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0000]
+meaning = "Output percentage of Output 2, unit 0.1 percent. A write is only applicable in manual mode."
+
+[[registers]]
+number = "1014H"
+wire = 4116
+name = "Upper-limit regulation for analog linear output"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0000]
+meaning = "1 scale = 2.8 uA = 1.3 mV. Default 0."
+
+[[registers]]
+number = "1015H"
+wire = 4117
+name = "Lower-limit regulation for analog linear output"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0000]
+meaning = "1 scale = 2.8 uA = 1.3 mV. Default 0."
+
+[[registers]]
+number = "1016H"
+wire = 4118
+name = "PV Offset"
+type = "INT"
+access = "R/W"
+basis = "default"
+words = [0x0000]
+value = "0"
+meaning = "Temperature offset regulation value, -999 to +999, unit 0.1 degree or 1 EU. Default 0."
+
+[[registers]]
+number = "1019H"
+wire = 4121
+name = "Temperature Filter Range"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x000A]
+meaning = "1 to 100, unit 0.1 degree C. Default 10."
+
+[[registers]]
+number = "101AH"
+wire = 4122
+name = "Temperature Filter Factor"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0008]
+meaning = "0 to 50. Default 8."
+
+[[registers]]
+number = "1020H"
+wire = 4128
+name = "Alarm 1"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0000]
+meaning = "0 disables alarm 1; 1 to 18 is the alarm type number. Default 0."
+
+[[registers]]
+number = "1021H"
+wire = 4129
+name = "Alarm 2"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0000]
+meaning = "0 disables alarm 2; 1 to 18 is the alarm type number. Default 0."
+
+[[registers]]
+number = "1023H"
+wire = 4131
+name = "Control selection of Output 2"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0000]
+meaning = "0 Heating (default), 1 Cooling, 2 Alarm."
+
+[[registers]]
+number = "1024H"
+wire = 4132
+name = "Alarm 1 High Limit"
+type = "INT"
+access = "R/W"
+basis = "default"
+words = [0x0028]
+meaning = "See the manual's Alarm Output section. Default 40."
+
+[[registers]]
+number = "1025H"
+wire = 4133
+name = "Alarm 1 Low Limit"
+type = "INT"
+access = "R/W"
+basis = "default"
+words = [0x0028]
+meaning = "See the manual's Alarm Output section. Default 40."
+
+[[registers]]
+number = "1026H"
+wire = 4134
+name = "Alarm 2 High Limit"
+type = "INT"
+access = "R/W"
+basis = "default"
+words = [0x0028]
+meaning = "See the manual's Alarm Output section. Default 40."
+
+[[registers]]
+number = "1027H"
+wire = 4135
+name = "Alarm 2 Low Limit"
+type = "INT"
+access = "R/W"
+basis = "default"
+words = [0x0028]
+meaning = "See the manual's Alarm Output section. Default 40."
+
+[[registers]]
+number = "102AH"
+wire = 4138
+name = "Status bits"
+type = "WORD"
+access = "R"
+basis = "placeholder"
+words = [0x0004]
+meaning = "Bit 0 not used, bit 1 ALM2, bit 2 degrees C, bit 3 degrees F, bit 4 ALM1, bit 5 OUT2, bit 6 OUT1, bit 7 AT. The replay holds degrees C only."
+
+[[registers]]
+number = "102CH"
+wire = 4140
+name = "Positive/negative retransmit output"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0000]
+meaning = "0 positive (default), 1 negative."
+
+[[registers]]
+number = "102EH"
+wire = 4142
+name = "LED Status"
+type = "WORD"
+access = "R"
+basis = "placeholder"
+words = [0x0001]
+meaning = "Bit 0 RUN, bit 1 ERR, bit 2 O2, bit 3 O1, bit 4 RX, bit 5 TX, bit 6 AT, bit 7 not used. The replay shows RUN only."
+
+[[registers]]
+number = "102FH"
+wire = 4143
+name = "Firmware version"
+type = "UINT"
+access = "R"
+basis = "example"
+words = [0x0100]
+value = "256"
+meaning = "V1.00 is indicated as 0x100 (the manual's example)."
+
+[[registers]]
+number = "1030H"
+wire = 4144
+name = "Starting Ramp / Soak Pattern"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0000]
+meaning = "0 to 7. Default 0."
+
+[[registers]]
+number = "1032H"
+wire = 4146
+name = "Current Step Time Remaining in Seconds"
+type = "UINT"
+access = "R"
+basis = "placeholder"
+words = [0x0000]
+meaning = "0 to 54,000."
+
+[[registers]]
+number = "1033H"
+wire = 4147
+name = "Current Step Time Remaining in Minutes"
+type = "UINT"
+access = "R"
+basis = "placeholder"
+words = [0x0000]
+meaning = "0 to 900."
+
+[[registers]]
+number = "1034H"
+wire = 4148
+name = "Current Step Number"
+type = "UINT"
+access = "R"
+basis = "placeholder"
+words = [0x0000]
+meaning = "0 to 7."
+
+[[registers]]
+number = "1035H"
+wire = 4149
+name = "Current Pattern Number"
+type = "UINT"
+access = "R"
+basis = "placeholder"
+words = [0x0000]
+meaning = "0 to 7."
+
+[[registers]]
+number = "1036H"
+wire = 4150
+name = "Ramp Set Point"
+type = "INT"
+access = "R"
+basis = "placeholder"
+words = [0x0000]
+meaning = "Unit 0.1 (degrees C or F)."
+
+[[registers]]
+number = "1037H"
+wire = 4151
+name = "Upper limit of retransmit output"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x03E8]
+meaning = "0 to 100 percent upper limit of the analog output, unit 0.1 percent. Default 1,000."
+
+[[registers]]
+number = "1038H"
+wire = 4152
+name = "Lower limit of retransmit output"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0000]
+meaning = "0 to 100 percent lower limit of the analog output, unit 0.1 percent. Default 0."
+
+[[registers]]
+number = "1040H~1047H"
+wire = 4160
+name = "Last Step Number"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0007, 0x0007, 0x0007, 0x0007, 0x0007, 0x0007, 0x0007, 0x0007]
+meaning = "0 to 7: the last step number of pattern 0 to 7. Default 7 each."
+
+[[registers]]
+number = "1050H~1057H"
+wire = 4176
+name = "Additional Cycles"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000]
+meaning = "0 to 199, for pattern 0 to 7. Default 0 each."
+
+[[registers]]
+number = "1060H~1067H"
+wire = 4192
+name = "Next Pattern Number"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000]
+meaning = "0 to 7 is the next pattern, 8 means none, for pattern 0 to 7. Default 0 each."
+
+[[registers]]
+number = "1068H"
+wire = 4200
+name = "Run/Stop setting"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0001]
+meaning = "0 Stop, 1 Run (default), 2 Program end, 3 Program hold."
+
+[[registers]]
+number = "1069H"
+wire = 4201
+name = "Control selection of Output 1 (duplicate address)"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0000]
+meaning = "0 Heating, 1 Cooling, 2 Alarm, 3 Retransmit output. The manual marks the address a duplicate of 1006H."
+
+[[registers]]
+number = "106AH"
+wire = 4202
+name = "Control selection of Output 2 (duplicate address)"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0000]
+meaning = "0 Heating, 1 Cooling, 2 Alarm. The manual marks the address a duplicate of 1023H."
+
+[[registers]]
+number = "1071H"
+wire = 4209
+name = "Network Address"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0001]
+meaning = "1 to 247. Default 1."
+
+[[registers]]
+number = "1072H"
+wire = 4210
+name = "Modbus Protocol"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0000]
+meaning = "1 RTU, 0 ASCII (default). The unit ships set to ASCII."
+
+[[registers]]
+number = "1073H"
+wire = 4211
+name = "Baud Rate"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0002]
+meaning = "0 to 4 is 2,400, 4,800, 9,600, 19,200 and 38,400 bps. Default 2 (9,600)."
+
+[[registers]]
+number = "1074H"
+wire = 4212
+name = "Bit Length"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0001]
+meaning = "0 8 bits, 1 7 bits (default)."
+
+[[registers]]
+number = "1075H"
+wire = 4213
+name = "Parity"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0001]
+meaning = "0 none, 1 even (default), 2 odd."
+
+[[registers]]
+number = "1076H"
+wire = 4214
+name = "Stop Bit"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [0x0001]
+meaning = "0 2 stop bits, 1 1 stop bit (default)."
+
+[[registers]]
+number = "2000H~203FH"
+wire = 8192
+name = "Ramp / Soak SV"
+type = "INT"
+access = "R/W"
+basis = "default"
+words = [
+    0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+    0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+    0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+    0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+    0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+    0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+    0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+    0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+]
+meaning = "-999 to 9999 for each of the 64 steps. Default 0."
+
+[[registers]]
+number = "2080H~20BFH"
+wire = 8320
+name = "Ramp / Soak Time"
+type = "UINT"
+access = "R/W"
+basis = "default"
+words = [
+    0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+    0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+    0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+    0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+    0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+    0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+    0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+    0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+]
+meaning = "0 to 1500 (15 hours 0 minutes) for each of the 64 steps. Default 0."

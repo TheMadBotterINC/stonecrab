@@ -53,6 +53,11 @@
 # file, case, step, payload byte order, tag and the values the case reports) that the typed
 # decoder tests compare with their decoding.
 #
+# The devices/ directory holds two documented maps (slice S52d), the register and coil tables of
+# two vendor devices. It has a PROVENANCE.toml of its own (CODING_STANDARDS 13.6, one per
+# directory), which pins each vendor document by URL and sha256; its entries are not listed
+# here.
+#
 # Every tcp vector has <name>.hex (comment lines, then one hex line) and a
 # <name>.expected.json written by hand (or from the stated byte pattern, or, for the upstream
 # vectors below, by a script that does not use the decoder), never produced by running the

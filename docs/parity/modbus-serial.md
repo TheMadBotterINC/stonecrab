@@ -3,8 +3,11 @@ Baseline: `upstream/manifest.toml`, Apache PLC4X v1.0.0 (tag `v1.0.0`),
 commit `ea229918f5d07700e04d7d69ab1645da679cb700`.
 
 State at S43: nothing is implemented. Stonecrab has no serial transport and no RTU or ASCII
-framing. Every row below is `planned` for milestone M2 (slice S58 serial transport, S59
-RTU, S60 ASCII, HW2 for hardware evidence) or `deferred` with its reason. The PDU codec,
+framing. (S52d adds the `MBS-DEVICE-SLM1C-*` rows of "Hardware evidence": a replay of the
+SLM1-C's documented register map at the PDU level over TCP framing, which needs no serial
+line; no serial behavior is implemented.) Every other row below is `planned` for milestone M2
+(slice S58 serial transport, S59 RTU, S60 ASCII, HW2 for hardware evidence) or `deferred` with
+its reason. The PDU codec,
 the address grammar, the read batcher, the typed decoder, the byte-order modes and the
 exception mapping are shared with Modbus TCP and are not restated here: this record points
 at `docs/parity/modbus.md` (rows `MB-*`) for them and lists only what differs on a serial
@@ -12,15 +15,17 @@ line. The manifest entries are `inventory.modbus_rtu`, `inventory.modbus_ascii` 
 `inventory.transport_serial`; the non-Java drivers are `go_modbus`, `c_modbus` and
 `python_modbus`.
 
-Status vocabulary, as used in the Status column (this file uses the first two only; the
-rest is defined in `docs/parity/modbus.md`):
+Status vocabulary, as used in the Status column (this file uses the first two and
+`implemented (documented map, not hardware-verified)` for the S52d rows; the rest is
+defined in `docs/parity/modbus.md`):
 
 - `planned (Mn)`: Stonecrab will port the behavior in milestone Mn. The Test ids column
   names at least one test id prefixed `planned:`; none exists yet.
 - `deferred (<reason>)`: Stonecrab does not port the behavior now. The reason is a
   non-Java-only capability, an upstream placeholder, or a decision. Test ids may be `none`.
-- `implemented`, `automated-verified`, `hardware-verified`: not used until a slice lands.
-  `hardware-verified` rows will name the device model and firmware (HW2).
+- `implemented`, `automated-verified`, `hardware-verified`: not used until a slice lands,
+  except the S52d rows named above. `hardware-verified` rows will name the device model and
+  firmware (HW2).
 
 Row ids use the prefix `MBS-`. Ids are never renumbered. `scripts/parity-check.sh` does not
 require the planned ids to appear in code.
@@ -200,7 +205,30 @@ test hardware). That is the virtual-framing half only; the electrical layer is H
 
 | Row id | Upstream behavior (manifest key or path:lines) | Planned Stonecrab behavior | Status | Test ids |
 | --- | --- | --- | --- | --- |
-| MBS-HW-RS485 | `transport_serial.notes`: needs the native serial library at run time and is not usable without hardware or a pty. | RTU and ASCII on a real RS-485 adapter against the SLM1-C: a hardware record with device model and firmware. | planned (M2) | `planned:hw2_rtu_read_against_the_slm1_c`, `planned:hw2_ascii_read_against_the_slm1_c` |
+| MBS-HW-RS485 | `transport_serial.notes`: needs the native serial library at run time and is not usable without hardware or a pty. | RTU and ASCII on a real RS-485 adapter against the SLM1-C: a hardware record with device model and firmware (runbook `docs/hardware/hw2-slm1-c.md`). | planned (M2) | `planned:hw2_rtu_read_against_the_slm1_c`, `planned:hw2_ascii_read_against_the_slm1_c` |
+
+### Documented device map: SOLO SLM1-C (S52d)
+The SLM1-C is the HW2 device: a Modbus RTU and ASCII server on RS-485. Its map is a hand
+transcription of the vendor's manual (SOLO Modular Temperature Controller User Manual, 1st
+Edition 07/2023, `https://cdn.automationdirect.com/static/manuals/soloslm/soloslmman.pdf`,
+sha256 `830b99162dfbab23ed87c1778428747e65ce658dbce48e76899d4b948295d7cc`, retrieved
+2026-10-28; vendor documentation, all rights reserved, pinned and never copied) in
+`fixtures/modbus/devices/slm1-c.toml`: 58 register entries and five bit registers, with
+the manual's number, access, type, default and meaning for each. The profile is
+`profiles/documented/modbus-rtu/solo_slm1_c.toml`, scheme `modbus-rtu` (planned for S59).
+Both carry the label **documented map, not hardware-verified**: no device was read. Stonecrab
+has no RTU framing until S59, so the suite (`crates/stonecrab/tests/modbus_device_replays.rs`,
+module `slm1_c`) is a PDU-level replay over TCP framing through the first-party responder with
+the manual's function table and limits enforced: it proves the register map, the limits and the
+profile, not the serial line. The runbook `docs/hardware/hw2-slm1-c.md` lists the steps and every
+item the manual leaves open (exception codes, oversize requests, extension-module addressing).
+
+| Row id | What the document says | Stonecrab behavior | Status | Test ids |
+| --- | --- | --- | --- | --- |
+| MBS-DEVICE-SLM1C-MAP | The data and bit register tables of chapter 7 (pages 7-2 to 7-6) with the hexadecimal address, default, access and meaning of each, and the appendix (pages A-2 to A-4), which prints the Modbus decimal beside the hex: 1040H is 44161 | The transcription is checked against its own rules (the label, the pinned URL and sha256 equal to the entry of `PROVENANCE.toml`, the sentinel list, the defaults the HW2 steps depend on, and that each ramp/soak decimal of the appendix is 40001 plus its hex, so the hex is the wire address). Every documented register and bit register is read with the transcribed value, in requests that are exactly the runs of documented addresses cut at eight registers. The profile loads, validates for the planned serial scheme and, with its scheme changed in memory, validates against and builds tags for the TCP driver | implemented (documented map, not hardware-verified) | `the_map_is_a_consistent_transcription_of_the_pinned_manual`, `every_documented_register_and_coil_reads_back`, `the_profile_is_documented_and_validates_for_the_planned_serial_scheme` |
+| MBS-DEVICE-SLM1C-LIMITS | "03: Read Holding Registers (maximum limit is read of eight registers)", "16: Write Multiple Registers (maximum limit is eight)"; data registers take 03, 06 and 16, bit registers 01, 02 and 05; 04 and 15 are not listed | With `max-registers-per-request=8` a 64-register read is eight requests of eight and a nine-register read is cut at eight; without it the replay refuses nine with exception 03 (assumed); function 16 accepts eight and refuses nine. A read of input registers (function 04) and a coil write (Stonecrab writes a coil with function 15) are refused with exception 01 (assumed) and nothing is applied, so a Stonecrab coil write cannot reach this device until function 05 is supported (recorded divergence of S45). The replay serves no function 05 | implemented (documented map, not hardware-verified) | `the_documented_request_limit_cuts_reads_and_refuses_larger_requests`, `functions_04_and_15_are_refused_because_the_manual_does_not_list_them` |
+| MBS-DEVICE-SLM1C-SENTINEL | Register 1000H, "Unit: 0.1 degree": "8002H: Temperature not acquired yet, 8003H: Temperature sensor not connected, 8004H: Incorrect sensor type, 8006H: Unable to acquire temperature, ADC input error, 8007H: Unable to read/write the memory"; 8005H is not listed; the status bits 102AH say degrees C (bit 2) or F (bit 3) | Through the profile, the five error codes read as signed 16 bit integers are far outside the range and the measurement is `Uncertain` with the raw code kept, never `Good`; schema version 1 cannot match a value, so it cannot make a code `Bad`. A display that is not degrees C makes the measurement `Bad`. That a negative PV is signed is an assumption (hardware item 4) | implemented (documented map, not hardware-verified) | `a_process_variable_error_code_is_never_a_good_reading`, `a_fahrenheit_display_makes_the_process_value_bad` |
+| MBS-DEVICE-SLM1C-WRITE | Input type 1004H, set point 1001H and the serial settings 1071H to 1076H are R/W; the defaults table gives ASCII, 7 data bits, even parity and 1 stop bit at 1072H, 1074H, 1075H and 1076H (values 0, 1, 1, 1); the plan reads that as "ships set to ASCII 7E1", so RTU needs 1072H (protocol) and 1074H (data bits) written | With `access=read-write`, a write to input type (to type K), set point (a negative value), protocol (to RTU) and bit length (to 8 bits) is confirmed, applied once and read back, and each is restored to its documented default | implemented (documented map, not hardware-verified) | `the_documented_write_targets_take_a_write_and_read_back` |
 
 ## Upstream quirks
 Observed in the pinned source and not reproduced.

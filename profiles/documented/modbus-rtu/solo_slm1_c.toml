@@ -1,0 +1,63 @@
+# Documented-map profile of the AutomationDirect SOLO Modular SLM1-C temperature controller
+# (hardware record HW2, slice S52d). LABEL: documented map, not hardware-verified.
+#
+# The map is transcribed from the vendor's manual, which is pinned by URL and sha256 in the
+# provenance below and in fixtures/modbus/devices/slm1-c.toml and is not retained here.
+# Nothing was read from a device. The process variable (PV) is register 1000H in units of
+# 0.1 degree, so divide by 10; the unit is Cel because the status bits of 102AH say the
+# display is in degrees C (bit 2) and the measurement is Bad when that bit is clear.
+#
+# The device speaks Modbus RTU and ASCII only, and Stonecrab has no serial driver until slice
+# S59, so the scheme below is the one planned for it. `SensorProfile::tags` refuses it until
+# then; the replay suite reads it through the TCP driver by changing the scheme in memory.
+#
+# Sentinel handling. A PV that cannot be measured reads as one of the error codes 8002H (not
+# acquired yet), 8003H (sensor not connected), 8004H (incorrect sensor type), 8006H (ADC
+# input error) and 8007H (memory error); 8005H is not listed. Read as a signed 16 bit
+# integer they are -32766 to -32761, so after the divide they are about -3276 degrees,
+# far below the range, and the range check makes the measurement Uncertain with the raw code
+# kept (`keep_raw`), never Good. Schema version 1 cannot match a status field against a
+# value, so it cannot make the code Bad. Whether the manual's PV is a signed 16 bit integer
+# for a negative temperature is not stated; HW2 settles it.
+#
+# The range is the one of the thermocouple K input (input type 1004H = 0): -200 to 1300 degrees
+# C. The unit ships set to Pt100 (12), so a thermocouple needs 1004H written first. The unit
+# of 0.1 degree holds for temperature inputs only: the manual gives 1 EU for a linear
+# (analog) input, so linear inputs are out of scope for this profile, which does not read
+# 1004H and would show them as Cel.
+#
+# Addresses: the hexadecimal numbers of the manual are wire addresses ("zero-based"), so 1000H
+# is holding register 4096 and 102AH is 4138; the manual's appendix prints the one-based
+# Modbus decimal beside the hex for the ramp/soak registers (1040H is 44161). The device is
+# reached at its default network address 1.
+id = "solo_slm1_c"
+schema_version = 1
+validation = "documented"
+
+[device]
+manufacturer = "AutomationDirect"
+model = "SOLO Modular SLM1-C"
+
+[connection]
+scheme = "modbus-rtu"
+address_convention = "zero-based"
+
+[connection.options]
+default-unit-identifier = "1"
+# The manual's limit: at most eight registers a read (FC03) and a write (FC16).
+max-registers-per-request = "8"
+
+[provenance]
+source = "Label: documented map, not hardware-verified. AutomationDirect SOLO Modular Temperature Controller User Manual, 1st Edition 07/2023, https://cdn.automationdirect.com/static/manuals/soloslm/soloslmman.pdf, sha256 830b99162dfbab23ed87c1778428747e65ce658dbce48e76899d4b948295d7cc (vendor documentation, not copied)"
+fixtures = ["fixtures/modbus/devices/slm1-c.toml"]
+
+[[measurements]]
+name = "process_value"
+address = "holding-register:4096:INT"      # 1000H
+data_type = "INT"
+unit = "Cel"
+scaling = [{ divide = 10.0 }]
+range = { min = -200.0, max = 1300.0 }
+keep_raw = true
+status_fields = [{ name = "celsius", address = "holding-register:4138:WORD", bit = 2, invert = true }]
+quality_map = { bad_when = ["celsius"] }

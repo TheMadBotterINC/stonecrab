@@ -16,6 +16,23 @@ placeholder.
   type (`PT-1.5S`, `2024-02-29`, `13:05`, `2026-10-28T06:30:15.250`). No new dependency.
   No driver decodes calendar values yet; the Modbus `TIME` and `DATE` names stay rejected,
   since upstream has no Modbus encoding for them. New parity row `CORE-VALUE-CALENDAR`.
+- Documented device maps and profiles (no crate API change): the register and coil tables of
+  the AutomationDirect STRIDE SIO-MB04THMS and SOLO SLM1-C, transcribed by hand from the
+  vendors' documents under `fixtures/modbus/devices/`, and one named device profile each
+  under `profiles/documented/` (`validation = "documented"`: a thermocouple module with its
+  break bits and degree units as status fields, and a controller whose process variable
+  keeps its error codes out of `Good`). All four carry the label "documented map, not
+  hardware-verified": no device was read. The vendor documents are pinned by URL and sha256
+  in `fixtures/modbus/devices/PROVENANCE.toml` and are not copied. The new test
+  `modbus_device_replays` serves each map through the first-party responder with the
+  vendors' request limits and function tables enforced and runs what the hardware records
+  will run: every documented register and coil, the limits, the break flag driving `Bad`,
+  the error codes and the documented write targets. The SOLO suite is a PDU-level replay over
+  TCP framing until the serial driver exists. Runbooks `docs/hardware/hw1-sio-mb04thms.md`
+  and `docs/hardware/hw2-slm1-c.md` list the steps and everything the documents leave open.
+  Findings: the SOLO manual lists function codes 05 and 16 but not 15, so a Stonecrab coil
+  write cannot reach it yet, and schema version 1 cannot make a process variable error code
+  `Bad` (it is `Uncertain`). New parity rows `MB-DEVICE-SIO-*` and `MBS-DEVICE-SLM1C-*`.
 - New `serial` feature (off by default; `modbus` does not enable it yet): a serial transport
   on a blocking worker thread, `stonecrab::transport::{SerialFactory, SerialTransport}` with
   `DataBits`, `Parity`, `StopBits` and `FlowControl` (upstream's option names and defaults:

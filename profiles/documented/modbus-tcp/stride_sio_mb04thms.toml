@@ -1,0 +1,102 @@
+# Documented-map profile of the AutomationDirect STRIDE SIO-MB04THMS thermocouple input
+# module (hardware record HW1, slice S52d). LABEL: documented map, not hardware-verified.
+#
+# The map is transcribed from the vendor's user guide, which is pinned by URL and sha256 in
+# the provenance below and in fixtures/modbus/devices/sio-mb04thms.toml and is not retained
+# here. Nothing was read from a device. Four temperatures, one per channel, read the analog
+# input registers 40041 to 40044 (signed 16 bit, one implied decimal for a thermocouple, so
+# divide by 10). Each channel carries three status fields that make the reading Bad:
+#   - break: its bit of Break Status 40050 (bit 0 channel 0, bit 2 channel 1, bit 4 channel
+#     2, bit 6 channel 3), set for a broken sensor, a disconnected cable or over temperature;
+#   - fahrenheit and kelvin: bit 0 and bit 1 of its Degree Units register (41218 to 41221;
+#     0 is Celsius, 1 Fahrenheit, 2 Kelvin), because the unit below is Cel and a value in
+#     another unit must not pass as one.
+# The input type of each channel (40031 to 40034) defaults to TC K and the profile assumes
+# it. A channel set to 250 mV (type 1) stores two implied decimals and reports millivolts, so
+# the divide by 10 and the unit Cel below would be wrong for it, and a disabled channel
+# (type 0) has no reading; the profile does not detect either and would report them Good.
+# Schema version 1 has only OR-ed single-bit tests, which cannot say "type is 0 or 1", so the
+# profile cannot guard it. Leave every channel at a thermocouple type (HW1 open item 13). The
+# guide states no measuring range, so the profile has none.
+#
+# Addresses: the number the guide prints, read as the wire address ("zero-based": 40041 is
+# holding register 41). The guide prints one hex datum (coil 00161 is 0x00A1) that points
+# this way, and HW1 must settle it; if the device counts from one, change the convention to
+# "one-based-40001" and nothing else. The device is reached at the default unit id 1.
+id = "stride_sio_mb04thms"
+schema_version = 1
+validation = "documented"
+
+[device]
+manufacturer = "AutomationDirect"
+model = "STRIDE SIO-MB04THMS"
+
+[connection]
+scheme = "modbus-tcp"
+address_convention = "zero-based"
+
+[connection.options]
+default-unit-identifier = "1"
+# The guide's limits: at most 64 registers (FC03, FC04) and 128 coils (FC01, FC02) a read.
+max-registers-per-request = "64"
+max-coils-per-request = "128"
+
+[provenance]
+source = "Label: documented map, not hardware-verified. AutomationDirect SIO-MB04THMS User Guide, 1st Edition, Rev. C, https://cdn.automationdirect.com/static/manuals/stridefio/siomb04thmsug.pdf, sha256 0800b63b890638626cc359e6b539d3fe14e315c1749a47f28063fd5ecbc53854 (vendor documentation, not copied)"
+fixtures = ["fixtures/modbus/devices/sio-mb04thms.toml"]
+
+[[measurements]]
+name = "channel_0_temperature"
+address = "holding-register:41:INT"      # 40041
+data_type = "INT"
+unit = "Cel"
+scaling = [{ divide = 10.0 }]
+keep_raw = true
+status_fields = [
+    { name = "break", address = "holding-register:50:WORD", bit = 0 },
+    { name = "fahrenheit", address = "holding-register:1218:UINT", bit = 0 },
+    { name = "kelvin", address = "holding-register:1218:UINT", bit = 1 },
+]
+quality_map = { bad_when = ["break", "fahrenheit", "kelvin"] }
+
+[[measurements]]
+name = "channel_1_temperature"
+address = "holding-register:42:INT"      # 40042
+data_type = "INT"
+unit = "Cel"
+scaling = [{ divide = 10.0 }]
+keep_raw = true
+status_fields = [
+    { name = "break", address = "holding-register:50:WORD", bit = 2 },
+    { name = "fahrenheit", address = "holding-register:1219:UINT", bit = 0 },
+    { name = "kelvin", address = "holding-register:1219:UINT", bit = 1 },
+]
+quality_map = { bad_when = ["break", "fahrenheit", "kelvin"] }
+
+[[measurements]]
+name = "channel_2_temperature"
+address = "holding-register:43:INT"      # 40043
+data_type = "INT"
+unit = "Cel"
+scaling = [{ divide = 10.0 }]
+keep_raw = true
+status_fields = [
+    { name = "break", address = "holding-register:50:WORD", bit = 4 },
+    { name = "fahrenheit", address = "holding-register:1220:UINT", bit = 0 },
+    { name = "kelvin", address = "holding-register:1220:UINT", bit = 1 },
+]
+quality_map = { bad_when = ["break", "fahrenheit", "kelvin"] }
+
+[[measurements]]
+name = "channel_3_temperature"
+address = "holding-register:44:INT"      # 40044
+data_type = "INT"
+unit = "Cel"
+scaling = [{ divide = 10.0 }]
+keep_raw = true
+status_fields = [
+    { name = "break", address = "holding-register:50:WORD", bit = 6 },
+    { name = "fahrenheit", address = "holding-register:1221:UINT", bit = 0 },
+    { name = "kelvin", address = "holding-register:1221:UINT", bit = 1 },
+]
+quality_map = { bad_when = ["break", "fahrenheit", "kelvin"] }

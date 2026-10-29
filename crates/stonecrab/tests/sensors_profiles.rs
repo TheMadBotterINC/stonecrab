@@ -1,7 +1,9 @@
-//! The repository's synthetic profiles under `profiles/` (slice S30): each one loads,
-//! validates, declares the address convention its scheme needs, has a twin for the other
-//! driver and is listed in `profiles/README.md`. The profiles are repository data, read
-//! from the workspace root relative to this crate; they are not packaged.
+//! The repository's profiles under `profiles/`: the synthetic ones (slice S30) each load,
+//! validate, declare the address convention their scheme needs, have a twin for the other
+//! driver and are listed in `profiles/README.md`; the documented device profiles (slice
+//! S52d) load, validate, carry the label of their evidence and name a fixture that exists.
+//! The profiles are repository data, read from the workspace root relative to this crate;
+//! they are not packaged.
 #![cfg(all(feature = "sim", feature = "sensors"))]
 #![forbid(unsafe_code)]
 
@@ -52,6 +54,7 @@ mod tests {
         found
     }
 
+    /// Every profile file below `profiles/`.
     fn all_profiles() -> Vec<(String, SensorProfile)> {
         let files = profile_files(&profiles_dir(), "");
         assert!(!files.is_empty(), "profiles/ holds profile files");
@@ -65,16 +68,20 @@ mod tests {
             .collect()
     }
 
+    /// The profiles under `profiles/synthetic/`.
+    fn synthetic_profiles() -> Vec<(String, SensorProfile)> {
+        all_profiles()
+            .into_iter()
+            .filter(|(name, _)| name.starts_with("synthetic/"))
+            .collect()
+    }
+
     // covers: SENSORS-SYNTHETIC-PROFILES / every repository profile loads and validates
     #[test]
     fn every_repository_profile_loads_and_validates_as_synthetic() {
-        let profiles = all_profiles();
+        let profiles = synthetic_profiles();
         assert_eq!(profiles.len(), 6, "three devices in two variants");
         for (name, profile) in &profiles {
-            assert!(
-                name.starts_with("synthetic/"),
-                "{name} is under profiles/synthetic/"
-            );
             assert_eq!(profile.validation, ValidationStatus::Synthetic, "{name}");
             assert_eq!(profile.validate(), Ok(()), "{name} validates");
             assert!(!profile.measurements.is_empty(), "{name} has measurements");
@@ -90,7 +97,7 @@ mod tests {
     // covers: SENSORS-SYNTHETIC-PROFILES / the variants declare their scheme and convention
     #[test]
     fn modbus_profiles_declare_the_plc4x_convention_and_sim_profiles_none() {
-        for (name, profile) in all_profiles() {
+        for (name, profile) in synthetic_profiles() {
             if let Some(file) = name.strip_prefix("synthetic/modbus-tcp/") {
                 assert_eq!(profile.connection.scheme, "modbus-tcp", "{file} scheme");
                 assert_eq!(
@@ -117,7 +124,7 @@ mod tests {
     // covers: SENSORS-SYNTHETIC-PROFILES / each device has a twin with the same measurements
     #[test]
     fn every_modbus_profile_has_a_sim_twin_with_the_same_measurement_names_and_units() {
-        let profiles = all_profiles();
+        let profiles = synthetic_profiles();
         let modbus: Vec<_> = profiles
             .iter()
             .filter_map(|(name, profile)| {
@@ -168,7 +175,7 @@ mod tests {
     #[test]
     fn the_sim_profiles_build_tags_for_the_simulator_driver() {
         let driver = SimDriver::new();
-        for (name, profile) in all_profiles() {
+        for (name, profile) in synthetic_profiles() {
             if !name.starts_with("synthetic/sim/") {
                 continue;
             }
@@ -191,7 +198,7 @@ mod tests {
             );
         }
         // A temperature reading is a float on the wire the profile is a twin of.
-        let temperature = all_profiles()
+        let temperature = synthetic_profiles()
             .into_iter()
             .find(|(name, _)| name == "synthetic/sim/temperature_transmitter.toml")
             .map(|(_, profile)| profile)
@@ -209,16 +216,76 @@ mod tests {
         let readme = std::fs::read_to_string(profiles_dir().join("README.md"))
             .expect("profiles/README.md exists");
         for (name, _) in all_profiles() {
-            let relative = name.strip_prefix("synthetic/").unwrap_or(&name);
-            let heading = format!("### synthetic/{relative}");
+            let heading = format!("### {name}");
             assert!(
                 readme.lines().any(|line| line.trim_end() == heading),
                 "profiles/README.md has no section headed {heading}"
             );
         }
         assert!(
-            readme.contains("no named device profile"),
-            "the README states that no named device profile exists"
+            readme.contains("no hardware-verified device profile"),
+            "the README states that no device profile is hardware-verified"
+        );
+    }
+
+    // covers: MB-DEVICE-SIO-MAP / the documented profiles carry their evidence label
+    #[test]
+    fn every_documented_profile_is_a_labeled_documented_map_with_a_fixture() {
+        let profiles: Vec<_> = all_profiles()
+            .into_iter()
+            .filter(|(name, _)| name.starts_with("documented/"))
+            .collect();
+        let names: Vec<&str> = profiles.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "documented/modbus-rtu/solo_slm1_c.toml",
+                "documented/modbus-tcp/stride_sio_mb04thms.toml"
+            ],
+            "two devices, one profile each, under their scheme"
+        );
+        for (name, profile) in &profiles {
+            assert_eq!(profile.validation, ValidationStatus::Documented, "{name}");
+            assert_eq!(profile.validate(), Ok(()), "{name} validates");
+            assert_eq!(
+                Some(profile.connection.scheme.as_str()),
+                name.split('/').nth(1),
+                "{name}: the directory is the scheme"
+            );
+            assert!(
+                profile
+                    .provenance
+                    .source
+                    .contains("documented map, not hardware-verified"),
+                "{name}: the provenance source carries the label"
+            );
+            assert!(
+                !profile.provenance.fixtures.is_empty()
+                    && profile
+                        .provenance
+                        .fixtures
+                        .iter()
+                        .all(|fixture| profiles_dir().join("..").join(fixture).is_file()),
+                "{name}: every named fixture exists"
+            );
+            assert_eq!(
+                profile.connection.address_convention.as_deref(),
+                Some("zero-based"),
+                "{name}: the convention the guide's hex datum points to"
+            );
+            assert!(
+                profile.device.manufacturer.is_some() && profile.device.model.is_some(),
+                "{name}: a named device"
+            );
+        }
+        let ids: BTreeSet<_> = all_profiles()
+            .iter()
+            .map(|(_, profile)| profile.id.as_str().to_owned())
+            .collect();
+        assert_eq!(
+            ids.len(),
+            8,
+            "profile ids are unique across both directories"
         );
     }
 }
