@@ -440,3 +440,62 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
 - Review date: 2026-10-28. `cargo-deny` 0.20.2 passes advisory, license, ban and source
   checks (`mise run dependencies`, exit 0); this records the trust boundary, not a
   memory-safety certification.
+
+## serial2 0.2.39 (stonecrab, feature `serial`; dev-dependency with `unix`)
+- Purpose: open a serial port by name, apply baud rate, character size, parity, stop bits
+  and flow control, and give `Read` and `Write` with a read and a write timeout. The serial
+  transport (`stonecrab::transport::SerialTransport`, slice S58, ADR-0014 addendum) runs it
+  on a dedicated worker thread (CODING_STANDARDS 8.4). The standards name a serial library
+  (sections 4.5 and 15.8). Its `SerialPort::pair`, behind the `unix` feature, makes the
+  pseudo-terminal pair the integration tests use.
+- License: BSD-2-Clause OR Apache-2.0. Both are in the `deny.toml` allow list, so
+  `deny.toml` is unchanged. This is why it replaces `serialport` (MPL-2.0), which would have
+  needed a license exception the maintainer has not granted.
+- Features: `default-features = false` in `[workspace.dependencies]` (`serial2 = "0.2.39"`;
+  the crate has no default features). Stonecrab enables it only through `serial = ["transport",
+  "dep:serial2"]`; the `default`, `full` and `modbus` features do not, and `cargo tree -p
+  stonecrab -e normal` shows no `serial2` without it. The dev-dependency entry adds the
+  `unix` feature (it only exposes `SerialPort::pair` and the raw `termios` type), so test
+  builds always compile the crate; it is not in the packaged manifest's dependencies. The
+  `serde` feature (which would pull `serde`), `rs4xx` and `windows` stay off.
+- Transitive crates in this configuration (`cargo tree -e normal --target all`): none new.
+  `cfg-if` 1.0.5 and `libc` 0.2.191 (Unix; both MIT OR Apache-2.0) and `windows-sys` 0.61.2
+  with `windows-link` 0.2.1 (Windows; MIT OR Apache-2.0) are the versions Tokio already
+  resolves, so `Cargo.lock` gains only the `serial2` package. On Windows the crate asks
+  `windows-sys` for the `Win32_Devices_Communication`, `Win32_System_Registry`,
+  `Win32_System_IO`, `Win32_System_Threading`, `Win32_Storage_FileSystem`,
+  `Win32_System_WindowsProgramming` and `Win32_Security` features, which enlarge the binding
+  surface of a crate that is already linked there; no second `windows-sys` appears and
+  `cargo deny` reports no new duplicate.
+- Unsafe: `serial2` is not `forbid(unsafe_code)`; its sources contain the keyword 51 times
+  (termios and ioctl calls, `poll`, `read`, `write` and `close` on Unix, overlapped
+  `ReadFile` and `WriteFile` on Windows, and `from_raw_fd`) on 2026-10-28. That is the
+  expected surface for a crate whose job is system calls; CODING_STANDARDS 4.5 puts it behind
+  one audited crate. `cfg-if` has none; `libc` and `windows-sys` are bindings. First-party
+  code stays `forbid(unsafe_code)` and does not mention the keyword.
+- Native code: none. No build script, no proc macro.
+- Behavior to know: on Unix the port is opened non-blocking (`O_NONBLOCK`, `O_NOCTTY`) and
+  each read or write first `poll`s for readiness for at most the port's timeout (3 seconds
+  unless set; Stonecrab sets 20 ms), so a call never blocks past its timeout, which is what
+  bounds a write into a stalled line. On Windows the timeouts are the `COMMTIMEOUTS` of the
+  handle, and a timeout is reported as a transfer of zero bytes, which the crate turns into
+  `TimedOut`. It takes no exclusive lock: a second open of the same device succeeds. On
+  macOS every settings call ends in the `IOSSIOSPEED` ioctl, which a pseudo-terminal
+  refuses with `ENOTTY`, so `SerialPort::pair` and opening a pseudo-terminal by name fail
+  there; the pair tests and the by-name tests are skipped on macOS and Windows (ADR-0014
+  addendum S58). It has no mark or space parity and no 1.5 stop bits.
+- Banned crates: `cargo tree --locked -p stonecrab --all-features -e normal,dev,build -i
+  <name>` for each of `once_cell`, `lazy_static`, `log`, `time` and `chrono`: the two
+  existing paths (`once_cell` through `tracing-core`, `lazy_static` through `sharded-slab`,
+  both wrapped in `deny.toml`) are unchanged and the other three match no package. Neither
+  `serial2` nor anything it uses is on those paths, so the wrappers need no change.
+- Alternatives: `serialport` (the first attempt at S58; MPL-2.0, which `deny.toml` does not
+  allow, and with a larger tree: `nix`, a second `bitflags`, `core-foundation`, `io-kit-sys`,
+  `mach2` and a second `windows-sys`); `mio-serial` and `tokio-serial` (they wrap
+  `serialport` and put its descriptor behind a reactor; section 8.4 asks for a dedicated
+  thread instead); `serial2-tokio` (the same, over `serial2`); writing termios and Win32
+  serial code (needs `unsafe`, which first-party code forbids).
+- Maintenance: 0.2.39 is the current release as resolved on the review date, and
+  `cargo-deny` reports no open RUSTSEC advisory against it.
+- Review date: 2026-10-28. `cargo-deny` passes advisory, license, ban and source checks with
+  `deny.toml` unchanged; this records the trust boundary, not a memory-safety certification.

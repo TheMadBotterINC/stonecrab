@@ -27,6 +27,9 @@ default = ["sim", "modbus", "sensors"]
 full = ["sim", "modbus", "sensors"]
 # Deadline-bounded byte transports and the Tokio TCP transport (`stonecrab::transport`).
 transport = ["dep:tokio"]
+# The serial transport on a blocking worker thread (`stonecrab::transport::SerialTransport`).
+# Needs the transport. Not part of `modbus` yet: Modbus RTU and ASCII will enable it.
+serial = ["transport", "dep:serial2"]
 # The native Modbus TCP driver (`stonecrab::modbus`). Needs the transport and the codec
 # (the codec is always built).
 modbus = ["transport", "dep:tracing"]
@@ -243,6 +246,10 @@ name = "transport_public_types"
 required-features = ["testkit"]
 
 [[test]]
+name = "transport_serial"
+required-features = ["serial"]
+
+[[test]]
 name = "transport_tcp"
 required-features = ["testkit"]
 
@@ -264,6 +271,7 @@ thiserror.workspace = true
 bytes.workspace = true
 tokio = { workspace = true, optional = true, features = ["rt", "net", "time", "sync", "io-util"] }
 tracing = { workspace = true, optional = true }
+serial2 = { workspace = true, optional = true }
 serde = { workspace = true, optional = true, features = ["derive"] }
 serde_json = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }
@@ -275,4 +283,6 @@ criterion.workspace = true
 tokio = { workspace = true, features = ["rt", "macros", "sync", "test-util", "rt-multi-thread"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
+# The `unix` feature adds `SerialPort::pair`, the pseudo-terminal pair of the serial tests.
+serial2 = { workspace = true, features = ["unix"] }
 roxmltree.workspace = true

@@ -22,7 +22,8 @@ types are Stonecrab's own contract. The behavior that is specified is recorded i
 | `ConnectionGuard` request-driven reconnect, bounded queue, resync after a timeout | simulator-tested |
 | `SystemClock` (Tokio timer) | interoperability-tested |
 | `Jitter` (xorshift64* sample source for `ReconnectPolicy::next_delay`) | build-tested |
-| Serial, UDP and TLS transports | planned |
+| `SerialTransport` and `SerialFactory` (feature `serial`) | simulator-tested |
+| UDP and TLS transports | planned |
 | Hardware verification | planned |
 
 How the levels were reached. The TCP transport has byte-level tests over real loopback
@@ -38,6 +39,14 @@ reply on demand, so those rows are `simulator-tested` and no further. The framin
 ships no protocol framer of its own; the only one is the Modbus one. No physical device has
 been tried.
 
+The serial transport is `simulator-tested`: its byte-level tests run over a pseudo-terminal
+pair (the virtual serial pair of the `serial2` crate), which exercises the operating
+system's terminal layer but no UART, RS-485 adapter or device, and no protocol framer runs
+over it yet. Its worker, retry, cancellation and error paths run on an in-memory port. The
+pair tests run on Unix other than macOS: `serial2` builds its pair with a baud-rate ioctl
+that a macOS pseudo-terminal refuses, and Windows has no pseudo-terminals. Where they do not
+run, the in-memory tests still do.
+
 ## Feature
 The module exists only with the `transport` feature, which is the only thing that brings
 Tokio into the crate: `rt`, `net`, `time`, `sync` and `io-util` are scoped on, and the
@@ -46,12 +55,57 @@ turn `transport` on; `sim`, `sensors` and `default-features = false` do not, so 
 core stays free of Tokio. Nothing here spawns a task, and a transport does no work
 between calls (decision D15 of the alpha plan).
 
+The `serial` feature adds `SerialTransport` and `SerialFactory` to the module and turns on
+`transport` and the `serial2` crate. No other feature enables it, so a build without it has
+no `serial2` in its dependency graph. See [Serial](#serial).
+
 ## The deadline rule
 Every call that waits takes the `Deadline` it must finish by, and that argument is the
 only deadline source: there is no default and no hidden timeout. A deadline that has
 already passed fails with `ErrorKind::Timeout` before any I/O. Deadlines are compared with
 Tokio's clock, which is the ordinary `std::time::Instant` clock unless a test pauses time;
 build them from `SystemClock::now()` and they agree in both cases.
+
+## Serial
+`SerialFactory::open` opens the port named by an `Endpoint::Custom` (`/dev/ttyUSB0`,
+`COM3`) with the factory's settings, which are upstream's option names and defaults: 9600
+baud, 8 data bits, no parity, 1 stop bit, no flow control. It returns a `SerialTransport`
+that follows the same `Transport` rules as the TCP one. `SerialTransport::from_port` wraps a
+port you opened yourself (any `Read + Write` that gives up a call after a short timeout; a
+`serial2::SerialPort` with its read and write timeouts set to about 20 ms).
+
+Serial ports have blocking reads and writes, so one dedicated thread owns each port (the
+worker) and the async side talks to it over a bounded channel (coding standards 8.4 and
+8.8; ADR-0014, addendum S58). The worker is a thread, not a Tokio task, and it reads the
+port only while a `recv` is waiting: between calls it is blocked on the channel, so the
+no-background-work rule of decision D15 holds here too.
+
+- **Deadlines are the caller's.** The worker reads no clock. Every call races its reply
+  against its `Deadline` on the Tokio clock, exactly as the TCP transport does, so an
+  elapsed deadline fails before any I/O and a deadline that passes mid-call is `Timeout`.
+- **Writes are bounded by the deadline.** The factory gives the port a 20 ms write timeout,
+  so a write call returns once the line has taken some bytes or the timeout has passed, and
+  the worker offers a frame in chunks of at most 256 bytes and looks for a departed caller
+  before each. A `send` into a stalled or flow-controlled line therefore ends at its
+  deadline, and the worker is free again within one slice of it. A write that returns
+  nothing (`Ok(0)`, which some platforms use for a timeout) is not an error: it is tried
+  again until the frame is out or the caller has gone.
+- **Cancellation.** A dropped or timed-out call is noticed within a slice. A dropped `recv`
+  loses nothing, even if the worker had already answered it: bytes the worker read for it
+  are kept in a stash on the worker's side and returned, in order, by the next `recv`. A
+  cut-short `send` poisons the transport, as for TCP.
+- **Close.** `shutdown` stops the worker, waits for it (within the deadline) and so releases
+  the device; a repeat call is a no-op. Dropping the transport without it also stops the
+  worker, without waiting.
+- **Errors.** A port error is `Disconnected` with the cause as the source; a closed peer
+  (an end of stream or a broken pipe) is `recv` returning `0`, after which every call is
+  `Disconnected`; a missing or unreadable port is `Disconnected`; a wrong endpoint, an empty
+  name, a zero baud rate or a rate the platform has no setting for is `InvalidConfig`.
+- **Not offered yet.** `read-timeout-ms`, `write-timeout-ms` (replaced by the deadlines),
+  `dtr`, `rts`, `reuse-port` and `interframe-delay`; mark and space parity and 1.5 stop
+  bits. The Modbus RTU slice owns inter-frame timing and bus sharing. `send` returns when
+  the bytes are handed to the operating system, not when the last bit has left the line.
+  The port is not opened exclusively: keep one transport per port.
 
 ## Framing
 A `Framer<F>` turns bytes into frames (`decode`, `encode`, `max_frame_bytes`) and does no

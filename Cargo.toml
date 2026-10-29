@@ -19,6 +19,7 @@ proptest = { version = "1.12", default-features = false, features = ["std"] }
 criterion = { version = "0.8", default-features = false }
 tokio = { version = "1.54", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["std"] }
+serial2 = { version = "0.2.39", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
 serde = { version = "1.0", default-features = false, features = ["std"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }

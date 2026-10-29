@@ -5,6 +5,20 @@ as `stonecrab` 0.2.0 (2026-10-27); `stonecrab` 0.1.0 is the specification-stage
 placeholder.
 
 ## Unreleased
+- New `serial` feature (off by default; `modbus` does not enable it yet): a serial transport
+  on a blocking worker thread, `stonecrab::transport::{SerialFactory, SerialTransport}` with
+  `DataBits`, `Parity`, `StopBits` and `FlowControl` (upstream's option names and defaults:
+  9600 baud, 8 data bits, no parity, 1 stop bit, no flow control). One thread owns the port
+  and talks to the async caller over a bounded channel; every call honors its `Deadline`,
+  a `send` into a stalled line ends at its deadline and frees the worker within 20 ms, a
+  dropped `recv` loses nothing (even one dropped after the worker answered), `shutdown` joins
+  the worker and releases the port, and a port error or a closed peer surfaces as the TCP
+  transport's error kinds. The port name is an `Endpoint::Custom`; `SerialTransport::from_port`
+  wraps a port you opened. New optional dependency `serial2` 0.2.39 (`default-features =
+  false`), BSD-2-Clause OR Apache-2.0, which adds no other crate to the lock file and needs
+  no `deny.toml` change. Additive API only. Not offered yet: `dtr`, `rts`, `reuse-port`,
+  `interframe-delay`, mark and space parity (docs/parity/transport.md). Tested over a
+  pseudo-terminal pair on Unix other than macOS; no hardware. ADR-0014 addendum S58.
 - Subscription types and a bounded event queue (ADR-0020; additive): `SubscribeRequest`
   and its builder, `SubscriptionKind` (cyclic, change-of-state, event), `QueuePolicy`
   (backpressure, latest-value coalescing, drop-oldest), `LossCounters`, `Subscription`

@@ -125,7 +125,7 @@ The standards exist for one reason: this library parses bytes from industrial ne
 - Adding a dependency that is not `#![forbid(unsafe_code)]` requires that entry in the same PR.
 - Prefer, in order: `std` → a crate that forbids `unsafe` → a widely-used crate whose `unsafe` is well-audited (`tokio`, `bytes`, `rustls`) → anything else, with justification.
 
-4.5. **Hardware access** goes through `std` file I/O and `ioctl`-wrapping crates (`spidev`, `i2cdev`, `serialport`), which encapsulate the `unsafe` syscalls. Our adapters wrap those behind the `SpiBus`/`I2cBus`/`SerialPort` traits in §8.7 so the `unsafe` surface is one audited crate per bus, not scattered.
+4.5. **Hardware access** goes through `std` file I/O and `ioctl`-wrapping crates (`spidev`, `i2cdev`, `serial2`), which encapsulate the `unsafe` syscalls. Our adapters wrap those behind the `SpiBus`/`I2cBus`/`SerialPort` traits in §8.7 so the `unsafe` surface is one audited crate per bus, not scattered.
 
 4.6. **Miri.** Because there is no first-party `unsafe`, Miri is not a release gate. It runs on the nightly job against the test suites of the core and `stonecrab::codec` as a cheap detector of library misuse (uninitialized reads via a dependency, data races in tests), with findings filed as issues.
 
@@ -281,7 +281,7 @@ pub struct PlcError { inner: Box<ErrorInner> }
 
 8.3. **Every future is `Send`.** `clippy::future_not_send` is enabled. A public future that is not `Send` is a bug. Holding a `std::sync::MutexGuard`, `RefCell` borrow or `Rc` across an `.await` is rejected (`clippy::await_holding_lock`, `await_holding_refcell_ref`).
 
-8.4. **No blocking on the runtime.** `std::thread::sleep`, synchronous `std::net`/`std::fs` I/O, and blocking `serialport` calls are disallowed in async code (`clippy.toml` `disallowed-methods`). Serial, SPI and I²C run on a dedicated OS thread owned by `BlockingWorker`, which talks to the async side through bounded channels. `tokio::task::spawn_blocking` is acceptable for one-shot operations (opening a port); a long-lived device loop gets its own thread so it cannot starve the blocking pool.
+8.4. **No blocking on the runtime.** `std::thread::sleep`, synchronous `std::net`/`std::fs` I/O, and blocking `serial2` calls are disallowed in async code (`clippy.toml` `disallowed-methods`). Serial, SPI and I²C run on a dedicated OS thread owned by `BlockingWorker`, which talks to the async side through bounded channels. `tokio::task::spawn_blocking` is acceptable for one-shot operations (opening a port); a long-lived device loop gets its own thread so it cannot starve the blocking pool.
 
 8.5. **Every I/O call has a deadline.** `Transport::send`/`recv` take a `Deadline`. There is no `read().await` without `timeout`/deadline anywhere in the workspace. A function that performs I/O and takes no deadline parameter has a documented deadline source (the connection's `Timeouts`) in its rustdoc.
 
@@ -289,7 +289,7 @@ pub struct PlcError { inner: Box<ErrorInner> }
 
 8.7. **Structured tasks.** `tokio::spawn` is a disallowed method (`clippy.toml`), so every spawn site carries `#[expect(clippy::disallowed_methods, reason = "…")]` naming the owner that keeps the `JoinHandle` (or `JoinSet`) and aborts/awaits it in `close()`. Detached tasks that outlive their owner are prohibited; a `tokio::spawn(async move { … });` with the handle discarded is rejected in review even with the `expect`. Task-spawning types document their shutdown order.
 
-8.8. **Channels are bounded.** `tokio::sync::mpsc::unbounded_channel`, `UnboundedSender` and `UnboundedReceiver` are disallowed types (`clippy.toml`). Every channel capacity is a named constant or a `ResourceLimits` field with a documented upper bound, and every producer's behavior on a full channel is one of the three `QueuePolicy` variants with its loss counter updated.
+8.8. **Channels are bounded.** `tokio::sync::mpsc::unbounded_channel`, `UnboundedSender` and `UnboundedReceiver` are disallowed types (`clippy.toml`). Every channel capacity is a named constant or a `ResourceLimits` field with a documented upper bound, and every producer's behavior on a full channel is one of the three `QueuePolicy` variants with its loss counter updated. A request channel to a worker, with one owner that runs one call at a time, may have a small named capacity that makes the sender wait inside its deadline instead of using a `QueuePolicy` (ADR-0014, S58 addendum).
 
 8.9. **One owner per connection.** Connection state lives in exactly one task or one `Mutex`-guarded state machine (`ConnectionGuard`). Requests are serialized through it; "just clone the stream" is not a pattern here. For Modbus RTU the serialization is per *bus*, not per connection, and the `SerialTransport` enforces it.
 
@@ -522,7 +522,7 @@ A library crate emits nothing above `warn` in steady-state operation. A log line
 | error derive | `thiserror` 2 |
 | async runtime / net / time | `tokio` (scoped features) |
 | cancellation bridge | `tokio-util` (`CancellationToken`, codecs) in transport only |
-| serial | `serialport` (sync, on a `BlockingWorker` thread) |
+| serial | `serial2` (sync, on a `BlockingWorker` thread) |
 | SPI / I²C on Linux | `spidev`, `i2cdev` |
 | TLS (OPC UA) | `rustls` + `rustls-pki-types`, `aws-lc-rs` or `ring` provider per ADR |
 | config/profile parsing | `toml` + `serde` |

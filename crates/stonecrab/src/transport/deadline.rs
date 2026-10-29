@@ -73,6 +73,31 @@ impl Site {
     }
 }
 
+/// The serial transport's sites, in their own block so the feature gate sits on one item.
+#[cfg(feature = "serial")]
+impl Site {
+    /// Opening a serial port.
+    pub(crate) const SERIAL_OPEN: Self = Self {
+        name: "serial open",
+        operation: Some(Operation::Connect),
+    };
+    /// Sending one frame to a serial port.
+    pub(crate) const SERIAL_SEND: Self = Self {
+        name: "serial send",
+        operation: None,
+    };
+    /// Receiving bytes from a serial port.
+    pub(crate) const SERIAL_RECV: Self = Self {
+        name: "serial receive",
+        operation: None,
+    };
+    /// Closing a serial port.
+    pub(crate) const SERIAL_SHUTDOWN: Self = Self {
+        name: "serial shutdown",
+        operation: Some(Operation::Close),
+    };
+}
+
 /// The monotonic reading deadlines are judged against: Tokio's clock, which is the plain
 /// `std::time::Instant::now()` unless a test has paused time.
 #[expect(

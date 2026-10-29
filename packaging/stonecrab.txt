@@ -95,6 +95,8 @@ src/transport/framed.rs
 src/transport/framer.rs
 src/transport/guard.rs
 src/transport/jitter.rs
+src/transport/serial.rs
+src/transport/serial_worker.rs
 src/transport/tcp.rs
 src/transport/traits.rs
 src/transport.rs

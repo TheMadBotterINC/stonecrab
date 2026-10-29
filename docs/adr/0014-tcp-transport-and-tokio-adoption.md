@@ -491,6 +491,144 @@ ADR-0011 decision 8.
   `examples` job and `mise run examples` the same two commands; the `features` job's
   powerset (`--no-dev-deps`) checks `sim` on its own and with every other feature.
 
+## Addendum (S58, 2026-10-28): the serial transport on a blocking worker
+Slice S58 of docs/POST_ALPHA_PLAN.md adds a serial transport to the `transport` module
+behind a new `serial` feature. It is the base for Modbus RTU (S59) and ASCII (S60). It
+needs no ADR of its own: it is a second implementation of the `Transport` and
+`TransportFactory` traits above and follows CODING_STANDARDS 8.4, 8.7 and 8.8. A first
+attempt used the `serialport` crate and was set aside because that crate is MPL-2.0, which
+`deny.toml` does not allow and the maintainer has not agreed to add as an exception (decision
+1); this is the rework on `serial2`.
+
+1. **Feature and dependency; why `serial2` and not `serialport`.** `serial = ["transport",
+   "dep:serial2"]`; `serial2` 0.2.39 with `default-features = false` (workspace entry
+   `serial2 = { version = "0.2.39", default-features = false }`; the crate has no default
+   features). It is BSD-2-Clause OR Apache-2.0, both on the `deny.toml` allow list, so the
+   license policy is unchanged and no exception is asked for. `serialport` is MPL-2.0, a
+   file-level copyleft, and would have needed `exceptions = [{ allow = ["MPL-2.0"], crate =
+   "serialport" }]`; `serial2` also adds no crate to the lock file other than itself
+   (`cfg-if`, `libc` and `windows-sys` are already there), where `serialport` added `nix`, a
+   second `bitflags`, `core-foundation`, `io-kit-sys`, `mach2`, `scopeguard`, `unescaper` and a
+   second `windows-sys`. `modbus` does not enable `serial`; S59 will. The default feature set
+   does not contain the crate (`cargo tree -p stonecrab -e normal` is unchanged). `serial2`
+   is also a dev-dependency with its `unix` feature, which exposes `SerialPort::pair`. The
+   review is in docs/DEPENDENCY_AUDIT.md.
+2. **Worker model (8.4, 8.7).** One OS thread per transport owns the port. The thread is
+   started with `std::thread::Builder` (named `stonecrab-serial`), not `tokio::spawn`,
+   so 8.7's spawn-site rule does not apply; its owner is the `SerialTransport`, which keeps
+   the `JoinHandle` and joins it in `shutdown`. Opening a port is a one-shot blocking call
+   and runs on Tokio's blocking pool (`spawn_blocking`, which 8.4 allows), so a deadline
+   that passes during `open` returns `Timeout` at once and the open finishes by itself,
+   dropping the port. Joining the thread also runs on the blocking pool, so no runtime
+   thread blocks; that join task is awaited by `stop`, or abandoned with the caller's
+   deadline race, and then finishes by itself when the thread ends, so no handle is lost.
+   The `Worker` type (private to the module) is the standards' `BlockingWorker`; the shorter
+   name is kept because the module name already says it is the serial worker.
+3. **Channels (8.8).** The async side sends `Read { limit }` and `Write { bytes }` commands
+   over a `tokio::sync::mpsc` channel of capacity 2 (`COMMAND_CAPACITY`) and receives each
+   result on a `oneshot`. A transport has one owner and runs one call at a time, so the
+   channel holds the live command plus at most one abandoned by a call that timed out while
+   the worker was busy. A full channel is not a loss: the sender waits, inside the caller's
+   deadline. This is a reasoned reading of 8.8, whose three `QueuePolicy` variants and loss
+   counter fit a producer that can outrun its consumer, not a request channel; it is a
+   deviation from the letter of 8.8, which section 8.8 now states for request channels.
+   There is no channel from the worker to the transport that could fill: received bytes are
+   handed over only to a waiting `Read`, so a slow consumer stops the worker from reading and
+   the operating system buffers (a pull model, not a pushed stream). `ResourceLimits` still
+   bound the data: at most `max_buffered_bytes` minus the buffer is requested, a read
+   returns at most 1024 bytes (`READ_CHUNK`), and a frame over `max_frame_bytes` is refused
+   before it is queued.
+4. **Deadline and cancellation.** The worker reads no clock. The caller races the `oneshot`
+   against its `Deadline` with the same `within` helper as TCP, so every call fails with
+   `Timeout` at its deadline and an elapsed deadline fails before any I/O. Mixing a worker's
+   real clock with Tokio's paused clock would make tests unsound, which is the other
+   reason. The factory gives the port a 20 ms read timeout and a 20 ms write timeout
+   (`POLL`), and between port calls the worker checks whether the caller's `oneshot` is still
+   open; a dropped or timed-out call is therefore abandoned within about one slice.
+   `recv` is cancel-safe because bytes read for a caller stay in a stash on the worker's
+   side (at most 1024 bytes), shared with the transport, and the `oneshot` only says that
+   bytes are ready: the caller takes them from the stash in the same poll in which it sees the
+   answer, so a `recv` future dropped before it ran again, after the worker had answered,
+   leaves the bytes in the stash and they are the first thing the next `Read` returns, in
+   order. `send` is not cancel-safe, as for TCP: it poisons the transport before writing and
+   restores it only when the whole frame was written.
+5. **Writes are bounded by the caller's deadline.** A frame is not handed to the port in one
+   call. `serial2` sets the descriptor non-blocking on Unix and waits for the line to be
+   writable for at most the write timeout before each write, which then takes what the line
+   has room for; on Windows the write timeout bounds the transfer. So one port write returns
+   within about 20 ms whatever the line does, and the worker offers at most 256 bytes
+   (`WRITE_CHUNK`) per call and looks for a departed caller before each. A `send` into a
+   stalled or flow-controlled line therefore ends at its deadline (the caller's side) and
+   the worker leaves the write within one slice of it, where a single blocking write of the
+   whole frame would have held the thread for as long as the line stayed stalled. This is
+   tested three ways: a unit test where the port only ever times out (the worker is seen
+   inside the write loop, the caller drops, the thread is joined), a unit test that a
+   `serial2` write to a full pseudo-terminal gives up with `TimedOut`, and an integration
+   test where a 4 MiB frame meets a pseudo-terminal the device does not drain (the worker is
+   seen to have started, the deadline passes on the paused clock, `send` is `Timeout` and
+   `shutdown` joins the worker). A write that returns nothing (`Ok(0)`, which some
+   platforms use for a timeout), `TimedOut`, `Interrupted` or `WouldBlock` is retried and is
+   never an error; only the caller's deadline or a real port error ends the loop. A port
+   handed to `from_port` must also time out its calls (the documentation says to set about 20
+   ms on both timeouts); `serial2`'s own default is three seconds.
+6. **Close.** `shutdown` closes the command channel, which ends the worker loop after its
+   current slice, then joins the thread; the thread drops the port as it ends, so the
+   device is free when `shutdown` returns `Ok`. It is bounded by its deadline: closing a
+   real port can wait for output to drain, and on `Timeout` the join finishes in the
+   background. The transport is closed from the first poll, a repeat call is a no-op, and
+   dropping the transport without `shutdown` closes the channel but does not wait. No
+   thread outlives its transport by more than one slice, except behind a port call that
+   does not return.
+7. **Errors.** The same kinds as TCP: a port error or a failed write is `Disconnected`
+   with the `io::Error` as source and poisons the transport; an end of stream (`Ok(0)`) or
+   `BrokenPipe` on a read returns `0` from `recv` and poisons it (a pseudo-terminal whose
+   peer closed may read as an I/O error instead, as on Linux, which is `Disconnected`); a
+   frame over the limit is `ResourceLimit`; a missing, not permitted or refused port is
+   `Disconnected`; an endpoint that is not `Endpoint::Custom`, an empty port name, a zero baud
+   rate or an `InvalidInput` from the library (a rate the platform cannot set) is
+   `InvalidConfig`. The serial sites are named `serial open`, `serial send`, `serial receive` and `serial
+   shutdown`.
+8. **Configuration.** `SerialFactory` carries the settings, as `TcpFactory` carries
+   `nodelay`: `baud_rate` (9600), `data_bits` (8), `parity` (none), `stop_bits` (1),
+   `flow_control` (none), the names and defaults of upstream's
+   `SerialTransportConfiguration` (`upstream/manifest.toml`, `inventory.transport_serial`).
+   The enums are Stonecrab's own, so the public API does not expose `serial2` types except in
+   the argument of `SerialTransport::from_port`, which takes any `Read + Write + Send` port.
+   Not offered, and recorded in `docs/parity/transport.md#TRANSPORT-SERIAL-CONFIG`:
+   `read-timeout-ms` and `write-timeout-ms` (every call takes a `Deadline`), `dtr` and
+   `rts` (modem lines cannot be tested without hardware), `reuse-port` (a shared port
+   multiplexes several logical connections, which belongs with the RTU bus serialization
+   of S59) and `interframe-delay` (inter-frame timing belongs to the RTU framing, S59);
+   mark and space parity and 1.5 stop bits (not in `serial2`). The port name is the text
+   of an `Endpoint::Custom`, passed to the operating system as is, like upstream; a typed
+   `Endpoint::Serial` would need a core change and is left to S59. `serial2` takes no
+   exclusive lock on the device, so a second open succeeds; the documentation says to keep
+   one transport per port. `SerialTransport::from_port` wraps a port the caller opened.
+9. **Testing.** Unit tests drive the worker and the transport through an in-memory port
+   (`std::io::Read + Write`, not a Stonecrab trait) for every error, retry, stash and
+   panic path. Integration tests (`tests/transport_serial.rs`) use a pseudo-terminal pair
+   from `serial2::SerialPort::pair`: bytes both ways, deadline expiry and cancellation on a
+   paused clock, close while a read waits (the port is released), the peer closing, the
+   write into a stalled line, and configuration errors. The pair tests run on Unix other than
+   macOS and are skipped by name elsewhere: on Windows (`windows_has_no_virtual_pair`;
+   pseudo-terminals are Unix only) and on macOS (`macos_refuses_the_serial2_pair`).
+   The reason on macOS is not the one the `serialport` attempt met. `serial2` applies every
+   settings change on macOS with the `IOSSIOSPEED` ioctl, which a pseudo-terminal refuses
+   with `ENOTTY`, and `SerialPort::pair` applies settings, so the pair itself cannot be made;
+   opening a pseudo-terminal by name would fail the same way, and `serial2` does not report
+   the slave's path. The tests that open by name through the factory (`by_name`) run on
+   Linux only, which also reads the path from `/proc/self/fd`. The unit tests that need a
+   `serial2::Settings` (it cannot be built without a port) share the macOS skip. The
+   by-name path and the settings code are exercised only by the Linux gate; the in-memory
+   tests run everywhere. No test touches a device or sleeps on real time; the stalled-line
+   integration test waits on the pair's I/O only, and fails after its 30 second deadline
+   if the worker were not freed.
+10. **Coverage.** The module is in the `transport` component (`src/transport/`), so it is
+    inside the existing 95 percent row and no new row is needed. The lines that only the
+    Linux tests reach are the settings code, `open_port` and the successful end of
+    `open_serial`; a macOS run leaves them uncovered, a few lines in all, and none is an
+    excluded line.
+
 ## Alternatives considered
 - **`async-std` or `smol`.** Rejected: CODING_STANDARDS 15.8 names Tokio as the sanctioned
   runtime, the later OPC UA and TLS crates in the ecosystem assume it, and a second

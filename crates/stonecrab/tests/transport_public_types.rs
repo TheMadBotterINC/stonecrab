@@ -50,4 +50,20 @@ mod tests {
         assert_send_sync::<TcpFactory>();
         assert_send_sync::<TcpTransport>();
     }
+
+    #[cfg(feature = "serial")]
+    #[test]
+    fn serial_types_are_send_sync_and_static() {
+        use stonecrab::transport::{
+            DataBits, FlowControl, Parity, SerialFactory, SerialTransport, StopBits,
+        };
+
+        fn assert_send_sync<T: Send + Sync + 'static>() {}
+        assert_send_sync::<SerialFactory>();
+        assert_send_sync::<SerialTransport>();
+        assert_send_sync::<DataBits>();
+        assert_send_sync::<Parity>();
+        assert_send_sync::<StopBits>();
+        assert_send_sync::<FlowControl>();
+    }
 }
