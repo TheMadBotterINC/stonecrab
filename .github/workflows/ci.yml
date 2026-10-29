@@ -33,7 +33,7 @@ jobs:
         rust: ["1.97.1", "1.99.1"]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
         with:
           toolchain: ${{ matrix.rust }}
@@ -49,7 +49,7 @@ jobs:
       PROPTEST_CASES: 256
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
         with:
           toolchain: "1.99.1"
@@ -66,7 +66,7 @@ jobs:
       - run: scripts/coverage-gate.sh
         env:
           NEXTEST_PROFILE: ci
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ !cancelled() }}
         with:
           name: coverage
@@ -76,7 +76,7 @@ jobs:
   cross:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
         with:
           toolchain: "1.99.1"
@@ -86,7 +86,7 @@ jobs:
   dependencies:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
         with:
           toolchain: "1.99.1"
@@ -97,7 +97,7 @@ jobs:
   package:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
         with:
           toolchain: "1.99.1"
@@ -116,7 +116,7 @@ jobs:
       github.event.before != '0000000000000000000000000000000000000000')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Signed-off-by on every pull request commit
@@ -134,7 +134,7 @@ jobs:
   features:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
         with:
           toolchain: "1.99.1"
@@ -152,7 +152,7 @@ jobs:
   examples:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
         with:
           toolchain: "1.99.1"
@@ -176,7 +176,7 @@ jobs:
     # subcommands of interop/pymodbus/interop.sh, which `mise run interop` also runs.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
         with:
           toolchain: "1.99.1"
@@ -202,7 +202,7 @@ jobs:
       # Image id, pip freeze and server log next to the contract report the test wrote.
       - run: interop/pymodbus/interop.sh evidence
         if: ${{ always() }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ always() }}
         with:
           name: interop-evidence
@@ -217,7 +217,7 @@ jobs:
     # `mise run interop-libmodbus` also runs.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
         with:
           toolchain: "1.99.1"
@@ -238,7 +238,7 @@ jobs:
       # Image id, package version and server log next to the test output.
       - run: interop/libmodbus/interop.sh evidence
         if: ${{ always() }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ always() }}
         with:
           name: interop-libmodbus-evidence
@@ -254,7 +254,7 @@ jobs:
     # runs.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
         with:
           toolchain: "1.99.1"
@@ -275,7 +275,7 @@ jobs:
       # Image id, pip freeze and server log next to the test output.
       - run: interop/modbus-tk/interop.sh evidence
         if: ${{ always() }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ always() }}
         with:
           name: interop-modbus-tk-evidence
@@ -292,7 +292,7 @@ jobs:
     # `mise run interop-toxiproxy` also runs.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
         with:
           toolchain: "1.99.1"
@@ -320,7 +320,7 @@ jobs:
       # Image digests, tshark and Toxiproxy versions, the capture counts and the container logs.
       - run: interop/toxiproxy/interop.sh evidence
         if: ${{ always() }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ always() }}
         with:
           name: interop-toxiproxy-evidence
@@ -330,7 +330,7 @@ jobs:
   machete:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
         with:
           toolchain: "1.99.1"
@@ -341,7 +341,7 @@ jobs:
   lint-attrs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: scripts/lint-attrs.sh
       - run: scripts/lint-attrs.sh --self-test
   parity:
@@ -349,7 +349,7 @@ jobs:
     # docs/parity, and every implemented or automated-verified row is referenced.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: scripts/parity-check.sh
       - run: scripts/parity-check.sh --self-test
   beta:
@@ -357,7 +357,7 @@ jobs:
     continue-on-error: true
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
         with:
           toolchain: beta
@@ -368,7 +368,7 @@ jobs:
     # code. The blocking gate is the grep; the geiger tree is an informational report.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: No first-party unsafe outside forbid(unsafe_code)
         run: |
           if grep -rnw --include='*.rs' unsafe crates | grep -v 'forbid(unsafe_code)'; then
@@ -389,7 +389,7 @@ jobs:
     # fails until the version bump that announces it (CODING_STANDARDS 9.10).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
         with:
           toolchain: "1.99.1"
@@ -402,7 +402,7 @@ jobs:
     # the script; with zero targets the job is green (ADR-0009).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       # Nightly pinned by date in fuzz/rust-toolchain.toml; keep the two in sync.
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
         with:
@@ -419,7 +419,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # The full history, so the benchmark step can check out the commit of a week ago.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
@@ -436,7 +436,7 @@ jobs:
           toolchain: "1.99.1"
       - name: Mutation testing (mutants.toml scope; a survivor fails the step)
         run: scripts/mutants.sh 4
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ always() }}
         with:
           name: mutants-outcomes
@@ -454,7 +454,7 @@ jobs:
           else
             scripts/bench-compare.sh "$base"
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ always() }}
         with:
           name: bench-compare
