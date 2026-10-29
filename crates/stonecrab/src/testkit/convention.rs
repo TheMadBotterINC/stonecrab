@@ -12,7 +12,9 @@ use crate::testkit::FixtureAddress;
 /// `parse_address` returns a [`FixtureAddress`] whose canonical text is
 /// `<convention>:<text>`, or `none:<text>` when the options carry no convention, so a
 /// test sees exactly which [`AddressOptions`] a caller passed. Text that is empty is
-/// rejected. Connecting is `Unsupported`; nothing is ever read.
+/// rejected. [`ConventionDriver::with_wide_addresses`] makes every address declare that its
+/// value spans several words, as a second driver with wide types would. Connecting is
+/// `Unsupported`; nothing is ever read.
 ///
 /// # Examples
 ///
@@ -31,13 +33,37 @@ use crate::testkit::FixtureAddress;
 #[derive(Debug, Clone)]
 pub struct ConventionDriver {
     scheme: &'static str,
+    wide: bool,
 }
 
 impl ConventionDriver {
     /// A double that reports `scheme` as its URI scheme.
     #[must_use]
     pub const fn new(scheme: &'static str) -> Self {
-        Self { scheme }
+        Self {
+            scheme,
+            wide: false,
+        }
+    }
+
+    /// The same double, but every address it parses spans more than one protocol word.
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab::{AddressOptions, Driver};
+    /// use stonecrab::testkit::ConventionDriver;
+    ///
+    /// # fn main() -> Result<(), stonecrab::PlcError> {
+    /// let driver = ConventionDriver::new("demo").with_wide_addresses();
+    /// let address = driver.parse_address("a", &AddressOptions::default())?;
+    /// assert!(address.spans_multiple_words());
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[must_use]
+    pub const fn with_wide_addresses(mut self) -> Self {
+        self.wide = true;
+        self
     }
 }
 
@@ -66,10 +92,12 @@ impl Driver for ConventionDriver {
             return Err(PlcError::new(ErrorKind::InvalidAddress, "empty address"));
         }
         let convention = options.convention().unwrap_or("none");
-        Ok(Arc::new(FixtureAddress::new(
-            &format!("{convention}:{text}"),
-            None,
-        )))
+        let address = FixtureAddress::new(&format!("{convention}:{text}"), None);
+        Ok(Arc::new(if self.wide {
+            address.spanning_multiple_words()
+        } else {
+            address
+        }))
     }
 
     fn connect(&self, _config: ConnectionConfig) -> OpFuture<'_, Box<dyn Connection>> {
@@ -108,6 +136,12 @@ mod tests {
                 .is_err(),
             "empty text is rejected"
         );
+        assert!(!address.spans_multiple_words(), "single word by default");
+        let wide = driver.with_wide_addresses();
+        let address = wide
+            .parse_address("a", &AddressOptions::default())
+            .expect("parses");
+        assert!(address.spans_multiple_words(), "wide on request");
     }
 
     #[test]

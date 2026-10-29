@@ -177,6 +177,20 @@ mod tests {
         }
     }
 
+    // covers: MB-TYPE-BOOL
+    #[test]
+    fn an_address_spans_multiple_words_when_its_type_is_wider_than_one_register() {
+        for (kind, name, size, _) in TYPE_TABLE {
+            let area = if kind == ModbusDataType::Bool {
+                ModbusArea::Coil
+            } else {
+                ModbusArea::HoldingRegister
+            };
+            let address = build(area, 0, kind).expect("builds");
+            assert_eq!(address.spans_multiple_words(), size > 1, "{name}");
+        }
+    }
+
     // covers: MB-ADDR-STRING, MB-TYPE-CHAR, MB-TYPE-WCHAR, MB-TYPE-STRING, MB-TYPE-WSTRING
     #[test]
     fn string_and_character_names_are_recognised_and_refused_as_deferred() {

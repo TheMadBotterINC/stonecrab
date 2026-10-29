@@ -469,3 +469,28 @@ finite and `min` must not exceed `max`. The rule sits after the unit check and b
 status fields, following the `MeasurementDef` field order, and the variant converts to
 `InvalidConfig` like the others. It names the measurement by index and never echoes the
 document. Status-field bit positions stay unchecked until S37.
+
+## Addendum: the word-order rule follows the driver (slice S39, 2026-10-28)
+This addendum records the S39 decision for finding G05 of `docs/POST_ALPHA_PLAN.md`. It
+changes one behavior above and no type.
+
+1. **Reason.** S28b keyed the rule "a value wider than 16 bits has both a `byte_order` and a
+   `word_order`" on eight Modbus type names inside the driver-independent `validate`. That
+   was correct for Modbus and wrong as soon as a second driver has wide types, and the
+   `sensors` module should not name any driver's types. `tags` already treats `data_type`
+   as documentary: the type comes from the parsed address.
+2. **`ProtocolAddress::spans_multiple_words(&self) -> bool`.** A provided method, false by
+   default, true when the value at the address occupies more than one of the protocol's
+   words. `ModbusAddress` overrides it from its data type's register count (every type
+   wider than one register); simulator addresses keep the default.
+3. **`SensorProfile::validate_for(&dyn Driver)`.** It runs every `validate` rule, then
+   parses each measurement's address under `address_options()` as `tags` does and reports,
+   in document order, `AddressRejected` for an address the driver refuses and
+   `MissingByteOrder` and `MissingWordOrder` when the parsed address spans words and the
+   definition does not set that order. `tags` runs `validate_for` instead of `validate`,
+   so a Modbus profile without orders is still refused there.
+4. **Behavior change.** `validate` no longer reports `MissingByteOrder` or
+   `MissingWordOrder`; a caller that relied on `validate` alone to find a missing order
+   must call `validate_for` or `tags`. The change is additive in API terms (a provided
+   trait method and a new method) and is recorded in `CHANGELOG.md` and in the
+   `SENSORS-VALIDATION` row of `docs/parity/sensors.md`.

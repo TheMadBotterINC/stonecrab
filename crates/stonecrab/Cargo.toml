@@ -187,6 +187,10 @@ name = "sensors_validation"
 required-features = ["sensors"]
 
 [[test]]
+name = "sensors_word_order"
+required-features = ["modbus", "sim", "sensors", "testkit"]
+
+[[test]]
 name = "sim_address_properties"
 required-features = ["sim"]
 

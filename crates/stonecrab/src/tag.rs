@@ -21,6 +21,38 @@ pub trait ProtocolAddress: Any + fmt::Debug + Send + Sync {
 
     /// Scalar type fixed by the parsed address, or `None` when not specified.
     fn value_type_hint(&self) -> Option<PlcValueType>;
+
+    /// Whether the value at this address occupies more than one of the protocol's words.
+    ///
+    /// When it does, its word order must be declared and is never inferred (docs/SPEC.md);
+    /// `SensorProfile::validate_for` (feature `sensors`) refuses a measurement at such an
+    /// address that sets no `byte_order` or `word_order`. The default is `false`: an
+    /// address is single-word unless its driver says otherwise.
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab::{PlcValueType, ProtocolAddress};
+    ///
+    /// #[derive(Debug)]
+    /// struct Counter;
+    ///
+    /// impl ProtocolAddress for Counter {
+    ///     fn protocol(&self) -> &'static str {
+    ///         "counter"
+    ///     }
+    ///     fn canonical(&self) -> String {
+    ///         "counter".to_owned()
+    ///     }
+    ///     fn value_type_hint(&self) -> Option<PlcValueType> {
+    ///         Some(PlcValueType::I16)
+    ///     }
+    /// }
+    ///
+    /// assert!(!Counter.spans_multiple_words());
+    /// ```
+    fn spans_multiple_words(&self) -> bool {
+        false
+    }
 }
 
 /// Immutable caller identity, validated address and positive element count.

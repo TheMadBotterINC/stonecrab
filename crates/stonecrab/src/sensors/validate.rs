@@ -1,14 +1,9 @@
 use std::collections::BTreeMap;
 
+use crate::Driver;
 use crate::sensors::{
     ConnectionRequirements, MeasurementDef, ProfileError, ScaleStep, SensorProfile, Unit,
 };
-
-/// Modbus data type names that occupy more than 16 bits on the wire (32- and 64-bit
-/// integers, bit strings and floats), spelled as the Modbus driver spells them.
-const WIDE_MODBUS_TYPES: [&str; 8] = [
-    "DINT", "UDINT", "DWORD", "LINT", "ULINT", "LWORD", "REAL", "LREAL",
-];
 
 /// The one address convention that exists at alpha.
 const PLC4X_CONVENTION: &str = "plc4x";
@@ -26,10 +21,9 @@ impl SensorProfile {
     /// says. The check never stops at the first problem: the `Err` holds every error, in
     /// a fixed order, so an author fixes a profile in one pass. The order is the
     /// connection first, then each measurement in document order, and within a
-    /// measurement the fields in the order of [`MeasurementDef`]: name, `count`,
-    /// `byte_order` and `word_order`, scaling steps, unit, status fields, quality
-    /// mapping. A measurement is named in an error by its 0-based index; errors never
-    /// contain any text of the profile.
+    /// measurement the fields in the order of [`MeasurementDef`]: name, `count`, scaling
+    /// steps, unit, status fields, quality mapping. A measurement is named in an error by
+    /// its 0-based index; errors never contain any text of the profile.
     ///
     /// Rules:
     /// - the address convention, when set, is `plc4x`, and a `modbus-tcp` connection must
@@ -38,13 +32,6 @@ impl SensorProfile {
     ///   reported). Names are `snake_case` already, because the loader refuses anything
     ///   else;
     /// - `count` is 1 (`UnsupportedCount`);
-    /// - a data type of 32 or 64 bits has both a `byte_order` and a `word_order`
-    ///   (`MissingByteOrder`, `MissingWordOrder`). The width comes from the data type
-    ///   name by the Modbus rule: `DINT`, `UDINT`, `DWORD`, `LINT`, `ULINT`, `LWORD`,
-    ///   `REAL` and `LREAL`, in upper case, are wider than 16 bits. Every other name is
-    ///   passed through without an order requirement, because the width of another
-    ///   driver's type is that driver's to say. The rule is Modbus-name based and not
-    ///   universal;
     /// - every scaling step can be evaluated: constants are finite, a divisor is not
     ///   zero, a clamp has `min <= max`, a bit field has a width of at least 1 and
     ///   `shift + width <= 64` (`InvalidScaleStep`);
@@ -62,15 +49,18 @@ impl SensorProfile {
     ///
     /// Validation is independent of any driver. Whether `address` and `data_type` are
     /// meaningful to the driver, and whether status fields name real addresses, is the
-    /// driver's `parse_address` to say when tags are built (slice S29); this method only
-    /// compares address text for equality.
+    /// driver's `parse_address` to say when tags are built; this method only compares
+    /// address text for equality. The rule that a value spanning several words needs a
+    /// declared `byte_order` and `word_order` needs the driver to say which addresses
+    /// those are, so it lives in [`SensorProfile::validate_for`], which
+    /// [`SensorProfile::tags`] runs.
     ///
     /// # Errors
     /// Returns every [`ProfileError`] found, never an empty list: the validation variants
-    /// are `DuplicateMeasurementName`, `UnknownUnit`, `EmptyUnit`, `MissingByteOrder`,
-    /// `MissingWordOrder`, `OverlappingStatusBits`, `UnsupportedCount`,
-    /// `InvalidScaleStep`, `InvalidRange`, `UnknownQualityReference`,
-    /// `UnknownAddressConvention` and `MissingAddressConvention`. Each converts into a [`PlcError`](crate::PlcError)
+    /// are `DuplicateMeasurementName`, `UnknownUnit`, `EmptyUnit`,
+    /// `OverlappingStatusBits`, `UnsupportedCount`, `InvalidScaleStep`, `InvalidRange`,
+    /// `UnknownQualityReference`, `UnknownAddressConvention` and
+    /// `MissingAddressConvention`. Each converts into a [`PlcError`](crate::PlcError)
     /// of kind `InvalidConfig`.
     ///
     /// # Examples
@@ -133,6 +123,96 @@ impl SensorProfile {
             Err(errors)
         }
     }
+
+    /// Check the meaning of a loaded profile against the driver that will read it.
+    ///
+    /// This runs every rule of [`SensorProfile::validate`], then parses each measurement's
+    /// address with `driver` under [`SensorProfile::address_options`], exactly as
+    /// [`SensorProfile::tags`] does, and appends, in document order:
+    /// - `AddressRejected` when the driver refuses the address;
+    /// - `MissingByteOrder` and `MissingWordOrder` when the parsed address
+    ///   [spans several words](crate::ProtocolAddress::spans_multiple_words) and the
+    ///   definition does not set that order. Word order is never inferred (docs/SPEC.md),
+    ///   and the driver, not the `data_type` text, says which values span words.
+    ///
+    /// When the declared address convention is unusable the addresses are not parsed, and
+    /// `validate`'s `UnknownAddressConvention` stands alone. Status field addresses are
+    /// parsed by [`SensorProfile::tags`]. The connection scheme is not compared with the
+    /// driver's, so pass the driver the profile names; `tags` checks the scheme first.
+    ///
+    /// # Errors
+    /// Returns every [`ProfileError`] found, never an empty list: those of
+    /// [`SensorProfile::validate`] plus `AddressRejected`, `MissingByteOrder` and
+    /// `MissingWordOrder`. Each converts into a [`PlcError`](crate::PlcError) of kind
+    /// `InvalidConfig`.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[cfg(feature = "modbus")]
+    /// # fn main() -> Result<(), stonecrab::sensors::ProfileError> {
+    /// use stonecrab::modbus::ModbusTcpDriver;
+    /// use stonecrab::sensors::{ProfileError, SensorProfile};
+    ///
+    /// let profile = SensorProfile::from_toml(r#"
+    ///     id = "synthetic_flow"
+    ///     schema_version = 1
+    ///     validation = "synthetic"
+    ///
+    ///     [connection]
+    ///     scheme = "modbus-tcp"
+    ///     address_convention = "plc4x"
+    ///
+    ///     [provenance]
+    ///     source = "Synthetic reference profile; no real device"
+    ///
+    ///     [[measurements]]
+    ///     name = "flow"
+    ///     address = "holding-register:1:REAL"
+    ///     data_type = "REAL"
+    ///     unit = "L"
+    /// "#)?;
+    /// assert_eq!(profile.validate(), Ok(()));
+    /// assert_eq!(
+    ///     profile.validate_for(&ModbusTcpDriver::new()),
+    ///     Err(vec![
+    ///         ProfileError::MissingByteOrder { measurement: 0 },
+    ///         ProfileError::MissingWordOrder { measurement: 0 },
+    ///     ]),
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "modbus"))]
+    /// # fn main() {}
+    /// ```
+    ///
+    /// # Compatibility: docs/parity/sensors.md#SENSORS-VALIDATION
+    /// Upstream PLC4X has no sensor profile concept; this is a Stonecrab operation with
+    /// no upstream parity claim.
+    #[must_use = "validation errors must be checked"]
+    pub fn validate_for(&self, driver: &dyn Driver) -> Result<(), Vec<ProfileError>> {
+        let mut errors = self.validate().err().unwrap_or_default();
+        if let Ok(options) = self.address_options() {
+            for (index, measurement) in self.measurements.iter().enumerate() {
+                match measurement.parse_address(index, driver, &options) {
+                    Ok(address) if address.spans_multiple_words() => {
+                        if measurement.byte_order.is_none() {
+                            errors.push(ProfileError::MissingByteOrder { measurement: index });
+                        }
+                        if measurement.word_order.is_none() {
+                            errors.push(ProfileError::MissingWordOrder { measurement: index });
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(error) => errors.push(error),
+                }
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
 }
 
 fn check_connection(connection: &ConnectionRequirements, errors: &mut Vec<ProfileError>) {
@@ -152,14 +232,6 @@ fn check_measurement(index: usize, measurement: &MeasurementDef, errors: &mut Ve
             measurement: index,
             count: measurement.count,
         });
-    }
-    if WIDE_MODBUS_TYPES.contains(&measurement.data_type.as_str()) {
-        if measurement.byte_order.is_none() {
-            errors.push(ProfileError::MissingByteOrder { measurement: index });
-        }
-        if measurement.word_order.is_none() {
-            errors.push(ProfileError::MissingWordOrder { measurement: index });
-        }
     }
     for (step, scale) in measurement.scaling.iter().enumerate() {
         if !step_is_valid(scale) {
@@ -370,10 +442,6 @@ mod tests {
     }
 
     fn measurement_is_valid(m: &MeasurementDef) -> bool {
-        let wide = matches!(
-            m.data_type.as_str(),
-            "DINT" | "UDINT" | "DWORD" | "LINT" | "ULINT" | "LWORD" | "REAL" | "LREAL"
-        );
         let pairs: BTreeSet<(&str, u8)> = m
             .status_fields
             .iter()
@@ -399,7 +467,6 @@ mod tests {
         });
         let clauses = [
             m.count == 1,
-            !wide || (m.byte_order.is_some() && m.word_order.is_some()),
             steps_ok,
             ["Cel", "kPa", "1"].contains(&m.unit.as_str()),
             range_ok,

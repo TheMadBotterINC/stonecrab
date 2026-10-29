@@ -683,6 +683,11 @@ impl ProtocolAddress for ModbusAddress {
     fn value_type_hint(&self) -> Option<PlcValueType> {
         Some(self.data_type.value_type())
     }
+
+    // True for every data type wider than one 16-bit register (`register_size`).
+    fn spans_multiple_words(&self) -> bool {
+        self.data_type.register_size() > 1
+    }
 }
 
 /// Builder for [`ModbusAddress`], created by [`ModbusAddress::builder`].

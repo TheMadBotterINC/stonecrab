@@ -229,3 +229,11 @@ assert_eq!(map.holding_extension[0].words, [0xDC0F, 0x4940]);
 # Ok(())
 # }
 ```
+
+`FixtureAddress::spanning_multiple_words` and `ConventionDriver::with_wide_addresses` build
+test addresses that report `ProtocolAddress::spans_multiple_words`, for sensor profile
+tests that need a value wider than one word without a Modbus driver.
+
+`FixtureAddress::spanning_multiple_words` and `ConventionDriver::with_wide_addresses` build
+test addresses that report `ProtocolAddress::spans_multiple_words`, for sensor profile
+tests that need a value wider than one word without a Modbus driver.

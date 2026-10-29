@@ -6,6 +6,7 @@ use crate::{PlcValueType, ProtocolAddress};
 pub struct FixtureAddress {
     canonical: String,
     hint: Option<PlcValueType>,
+    multiple_words: bool,
 }
 
 impl FixtureAddress {
@@ -15,7 +16,16 @@ impl FixtureAddress {
         Self {
             canonical: canonical.to_owned(),
             hint,
+            multiple_words: false,
         }
+    }
+
+    /// Make the address declare that its value spans more than one protocol word, as a
+    /// wide type of a second driver would ([`ProtocolAddress::spans_multiple_words`]).
+    #[must_use]
+    pub const fn spanning_multiple_words(mut self) -> Self {
+        self.multiple_words = true;
+        self
     }
 }
 
@@ -31,6 +41,10 @@ impl ProtocolAddress for FixtureAddress {
     fn value_type_hint(&self) -> Option<PlcValueType> {
         self.hint
     }
+
+    fn spans_multiple_words(&self) -> bool {
+        self.multiple_words
+    }
 }
 
 #[cfg(test)]
@@ -45,6 +59,11 @@ mod tests {
             assert_eq!(address.canonical(), "counter", "text retained");
             assert_eq!(address.value_type_hint(), hint, "hint retained");
             assert_eq!(address.clone(), address, "value semantics");
+            assert!(!address.spans_multiple_words(), "single word by default");
+            assert!(
+                address.spanning_multiple_words().spans_multiple_words(),
+                "the fixture can declare a wide value"
+            );
         }
     }
 }

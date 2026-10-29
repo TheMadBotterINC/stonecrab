@@ -133,67 +133,20 @@ mod tests {
         );
     }
 
+    // covers: SENSORS-VALIDATION / the word-order rule needs a driver and lives in validate_for
     #[test]
-    fn wide_modbus_types_need_both_orders() {
-        for data_type in [
-            "DINT", "UDINT", "DWORD", "LINT", "ULINT", "LWORD", "REAL", "LREAL",
-        ] {
+    fn validate_alone_does_not_report_missing_orders() {
+        for data_type in ["DINT", "REAL", "LREAL", "INT", "real", "Float64"] {
             let body = measurement(
                 "flow",
                 &format!("data_type = \"{data_type}\"\nunit = \"L\""),
             );
             assert_eq!(
-                errors_of("scheme = \"sim\"", &[body]),
-                [
-                    ProfileError::MissingByteOrder { measurement: 0 },
-                    ProfileError::MissingWordOrder { measurement: 0 },
-                ],
-                "{data_type} is wider than 16 bits"
+                profile("scheme = \"sim\"", &[body.as_str()]).validate(),
+                Ok(()),
+                "{data_type}: which values span words is the driver's to say, not the name's"
             );
         }
-    }
-
-    #[test]
-    fn one_missing_order_is_reported_alone() {
-        let only_word = measurement(
-            "flow",
-            "data_type = \"REAL\"\nunit = \"L\"\nbyte_order = \"big_endian\"",
-        );
-        let only_byte = measurement(
-            "flow",
-            "data_type = \"REAL\"\nunit = \"L\"\nword_order = \"high_word_first\"",
-        );
-        assert_eq!(
-            errors_of("scheme = \"sim\"", &[only_word]),
-            [ProfileError::MissingWordOrder { measurement: 0 }],
-        );
-        assert_eq!(
-            errors_of("scheme = \"sim\"", &[only_byte]),
-            [ProfileError::MissingByteOrder { measurement: 0 }],
-        );
-    }
-
-    #[test]
-    fn narrow_and_foreign_type_names_need_no_order() {
-        let narrow = [
-            "INT", "UINT", "WORD", "BOOL", "SINT", "BYTE", "real", "Float64", "i32",
-        ];
-        let bodies: Vec<String> = narrow
-            .iter()
-            .enumerate()
-            .map(|(index, data_type)| {
-                measurement(
-                    &format!("value_{index}"),
-                    &format!("data_type = \"{data_type}\"\nunit = \"1\""),
-                )
-            })
-            .collect();
-        let refs: Vec<&str> = bodies.iter().map(String::as_str).collect();
-        assert_eq!(
-            profile("scheme = \"sim\"", &refs).validate(),
-            Ok(()),
-            "the width rule is Modbus-name based; other names pass through"
-        );
     }
 
     #[test]
@@ -414,8 +367,6 @@ mod tests {
                     measurement: 0,
                     count: 4
                 },
-                ProfileError::MissingByteOrder { measurement: 0 },
-                ProfileError::MissingWordOrder { measurement: 0 },
                 ProfileError::InvalidScaleStep {
                     measurement: 0,
                     step: 0
@@ -431,7 +382,6 @@ mod tests {
                     measurement: 2,
                     first: 0
                 },
-                ProfileError::MissingWordOrder { measurement: 2 },
                 ProfileError::OverlappingStatusBits {
                     measurement: 2,
                     status_field: 1

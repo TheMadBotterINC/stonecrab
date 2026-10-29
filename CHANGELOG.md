@@ -10,6 +10,16 @@ placeholder.
 - `SensorProfile::validate` rejects a measurement range with a NaN or infinite bound or
   `min > max` (new `ProfileError::InvalidRange`); before, such a range left values
   Uncertain or Good by accident.
+- Changed: the word-order rule of sensor profiles is keyed on what the driver declares, not
+  on Modbus type names (finding G05). `SensorProfile::validate` no longer reports
+  `MissingByteOrder` or `MissingWordOrder`; the new `SensorProfile::validate_for(&dyn
+  Driver)` runs every `validate` rule, then parses each measurement's address and reports
+  those errors (and `AddressRejected`) when `ProtocolAddress::spans_multiple_words` is true
+  for the parsed address and the definition sets no such order. `SensorProfile::tags` runs
+  `validate_for`, so a Modbus profile without orders is still refused there. Additive API:
+  the provided `ProtocolAddress::spans_multiple_words` (false by default, true for Modbus
+  addresses wider than one register) and `validate_for`; the testkit's `FixtureAddress`
+  and `ConventionDriver` can declare wide addresses.
 - `stonecrab::sensors` now denies `clippy::indexing_slicing` (checked by `lint-attrs`), like
   the other modules that parse untrusted input; no code in the module needed to change.
 - Release process and evidence (no crate changes): ADR-0017, `release.toml`,

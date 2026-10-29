@@ -32,7 +32,10 @@ Calendar and structured values require a further design decision (ADR-0006).
   and explicit float-only access. Byte/raw/calendar/collection values remain deferred.
 - Public-API integration tests and compile-time Send/Sync assertions.
 - `ProtocolAddress` and immutable `Tag`: driver-owned addresses, stable caller
-  identity, type-hint consistency, positive counts and shared immutable ownership.
+  identity, type-hint consistency, positive counts and shared immutable ownership. The
+  provided `ProtocolAddress::spans_multiple_words` (false by default; S39) lets a driver say
+  that a value occupies several of its protocol's words, which is what makes a declared word
+  order mandatory in a sensor profile (`docs/parity/sensors.md#SENSORS-VALIDATION`).
 - `ReadRequest`: finite item budgets, duplicate rejection, explicit deadline metadata and
   an optional cancel slot; core transmits nothing, a connection enforces the token.
 - `ProtocolStatus`, `ItemError`, `ReadItem`: original device status and bounded raw

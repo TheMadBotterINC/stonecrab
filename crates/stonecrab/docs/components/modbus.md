@@ -301,6 +301,11 @@ assert!(ModbusAddress::parse("4x00016", &AddressOptions::default()).is_ok());
 # Ok::<(), stonecrab::PlcError>(())
 ```
 
+A `ModbusAddress` declares `ProtocolAddress::spans_multiple_words` from its own data type:
+true for every type wider than one 16-bit register (`DWORD`, `DINT`, `UDINT`, `REAL` and
+the 64-bit types), false for the 16-bit types and for a coil. A sensor profile's
+`SensorProfile::validate_for` uses it to require a declared `byte_order` and `word_order`.
+
 ## PDU codec
 A PDU is the function code and its data, without the MBAP header. `ModbusPdu` has the four
 read requests (`ReadCoils`, `ReadDiscreteInputs`, `ReadHoldingRegisters`,

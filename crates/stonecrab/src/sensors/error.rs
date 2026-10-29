@@ -10,10 +10,13 @@ use crate::{ErrorKind, PlcError};
 /// configuration that the library must not repeat into logs.
 ///
 /// The first four variants come from the loader, which checks the schema only (decision
-/// D17, slice S28a). The next eleven come from [`SensorProfile::validate`](crate::sensors::SensorProfile::validate)
-/// (slice S28b), which checks the meaning of a loaded profile. The last four come from
+/// D17, slice S28a). The next eleven check the meaning of a loaded profile: all but `MissingByteOrder` and
+/// `MissingWordOrder` come from [`SensorProfile::validate`](crate::sensors::SensorProfile::validate)
+/// (slice S28b), and those two come from
+/// [`SensorProfile::validate_for`](crate::sensors::SensorProfile::validate_for), which asks a
+/// driver which addresses span several words. The last four come from
 /// [`SensorProfile::tags`](crate::sensors::SensorProfile::tags) (slice S29), which asks a driver to
-/// parse the profile's addresses. Validation errors name
+/// parse the profile's addresses; `AddressRejected` also comes from `validate_for`. Validation errors name
 /// the offending measurement by its 0-based index in
 /// [`SensorProfile::measurements`](crate::sensors::SensorProfile::measurements), not by its name,
 /// which keeps the type `Copy`; `profile.measurements[index].name` gives the name. The
@@ -86,12 +89,12 @@ pub enum ProfileError {
         /// Index of the measurement.
         measurement: usize,
     },
-    /// A data type wider than 16 bits has no `byte_order`.
+    /// A value that spans several words has no `byte_order`.
     MissingByteOrder {
         /// Index of the measurement.
         measurement: usize,
     },
-    /// A data type wider than 16 bits has no `word_order`.
+    /// A value that spans several words has no `word_order`.
     MissingWordOrder {
         /// Index of the measurement.
         measurement: usize,
@@ -212,11 +215,11 @@ impl fmt::Display for ProfileError {
             }
             Self::MissingByteOrder { measurement } => write!(
                 f,
-                "measurement {measurement} has a data type wider than 16 bits and no byte_order"
+                "measurement {measurement} spans several words and has no byte_order"
             ),
             Self::MissingWordOrder { measurement } => write!(
                 f,
-                "measurement {measurement} has a data type wider than 16 bits and no word_order"
+                "measurement {measurement} spans several words and has no word_order"
             ),
             Self::OverlappingStatusBits {
                 measurement,
@@ -330,11 +333,11 @@ mod tests {
             ),
             (
                 ProfileError::MissingByteOrder { measurement: 4 },
-                "measurement 4 has a data type wider than 16 bits and no byte_order",
+                "measurement 4 spans several words and has no byte_order",
             ),
             (
                 ProfileError::MissingWordOrder { measurement: 4 },
-                "measurement 4 has a data type wider than 16 bits and no word_order",
+                "measurement 4 spans several words and has no word_order",
             ),
             (
                 ProfileError::OverlappingStatusBits {

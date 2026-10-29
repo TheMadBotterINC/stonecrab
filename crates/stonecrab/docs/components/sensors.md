@@ -7,8 +7,8 @@ behind the `sensors` feature (on by default).
 
 This module currently offers the schema types, a bounded loader, semantic validation and
 the measurement pipeline: `SensorProfile::from_toml`, `SensorProfile::validate`,
-`SensorProfile::tags`, `SensorProfile::measurements`, `Measurement`, `Quality`, `Unit`,
-`ProfileId`, `SchemaVersion` (version 1 is the only schema version; any other value is
+`SensorProfile::validate_for`, `SensorProfile::tags`, `SensorProfile::measurements`,
+`Measurement`, `Quality`, `Unit`, `ProfileId`, `SchemaVersion` (version 1 is the only schema version; any other value is
 `ProfileError::IncompatibleSchema`), `DeviceApplicability`, `ConnectionRequirements`,
 `MeasurementDef`, `ScaleStep`, `ValueRange`, `StatusField`, `QualityMapping`,
 `Provenance`, `ValidationStatus` and `ProfileError`. The loader checks the shape of a
@@ -107,11 +107,6 @@ checks:
   set it;
 - unique measurement names (names are already `snake_case`, which the loader enforces);
 - `count` is 1 (arrays are not supported at alpha);
-- both `byte_order` and `word_order` for a data type wider than 16 bits. The width is
-  decided from the data type name by the Modbus rule: `DINT`, `UDINT`, `DWORD`, `LINT`,
-  `ULINT`, `LWORD`, `REAL` and `LREAL` (upper case) are wide, and any other name is
-  passed through with no requirement, because another driver's types are that driver's
-  to describe;
 - scaling steps that can run: finite constants, a non-zero divisor, a clamp with
   `min <= max`, and a bit field of width 1 or more that ends at or before bit 64;
 - a unit that is not empty and is in the fixed unit table;
@@ -121,6 +116,19 @@ checks:
 
 Validation is independent of any driver: address text is compared for equality only, and
 the driver's `parse_address` validates it when `SensorProfile::tags` builds the tags.
+
+`SensorProfile::validate_for(&driver)` adds the one rule that needs a driver. It runs
+every rule above, then parses each measurement's address with the driver under the
+profile's `address_convention` and reports, in document order, `AddressRejected` for an
+address the driver refuses and `MissingByteOrder` and `MissingWordOrder` when the parsed
+address spans more than one of the protocol's words
+(`ProtocolAddress::spans_multiple_words`) and the definition sets no such order. Word
+order is never inferred, and the driver, not the `data_type` text, says which values span
+words: a Modbus `REAL`, `DINT` or `LREAL` address does, an `INT`, a `WORD` or a coil does
+not, and a simulator address never does. `SensorProfile::tags` runs `validate_for` first,
+so a Modbus profile that lacks the orders is still refused there. Until 2026-10-28
+`validate` applied this rule by Modbus type names; a profile that relied on `validate`
+alone to find a missing order must now call `validate_for`.
 
 The unit table is a fixed list of UCUM-style codes with a description each, and there
 is no unit arithmetic: nothing converts between units or parses compound expressions.
@@ -139,8 +147,8 @@ assert!(!Unit::is_known("celsius"));
 ## Tags and measurements
 `profile.tags(&driver)` returns the tags to read. The driver's scheme must equal the
 profile's `connection.scheme` (otherwise `ProfileError::SchemeMismatch`), the profile must
-validate, and every address is parsed by `Driver::parse_address` under the profile's
-`address_convention`, so a bare short form such as `40001` parses only under the declared
+pass `validate_for`, and every address is parsed by `Driver::parse_address` under the
+profile's `address_convention`, so a bare short form such as `40001` parses only under the declared
 convention. A measurement becomes one tag whose `TagId` is the measurement name, with the
 driver's own type hint and the declared byte and word order. Each status field becomes an
 extra tag with the id `<measurement>.<status name>`, for example

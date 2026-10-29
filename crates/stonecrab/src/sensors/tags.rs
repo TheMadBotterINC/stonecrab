@@ -1,6 +1,8 @@
 //! Turning a profile into the tags a driver reads.
 
-use crate::{AddressOptions, ByteOrder, Driver, Tag, TagId, WordOrder};
+use std::sync::Arc;
+
+use crate::{AddressOptions, ByteOrder, Driver, ProtocolAddress, Tag, TagId, WordOrder};
 
 use crate::sensors::{MeasurementDef, ProfileError, SensorProfile, StatusField};
 
@@ -44,6 +46,20 @@ impl MeasurementDef {
     #[must_use = "tag identity errors must be checked"]
     pub fn status_tag_id(&self, field: &StatusField) -> Result<TagId, ProfileError> {
         TagId::new(&format!("{}.{}", self.name, field.name)).map_err(|_error| STATUS_TAG_NAME)
+    }
+
+    /// Parse this measurement's address with `driver`; `index` names the measurement in the
+    /// error, which never repeats the address text. [`SensorProfile::validate_for`] and
+    /// [`SensorProfile::tags`] both parse through here, so they refuse the same addresses.
+    pub(super) fn parse_address(
+        &self,
+        index: usize,
+        driver: &dyn Driver,
+        options: &AddressOptions,
+    ) -> Result<Arc<dyn ProtocolAddress>, ProfileError> {
+        driver
+            .parse_address(&self.address, options)
+            .map_err(|_error| ProfileError::AddressRejected { measurement: index })
     }
 }
 
@@ -108,8 +124,8 @@ impl SensorProfile {
     /// Build the tags that read this profile through `driver`.
     ///
     /// The profile must belong to the driver: the driver's scheme must equal the profile's
-    /// `connection.scheme`. The profile is then validated and the first problem is
-    /// returned (call [`SensorProfile::validate`] yourself to get all of them). Every
+    /// `connection.scheme`. The profile is then checked with [`SensorProfile::validate_for`]
+    /// and the first problem is returned (call it yourself to get all of them). Every
     /// address is parsed by `driver.parse_address` under [`SensorProfile::address_options`],
     /// so the declared address convention reaches the driver on every call.
     ///
@@ -131,10 +147,12 @@ impl SensorProfile {
     ///
     /// # Errors
     /// Returns [`ProfileError::SchemeMismatch`] when the driver's scheme is not the
-    /// profile's, any error of [`SensorProfile::validate`] (the first, in its order),
-    /// [`ProfileError::AddressRejected`] or [`ProfileError::StatusAddressRejected`] when
-    /// the driver refuses an address (the error names the measurement and status field by
-    /// index and never repeats the address text),
+    /// profile's, any error of [`SensorProfile::validate_for`] (the first, in its order: among
+    /// them `MissingByteOrder` and `MissingWordOrder` for a value that spans several words,
+    /// and [`ProfileError::AddressRejected`] when the driver refuses a measurement's
+    /// address), [`ProfileError::StatusAddressRejected`] when the driver refuses a status
+    /// address (the errors name the measurement and status field by index and never repeat
+    /// the address text),
     /// [`ProfileError::DuplicateStatusFieldName`] when two status fields of one measurement
     /// share a name, and [`ProfileError::UnknownAddressConvention`] as for
     /// [`SensorProfile::address_options`]. Each converts into a
@@ -191,7 +209,7 @@ impl SensorProfile {
             });
         }
         if let Some(first) = self
-            .validate()
+            .validate_for(driver)
             .err()
             .and_then(|errors| errors.first().copied())
         {
@@ -200,9 +218,7 @@ impl SensorProfile {
         let options = self.address_options()?;
         let mut tags = Vec::new();
         for (index, definition) in self.measurements.iter().enumerate() {
-            let address = driver
-                .parse_address(&definition.address, &options)
-                .map_err(|_error| ProfileError::AddressRejected { measurement: index })?;
+            let address = definition.parse_address(index, driver, &options)?;
             let mut tag = Tag::new(definition.name.clone(), address);
             if let Some(order) = definition.byte_order {
                 tag = tag.with_byte_order(ByteOrder::from(order));
