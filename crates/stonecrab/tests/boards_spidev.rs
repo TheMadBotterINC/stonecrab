@@ -278,20 +278,13 @@ mod tests {
             .read(4, deadline())
             .await
             .expect_err("the worker panicked");
-        assert_eq!(
-            first.kind(),
-            ErrorKind::Disconnected,
-            "the reply channel closed"
-        );
+        assert_eq!(first.kind(), ErrorKind::Disconnected, "the worker stopped");
         let second = bus
             .read(4, deadline())
             .await
             .expect_err("the worker is gone");
-        assert_eq!(
-            second.kind(),
-            ErrorKind::Disconnected,
-            "the command channel closed"
-        );
+        // Whether the worker has dropped its queue yet or not, the call fails the same way.
+        assert_eq!(second.kind(), ErrorKind::Disconnected, "the worker is gone");
     }
 
     /// A file of `bytes` in the temporary directory, removed when dropped.

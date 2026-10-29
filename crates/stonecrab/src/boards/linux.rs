@@ -170,10 +170,10 @@ impl SpiBus for LinuxSpiDev {
             }
             let transfer = async {
                 let (done, reply) = oneshot::channel();
-                self.commands
-                    .send(Command { len, done })
-                    .await
-                    .map_err(|_closed| gone())?;
+                // A send to a stopped worker hands the command back and drops it, and `done`
+                // with it, so the reply below reports a stopped worker either way: before the
+                // command was queued or while it waited.
+                drop(self.commands.send(Command { len, done }).await);
                 reply.await.map_err(|_closed| gone())?.map_err(io_failure)
             };
             let limit = tokio::time::Instant::from_std(deadline.instant());
