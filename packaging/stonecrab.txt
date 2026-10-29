@@ -14,6 +14,9 @@ docs/components/sim.md
 docs/components/testkit.md
 docs/components/transport.md
 src/address_options.rs
+src/boards/adxl345.rs
+src/boards/linux.rs
+src/boards/max31855.rs
 src/boards.rs
 src/cancel.rs
 src/capability.rs
@@ -92,6 +95,7 @@ src/testkit/convention.rs
 src/testkit/counting_factory.rs
 src/testkit/executor.rs
 src/testkit/fake_factory.rs
+src/testkit/fake_i2c.rs
 src/testkit/fake_spi.rs
 src/testkit/fake_transport.rs
 src/testkit/framer.rs

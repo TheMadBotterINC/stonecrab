@@ -37,8 +37,9 @@ modbus = ["transport", "serial", "dep:tracing"]
 sim = ["dep:tracing"]
 # Declarative sensor profiles and their bounded TOML loader (`stonecrab::sensors`).
 sensors = ["dep:serde", "dep:toml"]
-# Board adapters (`stonecrab::boards`): the `SpiBus` trait and the MAX31855 thermocouple
-# converter, emitting sensor measurements. Needs `sensors`; no Tokio, no new dependency.
+# Board adapters (`stonecrab::boards`): the `SpiBus` and `I2cBus` traits, the MAX31855
+# thermocouple converter and the ADXL345 accelerometer, emitting sensor measurements and
+# sample blocks. Needs `sensors`; no Tokio, no new dependency.
 boards = ["sensors"]
 # The Linux backends of the board adapters (`stonecrab::boards::LinuxSpiDev`): a worker thread
 # reading an `/dev/spidev` node, on the transport's Tokio. No new dependency.
@@ -71,6 +72,14 @@ required-features = ["full"]
 # plain `cargo test` skips it (cargo prints no notice) instead of building an empty test binary;
 # naming one with `--test` reports the missing feature. The gates run `--all-features` and so
 # run every file; this list must match each file's `#![cfg(...)]`.
+[[test]]
+name = "boards_adxl345"
+required-features = ["boards", "testkit"]
+
+[[test]]
+name = "boards_adxl345_properties"
+required-features = ["boards"]
+
 [[test]]
 name = "boards_max31855"
 required-features = ["boards", "testkit"]

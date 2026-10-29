@@ -251,3 +251,15 @@ and D[30:18] are all 1, so an open-circuit frame carries the thermocouple field 
 bits in `raw` and offers no temperature, as decision 6 says; the datasheet gives no
 temperature meaning to them under any other fault. A test pins the frame `0x7FFD_1901`.
 The runbook's step B0 still compares the revision of the part actually bought.
+
+## Addendum (2026-10-29): the module is a directory (S64)
+The second adapter arrived (the ADXL345, slice S64, ADR-0029), and decision 1's deferred part
+is done. `stonecrab::boards` is `src/boards.rs` (the `SpiBus` and `I2cBus` traits and two
+helpers both adapters use: the failure constructor and the builder of a `Measurement` of
+origin `Documented`) with `src/boards/max31855.rs` and `src/boards/linux.rs` (this ADR's code,
+moved without a change of behavior or of public path) and `src/boards/adxl345.rs`. The module
+has its own rows: `boards|100` in `scripts/coverage-gate.sh`, so it is no longer measured with
+the core, and a `boards` row in `scripts/lint-attrs.sh`. Its declaration promotes
+`clippy::indexing_slicing`, `clippy::arithmetic_side_effects` and `clippy::as_conversions`,
+not only the first as decision 1 said: the code already met all three, as decision 1 noted.
+Decisions 2 to 9 are unchanged.

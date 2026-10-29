@@ -34,6 +34,7 @@ SRC=crates/stonecrab/src
 #   sim        src/sim.rs and src/sim/
 #   modbus     src/modbus.rs and src/modbus/
 #   sensors    src/sensors.rs and src/sensors/
+#   boards     src/boards.rs and src/boards/ (a directory since S64, ADR-0029)
 #   testkit    src/testkit.rs and src/testkit/
 #   other      any other file in the lcov that is not under src/ (none today)
 #
@@ -47,13 +48,16 @@ SRC=crates/stonecrab/src
 # addresses are forbidden in tests; it is the first named OS-dependent uncovered arm. The
 # testkit row is 90: it is test support, not shipped runtime logic. The modbus session and
 # connection modules run entirely on the in-memory transport and the fake clock, so they
-# have no OS-dependent arm and the row stays 100 (ADR-0015 decision 9).
+# have no OS-dependent arm and the row stays 100 (ADR-0015 decision 9). The boards row is 100
+# (ADR-0026 decision 9, ADR-0029): the adapters run on scripted buses and the Linux SPI
+# backend on in-memory readers, so no arm depends on a device.
 THRESHOLDS="
 core|100
 codec|100
 sim|100
 modbus|100
 sensors|100
+boards|100
 transport|95
 testkit|90
 other|100
@@ -92,7 +96,7 @@ for dir in "$SRC"/*/; do
   fi
 done
 
-for name in codec transport sim modbus sensors testkit; do
+for name in codec transport sim modbus sensors boards testkit; do
   if [ ! -f "$SRC/$name.rs" ]; then
     fail "$SRC/$name.rs does not exist (a component module has a THRESHOLDS row but no module file)"
   fi
@@ -128,7 +132,7 @@ function component(path,   rel, seg, i) {
 # lcov line totals for one component: prints "<found> <hit>".
 lcov_lines() {
   awk -v SRC="$SRC" -v want="$1" "$COMPONENT_AWK"'
-    BEGIN { split("codec transport sim modbus sensors testkit", m, " "); for (k in m) MODULE[m[k]] = 1 }
+    BEGIN { split("codec transport sim modbus sensors boards testkit", m, " "); for (k in m) MODULE[m[k]] = 1 }
     /^SF:/ { inside = (component(substr($0, 4)) == want) }
     inside && /^LF:/ { found += substr($0, 4) }
     inside && /^LH:/ { hit += substr($0, 4) }
@@ -138,7 +142,7 @@ lcov_lines() {
 # The uncovered lines of one component, "<file>:<line>", for a failure message.
 lcov_missing() {
   awk -v SRC="$SRC" -v want="$1" "$COMPONENT_AWK"'
-    BEGIN { split("codec transport sim modbus sensors testkit", m, " "); for (k in m) MODULE[m[k]] = 1 }
+    BEGIN { split("codec transport sim modbus sensors boards testkit", m, " "); for (k in m) MODULE[m[k]] = 1 }
     /^SF:/ { file = substr($0, 4); inside = (component(file) == want) }
     inside && /^DA:/ { split(substr($0, 4), da, ","); if (da[2] == 0) print file ":" da[1] }' "$LCOV"
 }

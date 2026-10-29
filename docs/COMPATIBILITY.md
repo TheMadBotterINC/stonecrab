@@ -83,7 +83,9 @@ hardware record exists.
 | OPC UA, EtherNet/IP, S7, other baseline drivers | everything | none yet | planned | one record per driver, listed in the matrix below | milestones M3 to M5 |
 | Direct bench adapters: MAX31855 over SPI | frame decode (thermocouple and cold-junction temperature, open, short-to-ground and short-to-Vcc flags, negative readings, refused reserved-bit, inconsistent and all-zeros or all-ones frames), `Max31855::read` over `SpiBus`, the three measurements (`Bad` thermocouple with no value under a fault) | `boards` | simulator-tested | none (Stonecrab extension, no upstream row; ADR-0026) | scripted `FakeSpiBus` on a fake clock and property tests of the decode against a reference decoder (`boards_max31855`, `boards_properties`); no converter and no SPI controller took part; runbook [`hardware/max31855-spi.md`](hardware/max31855-spi.md), no record |
 | Direct bench adapters: Linux SPI backend | `LinuxSpiDev`: a `/dev/spidev` node read with `read(2)` on a worker thread, deadline-bounded, no dependency, no `unsafe`; cannot set the bus mode or speed | `adapters-linux` | simulator-tested | none (ADR-0026) | in-memory readers and temporary files (`boards_spidev`); no real node has been read |
-| Direct bench adapters: ADXL345 over I2C | everything | none yet | planned | none | milestone M2S, slice S64 |
+| Direct bench adapters: ADXL345 over I2C | `Adxl345` over `I2cBus`: identity check (DEVID, a wrong one is `Trust`), the configuration written by `init` alone (standby, FIFO bypass, zero offsets, range and full resolution, rate 3200 Hz to 6.25 Hz, FIFO mode, measure), the sample decode at every range and resolution with counts outside the resolution refused, `read_sample` (only a sample `DATA_READY` flags as new, otherwise `None`) and its three measurements in `[g]`, `read_fifo` into a `SampleBlock` (interval, axes, gapless sequence, the device's overrun flag, a full FIFO or one that filled during the drain by the host's clock, and the host's estimate of lost samples), a failed or dropped read ending the stream until `init` | `boards` | simulator-tested | none (Stonecrab extension, no upstream row; ADR-0029) | scripted `FakeI2cBus` on a fake clock (NACK, bus errors, stalls, silence, short replies) and property tests and an exhaustive pair sweep of the decode against a reference decoder (`boards_adxl345`, `boards_adxl345_properties`); bus-mock tested, no accelerometer and no I2C controller took part; runbook [`hardware/adxl345-i2c.md`](hardware/adxl345-i2c.md), no record |
+| Direct bench adapters: Linux I2C backend | `LinuxI2cDev` on `/dev/i2c-N` | none yet | planned | none (ADR-0029 decision 3) | deferred: `i2c-dev` needs an `ioctl`, which needs first-party `unsafe` or a new dependency; an application supplies its own `I2cBus` until then |
+| Direct bench adapters: ADXL345 over SPI | everything | none yet | planned | none | SPEC.md "SPI as a follow-on"; needs a transmitting `SpiBus` method (ADR-0026 decision 2) |
 
 The driver boundary itself (`DriverRegistry`, `Driver`, `Connection`, configuration,
 address options, cancellation, the state watch, diagnostics) is `simulator-tested` through
@@ -340,17 +342,19 @@ order of the SPEC bullets. Counts are the number of tagged tests at S31.
 | F6 | queue exhaustion, slow consumer, dropped events, stale last-known values, timestamp absence | queue exhaustion (`Backpressure`) and timestamp absence at the alpha; since then the subscription queue (S54: slow consumer, dropped events) and polling subscriptions (S55: skipped ticks counted, no burst after a stall); stale values wait for the stale tracker (S56) | 4 |
 | F7 | negative and scaled values, swapped words, integer boundaries, counter rollover, NaN and infinity, incompatible profile version | typed decoder, scaling pipeline, profile loader | 36 |
 | F8 | RTU: CRC errors, timing boundaries, serial disconnect and reopen, wrong unit replies, and a late reply after a timeout | RTU framer, RTU connection over the fake transport and fake clock (S59), tagged `RTU ...` rather than `F8` | 5 |
-| F10 | direct sensors: open and short thermocouple flags, invalid frames, SPI failures and timeouts, unavailable device (SPEC "Direct sensor extension") | MAX31855 frame decode, `Max31855`, `LinuxSpiDev` (S63); the SPI cases only | 16 |
+| F10 | direct sensors: open and short thermocouple flags, invalid frames, SPI and I2C failures and timeouts, unavailable device, invalid identity, FIFO overflow (SPEC "Direct sensor extension") | MAX31855 frame decode, `Max31855`, `LinuxSpiDev` (S63); `Adxl345` and its sample decode over the scripted I2C bus (S64) | 34 |
 
 The RTU cases of SPEC.md (F8: CRC errors, timing boundaries, serial disconnect and
 reopen, wrong unit replies) are covered since S59 by the tests of
 `crates/stonecrab/tests/modbus_rtu.rs` tagged `// covers: SPEC mandatory-failure-cases /
 RTU ...`, on the in-memory transport and the fake clock. The OPC UA cases (F9) are out of
 scope for the alpha. The direct-sensor case (F10, the last bullet of SPEC.md) has been
-covered since S63 for the MAX31855 over SPI; its flags, SPI failures and unavailable
-device are tagged, the I2C failures, invalid identity and FIFO overflow wait for the
-accelerometer (S64). The F10 count is as of S63; the MAX31855 decode tests of S63 are
-also tagged F7, and the F7 count above was not recomputed.
+covered since S63 for the MAX31855 over SPI (its flags, SPI failures and unavailable
+device) and since S64 for the ADXL345 over I2C (I2C failures and timeouts, a device that
+does not acknowledge, an invalid identity, invalid samples and FIFO levels, and the FIFO
+overflow with its loss count, including a FIFO that fills during a stalled drain), all on
+scripted buses. The F10 count is as of S64; the
+decode tests of S63 and S64 are also tagged F7, and the F7 count above was not recomputed.
 
 ## Divergences from upstream
 

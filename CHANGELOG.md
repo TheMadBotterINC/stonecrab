@@ -5,6 +5,32 @@ as `stonecrab` 0.2.0 (2026-10-27); `stonecrab` 0.1.0 is the specification-stage
 placeholder.
 
 ## Unreleased
+- Board adapters, the ADXL345 accelerometer over I2C (ADR-0029, slice S64; additive): under
+  the existing `boards` feature (no new feature, no new dependency), `stonecrab::boards`
+  gains the `I2cBus` trait (`write` and `write_read`, deadline-bounded, a NACK is
+  `Disconnected`), `Adxl345` with `init`, `verify_identity`, `read_sample` and `read_fifo`,
+  `Adxl345Config` (`address`, `range` as `AccelRange`, `rate` as `OutputRate` from 3200 Hz
+  to 6.25 Hz, `fifo` as `FifoMode`, `full_resolution`), `AccelSample`, `AccelReading` and
+  `SampleBlock`. `init` checks DEVID (a wrong one is `Trust` and nothing is written) and
+  writes the configuration in a fixed order; there is no public register write.
+  `AccelSample::from_registers` decodes the little-endian, right-justified counts exactly
+  and refuses a count outside the configured resolution (`MalformedData`; at 16 g the
+  device does not clip, so a rollover that fits is not detected). `read_sample` returns
+  `None` unless `DATA_READY` flags a new sample, so neither the reset zeros of a device
+  still turning on nor a repeated sample is returned as a reading; a reading becomes
+  `acceleration_x`, `acceleration_y` and `acceleration_z` in `[g]`. A FIFO drain becomes a
+  `SampleBlock` with the exact interval, the three axes per sample, a gapless sequence
+  number from each `init`, the device's overrun flag (or a full FIFO, or a FIFO that the
+  host's clock says filled during the drain, since every pop clears the flag) and the
+  host's estimate of the samples lost. A failed or dropped read ends the stream until
+  `init` runs again. No Linux I2C backend: `i2c-dev` needs an `ioctl`, so it waits for a
+  dependency decision; an application supplies its own `I2cBus`. The testkit gains
+  `FakeI2cBus`, `I2cStep` and `I2cTransfer` (with a `Delay` step that stalls the bus on the
+  fake clock) when `boards` is on. The `boards` module is now a directory with its own
+  coverage row (100 percent) and lint promotions; every existing path is unchanged.
+  Bus-mock tested only, written from the datasheet (Rev. 0, pinned by sha256 in the ADR);
+  the bench record is a runbook, `docs/hardware/adxl345-i2c.md`, that needs the
+  maintainer's approval. No change to any industrial parity status.
 - Board adapters, the MAX31855 thermocouple converter over SPI (ADR-0026, slice S63;
   additive): the new off-by-default feature `boards` (`boards = ["sensors"]`, no new
   dependency) adds `stonecrab::boards` with the `SpiBus` trait (`read(len, deadline)`, one

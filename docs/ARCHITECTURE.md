@@ -61,7 +61,7 @@ flowchart TB
         subgraph sensing["Sensors"]
             SENSORS["<b>stonecrab::sensors</b><br/>feature sensors<br/>declarative profiles , units , scaling , quality"]
             MAX["<b>max31855</b> (S63, in stonecrab::boards)<br/>thermocouple over SPI"]
-            ADXL["<b>adxl345</b> (deferred)<br/>accelerometer over I2C (SPI later)"]
+            ADXL["<b>adxl345</b> (S64, in stonecrab::boards)<br/>accelerometer over I2C (SPI later)"]
         end
 
         subgraph foundation["Foundation"]
@@ -148,8 +148,7 @@ Where the alpha differs from the graph and the original brief:
   explain and to version. The module edges above are the former crate edges, and the
   lint promotions and coverage thresholds that were per crate are per module.
 - **Deferred modules.** `opcua` (milestone M3), `eip` and `s7` (M4), the remaining
-  baseline drivers (M5), the ADXL345 board adapter (M2S; the MAX31855 shipped in S63 as
-  `stonecrab::boards`), the MSpec code generator (M5) and the
+  baseline drivers (M5), the MSpec code generator (M5) and the
   differential runner (M5) do not exist. `xtask` does not exist either: its jobs are shell
   scripts under `scripts/` and mise tasks (ADR-0005). The serial transport (S58) and Modbus
   RTU (S59, inside `modbus`) have shipped; UDP is S61. Each arrives as a module behind its
@@ -1684,7 +1683,7 @@ classDiagram
 **Shipped at alpha (ADR-0016).** The `stonecrab::sensors` module (feature `sensors`) ships the schema (version 1), the
 loader, validation, the tag builder and the measurement pipeline, and since S56 the stale
 tracker and the acquisition loop (ADR-0023). The MAX31855 board adapter shipped in S63 in
-its own module, `stonecrab::boards` (ADR-0026, section 6.1); the ADXL345 is deferred.
+its own module, `stonecrab::boards` (ADR-0026, section 6.1), and the ADXL345 in S64 (ADR-0029).
 
 - `SensorProfile::from_toml(&str) -> Result<SensorProfile, ProfileError>` (64 KiB
   bound checked before parsing, unknown keys denied), `validate(&self)
@@ -1713,8 +1712,8 @@ its own module, `stonecrab::boards` (ADR-0026, section 6.1); the ADXL345 is defe
   stale transitions, with no spawned task. The drawn `Arc` and `Box` handles, `plan()`,
   `run()`, `BoundedReceiver` and per-tag `trackers` map do not exist, and the loop reads
   through `Connection::read`, not through a subscription.
-- **Deferred:** `Lookup` scale steps (M2) and the `adxl345` board adapter (M2S, S64); the
-  `max31855` adapter shipped in S63 (section 6.1). Named device profiles exist since S52d
+- **Deferred:** `Lookup` scale steps (M2); the `max31855` adapter shipped in S63 and the
+  `adxl345` adapter in S64 (section 6.1), the Linux I2C backend is deferred (ADR-0029). Named device profiles exist since S52d
   as documented maps under `profiles/documented/`, none hardware-verified.
 
 Section 9.7 shows the target pipeline with `Acquisition`; at the alpha an application calls
@@ -1812,7 +1811,8 @@ classDiagram
 **Update (2026-10-29), S63 and ADR-0026: the MAX31855 half shipped, not as drawn.** The
 diagram above is the original design and is not redrawn. `stonecrab::boards`, behind the
 `boards` feature (`boards = ["sensors"]`, off by default), holds the shipped half; the
-`Adxl345`, `I2cBus` and `LinuxI2cDev` classes are still deferred (S64).
+`Adxl345` and `I2cBus` classes followed in S64 (see the update below) and `LinuxI2cDev` is
+deferred (ADR-0029).
 - `SpiBus` is `read(len, deadline) -> OpFuture<Bytes>`: a receive under one chip-select cycle,
   not `transfer(tx, rx_len, deadline)`, because the MAX31855 sends nothing. A transmitting
   method arrives with the first device that needs it.
@@ -1836,6 +1836,40 @@ diagram above is the original design and is not redrawn. `stonecrab::boards`, be
 - The test double is `testkit::FakeSpiBus` with `SpiStep` (`Reply`, `Fail`, `Silence`).
 - The module is a single file for now (ADR-0026 decision 1); no hardware record exists. The
   runbook is `docs/hardware/max31855-spi.md`.
+
+**Update (2026-10-29), S64 and ADR-0029: the ADXL345 half shipped, not as drawn.** The diagram
+is not redrawn. The ADXL345 joins `stonecrab::boards` behind the same `boards` feature, and the
+module is now a directory (`src/boards.rs` with `boards/max31855.rs`, `boards/linux.rs` and
+`boards/adxl345.rs`) with its own coverage row at 100 percent and its own lint promotions;
+the bullet above about a single file is superseded. Section 6 still calls the ADXL345
+deferred; that statement is superseded by this note.
+- `I2cBus` is as drawn: `write(address, bytes, deadline) -> OpFuture<()>` and
+  `write_read(address, bytes, len, deadline) -> OpFuture<Bytes>`, with `Bytes` for the
+  transmitted bytes. A device that does not acknowledge is `Disconnected`.
+- `LinuxI2cDev` is **not** shipped: `i2c-dev` needs an `ioctl`, which needs first-party
+  `unsafe` or a new dependency (ADR-0029 decision 3). An application supplies the `I2cBus`.
+- `Adxl345::new(Box<dyn I2cBus>, Arc<dyn Clock>, Adxl345Config)`, with `init`,
+  `verify_identity`, `read_sample` and `read_fifo` as drawn. `init` checks DEVID (a wrong one
+  is `Trust`), then makes seven writes in a fixed order (standby, FIFO bypass, zero
+  offsets, data format, rate, FIFO mode, measure), with one discarded read of the data
+  registers after the bypass write to clear the flags of an earlier stream; there is no other
+  write. A failed or dropped read ends the stream until `init` runs again.
+- `Adxl345Config` has `address`, `range` (`AccelRange`), `rate` (`OutputRate`, 3200 Hz to
+  6.25 Hz), `fifo` (`FifoMode`: `Bypass`, `Fifo`, `Stream`; no trigger mode) and
+  `full_resolution`; no watermark and no interrupt configuration.
+- `AccelSample` holds the three counts (`x`, `y`, `z` as `i16`) and no time; a single read
+  returns an `Option<AccelReading>` (the sample, `counts_per_g`, the two stamps), `None` when
+  `DATA_READY` says the device has no sample not returned before, and the reading's
+  `measurements()` are `acceleration_x`, `acceleration_y` and `acceleration_z` in `[g]`.
+- `SampleBlock` (in `boards`, not `sensors`) has `sequence`, `interval`, `counts_per_g`,
+  `samples: Vec<AccelSample>`, `overflowed`, `lost: u64` and the two stamps of the FIFO level
+  read; no `tag`, no `AxisLayout` (the sample struct is the layout) and no `first_sample_at`.
+  `lost` is the host's estimate when the device flags an overrun, or when the host's clock
+  says the FIFO filled during the drain (every pop clears the flag). Blocks are not turned
+  into measurements.
+- The test double is `testkit::FakeI2cBus` with `I2cStep` (`Ack`, `Reply`, `Fail`, `Silence`,
+  `Delay`) and the recorded `I2cTransfer`. No hardware record exists; the runbook is
+  `docs/hardware/adxl345-i2c.md`.
 
 ---
 

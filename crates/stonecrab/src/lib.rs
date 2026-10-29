@@ -42,6 +42,11 @@ mod write_request;
 mod write_response;
 
 #[cfg(feature = "boards")]
+#[deny(
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions
+)]
 #[cfg_attr(docsrs, doc(cfg(feature = "boards")))]
 pub mod boards;
 #[deny(

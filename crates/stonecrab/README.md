@@ -26,7 +26,7 @@ for the contracts. Upstream compatibility is claimed only where a parity row say
 | `full` | the same set as the defaults, spelled out; the `profile_read` example requires it | `sim`, `modbus`, `sensors` | no |
 | `transport` | `stonecrab::transport`, deadline-bounded transports and the Tokio TCP transport | `tokio` | no (on through `modbus` and `testkit`) |
 | `serial` | the serial transport in `stonecrab::transport` (`SerialFactory`, `SerialTransport`) | `transport`, `serial2` | no (on through `modbus`) |
-| `boards` | `stonecrab::boards`, direct board adapters: the MAX31855 thermocouple converter over an `SpiBus` | `sensors` | no |
+| `boards` | `stonecrab::boards`, direct board adapters: the MAX31855 thermocouple converter over an `SpiBus` and the ADXL345 accelerometer over an `I2cBus` | `sensors` | no |
 | `adapters-linux` | `LinuxSpiDev`, a `/dev/spidev` node read on a worker thread | `boards`, `transport` | no |
 | `testkit` | `stonecrab::testkit`, fakes, scripted peers, golden-vector loader and the driver contract suite | `transport`, `serde`, `serde_json`, `toml`, Tokio `macros` | no |
 
@@ -60,6 +60,7 @@ operations.
 | `sensors`: synthetic profiles against the simulator | simulator-tested |
 | `sensors`: synthetic profiles against a Modbus TCP server | interoperability-tested |
 | `boards`: MAX31855 over SPI (decode, faults, measurements) and the Linux `/dev/spidev` backend, over scripted buses and in-memory readers | simulator-tested |
+| `boards`: ADXL345 over I2C (identity, configuration, decode, FIFO sample blocks with overflow and loss), over a scripted bus; no Linux I2C backend yet | simulator-tested |
 | Hardware verification | planned |
 
 `interoperability-tested` means an interop CI job ran the code against an independent

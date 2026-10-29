@@ -24,7 +24,7 @@ either.
 | --- | --- |
 | Vendor document | MAX31855 datasheet, <https://www.analog.com/en/products/max31855.html>. The frame layout of ADR-0026 was checked on 2026-10-29 against Rev 2 (2/12, document 19-5793, sha256 `45904b81e79c46af49fd5c880df7ec04678c8599be9df73cea8422d241ceb7a2`; see the addendum of the ADR); step B0 checks it again against the datasheet of the part actually used and records its revision and hash. Vendor documentation, all rights reserved: pinned, never copied |
 | Decision record | `docs/adr/0026-board-adapters.md` (module, backend, decode, refused frames, measurements) |
-| Code | `crates/stonecrab/src/boards.rs` (`SpiBus`, `Max31855`, `ThermocoupleReading`, `LinuxSpiDev`) and `crates/stonecrab/src/testkit/fake_spi.rs` |
+| Code | `crates/stonecrab/src/boards.rs` (`SpiBus`), `crates/stonecrab/src/boards/max31855.rs` (`Max31855`, `ThermocoupleReading`), `crates/stonecrab/src/boards/linux.rs` (`LinuxSpiDev`; the module became a directory in S64) and `crates/stonecrab/src/testkit/fake_spi.rs` |
 | Tests | `crates/stonecrab/tests/boards_max31855.rs`, `boards_properties.rs`, `boards_spidev.rs` |
 | Support table | `docs/COMPATIBILITY.md`, the "Direct bench adapters" rows |
 
@@ -96,7 +96,7 @@ passing or not; a difference from ADR-0026 is the finding, not a failure to hide
 
 | Step | What runs | Pass criterion, and what to record |
 | --- | --- | --- |
-| B0 datasheet | Retrieve the datasheet of the part used, record its revision and sha256, and compare it with the table of ADR-0026: bit positions, the fields' widths and LSB sizes, the reserved bits, the fault bit as the OR of the three flags, the maximum SCK frequency and the SPI mode | Each item of the ADR agrees. A disagreement stops the run: fix ADR-0026, `boards.rs` and the tests first. Record the revision and hash |
+| B0 datasheet | Retrieve the datasheet of the part used, record its revision and sha256, and compare it with the table of ADR-0026: bit positions, the fields' widths and LSB sizes, the reserved bits, the fault bit as the OR of the three flags, the maximum SCK frequency and the SPI mode | Each item of the ADR agrees. A disagreement stops the run: fix ADR-0026, `boards/max31855.rs` and the tests first. Record the revision and hash |
 | B1 bus setup | Read the node's mode, speed and word size from the kernel (the tool the board's documentation names), and read it with `LinuxSpiDev` once | Mode 0, a speed not above the chip's limit, 8 bits. The first read returns an accepted frame (open item 3). Record the three settings |
 | B2 room temperature | Read for 60 s with the thermocouple at room temperature, next to an independent thermometer on the same junction | `thermocouple_temperature` and `cold_junction_temperature` are `Good`, within a few degrees (not tenths) of the thermometer, steady to a degree or two. `thermocouple_fault` is 0. This does not establish calibration |
 | B3 ice point | Put the thermocouple junction in an ice-and-water bath and read for 60 s | The reading is near 0 C, `Good`. If it reads exactly 0 C with the cold junction also at exactly 0.0000 C, record it (open item 7) |
