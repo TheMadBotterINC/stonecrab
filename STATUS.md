@@ -465,6 +465,7 @@ commit; gates named were run locally before that commit.
 | S63 (fix) | 2026-10-29 | The hosted `quality` job of run 40843548924 failed its coverage gate at `boards` 513 of 514 lines: `LinuxSpiDev::read` had two ways to report a stopped worker (the send to its queue, and the reply), and which one ran in `a_worker_that_has_died_is_a_disconnect_not_a_hang` depended on whether the panicked worker had dropped its queue yet. A failed send drops the command and its reply sender, so the read now ignores the send result and reports both cases through the reply; the behavior is unchanged and the coverage no longer depends on timing | check (clippy and the SPI tests), coverage (boards 510 of 510 lines) |
 | S60b (evidence) | 2026-10-29 | The first hosted runs of `interop-ascii` and `interop-rtu-pty` (CI run 40843548924, commit fc30f8c) passed nine of nine each; README, COMPATIBILITY, the component doc, the serial parity record and CHANGELOG cite them instead of "next evidence", and an ADR-0024 addendum records them. The `quality` job of that run failed on a timing-dependent coverage line in `boards`, fixed in 8400e45 | parity |
 | S59c | 2026-10-29 | The serial-port half of the RTU and ASCII interop (the plan's socat pair for S58 to S60): `interop/diagslave/serial.sh` makes a socat pseudo-terminal pair on a Linux host, runs the pinned diagslave archive's Linux binary (sha256 checked before it runs) on one end and gives the other end to the RTU and ASCII interop tests through the serial carrier (`modbus-rtu:///…`, `modbus-ascii:///…` with `serial.*` settings; the script refuses any other URL), plus two new tests of what the serial carrier adds: the line silence at 300 baud and with `serial.interframe-delay`, and a lost port reopened. A Linux-only CI job `interop-serial-port` and `mise run interop-serial-port` (not in `mise run interop`: diagslave has no macOS binary and macOS refuses the baud-rate ioctl on a pty). No parity row or evidence level moves before the first hosted run. A second RTU peer (libmodbus, modbus-tk) was not added: libmodbus's RTU server opens a hard-coded `/dev/ttyUSB0`, and modbus-tk needs pip installs. Side effect on the maintainer's machine: installing socat with Homebrew also installed openssl@4 and repointed the unversioned `openssl` links to it (openssl@3 untouched) | check, lint-attrs, parity, interop for every gateway peer; the serial run only as a modified copy in a Linux container (11 of 11 per framing); the hosted interop-serial-port job runs first with this push |
+| S59c (evidence) | 2026-10-29 | The first hosted run of `interop-serial-port` (CI run 40849466167, commit f656c56) ran `serial.sh` as written on `ubuntu-latest` (the archive downloaded and checked against its sha256, the x86_64 binary, Ubuntu's socat) and passed 11 of 11 per framing. `MBS-TRANS-SERIAL`, `-TRANS-PORT-NAME`, `-CFG-SERIAL-INTERFRAME`, `-RTU-SILENCE`, `-CFG-SERIAL-BAUD` (RTU only) and `-ASCII-TIMING` (the inter-frame delay only) move to automated-verified, and the shared rows gain the serial half; data bits, stop bits, parity and flow control stay implemented (a pty cannot show them). README, COMPATIBILITY, the component docs, CHANGELOG, the diagslave README and an ADR-0024 addendum record it; two ASCII and RTU-pty cells that cited the interop-rtu run id are corrected | parity |
 
 ## Verified evidence and reproduction
 
@@ -729,12 +730,11 @@ Deferred features, each a deferred row in `docs/parity/modbus.md` or an item of 
   (ADR-0022), extended registers with their selections in S50, the `zero-based` and
   `one-based-40001` conventions in S51, and the text types in S49 (ADR-0025).
   `PlcValue::Bytes` waits for a type that produces octet strings (ADR-0025 decision 9).
-- **A serial port of the RTU or ASCII driver against an independent peer** (since S59b and
-  S60b diagslave serves RTU encapsulated over TCP, and ASCII and RTU on a serial device
-  behind socat, all through the drivers' TCP gateway carrier; since S59c the Linux job
-  `interop-serial-port` opens a socat pseudo-terminal through the serial carrier, but no
-  evidence level is raised before its first hosted run; parity, data bits and flow control
-  cannot be observed on a pty) and HW2; TLS and TLS-PSK (M3 or the parity backlog); a Linux I2C backend for
+- **An electrical serial line and HW2**: since S59c (first hosted run 40849466167) the RTU
+  and ASCII drivers open a socat pseudo-terminal through their serial carrier against
+  diagslave, so the serial carrier, its baud-dependent t3.5, the inter-frame delay and a
+  reopened port are `interoperability-tested`; parity, data bits, stop bits and flow
+  control cannot be observed on a pty, and no RS-485 adapter or device has been used; TLS and TLS-PSK (M3 or the parity backlog); a Linux I2C backend for
   the board adapters (ADR-0029: an ioctl needs unsafe code or a new dependency); OPC UA (M3, after the
   generator); EtherNet/IP and S7 (M4); code generation (S66, S67: vendoring
   `modbus.mspec` waits for the maintainer's approval) and the remaining baseline protocols

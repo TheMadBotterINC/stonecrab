@@ -19,12 +19,20 @@ placeholder.
   reopens). New host-side script `interop/diagslave/serial.sh`, task `mise run
   interop-serial-port` (Linux only, so not part of `mise run interop`) and CI job
   `interop-serial-port` (socat from the runner's package index, its version recorded in the
-  evidence). The script and the job have not run as written (the download, the Linux probe
-  and the job itself never ran end to end), so no parity row or evidence level is raised
-  before the first hosted run (ADR-0024 addendum). A Linux pseudo-terminal
+  evidence). Its first hosted run (GitHub Actions run 40849466167, commit f656c56,
+  `ubuntu-latest`, 2026-10-29) passed in both modes, RTU 11 of 11 and ASCII 11 of 11, and was
+  the first time the script ran as written: the download and SHA-256 check of the archive, its
+  x86_64 binary, Ubuntu's socat and the Linux probe. Parity rows `MBS-TRANS-SERIAL`,
+  `MBS-TRANS-PORT-NAME`, `MBS-CFG-SERIAL-INTERFRAME`, `MBS-RTU-SILENCE`,
+  `MBS-CFG-SERIAL-BAUD` (RTU only) and `MBS-ASCII-TIMING` (the inter-frame delay only) are
+  automated-verified, `MBS-OP-READ`, `MBS-OP-WRITE`, `MBS-OP-PING`, `MBS-RTU-CRC`,
+  `MBS-RTU-WIRE-MODEL`, `MBS-ASCII-SEND`, `MBS-ASCII-LRC` and `MBS-ASCII-WIRE-MODEL` gained
+  the serial-port half of their evidence, and Modbus RTU and ASCII through a serial port of
+  the driver on a pseudo-terminal pair are interoperability-tested. A Linux pseudo-terminal
   forces eight data bits and no parity, so the line settings other than the baud rate are
-  accepted but not observed (the ASCII line is 19200 8N1 at the driver's end). No libmodbus
-  or modbus-tk RTU server was added (ADR-0024 addendum).
+  accepted but not observed (the ASCII line is 19200 8N1 at the driver's end); data bits,
+  stop bits, parity and flow control stay implemented, and no electrical line or device is
+  involved. No libmodbus or modbus-tk RTU server was added (ADR-0024 addendum).
 - Modbus ASCII, and Modbus RTU on a serial device, against an independent peer (ADR-0024,
   slice S60b; no crate API change): the diagslave 3.6 image now has two more modes, `ascii`
   (`diagslave -m ascii -a 1 -b 19200 -d 7 -s 1 -p even`) and `rtu-pty` (`diagslave -m rtu -a 1

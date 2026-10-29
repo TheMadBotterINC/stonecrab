@@ -18,16 +18,18 @@ diagslave 3.6 with `tc netem` faults passed its first hosted run (2026-10-29, ru
 40830080420, 6 of 6); the RTU driver has also met diagslave 3.6 as a Modbus RTU over TCP
 slave through its gateway carrier (job `interop-rtu`, S59b, first hosted run 40838776577,
 9 of 9, on 2026-10-29), and since S60b as a Modbus RTU slave on a
-serial device behind socat (job `interop-rtu-pty`, 9 of 9, the same); the ASCII driver has
-met diagslave 3.6 as a Modbus ASCII slave on a serial device behind socat, through its
-gateway carrier (job `interop-ascii`, S60b, 9 of 9 locally and in the first hosted run
-40843548924 on 2026-10-29). Since S59c a job is added that runs both drivers through a serial
-port of their own against diagslave 3.6: socat makes a pseudo-terminal pair on a Linux host,
-diagslave opens one end and the driver the other (job `interop-serial-port`, with the silence
-before a request and a lost port that is reopened). It has not run: the serial carrier stays
-`simulator-tested` until its first hosted run passes. That is a pseudo-terminal, not an
-electrical line: it keeps a baud rate and the stop bits and forces eight data bits and no
-parity.
+serial device behind socat (job `interop-rtu-pty`, 9 of 9 locally and in the first hosted
+run 40843548924 on 2026-10-29); the ASCII driver has met diagslave 3.6 as a Modbus ASCII
+slave on a serial device behind socat, through its gateway carrier (job `interop-ascii`,
+S60b, 9 of 9 locally and in the first hosted run 40843548924 on 2026-10-29). Since S59c both
+drivers have also been run through a serial port of their own against diagslave 3.6: socat
+makes a pseudo-terminal pair on a Linux host, diagslave opens one end and the driver the
+other (job `interop-serial-port`, with the silence before a request and a lost port that is
+reopened), and its first hosted run passed in both modes (run 40849466167 on 2026-10-29,
+RTU 11 of 11 and ASCII 11 of 11), so that carrier is `interoperability-tested` on a
+pseudo-terminal. That is not an electrical line: it keeps a baud rate and the stop bits and
+forces eight data bits and no parity, so parity, data bits and flow control are not
+observed, and no device has been tried.
 No independent server serves the file record function codes, so the extended registers are
 checked against the specification examples, the upstream PLC4X frames and a first-party
 device on the in-memory transport only.
@@ -219,10 +221,10 @@ assert!(driver.parse_config("modbus-rtu://COM3?default-unit-identifier=0").is_er
 
 | RTU capability | Support level |
 | --- | --- |
-| Read, write, ping and subscribe by polling over RTU framing, with the operations and limits of `modbus-tcp` | simulator-tested |
-| CRC errors, the silence before a request, the drain of a late reply, a lost serial link and its reopen, replies from another unit | simulator-tested |
+| Read, write, ping and subscribe by polling over RTU framing, with the operations and limits of `modbus-tcp` | simulator-tested; read, write and ping through a gateway or a serial port are also interoperability-tested (the two rows below) |
+| CRC errors, the silence before a request, the drain of a late reply, a lost serial link and its reopen, replies from another unit | simulator-tested; the silence before a request and the reopen of a lost serial port are also interoperability-tested on a pseudo-terminal pair (the serial port row below) |
 | RTU over a serial-to-IP gateway (`modbus-rtu:tcp://`): read of every area, writes read back, a range selection, frames of 255 bytes, ping, an exception, a unit the slave does not serve | interoperability-tested (jobs `interop-rtu`, diagslave 3.6 as `-m enc -a 1`, and `interop-rtu-pty`, as `-m rtu -a 1` on a serial device behind socat; 9 of 9 each locally and in their first hosted runs, 40838776577 and 40843548924, on 2026-10-29) |
-| RTU through a serial port of the driver (`modbus-rtu:///path`) on a pseudo-terminal pair: the same nine tests, the silence before a request at 300 baud and with an inter-frame delay, a lost port that is `Disconnected` and reopened | tests written, job `interop-serial-port` (diagslave 3.6 as `-m rtu -a 1`) added and not yet run; no libmodbus or modbus-tk server, see ADR-0024 |
+| RTU through a serial port of the driver (`modbus-rtu:///path`) on a pseudo-terminal pair: the same nine tests, the silence before a request at 300 baud and with an inter-frame delay, a lost port that is `Disconnected` and reopened | interoperability-tested (job `interop-serial-port`, diagslave 3.6 as `-m rtu -a 1`, 11 of 11 in its first hosted run, 40849466167, on 2026-10-29; the silence is timed on the driver, with lower bounds only, since a pseudo-terminal does not throttle bytes; no libmodbus or modbus-tk server, see ADR-0024) |
 | Hardware verification on RS-485 | planned (HW2) |
 
 The RTU rows of the
@@ -275,10 +277,10 @@ assert!(driver.parse_config("modbus-ascii://COM3?serial.data-bits=6").is_err());
 
 | ASCII capability | Support level |
 | --- | --- |
-| Read, write, ping and subscribe by polling over ASCII framing, with the operations and limits of `modbus-tcp` | simulator-tested |
-| LRC errors, bad digits, a missing CR or LF, noise before a colon, a frame split across reads, the drain of a late reply, a lost serial link and its reopen, replies from another unit | simulator-tested |
-| ASCII over a serial-to-IP gateway (`modbus-ascii:tcp://`): read of every area, writes read back, a range selection, frames of 511 characters, ping, an exception, a unit the slave does not serve | interoperability-tested (job `interop-ascii`, diagslave 3.6 as `-m ascii -a 1` on a serial device behind socat, first hosted run 40838776577, 9 of 9, on 2026-10-29) |
-| ASCII through a serial port of the driver (`modbus-ascii:///path`) on a pseudo-terminal pair: the same nine tests, the inter-frame delay as the gap before a request, a lost port that is `Disconnected` and reopened | tests written, job `interop-serial-port` (diagslave 3.6 as `-m ascii -a 1`) added and not yet run; the pseudo-terminal forces 8N1, so the 7E1 of the line would not be observed |
+| Read, write, ping and subscribe by polling over ASCII framing, with the operations and limits of `modbus-tcp` | simulator-tested; read, write and ping through a gateway or a serial port at 19200 8N1 are also interoperability-tested (the two rows below) |
+| LRC errors, bad digits, a missing CR or LF, noise before a colon, a frame split across reads, the drain of a late reply, a lost serial link and its reopen, replies from another unit | simulator-tested; the inter-frame delay before a request and the reopen of a lost serial port are also interoperability-tested on a pseudo-terminal pair (the serial port row below) |
+| ASCII over a serial-to-IP gateway (`modbus-ascii:tcp://`): read of every area, writes read back, a range selection, frames of 511 characters, ping, an exception, a unit the slave does not serve | interoperability-tested (job `interop-ascii`, diagslave 3.6 as `-m ascii -a 1` on a serial device behind socat, first hosted run 40843548924, 9 of 9, on 2026-10-29) |
+| ASCII through a serial port of the driver (`modbus-ascii:///path`) on a pseudo-terminal pair: the same nine tests, the inter-frame delay as the gap before a request, a lost port that is `Disconnected` and reopened | interoperability-tested (job `interop-serial-port`, diagslave 3.6 as `-m ascii -a 1`, 11 of 11 in its first hosted run, 40849466167, on 2026-10-29; the pseudo-terminal forces 8N1, so the 7E1 of the line is not observed, and the baud rate has no observable effect) |
 | Hardware verification on RS-485 | planned (HW2) |
 
 The ASCII rows of the serial parity record record every behavior and divergence with its test
@@ -327,8 +329,8 @@ The layers underneath, with their evidence:
 | Typed register decoding and byte order (`TypedDecoder`) | unit-tested; vector-tested; property-tested; `BIG_ENDIAN` and `LITTLE_ENDIAN` confirmed by the retained upstream PLC4X vectors; the two byte-swap modes are derived from the documented layouts |
 | Read batching (`Batcher`) | unit-tested; property-tested |
 | Connection and driver (`ModbusConnection`, `ModbusTcpDriver`) | unit-tested on the in-memory transport; contract-suite-tested on the in-memory transport and over loopback sockets; one read run over loopback; ten reads, two pings and the contract suite against pymodbus 3.8.6; ten tests against libmodbus 3.1.11 |
-| Connection and driver over RTU (`ModbusRtuDriver`) | unit-tested on the in-memory transport; contract-suite-tested on the in-memory transport; nine tests through the gateway carrier against diagslave 3.6 (`-m enc -a 1`) and nine against `-m rtu -a 1` on a serial device behind socat |
-| Connection and driver over ASCII (`ModbusAsciiDriver`) | unit-tested on the in-memory transport; contract-suite-tested on the in-memory transport; over a loopback socket; nine tests through the gateway carrier against diagslave 3.6 (`-m ascii -a 1` on a serial device behind socat) |
+| Connection and driver over RTU (`ModbusRtuDriver`) | unit-tested on the in-memory transport; contract-suite-tested on the in-memory transport; nine tests through the gateway carrier against diagslave 3.6 (`-m enc -a 1`) and nine against `-m rtu -a 1` on a serial device behind socat; eleven tests through a serial port of the driver on a pseudo-terminal pair against `-m rtu -a 1` |
+| Connection and driver over ASCII (`ModbusAsciiDriver`) | unit-tested on the in-memory transport; contract-suite-tested on the in-memory transport; over a loopback socket; nine tests through the gateway carrier against diagslave 3.6 (`-m ascii -a 1` on a serial device behind socat); eleven tests through a serial port of the driver on a pseudo-terminal pair against `-m ascii -a 1` |
 
 ## Not in the alpha
 Each item is a deferred row of the

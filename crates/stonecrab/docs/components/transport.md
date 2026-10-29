@@ -23,7 +23,7 @@ types are Stonecrab's own contract. The behavior that is specified is recorded i
 | `ConnectionGuard::supervise`: background reconnect and the `Timeouts.idle` bound | simulator-tested |
 | `SystemClock` (Tokio timer) | interoperability-tested |
 | `Jitter` (xorshift64* sample source for `ReconnectPolicy::next_delay`) | build-tested |
-| `SerialTransport` and `SerialFactory` (feature `serial`) | simulator-tested |
+| `SerialTransport` and `SerialFactory` (feature `serial`) | simulator-tested; interoperability-tested through Modbus RTU and Modbus ASCII on a pseudo-terminal pair of a Linux host (job `interop-serial-port`, diagslave 3.6, first hosted run 40849466167, 11 of 11 per framing) |
 | `UdpTransport` and `UdpFactory`, `Transport::delivers_datagrams` | interoperability-tested (job `interop-udp`, run 40830080420, 6 of 6); simulator-tested on loopback sockets |
 | TLS transport | planned |
 | Hardware verification | planned |
@@ -43,11 +43,17 @@ been tried.
 
 The serial transport is `simulator-tested`: its byte-level tests run over a pseudo-terminal
 pair (the virtual serial pair of the `serial2` crate), which exercises the operating
-system's terminal layer but no UART, RS-485 adapter or device, and no protocol framer runs
-over it yet. Its worker, retry, cancellation and error paths run on an in-memory port. The
-pair tests run on Unix other than macOS: `serial2` builds its pair with a baud-rate ioctl
-that a macOS pseudo-terminal refuses, and Windows has no pseudo-terminals. Where they do not
-run, the in-memory tests still do.
+system's terminal layer but no UART, RS-485 adapter or device. Its worker, retry,
+cancellation and error paths run on an in-memory port. Through `stonecrab::modbus`
+(`modbus-rtu:///path`, `modbus-ascii:///path`) it is also `interoperability-tested` on a
+pseudo-terminal pair of a Linux host: socat makes the pair, diagslave 3.6 serves one end and
+the drivers open the other, with the RTU and ASCII framers running over it (job
+`interop-serial-port`, first hosted run 40849466167, 11 of 11 per framing, on 2026-10-29).
+That is still a pseudo-terminal, which forces eight data bits and no parity: no UART, RS-485
+adapter or electrical line is involved. The transport's own pair tests run on Unix other
+than macOS: `serial2` builds its pair with a baud-rate ioctl that a macOS pseudo-terminal
+refuses, and Windows has no pseudo-terminals. Where they do not run, the in-memory tests
+still do.
 
 The UDP transport (S61, ADR-0027) has datagram tests over real loopback sockets (the source
 filter, kept boundaries, an oversize datagram, the send bound, a closed port, timeouts) and,

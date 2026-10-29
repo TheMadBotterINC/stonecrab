@@ -306,13 +306,23 @@ archive again.
   links; `line-up` makes the pair again at the same paths, starts a new diagslave (its areas
   are zero) and waits for it.
 
-Status: the script and the job `interop-serial-port` have not run as written. Never run end to
-end: the `curl` download and the SHA-256 check of the archive, the x86_64 selection, the Python
-probe on Linux, Ubuntu's socat and the CI job. The only run was a modified copy of the script
-in a scratchpad, in a Linux container of the S60b image on colima (an aarch64 binary whose
-banner reads "diagslave 3.5", not the "diagslave 3.6" archive; the copy's download and its
-Python probe replaced by the image's binary and a short sleep). It is a note, not evidence.
-In that run all nine tests of each framing and both new tests passed; a
-second request waited 155 ms at 300 baud (t3.5 is 116.7 ms) and 286 ms with
-`serial.interframe-delay=250`; diagslave logged each request as `readHoldingRegisters` or
-`writeHoldingRegisters`; socat 1.8.0.3 ended on SIGTERM and made new links when started again.
+Status: the script and the job `interop-serial-port` have run as written on a hosted runner.
+The first hosted run, GitHub Actions run 40849466167 (job 123365031237) on `ubuntu-latest`,
+for commit f656c56, on 2026-10-29, passed in both modes: RTU 11 tests run, 11 passed, and
+ASCII 11 run, 11 passed (the nine interop tests of each framing over the serial carrier, and
+the two tests of `modbus_interop_diagslave_serial`). That run covered what no earlier run
+could: the `curl` download and the SHA-256 check of the real archive, the x86_64 binary,
+Ubuntu's socat, the Python probe on Linux and the CI job itself. What has still never run:
+macOS (diagslave 3.6 has no macOS binary, and macOS refuses the baud-rate ioctl on a
+pseudo-terminal) and an electrical line (a pseudo-terminal forces eight data bits and no
+parity and does not throttle bytes, so parity, data bits and flow control are not observed,
+the ASCII line was 19200 8N1 at the driver while diagslave was told 7E1, and diagslave
+cannot see the silence before a request: the test times the driver). Before the hosted run
+the only run was a modified copy of the script in a scratchpad, in a Linux container of the
+S60b image on colima (an aarch64 binary whose banner reads "diagslave 3.5", not the
+"diagslave 3.6" archive; the copy's download and its Python probe replaced by the image's
+binary and a short sleep); it was a note, not evidence. In that run all nine tests of each
+framing and both new tests passed; a second request waited 155 ms at 300 baud (t3.5 is
+116.7 ms) and 286 ms with `serial.interframe-delay=250`; diagslave logged each request as
+`readHoldingRegisters` or `writeHoldingRegisters`; socat 1.8.0.3 ended on SIGTERM and made
+new links when started again.

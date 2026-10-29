@@ -561,3 +561,40 @@ No code under `crates/stonecrab/src` changes.
 - `docs/parity/modbus-serial.md` (the six rows of decision 6, still `implemented`),
   `docs/COMPATIBILITY.md`, `README.md`, `crates/stonecrab/README.md`,
   `crates/stonecrab/docs/components/modbus.md`, `CHANGELOG.md`.
+
+## Addendum (2026-10-29): the first hosted run of `interop-serial-port`
+
+The job of addendum S59c ran with commit f656c56 (CI run 40849466167, job 123365031237) on
+`ubuntu-latest` and passed in both modes: RTU 11 tests run, 11 passed, and ASCII 11 run, 11
+passed, that is the nine interop tests of each framing, run over the serial carrier, and the
+two tests of `modbus_interop_diagslave_serial` (the silence before a request, and a lost
+port that is reopened). It was the first run of `serial.sh` as written, which decision 6 of
+that addendum said had not happened: the `curl` download of the pinned archive and its check
+against the SHA-256 pinned in `interop/diagslave/Dockerfile`, before anything was unpacked,
+the x86_64 binary, Ubuntu's socat, the Linux probe and the job itself all ran on the hosted
+runner. The run of a modified copy of the script in a container, which decision 6 called a
+note, stays a note.
+
+What moved is what decision 6 said would move after this run; no other decision changes.
+RTU and ASCII through the driver's own serial port, on a pseudo-terminal pair against
+diagslave 3.6, are `interoperability-tested`. In `docs/parity/modbus-serial.md` the rows
+`MBS-TRANS-SERIAL`, `MBS-TRANS-PORT-NAME`, `MBS-CFG-SERIAL-INTERFRAME` and `MBS-RTU-SILENCE`
+are `automated-verified (S59c, ...)`. So are `MBS-CFG-SERIAL-BAUD`, for RTU only (the second
+of two requests waits at least t3.5 at 300 baud; for ASCII the baud rate has no observable
+effect on a pseudo-terminal, so that half stays `implemented`), and `MBS-ASCII-TIMING`, for
+the inter-frame delay as the gap before an ASCII request and not for the absence of a t3.5.
+The rows that already carried gateway evidence (`MBS-OP-READ`, `MBS-OP-WRITE`,
+`MBS-OP-PING`, `MBS-RTU-CRC`, `MBS-RTU-WIRE-MODEL`, `MBS-ASCII-SEND`, `MBS-ASCII-LRC` and
+`MBS-ASCII-WIRE-MODEL`) gained the serial-port half of it, and the rows that the same tests
+exercise but the peer shows only in part stay `implemented`, with the run added to their
+text.
+
+What did not move: `MBS-CFG-SERIAL-DATA-BITS`, `-STOP-BITS`, `-PARITY` and `-FLOW` stay
+`implemented`, because a Linux pseudo-terminal forces eight data bits and no parity and the
+run cannot show that these settings reach a line (the ASCII run used 19200 8N1 at the
+driver while diagslave was told 7E1, which changes nothing there). Nor does diagslave see the
+silence before a request, since a pseudo-terminal does not throttle bytes: the tests time
+the driver itself and assert lower bounds only, as decision 4 said. No electrical line,
+RS-485 adapter or device is involved, so `hardware-verified` stays with HW2; macOS has never
+run the job (diagslave has no macOS binary and macOS refuses the baud-rate ioctl on a
+pseudo-terminal); and no second serial peer was added (decision 7).
