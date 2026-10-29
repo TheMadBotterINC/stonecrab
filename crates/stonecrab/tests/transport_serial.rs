@@ -323,13 +323,16 @@ mod tests {
 
             use super::*;
 
+            // A Linux pseudo-terminal keeps the baud rate, the stop bits and XON/XOFF but
+            // forces eight data bits and no parity (pty_set_termios), so the settings below
+            // are the ones a pty can honour; the refusal test covers the others.
             #[tokio::test]
-            async fn the_factory_opens_a_port_by_name_with_every_line_setting() {
+            async fn the_factory_opens_a_port_by_name_with_the_line_settings_a_pty_keeps() {
                 let pair = Pair::new().expect("a pseudo-terminal pair");
                 let mut factory = SerialFactory::default();
                 factory.baud_rate = 19_200;
-                factory.data_bits = DataBits::Seven;
-                factory.parity = Parity::Even;
+                factory.data_bits = DataBits::Eight;
+                factory.parity = Parity::None;
                 factory.stop_bits = StopBits::Two;
                 factory.flow_control = FlowControl::XonXoff;
                 let mut transport = factory
@@ -351,6 +354,26 @@ mod tests {
                 recv_until(&mut *transport, &mut reply, 2).await;
                 assert_eq!(&reply[..], b"ok", "bytes reach the transport");
                 transport.shutdown(deadline()).await.expect("shutdown");
+            }
+
+            // covers: S58 / a port that refuses a line setting fails the open, typed
+            #[tokio::test]
+            async fn a_line_setting_the_port_refuses_fails_the_open() {
+                let pair = Pair::new().expect("a pseudo-terminal pair");
+                let mut factory = SerialFactory::default();
+                factory.data_bits = DataBits::Seven;
+                factory.parity = Parity::Even;
+                let Err(error) = factory
+                    .open(&endpoint(&pair), limits(64, 128), deadline())
+                    .await
+                else {
+                    panic!("a pty cannot keep seven data bits with even parity");
+                };
+                assert_eq!(
+                    error.kind(),
+                    ErrorKind::Disconnected,
+                    "a refused setting is reported like any other failed open: {error}"
+                );
             }
         }
     }
