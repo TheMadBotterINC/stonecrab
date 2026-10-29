@@ -25,7 +25,8 @@ types are Stonecrab's own contract. The behavior that is specified is recorded i
 | `Jitter` (xorshift64* sample source for `ReconnectPolicy::next_delay`) | build-tested |
 | `SerialTransport` and `SerialFactory` (feature `serial`) | simulator-tested; interoperability-tested through Modbus RTU and Modbus ASCII on a pseudo-terminal pair of a Linux host (job `interop-serial-port`, diagslave 3.6, first hosted run 40849466167, 11 of 11 per framing) |
 | `UdpTransport` and `UdpFactory`, `Transport::delivers_datagrams` | interoperability-tested (job `interop-udp`, run 40830080420, 6 of 6); simulator-tested on loopback sockets |
-| TLS transport | planned |
+| `TlsFactory` and `TlsSettings` (feature `tls`): TLS 1.3 and 1.2 on rustls and ring, explicit trust anchors, mutual TLS | interoperability-tested through Modbus TCP over TLS (job `interop-tls`, pymodbus 3.8.6 with mutual TLS, 3 of 3 in its local run on 2026-10-29; first hosted run pending); simulator-tested on loopback sockets against rustls's server |
+| TLS-PSK transport | not supported (rustls has no external pre-shared keys) |
 | Hardware verification | planned |
 
 How the levels were reached. The TCP transport has byte-level tests over real loopback
@@ -64,6 +65,16 @@ went through a UDP-over-TCP relay, because colima's default port forwarder does 
 UDP; the hosted job publishes the UDP port directly, and its first run passed on
 2026-10-29 (run 40830080420, 6 of 6).
 
+The TLS transport (S71, ADR-0032) has byte-level tests over real loopback sockets against
+rustls's own server, with certificate authorities and keys made at run time (a round trip,
+the versions, untrusted, expired and misnamed certificates, mutual TLS, a refused client, a
+peer's close with and without `close_notify`, the bounds, the PEM refusals) and a unit test
+of the handshake deadline on the paused clock. Through `stonecrab::modbus`
+(`modbus-tcp:tls`) it carries the reads, a write and ping of its `interop-tls` job against
+pymodbus 3.8.6 on Python's ssl module (OpenSSL), with mutual TLS and a PKI that openssl makes
+at run time; that job passed 3 of 3 in its local run on 2026-10-29 and its first hosted run
+is pending.
+
 ## Feature
 The module exists only with the `transport` feature, which is the only thing that brings
 Tokio into the crate: `rt`, `net`, `time`, `sync` and `io-util` are scoped on, and the
@@ -78,6 +89,10 @@ The `serial` feature adds `SerialTransport` and `SerialFactory` to the module an
 `transport` and the `serial2` crate. No other feature enables it, so a build without it has
 no `serial2` in its dependency graph. See [Serial](#serial). The UDP transport needs nothing
 beyond Tokio's `net`, so it is part of `transport` itself. See [UDP](#udp).
+
+The `tls` feature adds `TlsFactory` and `TlsSettings` and turns on `transport`, `rustls` and
+`tokio-rustls` on the `ring` provider, which compiles C and assembly (a C compiler is
+needed). It is off by default and no other feature enables it. See [TLS](#tls).
 
 ## The deadline rule
 Every call that waits takes the `Deadline` it must finish by, and that argument is the
@@ -150,6 +165,32 @@ an earlier one never reaches a later one.
   all. Nothing retransmits: a lost datagram is a request that times out.
 - **No options.** Upstream's `udp.` options are not offered; why each is refused or
   deferred is recorded in ADR-0027 and the transport record (`UTR-UDP-OPTIONS`).
+
+## TLS
+`TlsFactory::new` reads the two PEM files of a `TlsSettings` once (at most 1 MiB each, with
+blocking reads on the caller's thread and no time bound, so they must be regular local
+files) and builds one rustls client configuration on the ring provider (ADR-0032):
+`trust_store` holds the certificate authorities a server must chain to, the only trust there
+is (no web PKI or platform store, no way to turn verification off), and `keystore`, when
+set, the client certificate chain and its unencrypted private key for mutual TLS. `open`
+takes an `Endpoint::Tcp`, connects as the TCP factory does, and completes a TLS 1.3 or 1.2
+handshake in which the host is the server name the certificate must carry (a DNS name or an
+IP address). One deadline covers the resolution, the connect and the handshake.
+
+- **Errors.** A server certificate that fails verification is `Trust`; a server's
+  certificate alert refusing the client certificate (or its absence) is `Authentication`,
+  which under TLS 1.3 arrives with the first `recv`, since the client has finished its
+  handshake by then; a server that only closes is `Disconnected`, as is every other failure.
+  An unreadable or unusable PEM file is `InvalidConfig`, naming the option and never a path.
+- **The stream rules of TCP.** `send` encrypts one frame and flushes it, and poisons the
+  transport when cut short; `recv` is cancel-safe, because records read from the socket wait
+  in the TLS session until their plaintext is delivered; a `close_notify` reads as `0`, a
+  close without one is `Disconnected`; `shutdown` sends `close_notify` and a FIN.
+- **Secrets.** `TlsFactory` shows nothing in `Debug`, `TlsSettings` shows the trust store and
+  hides the keystore path, session keys are never logged, and no password is taken.
+- **The guard.** Unchanged: a failed open of kind `Trust`, `Authentication` or
+  `InvalidConfig` leaves it `Failed` without reconnecting; a lost TLS link reconnects with
+  backoff like a TCP one, and a reconnect may resume the TLS session.
 
 ## Framing
 A `Framer<F>` turns bytes into frames (`decode`, `encode`, `max_frame_bytes`) and does no

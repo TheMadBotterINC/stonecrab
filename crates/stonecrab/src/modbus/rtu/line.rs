@@ -13,6 +13,9 @@ use crate::modbus::{AddressConvention, ModbusOptions};
 /// The prefix of the serial line parameters (upstream reads transport options under the
 /// transport code).
 const PREFIX: &str = "serial.";
+/// The prefix of the TLS parameters, which belong to the `tls` transport of `modbus-tcp` alone
+/// (ADR-0032, decision 13).
+const TLS_PREFIX: &str = "tls.";
 const BAUD_RATE: &str = "baud-rate";
 const DATA_BITS: &str = "data-bits";
 const STOP_BITS: &str = "stop-bits";
@@ -58,7 +61,8 @@ pub(super) type Parsed = (SerialOptions, Option<AddressConvention>, AccessPolicy
 impl SerialOptions {
     /// Read `parameters` of a connection string of the driver speaking `wire`: the `serial.`
     /// keys here (only when the carrier is a serial line), every other key through
-    /// [`ModbusOptions`], which refuses unknown ones.
+    /// [`ModbusOptions`], which refuses unknown ones. The `tls.` keys are refused first, in
+    /// every build: no carrier of RTU or ASCII is TLS, so a TLS setting would be ignored.
     pub(super) fn from_parameters(
         parameters: &[(String, String)],
         serial: bool,
@@ -68,6 +72,13 @@ impl SerialOptions {
             .iter()
             .cloned()
             .partition(|(key, _)| key.starts_with(PREFIX));
+        if shared.iter().any(|(key, _)| key.starts_with(TLS_PREFIX)) {
+            return Err(invalid(format!(
+                "the {TLS_PREFIX} parameters belong to the tls transport of modbus-tcp; {} has \
+                 no TLS carrier",
+                wire.scheme()
+            )));
+        }
         let (modbus, convention, access) =
             ModbusOptions::from_parameters(ModbusOptions::default(), &shared)?;
         if modbus.unit_id.get() == BROADCAST {

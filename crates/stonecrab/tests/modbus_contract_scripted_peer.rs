@@ -295,7 +295,7 @@ mod tests {
         let bench = Bench::new();
         let report = ContractSuite::run(
             &bench.driver,
-            "modbus-tcp:tls://127.0.0.1:5020",
+            "modbus-tcp:tls-psk://127.0.0.1:5020",
             &bench.fixture,
         )
         .await

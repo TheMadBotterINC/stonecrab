@@ -14,13 +14,14 @@
 #   mise run features      = CI "features" job
 #   mise run examples      = CI "examples" job
 #   mise run interop       = CI "interop", "interop-libmodbus", "interop-modbus-tk",
-#                            "interop-toxiproxy", "interop-rtu", "interop-ascii" and
-#                            "interop-rtu-pty" jobs (needs Docker; interop/pymodbus/interop.sh,
-#                            then interop/libmodbus/interop.sh, interop/modbus-tk/interop.sh,
-#                            interop/toxiproxy/interop.sh and interop/diagslave/interop.sh in its
-#                            enc, ascii and rtu-pty modes, evidence under target/interop-evidence/
+#                            "interop-toxiproxy", "interop-rtu", "interop-ascii",
+#                            "interop-rtu-pty" and "interop-tls" jobs (needs Docker;
+#                            interop/pymodbus/interop.sh, then interop/libmodbus/interop.sh,
+#                            interop/modbus-tk/interop.sh, interop/toxiproxy/interop.sh,
+#                            interop/diagslave/interop.sh in its enc, ascii and rtu-pty modes and
+#                            interop/pymodbus/tls.sh, evidence under target/interop-evidence/
 #                            and its libmodbus/, modbus-tk/, toxiproxy/, diagslave-rtu/,
-#                            diagslave-ascii/ and diagslave-rtu-pty/). The UDP peer is not part
+#                            diagslave-ascii/, diagslave-rtu-pty/ and tls/). The UDP peer is not part
 #                            of it: it needs a
 #                            Docker that forwards published UDP ports, which colima's default
 #                            ssh forwarder does not.
@@ -32,6 +33,7 @@
 #   mise run interop-rtu   = CI "interop-rtu" job alone (slice S59b)
 #   mise run interop-ascii = CI "interop-ascii" job alone (slice S60b)
 #   mise run interop-rtu-pty = CI "interop-rtu-pty" job alone (slice S60b)
+#   mise run interop-tls   = CI "interop-tls" job alone (slice S71; pymodbus over mutual TLS)
 #   mise run interop-serial-port = CI "interop-serial-port" job (slice S59c; Linux only: diagslave
 #                            and socat on a pseudo-terminal pair of the host, the drivers' serial
 #                            carrier; not part of `mise run interop`, which also runs on macOS)
@@ -186,7 +188,7 @@ run = [
 ]
 
 [tasks.interop]
-description = "The interop peers in Docker, one after the other: pymodbus (the interop tests, the modbus_tcp_read example and profile_read for each modbus-tcp profile), libmodbus (its tests), the modbus-tk multi-unit server (its unit-ID tests), then the failure paths of pymodbus and libmodbus behind Toxiproxy with a tshark decode, keeping the evidence of each (ADR-0015 decision 16, slices S52a, S52c and S52b), then Modbus RTU over TCP against diagslave (slice S59b), then Modbus ASCII and Modbus RTU on a pseudo-terminal bridged to TCP against diagslave (slice S60b); the UDP peer of S61 is the separate interop-udp task"
+description = "The interop peers in Docker, one after the other: pymodbus (the interop tests, the modbus_tcp_read example and profile_read for each modbus-tcp profile), libmodbus (its tests), the modbus-tk multi-unit server (its unit-ID tests), then the failure paths of pymodbus and libmodbus behind Toxiproxy with a tshark decode, keeping the evidence of each (ADR-0015 decision 16, slices S52a, S52c and S52b), then Modbus RTU over TCP against diagslave (slice S59b), then Modbus ASCII and Modbus RTU on a pseudo-terminal bridged to TCP against diagslave (slice S60b), then Modbus TCP over mutual TLS against pymodbus (slice S71); the UDP peer of S61 is the separate interop-udp task"
 run = [
   "interop/pymodbus/interop.sh run",
   "interop/libmodbus/interop.sh run",
@@ -195,6 +197,7 @@ run = [
   "INTEROP_DIAGSLAVE_MODE=enc interop/diagslave/interop.sh run",
   "INTEROP_DIAGSLAVE_MODE=ascii interop/diagslave/interop.sh run",
   "INTEROP_DIAGSLAVE_MODE=rtu-pty interop/diagslave/interop.sh run",
+  "interop/pymodbus/tls.sh run",
 ]
 
 [tasks.interop-libmodbus]
@@ -224,6 +227,10 @@ run = "INTEROP_DIAGSLAVE_MODE=ascii interop/diagslave/interop.sh run"
 [tasks.interop-rtu-pty]
 description = "Build and run diagslave 3.6 as a Modbus RTU slave (diagslave -m rtu -a 1) on a pseudo-terminal that socat bridges to a TCP port in Docker, run the modbus-rtu:tcp interop tests against it (the same tests as interop-rtu, with the silence diagslave answers a unit it does not serve with), keep the evidence in target/interop-evidence/diagslave-rtu-pty/ (slice S60b, ADR-0024)"
 run = "INTEROP_DIAGSLAVE_MODE=rtu-pty interop/diagslave/interop.sh run"
+
+[tasks.interop-tls]
+description = "Build the pymodbus 3.8.6 image, make a throwaway PKI with openssl in it, run the server in its mutual-TLS mode in Docker, run the modbus-tcp:tls interop tests against it (reads, a write read back and ping, an untrusted server, a client without a certificate), keep the evidence (never a key) in target/interop-evidence/tls/ and remove the PKI (slice S71, ADR-0032)"
+run = "interop/pymodbus/tls.sh run"
 
 [tasks.interop-serial-port]
 description = "Run diagslave 3.6 (the pinned archive, checked against its SHA-256, no container) as a Modbus RTU and then a Modbus ASCII slave on one end of a pseudo-terminal pair that socat makes on this Linux host, and run the modbus-rtu and modbus-ascii interop tests against the other end through the drivers' serial carrier, with the line silence and a lost port reopened, keeping the evidence in target/interop-evidence/diagslave-serial-rtu/ and diagslave-serial-ascii/ (slice S59c, ADR-0024)"

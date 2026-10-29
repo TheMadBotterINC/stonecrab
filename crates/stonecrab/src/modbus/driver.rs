@@ -3,6 +3,8 @@
 use std::fmt;
 use std::sync::Arc;
 
+#[cfg(feature = "tls")]
+use crate::transport::TlsFactory;
 use crate::transport::{SystemClock, TcpFactory, TransportFactory, UdpFactory};
 use crate::{
     AddressOptions, Capabilities, Clock, Connection, ConnectionConfig, ConnectionUri, Driver,
@@ -21,9 +23,31 @@ const TCP: &str = "tcp";
 /// The transport code of Modbus TCP over UDP: the same MBAP frames, one per datagram.
 const UDP: &str = "udp";
 
+/// The transport code of Modbus TCP over TLS (Modbus/TCP Security): the same MBAP frames
+/// inside a TLS session (ADR-0032).
+#[cfg(feature = "tls")]
+const TLS: &str = "tls";
+
+/// The transport code of TLS with external pre-shared keys, which is refused: rustls has no
+/// external pre-shared keys (decision E11, ADR-0032).
+const TLS_PSK: &str = "tls-psk";
+
 /// The port of a connection string that names none, for `tcp` and `udp` alike (upstream
-/// `DEFAULT_TCP_PORT` and `DEFAULT_UDP_PORT`).
-const DEFAULT_PORT: u16 = 502;
+/// `DEFAULT_TCP_PORT` and `DEFAULT_UDP_PORT`), and for the `tcp` carrier of RTU and ASCII.
+pub(super) const DEFAULT_PORT: u16 = 502;
+
+/// The port of a `tls` connection string that names none (upstream `DEFAULT_TLS_PORT`, the
+/// Modbus/TCP Security port).
+#[cfg(feature = "tls")]
+const TLS_PORT: u16 = 802;
+
+/// The refusal of a transport code this build does not offer.
+#[cfg(feature = "tls")]
+const TRANSPORTS: &str = "the transport code of modbus-tcp is tcp, udp or tls";
+/// The refusal of a transport code this build does not offer.
+#[cfg(not(feature = "tls"))]
+const TRANSPORTS: &str =
+    "the transport code of modbus-tcp is tcp or udp (tls needs the tls feature)";
 
 /// The `Driver` of the `modbus-tcp` scheme: read-only Modbus TCP (function codes 01 to 04)
 /// with ping.
@@ -42,7 +66,13 @@ const DEFAULT_PORT: u16 = 502;
 /// `modbus-tcp:udp://host[:port]` for Modbus TCP over UDP (the same MBAP frames, one per
 /// datagram, over a [`UdpFactory`] socket connected to the device; ADR-0027). `host` is a
 /// name, an IPv4 address or an IPv6 address in brackets (`[::1]:502`), and the port is 1 to
-/// 65535, default 502 for both. Any other transport code is [`ErrorKind::InvalidConfig`].
+/// 65535, default 502 for both. With the `tls` feature, `modbus-tcp:tls://host[:port]` is
+/// Modbus TCP over TLS (Modbus/TCP Security, default port 802; ADR-0032): the same MBAP
+/// frames inside a TLS 1.3 or 1.2 session, opened with a
+/// [`TlsFactory`](crate::transport::TlsFactory) that trusts only the certificate authorities
+/// in the PEM file `tls.trust-store` names and, for mutual TLS, presents the certificate and
+/// key of the PEM file `tls.keystore` names. `tls-psk` is refused, because rustls has no
+/// external pre-shared keys. Any other transport code is [`ErrorKind::InvalidConfig`].
 /// Over UDP nothing is sent when the connection opens, a lost datagram is a request that
 /// times out at its deadline, and a reply that arrives twice or late is discarded by its
 /// transaction id.
@@ -54,8 +84,9 @@ const DEFAULT_PORT: u16 = 502;
 /// (`BIG_ENDIAN` by default, `LITTLE_ENDIAN`, `BIG_ENDIAN_BYTE_SWAP`,
 /// `LITTLE_ENDIAN_BYTE_SWAP`), `max-coils-per-request` (1 to 2000, default 2000) and
 /// `max-registers-per-request` (1 to 125, default 125). The shared `address-convention`
-/// key accepts `plc4x`, `one-based-40001` and `zero-based`. Every other key is
-/// [`ErrorKind::InvalidConfig`], where upstream warns (`MB-CFG-UNKNOWN`). The parsed
+/// key accepts `plc4x`, `one-based-40001` and `zero-based`. The `tls` transport needs
+/// `tls.trust-store` and takes `tls.keystore`, which no other transport takes. Every other
+/// key is [`ErrorKind::InvalidConfig`], where upstream warns (`MB-CFG-UNKNOWN`). The parsed
 /// values travel in the configuration as [`ModbusOptions`], seeded from the driver's
 /// defaults ([`with_defaults`](Self::with_defaults)) and overridden by the connection
 /// string; a configuration built by hand carries none and gets the driver's defaults.
@@ -65,7 +96,10 @@ const DEFAULT_PORT: u16 = 502;
 /// (`MB-TCP-CONNECT`); request-driven reconnect is a Stonecrab extension recorded in the
 /// same row. The `udp` transport with its default port 502 is
 /// docs/parity/modbus.md#MB-TCP-TRANSPORTS-UDP, where upstream's own default never applies
-/// (docs/parity/modbus.md#MB-QUIRK-A). [`capabilities`](Driver::capabilities) is the
+/// (docs/parity/modbus.md#MB-QUIRK-A). The `tls` transport with its default port 802 is
+/// docs/parity/modbus.md#MB-TCP-TRANSPORTS-TLS and the refused `tls-psk`
+/// docs/parity/modbus.md#MB-TCP-TRANSPORTS-TLS-PSK. [`capabilities`](Driver::capabilities) is
+/// the
 /// `MB-TCP-CAPABILITIES` value, the one every [`ModbusConnection`] reports
 /// (docs/parity/modbus.md#MB-TCP-CAPABILITIES).
 ///
@@ -104,8 +138,8 @@ pub struct ModbusTcpDriver {
 }
 
 impl ModbusTcpDriver {
-    /// A driver over the real TCP and UDP transports and the [`SystemClock`], with the
-    /// upstream connection defaults (unit 1, `BIG_ENDIAN`).
+    /// A driver over the real TCP, UDP and (feature `tls`) TLS transports and the
+    /// [`SystemClock`], with the upstream connection defaults (unit 1, `BIG_ENDIAN`).
     ///
     /// Nothing is opened until a connection is requested, so constructing the driver does
     /// no I/O. Connections must be driven inside a Tokio runtime with the time driver
@@ -253,13 +287,14 @@ impl Driver for ModbusTcpDriver {
         driver_capabilities()
     }
 
-    /// Read `modbus-tcp[:tcp|:udp]://host[:port][?parameters]` into a validated
+    /// Read `modbus-tcp[:tcp|:udp|:tls]://host[:port][?parameters]` into a validated
     /// configuration.
     ///
     /// The text is parsed with [`ConnectionUri::parse`], which already refuses duplicate
     /// and empty keys. The configuration has an [`Endpoint::Tcp`] for TCP, or for `udp` an
     /// [`Endpoint::Custom`] holding `host:port` (an IPv6 host in brackets) as
-    /// [`UdpFactory`] takes it; the core defaults for reconnect, retry and limits, a
+    /// [`UdpFactory`] takes it (for `tls` an [`Endpoint::Tcp`] with default port 802); the
+    /// core defaults for reconnect, retry and limits, a
     /// read-only access policy, and:
     ///
     /// - `request-timeout-ms` as `Timeouts.request` (5000 ms by default);
@@ -272,11 +307,15 @@ impl Driver for ModbusTcpDriver {
     /// - the six upstream parameters as a [`ModbusOptions`] in the configuration's driver
     ///   options slot, where `connect` reads them back. The options start from this
     ///   driver's defaults ([`with_defaults`](ModbusTcpDriver::with_defaults)) and the
-    ///   parameters the string names override them.
+    ///   parameters the string names override them;
+    /// - for `tls`, `tls.trust-store` and `tls.keystore` as the options' `tls` settings. The
+    ///   files are not read here: `connect` reads them.
     ///
     /// # Errors
     /// Returns [`ErrorKind::InvalidConfig`] for text that is not a valid connection string,
-    /// another scheme, a transport code other than `tcp` and `udp`, an authority that is not
+    /// another scheme, a transport code other than `tcp`, `udp` and (feature `tls`) `tls`, a
+    /// `tls` string without `tls.trust-store` or with an empty file name, a `tls.` parameter
+    /// on another transport, an authority that is not
     /// `host[:port]` (an empty host, a port that is empty, not decimal digits, zero or above
     /// 65535, an IPv6 address without brackets, a path), and a parameter that is unknown,
     /// empty, not a whole number where one is required, outside its bounds, an unknown
@@ -299,7 +338,8 @@ impl Driver for ModbusTcpDriver {
     /// `tcp` and `udp` is refused (docs/parity/modbus.md#MB-TCP-TRANSPORTS), and `udp`
     /// defaults to port 502 where upstream's default never applies
     /// (docs/parity/modbus.md#MB-QUIRK-A). The `udp.` options are refused like every other
-    /// transport option (docs/parity/modbus.md#MB-CFG-TRANSPORT-OPTIONS). `access` is a
+    /// transport option (docs/parity/modbus.md#MB-CFG-TRANSPORT-OPTIONS), except the two
+    /// `tls.` keys of docs/parity/modbus.md#MB-TCP-TRANSPORTS-TLS. `access` is a
     /// Stonecrab parameter with no upstream counterpart (docs/parity/modbus.md#MB-CFG-ACCESS),
     /// and so is `single-coil-write`, which picks function 05 for a one-coil write
     /// (docs/parity/modbus.md#MB-CFG-SINGLE-COIL).
@@ -309,14 +349,36 @@ impl Driver for ModbusTcpDriver {
             return Err(invalid("not a modbus-tcp connection string"));
         }
         let endpoint = match parsed.transport() {
-            None | Some(TCP) => endpoint(parsed.authority())?,
-            Some(UDP) => Endpoint::Custom(endpoint(parsed.authority())?.to_string()),
-            Some(_) => return Err(invalid("the transport code of modbus-tcp is tcp or udp")),
+            None | Some(TCP) => endpoint(parsed.authority(), DEFAULT_PORT)?,
+            Some(UDP) => Endpoint::Custom(endpoint(parsed.authority(), DEFAULT_PORT)?.to_string()),
+            #[cfg(feature = "tls")]
+            Some(TLS) => endpoint(parsed.authority(), TLS_PORT)?,
+            Some(TLS_PSK) => {
+                return Err(invalid(
+                    "the tls-psk transport is not offered: rustls has no external pre-shared keys",
+                ));
+            }
+            Some(_) => return Err(invalid(TRANSPORTS)),
         };
         let (options, convention, access) = ModbusOptions::from_parameters(
             ModbusOptions::from_defaults(self.defaults),
             parsed.options(),
         )?;
+        #[cfg(feature = "tls")]
+        match (parsed.transport() == Some(TLS), options.tls.is_some()) {
+            (true, false) => {
+                return Err(invalid(
+                    "the tls transport needs tls.trust-store, the PEM file of the certificate \
+                     authorities it trusts",
+                ));
+            }
+            (false, true) => {
+                return Err(invalid(
+                    "tls.trust-store and tls.keystore belong to the tls transport",
+                ));
+            }
+            (true, true) | (false, false) => {}
+        }
         let timeouts = Timeouts {
             request: options.request_timeout,
             ..Timeouts::default()
@@ -354,8 +416,12 @@ impl Driver for ModbusTcpDriver {
     ///
     /// This is [`ModbusConnection::open`] with the driver's clock and a transport factory,
     /// boxed: the whole attempt is bounded by `config.timeouts().connect`. The factory is the
-    /// injected one when there is one, else [`UdpFactory`] for an [`Endpoint::Custom`] (the
-    /// `udp` transport) and [`TcpFactory`] for any other endpoint. The unit, byte order and
+    /// injected one when there is one, else a [`TlsFactory`](crate::transport::TlsFactory)
+    /// built from the options' TLS settings when they are set (the `tls` transport, which
+    /// reads the PEM files here, once per connection, on the calling thread and before the
+    /// connect bound starts, so they must be regular local files), else [`UdpFactory`] for an
+    /// [`Endpoint::Custom`] (the `udp` transport) and [`TcpFactory`] for any other endpoint.
+    /// The unit, byte order and
     /// request-size limits come from the [`ModbusOptions`] of the configuration, else from
     /// the driver's own [`ConnectionDefaults`].
     ///
@@ -364,7 +430,9 @@ impl Driver for ModbusTcpDriver {
     /// another scheme, with a frame limit below 260 bytes or with request-size limits above
     /// the protocol maxima, [`ErrorKind::Timeout`] when
     /// the open does not finish in time and [`ErrorKind::Disconnected`] when the peer
-    /// refuses.
+    /// refuses. Over TLS also [`ErrorKind::InvalidConfig`] for a PEM file that cannot be
+    /// read or used, [`ErrorKind::Trust`] for a server certificate that fails verification
+    /// and [`ErrorKind::Authentication`] for a server that refuses the client certificate.
     ///
     /// # Cancel safety
     /// Cancel-safe, as [`ModbusConnection::open`]: a dropped call leaves no transport behind
@@ -372,7 +440,7 @@ impl Driver for ModbusTcpDriver {
     ///
     /// # Wire effects
     /// Opens a transport and sends no application bytes, as [`ModbusConnection::open`]; a
-    /// UDP socket sends nothing at all.
+    /// UDP socket sends nothing at all, and a TLS connection completes its handshake.
     ///
     /// # Compatibility: docs/parity/modbus.md#MB-TCP-CONNECT
     /// The counterpart of upstream `connect()` (`onConnect`); the reconnect behavior of
@@ -383,10 +451,9 @@ impl Driver for ModbusTcpDriver {
         let defaults = config
             .driver_options_as::<ModbusOptions>()
             .map_or(self.defaults, ModbusOptions::connection_defaults);
-        let factory: Arc<dyn TransportFactory> = match (&self.factory, config.endpoint()) {
-            (Some(factory), _) => Arc::clone(factory),
-            (None, Endpoint::Custom(_)) => Arc::new(UdpFactory::default()),
-            (None, _) => Arc::new(TcpFactory::default()),
+        let factory = match self.factory_for(&config) {
+            Ok(factory) => factory,
+            Err(error) => return Box::pin(async move { Err(error) }),
         };
         let opening = ModbusConnection::open(config, factory, Arc::clone(&self.clock), defaults);
         Box::pin(async move {
@@ -396,8 +463,37 @@ impl Driver for ModbusTcpDriver {
     }
 }
 
-/// The endpoint a `host[:port]` authority names.
-pub(super) fn endpoint(authority: &str) -> Result<Endpoint> {
+impl ModbusTcpDriver {
+    /// The factory a connection of `config` opens its transport with: the injected one, else
+    /// the transport the configuration names.
+    #[cfg_attr(
+        not(feature = "tls"),
+        expect(
+            clippy::unnecessary_wraps,
+            reason = "only building the TLS factory can fail, and it needs the tls feature"
+        )
+    )]
+    fn factory_for(&self, config: &ConnectionConfig) -> Result<Arc<dyn TransportFactory>> {
+        if let Some(factory) = &self.factory {
+            return Ok(Arc::clone(factory));
+        }
+        #[cfg(feature = "tls")]
+        if let Some(tls) = config
+            .driver_options_as::<ModbusOptions>()
+            .and_then(|options| options.tls.as_ref())
+        {
+            return Ok(Arc::new(TlsFactory::new(tls)?));
+        }
+        if matches!(config.endpoint(), Endpoint::Custom(_)) {
+            Ok(Arc::new(UdpFactory::default()))
+        } else {
+            Ok(Arc::new(TcpFactory::default()))
+        }
+    }
+}
+
+/// The endpoint a `host[:port]` authority names, with `default_port` when it names none.
+pub(super) fn endpoint(authority: &str, default_port: u16) -> Result<Endpoint> {
     let (host, port) = if let Some(bracketed) = authority.strip_prefix('[') {
         let Some((host, rest)) = bracketed.split_once(']') else {
             return Err(invalid("an IPv6 host in brackets needs a closing bracket"));
@@ -423,7 +519,7 @@ pub(super) fn endpoint(authority: &str) -> Result<Endpoint> {
         }
         (host, port)
     };
-    let port = port.map_or(Ok(DEFAULT_PORT), parse_port)?;
+    let port = port.map_or(Ok(default_port), parse_port)?;
     Ok(Endpoint::Tcp {
         host: host.to_owned(),
         port,
@@ -588,7 +684,7 @@ mod tests {
         for uri in [
             "sim://bench",
             "modbus-rtu://host",
-            "modbus-tcp:tls://host",
+            "modbus-tcp:tls-psk://host",
             "modbus-tcp:TCP://host",
             "modbus-tcp:UDP://host",
             "modbus-tcp:udp://host:0",
@@ -599,6 +695,143 @@ mod tests {
         ] {
             assert_eq!(refused(uri), ErrorKind::InvalidConfig, "{uri}");
         }
+    }
+
+    // covers: S71 / MB-TCP-TRANSPORTS-TLS-PSK refused, with the reason
+    #[test]
+    fn the_tls_psk_transport_is_refused_because_rustls_has_no_external_psk() {
+        let error = driver()
+            .parse_config("modbus-tcp:tls-psk://host?tls-psk.psk-identity=plc")
+            .expect_err("refused");
+        assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+        assert!(error.to_string().contains("pre-shared keys"), "{error}");
+        let error = driver()
+            .parse_config("modbus-tcp:tls13://host")
+            .expect_err("refused");
+        assert_eq!(error.to_string(), TRANSPORTS, "another code");
+    }
+
+    // covers: S71 / MB-TCP-TRANSPORTS-TLS default port 802 and the two tls. keys
+    #[cfg(feature = "tls")]
+    #[test]
+    fn driver_accepts_the_tls_transport_and_defaults_port_802() {
+        use std::path::Path;
+
+        let config = driver()
+            .parse_config(
+                "modbus-tcp:tls://plc.example?tls.trust-store=/etc/plc/ca.pem\
+                 &tls.keystore=/etc/plc/client.pem&default-unit-identifier=3",
+            )
+            .expect("config");
+        assert_eq!(config.endpoint(), &tcp("plc.example", 802));
+        let options = config
+            .driver_options_as::<ModbusOptions>()
+            .expect("options");
+        let tls = options.tls.as_ref().expect("tls settings");
+        assert_eq!(tls.trust_store, Path::new("/etc/plc/ca.pem"));
+        assert_eq!(
+            tls.keystore.as_deref(),
+            Some(Path::new("/etc/plc/client.pem"))
+        );
+        assert_eq!(options.unit_id, crate::modbus::UnitId::from(3));
+        assert_eq!(
+            endpoint_of("modbus-tcp:tls://[::1]:8802?tls.trust-store=ca.pem"),
+            tcp("::1", 8802)
+        );
+        let plain = driver()
+            .parse_config("modbus-tcp:tls://host?tls.trust-store=ca.pem")
+            .expect("config");
+        let options = plain.driver_options_as::<ModbusOptions>().expect("options");
+        assert_eq!(
+            options.tls.as_ref().and_then(|tls| tls.keystore.as_ref()),
+            None,
+            "no keystore, no client certificate"
+        );
+        assert!(
+            driver()
+                .parse_config("modbus-tcp://host")
+                .expect("tcp")
+                .driver_options_as::<ModbusOptions>()
+                .is_some_and(|options| options.tls.is_none()),
+            "tcp carries no TLS settings"
+        );
+    }
+
+    // covers: S71 / MB-CFG-TRANSPORT-OPTIONS the tls. keys belong to the tls transport
+    #[cfg(feature = "tls")]
+    #[test]
+    fn the_tls_keys_are_required_on_tls_and_refused_elsewhere() {
+        for (uri, says) in [
+            ("modbus-tcp:tls://host", "needs tls.trust-store"),
+            (
+                "modbus-tcp:tls://host?tls.keystore=client.pem",
+                "tls.keystore needs tls.trust-store",
+            ),
+            (
+                "modbus-tcp:tls://host?tls.trust-store=",
+                "must name a PEM file",
+            ),
+            (
+                "modbus-tcp:tls://host?tls.trust-store=ca.pem&tls.keystore=",
+                "must name a PEM file",
+            ),
+            (
+                "modbus-tcp:tls://host?tls.trust-store=ca.pem&tls.verify=false",
+                "the TLS parameters are tls.trust-store and tls.keystore",
+            ),
+            (
+                "modbus-tcp:tls://host?tls.trust-store=ca.pem&tls.keystore-password=x",
+                "the TLS parameters are tls.trust-store and tls.keystore",
+            ),
+            (
+                "modbus-tcp://host?tls.trust-store=ca.pem",
+                "belong to the tls transport",
+            ),
+            (
+                "modbus-tcp:udp://host?tls.trust-store=ca.pem",
+                "belong to the tls transport",
+            ),
+            ("modbus-tcp:tls://host:0?tls.trust-store=ca.pem", "port"),
+        ] {
+            let error = driver().parse_config(uri).expect_err("refused");
+            assert_eq!(error.kind(), ErrorKind::InvalidConfig, "{uri}");
+            assert!(error.to_string().contains(says), "{uri}: {error}");
+        }
+    }
+
+    // covers: S71 / ADR-0032 the trust store is read at connect, before any open
+    #[cfg(feature = "tls")]
+    #[test]
+    fn connect_reads_the_trust_store_and_refuses_one_it_cannot_read_before_any_open() {
+        let config = driver()
+            .parse_config("modbus-tcp:tls://127.0.0.1?tls.trust-store=/nonexistent/ca.pem")
+            .expect("config");
+        let error = block_on_with(&FakeClock::default(), driver().connect(config))
+            .err()
+            .expect("the trust store cannot be read");
+        assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+        assert!(error.to_string().contains("tls.trust-store"), "{error}");
+        assert!(!error.to_string().contains("nonexistent"), "{error}");
+    }
+
+    // covers: S71 / ADR-0032 an injected factory serves the tls transport too
+    #[cfg(feature = "tls")]
+    #[test]
+    fn an_injected_factory_serves_the_tls_transport() {
+        let clock = FakeClock::default();
+        let factory = FakeTransportFactory::new(clock.clone());
+        factory.push_script(Script::default());
+        let driver = ModbusTcpDriver::new()
+            .with_clock(Arc::new(clock.clone()))
+            .with_transport_factory(Arc::new(factory.clone()));
+        let config = driver
+            .parse_config("modbus-tcp:tls://192.0.2.10?tls.trust-store=/nonexistent/ca.pem")
+            .expect("config");
+        block_on_with(&clock, driver.connect(config)).expect("the fake opens, no file is read");
+        assert_eq!(
+            factory.opens().first().map(|call| call.endpoint.clone()),
+            Some(tcp("192.0.2.10", 802))
+        );
     }
 
     // covers: ALPHA_PLAN S26 / parameters reach the timeouts, the options and the convention

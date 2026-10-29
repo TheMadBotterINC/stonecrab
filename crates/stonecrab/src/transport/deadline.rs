@@ -122,6 +122,31 @@ impl Site {
     };
 }
 
+/// The TLS transport's sites, so that a failure names TLS rather than the TCP under it.
+#[cfg(feature = "tls")]
+impl Site {
+    /// Connecting and completing the TLS handshake.
+    pub(crate) const TLS_CONNECT: Self = Self {
+        name: "tls connect",
+        operation: Some(Operation::Connect),
+    };
+    /// Sending one frame as TLS records.
+    pub(crate) const TLS_SEND: Self = Self {
+        name: "tls send",
+        operation: None,
+    };
+    /// Receiving decrypted bytes.
+    pub(crate) const TLS_RECV: Self = Self {
+        name: "tls receive",
+        operation: None,
+    };
+    /// Sending `close_notify` and closing the connection.
+    pub(crate) const TLS_SHUTDOWN: Self = Self {
+        name: "tls shutdown",
+        operation: Some(Operation::Close),
+    };
+}
+
 /// The monotonic reading deadlines are judged against: Tokio's clock, which is the plain
 /// `std::time::Instant::now()` unless a test has paused time.
 #[expect(

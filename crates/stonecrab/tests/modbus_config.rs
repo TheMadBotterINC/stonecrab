@@ -108,13 +108,17 @@ mod tests {
     // covers: ALPHA_PLAN S26 / MB-TCP-TRANSPORTS, MB-QUIRK-A other transports refused
     #[test]
     fn driver_rejects_other_transport_codes() {
-        for code in ["tls", "tls-psk", "test", "TCP", "UDP", "tcp2", "udp6", ""] {
+        // `tls` is a transport with the `tls` feature (S71) and refused without it; with the
+        // feature a `tls` string without its trust store is refused too.
+        for code in [
+            "tls", "tls-psk", "test", "TCP", "UDP", "TLS", "tcp2", "udp6", "",
+        ] {
             assert_refused(&format!("modbus-tcp:{code}://192.0.2.10"));
         }
         assert_refused("modbus-rtu://192.0.2.10");
         assert_refused("sim://bench");
         assert_refused("192.0.2.10");
-        assert_refused("modbus-tcp:tls://192.0.2.10?request-timeout-ms=100");
+        assert_refused("modbus-tcp:tls-psk://192.0.2.10?request-timeout-ms=100");
     }
 
     // covers: ALPHA_PLAN S26 / MB-TCP-TRANSPORTS port bounds

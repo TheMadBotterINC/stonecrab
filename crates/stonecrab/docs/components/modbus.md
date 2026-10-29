@@ -70,11 +70,16 @@ tests run the driver over an in-memory transport and over loopback sockets.
   string says `access=read-write`.
 
 ### Connection strings
-`modbus-tcp://host[:port]` or `modbus-tcp:tcp://host[:port]` for TCP, and
-`modbus-tcp:udp://host[:port]` for Modbus TCP over UDP, followed by an optional
+`modbus-tcp://host[:port]` or `modbus-tcp:tcp://host[:port]` for TCP,
+`modbus-tcp:udp://host[:port]` for Modbus TCP over UDP and, with the `tls` feature,
+`modbus-tcp:tls://host[:port]` for Modbus TCP over TLS, followed by an optional
 `?key=value&key=value`. The host is a name, an IPv4 address or an IPv6 address in brackets
-(`[::1]:502`); the port is 1 to 65535 and defaults to 502 for both transport codes (`tls`
-and the rest are `InvalidConfig`). Over UDP the same MBAP frames travel one per datagram on a
+(`[::1]:502`); the port is 1 to 65535 and defaults to 502 for `tcp` and `udp` and to 802 for
+`tls` (`tls-psk` and the rest are `InvalidConfig`). Over TLS the same MBAP frames travel
+inside a TLS 1.3 or 1.2 session (`TlsFactory`, ADR-0032): the server must present a
+certificate for the host that chains to an authority of `tls.trust-store`, and
+`tls.keystore` supplies the client certificate for mutual TLS; there is no way to turn
+verification off. `tls-psk` is refused because rustls has no external pre-shared keys. Over UDP the same MBAP frames travel one per datagram on a
 socket connected to the device (`UdpFactory`, ADR-0027): connecting sends nothing, a lost
 datagram is a request that times out at its deadline, a reply that arrives twice or after
 its request timed out is discarded by its transaction id, and no `udp.` option is offered
@@ -82,8 +87,9 @@ its request timed out is discarded by its transaction id, and no `udp.` option i
 not contain whitespace, control characters or `%`, nor a `user:password@` part, and is at
 most 4096 bytes.
 
-The six upstream parameters, the shared `address-convention` key and Stonecrab's `access`
-and `single-coil-write` keys are the only keys. A
+The six upstream parameters, the shared `address-convention` key, Stonecrab's `access`
+and `single-coil-write` keys and, on `tls` only, `tls.trust-store` and `tls.keystore` are
+the only keys. A
 key may appear once, a value may not be empty, and every other key is `InvalidConfig`
 (upstream warns and ignores it; `MB-CFG-UNKNOWN`). That includes the misspelt
 `unit-identifier` that the upstream manual test passes. An error about a parameter value
@@ -100,6 +106,8 @@ or an unknown key names the key, and no error repeats the connection string.
 | `address-convention` | none | `plc4x`, `one-based-40001` or `zero-based` | `MB-ADDR-BARE-40001`, `MB-ADDR-CONVENTIONS` |
 | `access` | `read-only` | `read-only` or `read-write`; `read-write` is what lets `write` reach the wire (a Stonecrab parameter, upstream has no access policy) | `MB-CFG-ACCESS` |
 | `single-coil-write` | `fc15` | `fc15` or `fc05`; `fc05` writes exactly one coil with function 05, for a device that lists only function 05 for a bit; two or more coils stay function 15 (a Stonecrab parameter, upstream always sends function 15; `modbus-rtu` and `modbus-ascii` take it too) | `MB-CFG-SINGLE-COIL` |
+| `tls.trust-store` | none, required on `tls` | the PEM file of the certificate authorities the server's certificate must chain to, read by `connect`; refused on `tcp` and `udp` (feature `tls`) | `MB-TCP-TRANSPORTS-TLS`, `UTR-TLS-TRUST` |
+| `tls.keystore` | none | the PEM file of the client certificate chain and its unencrypted private key, for mutual TLS; needs `tls.trust-store`; its path never appears in `redacted_display` (feature `tls`) | `MB-TCP-TRANSPORTS-TLS`, `UTR-TLS-TRUST` |
 
 Numbers are decimal digits only: no sign, no space, no `0x`. `address-convention` is the
 explicit-convention rule of the address grammar below: the bare short forms such as
@@ -308,6 +316,8 @@ device has been tried.
 | Extended registers: read by function code 20 and write by function code 21, cut at the end of each 10000-register file (`extended-register:N`, `6x`, bare `6`) | simulator-tested |
 | Subscribe by polling: cyclic and change-of-state, event refused (`Connection::subscribe`) | simulator-tested |
 | Browse and discover | not supported |
+| Modbus TCP over TLS (`modbus-tcp:tls`, feature `tls`): reads, writes and ping with mutual TLS; untrusted, expired and misnamed server certificates refused as `Trust`, a refused client certificate as `Authentication` (job `interop-tls` against pymodbus 3.8.6 with mutual TLS, 3 of 3 in its local run on 2026-10-29, first hosted run pending; loopback tests against rustls's server) | interoperability-tested |
+| Modbus TCP over TLS-PSK (rustls has no external pre-shared keys) | not supported |
 | Connection string and parameters (`parse_config`) | simulator-tested |
 | Connect, close and connection state | interoperability-tested |
 | Reconnect (in the background when opened in a Tokio runtime, else request-driven), the idle bound, read retry, cancellation, timeout and late-reply discard | simulator-tested |

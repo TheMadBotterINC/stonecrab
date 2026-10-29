@@ -1290,6 +1290,7 @@ mod tests {
 
     // covers: MBS-TRANS-TCP / ascii_over_tcp_default_port_is_502
     // covers: MBS-TRANS-TLS / tls, tls-psk, udp and test carriers are refused
+    // covers: MBS-CFG-TRANSPORT-OPTIONS / the tls. keys are refused on the serial and tcp carriers
     // covers: MBS-TRANS-GO-CARRIERS / the carriers are serial and tcp
     #[test]
     fn ascii_carriers_are_serial_and_tcp() {
@@ -1322,6 +1323,23 @@ mod tests {
         ] {
             let error = driver.parse_config(uri).expect_err(uri);
             assert_eq!(error.kind(), ErrorKind::InvalidConfig, "{uri}");
+        }
+        // The tls. keys of modbus-tcp:tls are refused on every carrier, in every build: no
+        // carrier here is TLS, so accepting them would open plain TCP (ADR-0032, decision 13).
+        for uri in [
+            "modbus-ascii:tcp://192.0.2.10?tls.trust-store=ca.pem",
+            "modbus-ascii:tcp://192.0.2.10?tls.trust-store=ca.pem&tls.keystore=client.pem",
+            "modbus-ascii:tcp://192.0.2.10?tls.keystore=client.pem",
+            "modbus-ascii:///dev/ttyS1?tls.trust-store=ca.pem",
+        ] {
+            let error = driver.parse_config(uri).expect_err(uri);
+            assert_eq!(error.kind(), ErrorKind::InvalidConfig, "{uri}");
+            assert!(
+                error
+                    .to_string()
+                    .contains("modbus-ascii has no TLS carrier"),
+                "{uri}: {error}"
+            );
         }
         let config = driver
             .parse_config(&format!(

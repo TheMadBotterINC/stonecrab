@@ -1,6 +1,8 @@
 //! `ModbusOptions`: the driver-owned connection parameters of the `modbus-tcp` scheme.
 
 use std::num::{NonZeroU16, NonZeroU64};
+#[cfg(feature = "tls")]
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -10,6 +12,8 @@ use crate::{
 
 use crate::modbus::address::byte_order_by_name;
 use crate::modbus::{AddressConvention, ConnectionDefaults, ModbusAddress, UnitId};
+#[cfg(feature = "tls")]
+use crate::transport::TlsSettings;
 
 /// `request-timeout-ms`.
 const REQUEST_TIMEOUT: &str = "request-timeout-ms";
@@ -37,6 +41,12 @@ const FC05: &str = "fc05";
 const FC15: &str = "fc15";
 /// The convention the ping address is always read under.
 const PLC4X: &str = "plc4x";
+/// `tls.trust-store`, the PEM file of the trusted certificate authorities (ADR-0032).
+#[cfg(feature = "tls")]
+const TLS_TRUST_STORE: &str = "tls.trust-store";
+/// `tls.keystore`, the PEM file of the client certificate and key (ADR-0032).
+#[cfg(feature = "tls")]
+const TLS_KEYSTORE: &str = "tls.keystore";
 
 /// The most key characters an error message repeats.
 pub(super) const KEY_ECHO_LIMIT: usize = 32;
@@ -65,6 +75,7 @@ pub(super) const KEY_ECHO_LIMIT: usize = 32;
 /// | `max_coils` | `max-coils-per-request` | 2000 | 1 to 2000 |
 /// | `max_registers` | `max-registers-per-request` | 125 | 1 to 125 |
 /// | `single_coil_fc05` | `single-coil-write` | `fc15` | `fc15` or `fc05` |
+/// | `tls` (feature `tls`) | `tls.trust-store`, `tls.keystore` | none | PEM files; the `tls` transport only |
 ///
 /// `single-coil-write=fc05` is a Stonecrab extension: a write of exactly one coil goes out as
 /// function 05 where upstream sends function 15, for a device that lists only function 05 for
@@ -81,7 +92,8 @@ pub(super) const KEY_ECHO_LIMIT: usize = 32;
 /// with a range selection is read whole, every element in one request, as upstream does.
 ///
 /// The struct is `#[non_exhaustive]`; start from [`Default`] and assign the fields. Its
-/// `Debug` output carries no secrets (it has none to carry), as [`DriverOptions`] requires.
+/// `Debug` output carries no secrets, as [`DriverOptions`] requires: it holds none, and the
+/// TLS settings show whether a keystore is set but not its path (ADR-0032).
 ///
 /// # Compatibility: docs/parity/modbus.md#MB-CFG-REQUEST-TIMEOUT
 /// The six rows `MB-CFG-REQUEST-TIMEOUT`, `MB-CFG-UNIT-ID`, `MB-CFG-PING-ADDRESS`,
@@ -140,6 +152,12 @@ pub struct ModbusOptions {
     pub max_registers: NonZeroU16,
     /// Write a single coil with function 05 instead of function 15 (`single-coil-write`).
     pub single_coil_fc05: bool,
+    /// The trust store and keystore of a `modbus-tcp:tls` connection (`tls.trust-store`,
+    /// `tls.keystore`; ADR-0032); `None` for `tcp` and `udp`. When it is set, the driver
+    /// opens the connection with a [`TlsFactory`](crate::transport::TlsFactory) built from it.
+    #[cfg(feature = "tls")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "tls")))]
+    pub tls: Option<TlsSettings>,
 }
 
 impl Default for ModbusOptions {
@@ -181,6 +199,8 @@ impl ModbusOptions {
             max_coils: defaults.max_coils,
             max_registers: defaults.max_registers,
             single_coil_fc05: defaults.single_coil_fc05,
+            #[cfg(feature = "tls")]
+            tls: None,
         }
     }
 
@@ -214,9 +234,10 @@ impl ModbusOptions {
     /// ([`AccessPolicy::ReadOnly`] when it is absent).
     ///
     /// The core grammar has already refused duplicate and empty keys, so each key appears
-    /// once. Every key outside the six, `address-convention`, `access` and
-    /// `single-coil-write` is refused, which includes the misspelt `unit-identifier` of the
-    /// upstream test suite.
+    /// once. Every key outside the six, `address-convention`, `access`, `single-coil-write`
+    /// and, with the `tls` feature, `tls.trust-store` and `tls.keystore` is refused, which
+    /// includes the misspelt `unit-identifier` of the upstream test suite. The two TLS keys set
+    /// [`tls`](Self::tls); whether the transport takes them is the driver's check.
     ///
     /// The parameters override `seed`; a key the string does not name keeps the seed's value.
     pub(crate) fn from_parameters(
@@ -226,6 +247,8 @@ impl ModbusOptions {
         let mut options = seed;
         let mut convention = None;
         let mut access = AccessPolicy::ReadOnly;
+        #[cfg(feature = "tls")]
+        let (mut trust_store, mut keystore) = (None, None);
         for (key, value) in parameters {
             match key.as_str() {
                 REQUEST_TIMEOUT => {
@@ -285,8 +308,28 @@ impl ModbusOptions {
                         }
                     };
                 }
+                #[cfg(feature = "tls")]
+                TLS_TRUST_STORE => trust_store = Some(file(TLS_TRUST_STORE, value)?),
+                #[cfg(feature = "tls")]
+                TLS_KEYSTORE => keystore = Some(file(TLS_KEYSTORE, value)?),
                 other => return Err(unknown_key(other)),
             }
+        }
+        #[cfg(feature = "tls")]
+        {
+            options.tls = match (trust_store, keystore) {
+                (None, None) => None,
+                (None, Some(_)) => {
+                    return Err(invalid(format!(
+                        "{TLS_KEYSTORE} needs {TLS_TRUST_STORE}, the authorities that are trusted"
+                    )));
+                }
+                (Some(trust_store), keystore) => {
+                    let mut settings = TlsSettings::new(trust_store);
+                    settings.keystore = keystore;
+                    Some(settings)
+                }
+            };
         }
         Ok((options, convention, access))
     }
@@ -325,6 +368,16 @@ fn limit(key: &str, value: &str, max: u16) -> Result<NonZeroU16> {
         .ok_or_else(|| invalid(format!("{key} must be a whole number from 1 to {max}")))
 }
 
+/// A file named by a TLS parameter: any non-empty text, which the transport reads when the
+/// connection opens. The path is not repeated in a refusal.
+#[cfg(feature = "tls")]
+fn file(key: &str, value: &str) -> Result<PathBuf> {
+    if value.is_empty() {
+        return Err(invalid(format!("{key} must name a PEM file")));
+    }
+    Ok(PathBuf::from(value))
+}
+
 /// The ping address, parsed under the `plc4x` convention whatever the connection's own.
 /// The reason is not repeated: the address grammar is in the crate documentation.
 fn ping_address(value: &str) -> Result<ModbusAddress> {
@@ -346,6 +399,8 @@ fn unknown_key(key: &str) -> PlcError {
     }
     let hint = if key == "unit-identifier" {
         " (the upstream name is default-unit-identifier)"
+    } else if key.starts_with("tls.") && cfg!(feature = "tls") {
+        " (the TLS parameters are tls.trust-store and tls.keystore, PEM files; ADR-0032)"
     } else {
         ""
     };

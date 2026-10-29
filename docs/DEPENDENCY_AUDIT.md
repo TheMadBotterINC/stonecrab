@@ -165,19 +165,23 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
   dependency and the thread-safe callsite registry; `valuable` is off.
 - Unsafe: not `forbid(unsafe_code)`; about 33 occurrences of the keyword in its sources.
   Third-party code, outside the first-party prohibition.
-- Role in `deny.toml`: the only wrapper allowed to depend on `once_cell`
-  (`wrappers = ["tracing-core"]`).
+- Role in `deny.toml`: a wrapper allowed to depend on `once_cell`
+  (`wrappers = ["tracing-core", "rustls"]`; `rustls` since S71, entry below).
 - Alternatives: none separate from `tracing`; see above.
 - Review date: 2026-10-27.
 
-## once_cell 1.21.4 (via tracing-core, banned for first-party use)
-- Purpose: lazy and one-time initialization inside `tracing-core`'s callsite registry.
-  Reached only through `tracing-core/std`; no first-party crate depends on it.
+## once_cell 1.21.4 (via tracing-core and, with feature `tls`, rustls; banned for first-party use)
+- Purpose: lazy and one-time initialization inside `tracing-core`'s callsite registry, and,
+  since S71, inside `rustls` (its process-wide default crypto provider, through
+  `once_cell::race`). Reached only through `tracing-core/std` and `rustls`; no first-party
+  crate depends on it.
 - License: MIT OR Apache-2.0.
 - Features: the resolved set on 2026-10-27 is `alloc`, `default`, `race` and `std` (from
   `cargo tree -f '{p} {f}'`); nothing in this workspace selects them.
 - Policy: `deny.toml` keeps the ban with `reason = "use std lazy initialization in
-  first-party code"` and `wrappers = ["tracing-core"]` (decision D23). Removing the
+  first-party code"` and `wrappers = ["tracing-core", "rustls"]` (decision D23; `rustls`
+  added by S71 on 2026-10-29: without it `cargo deny check` fails with `crate 'once_cell =
+  1.21.4' is explicitly banned`, which was verified). Removing the
   wrapper makes `cargo deny check` fail with `crate 'once_cell = 1.21.4' is explicitly
   banned`; that was verified on 2026-10-27 and the wrapper restored. Any other crate that
   starts depending on `once_cell` fails the same check and needs its own wrapper entry and
@@ -544,3 +548,115 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
   platform; the gate still uses whichever exists for its own step 3).
 - Review date: 2026-10-29. This records the trust boundary, not a memory-safety
   certification.
+
+## rustls 0.23.46 (stonecrab, feature `tls`)
+- Purpose: the TLS 1.3 and 1.2 client of the TLS transport (`stonecrab::transport::TlsFactory`,
+  slice S71, ADR-0032; decision E11 of 2026-10-29 chose rustls with the ring provider). It
+  verifies the server's certificate against the caller's trust anchors and the host name
+  (through `rustls-webpki`), presents the client certificate for mutual TLS, and parses the
+  PEM files (through `rustls-pki-types`). The standard library has no TLS.
+- License: Apache-2.0 OR ISC OR MIT. All in the `deny.toml` allow list.
+- Features: `default-features = false` in `[workspace.dependencies]` (`rustls = "0.23"`),
+  with `ring` (the provider), `std` (file-backed PEM parsing, the session cache) and `tls12`.
+  The defaults `aws_lc_rs`, `prefer-post-quantum` and `logging` stay off: `logging` would
+  bring `log`, which `deny.toml` bans, and aws-lc-rs is the provider E11 did not choose.
+  Enabled only by the `tls` feature (`tls = ["transport", "dep:rustls", "dep:tokio-rustls"]`),
+  which no other feature turns on, so the default build has none of the crates of this and
+  the next entries.
+- Unsafe: `rustls` is `#![forbid(unsafe_code)]`. The keyword's remaining occurrences in its
+  sources (5 on 2026-10-29) are that attribute and documentation.
+- Banned crates: it depends on `once_cell` unconditionally (its `std` feature only adds
+  `once_cell/std`), so `deny.toml` names it as a second wrapper of that ban (entry above).
+  The D23 check (`cargo tree --locked -p stonecrab --all-features -e normal,dev,build -i
+  <name>`) finds `once_cell` through `tracing-core` and `rustls` and `lazy_static` through
+  `sharded-slab`; `log`, `time` and `chrono` match no package.
+- Transitive crates (`cargo tree -e normal --target all --features tls`): `ring`,
+  `rustls-webpki`, `rustls-pki-types`, `subtle`, `zeroize` and `once_cell` (entries below and
+  above); `Cargo.lock` gains `getrandom` 0.2.17, `ring` 0.17.14, `rustls` 0.23.46,
+  `rustls-pki-types` 1.15.1, `rustls-webpki` 0.103.16, `subtle` 2.6.1, `tokio-rustls` 0.26.6,
+  `untrusted` 0.9.0, `zeroize` 1.9.1 and, for Windows targets only, `windows-sys` 0.52.0 with
+  `windows-targets` 0.52.6 and its eight `windows_*` 0.52.6 import-library crates.
+- Behavior to know: the client configuration keeps the rustls defaults that matter here:
+  no key log (`NoKeyLog`), SNI for DNS names, an in-memory session cache of 256 entries
+  (a reconnect may resume), no ALPN, and revocation is not checked.
+- Alternatives: `native-tls` and `openssl` (banned in `deny.toml`; platform-dependent
+  behavior), `aws-lc-rs` as the provider (CMake and NASM in the build; E11 chose ring),
+  `boring` (BoringSSL bindings, the same objections).
+- Maintenance: 0.23.46 is the newest 0.23 release on the review date (0.24 is a pre-release);
+  `cargo deny` reports no RUSTSEC advisory.
+- Review date: 2026-10-29. `cargo-deny` passes advisory, license, ban and source checks with
+  the `rustls` wrapper; this records the trust boundary, not a memory-safety certification.
+
+## tokio-rustls 0.26.6 (stonecrab, feature `tls`)
+- Purpose: drives a rustls client session over a Tokio `TcpStream` (`TlsConnector`,
+  `client::TlsStream` with `AsyncRead` and `AsyncWrite`), which the TLS transport wraps in its
+  deadlines. The tests also use its server side (`TlsAcceptor`) as the loopback peer.
+- License: MIT OR Apache-2.0.
+- Features: `default-features = false` (`tokio-rustls = "0.26"`) with `ring` and `tls12`; the
+  defaults `logging` and `aws_lc_rs` stay off for the reasons of the rustls entry.
+- Unsafe: none in its sources on 2026-10-29 (the keyword does not occur), although the crate
+  does not declare `forbid(unsafe_code)`. No build script.
+- Alternatives: driving `rustls::ClientConnection` by hand over the socket (the read and
+  write state machine tokio-rustls already is), `async-tls` (unmaintained).
+- Review date: 2026-10-29.
+
+## ring 0.17.14 (via rustls with feature `tls`; dev-dependency of stonecrab)
+- Purpose: the cryptography of the rustls provider: AEAD ciphers, X25519 and ECDH key
+  exchange, ECDSA, Ed25519 and RSA signature verification and signing, HKDF and HMAC, and
+  the system random generator. As a dev-dependency (`ring = { workspace = true }` in
+  `[dev-dependencies]`, `default-features = false` in `[workspace.dependencies]`) it makes
+  the Ed25519 keys and signatures of the test certificate authorities
+  (`crates/stonecrab/tests/support/tls_pki.rs`); the same version as the normal graph, so the
+  lock gains nothing for it.
+- License: Apache-2.0 AND ISC (its own code under ISC-style terms, parts derived from
+  BoringSSL under Apache-2.0 and ISC). Both are in the allow list.
+- Features: through `rustls/ring` the defaults `alloc` and `dev_urandom_fallback`; the
+  dev-dependency adds none.
+- Native code: its build script compiles C and assembly (from BoringSSL) with `cc` 1.10.0,
+  which was already in `Cargo.lock` (with `shlex` and `find-msvc-tools`), so a build with
+  `tls` needs a C compiler, and the targets ring supports are the targets the feature
+  supports. The crate is not `forbid(unsafe_code)`: about 230 lines carry the keyword on
+  2026-10-29 (the FFI to the C and assembly primitives, CPU feature detection, constant-time
+  helpers). That is the expected surface of a cryptographic library, and the reason E11 put
+  it behind an opt-in feature.
+- Transitive crates: `cfg-if` and `libc` (already present), `untrusted` 0.9.0 (ISC; a
+  panic-free DER and byte reader, no `unsafe`), `getrandom` 0.2.17 (MIT OR Apache-2.0; 58
+  lines with the keyword: the operating-system random calls) and, on Windows,
+  `windows-sys` 0.52.0 (bindings).
+- Duplicates (CODING_STANDARDS 10.7): `getrandom` 0.2.17 beside the 0.4.3 that `proptest`
+  brings to dev builds, and, on Windows, `windows-sys` 0.52.0 beside the 0.61.2 of Tokio and
+  `serial2`. `ring` 0.17 pins both older majors and has no release on the newer ones; they
+  are justified here and stay until a ring release moves. `cargo deny` reports the
+  `windows-sys` pair as a warning (`multiple-versions = "warn"`), and Clippy's
+  `multiple_crate_versions` stays quiet under `-D warnings`.
+- Maintenance: 0.17.14 is past RUSTSEC-2025-0009 (fixed in 0.17.12); `cargo deny` reports no
+  advisory on the review date.
+- Review date: 2026-10-29.
+
+## rustls-webpki 0.103.16 (via rustls with feature `tls`)
+- Purpose: X.509 path building and verification for rustls: chain to a trust anchor,
+  validity dates, basic constraints, extended key usage and the subject alternative names
+  the server name must match.
+- License: ISC.
+- Features: `alloc`, `ring` and `std`, selected by rustls.
+- Unsafe: none in its sources on 2026-10-29. No build script.
+- Review date: 2026-10-29.
+
+## rustls-pki-types 1.15.1 (via rustls with feature `tls`)
+- Purpose: the shared certificate, private-key and server-name types of the rustls crates,
+  and the PEM parser (`PemObject`) the TLS transport reads the trust store and the keystore
+  with, which replaces the deprecated `rustls-pemfile`.
+- License: MIT OR Apache-2.0.
+- Features: `alloc`, `default` and `std` (file and slice PEM parsing).
+- Unsafe: one line with the keyword on 2026-10-29. Its private-key types implement
+  `zeroize::Zeroize` for an owner that calls it; they are not cleared on drop by themselves,
+  which is why ADR-0032 claims no zeroization beyond what rustls does.
+- Review date: 2026-10-29.
+
+## subtle 2.6.1 and zeroize 1.9.1 (via rustls with feature `tls`)
+- Purpose: `subtle` gives rustls constant-time comparisons (BSD-3-Clause; 2 lines with the
+  keyword); `zeroize` is how rustls clears its own key material, and the `Zeroize` impls of
+  `rustls-pki-types` (Apache-2.0 OR MIT; 20 lines with the keyword, volatile writes and
+  fences, which is its purpose).
+- Features: `zeroize` with `alloc`; `subtle` with none. No build script in either.
+- Review date: 2026-10-29.

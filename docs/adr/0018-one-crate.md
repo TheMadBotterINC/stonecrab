@@ -193,3 +193,11 @@ pulls in `transport`, `serial` and `tracing`, so the default build contains `ser
 of ADR-0014 announced. The Modbus RTU driver needs the serial transport, and the
 `modbus-rtu` scheme is part of the `modbus` module. No feature is added or removed, and the
 Tokio-free core of `default-features = false` is unchanged.
+
+## Addendum (S71, 2026-10-29): the opt-in `tls` feature
+ADR-0032 adds a `tls` feature to the feature table of decision 2: it pulls in `transport`,
+`rustls` 0.23 with the `ring` provider and `tokio-rustls` 0.26, and gives `modbus-tcp` its
+`tls` transport when `modbus` is on too. It is in neither the default set nor `full`, so the
+default build and its lock-file closure are unchanged and a user opts in with
+`features = ["tls"]`. It is still one crate with one version (decision 1); the new crates and
+their licenses are in `docs/DEPENDENCY_AUDIT.md`.

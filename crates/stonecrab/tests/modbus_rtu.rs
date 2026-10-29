@@ -1269,6 +1269,7 @@ mod tests {
     // covers: MBS-TRANS-TCP / rtu_over_tcp_default_port_is_502
     // covers: MBS-CFG-TRANSPORT-OPTIONS / rtu_over_tcp_tcp_prefixed_option_is_rejected
     // covers: MBS-TRANS-TLS / tls, tls-psk, udp and test carriers are refused
+    // covers: MBS-CFG-TRANSPORT-OPTIONS / the tls. keys are refused on the serial and tcp carriers
     // covers: MBS-TRANS-GO-CARRIERS / go_carrier_set_is_a_subset_of_stonecrab_carriers
     #[test]
     fn the_carriers_are_serial_and_tcp() {
@@ -1300,6 +1301,21 @@ mod tests {
         ] {
             let error = driver.parse_config(uri).expect_err(uri);
             assert_eq!(error.kind(), ErrorKind::InvalidConfig, "{uri}");
+        }
+        // The tls. keys of modbus-tcp:tls are refused on every carrier, in every build: no
+        // carrier here is TLS, so accepting them would open plain TCP (ADR-0032, decision 13).
+        for uri in [
+            "modbus-rtu:tcp://192.0.2.10?tls.trust-store=ca.pem",
+            "modbus-rtu:tcp://192.0.2.10?tls.trust-store=ca.pem&tls.keystore=client.pem",
+            "modbus-rtu:tcp://192.0.2.10?tls.keystore=client.pem",
+            "modbus-rtu:///dev/ttyS1?tls.trust-store=ca.pem",
+        ] {
+            let error = driver.parse_config(uri).expect_err(uri);
+            assert_eq!(error.kind(), ErrorKind::InvalidConfig, "{uri}");
+            assert!(
+                error.to_string().contains("modbus-rtu has no TLS carrier"),
+                "{uri}: {error}"
+            );
         }
         let config = driver
             .parse_config(&format!(

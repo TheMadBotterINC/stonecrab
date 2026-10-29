@@ -12,6 +12,8 @@ mod serial;
 #[cfg(feature = "serial")]
 mod serial_worker;
 mod tcp;
+#[cfg(feature = "tls")]
+mod tls;
 mod traits;
 mod udp;
 
@@ -25,5 +27,8 @@ pub use jitter::Jitter;
 #[cfg_attr(docsrs, doc(cfg(feature = "serial")))]
 pub use serial::{DataBits, FlowControl, Parity, SerialFactory, SerialTransport, StopBits};
 pub use tcp::{TcpFactory, TcpTransport};
+#[cfg(feature = "tls")]
+#[cfg_attr(docsrs, doc(cfg(feature = "tls")))]
+pub use tls::{TlsFactory, TlsSettings};
 pub use traits::{Transport, TransportFactory};
 pub use udp::{UdpFactory, UdpTransport};

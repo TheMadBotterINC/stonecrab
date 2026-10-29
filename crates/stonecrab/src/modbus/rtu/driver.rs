@@ -12,7 +12,7 @@ use crate::{
 };
 
 use crate::modbus::connection::driver_capabilities;
-use crate::modbus::driver::endpoint;
+use crate::modbus::driver::{DEFAULT_PORT, endpoint};
 use crate::modbus::options::invalid;
 use crate::modbus::rtu::line::SerialOptions;
 use crate::modbus::rtu::pace::PacedFactory;
@@ -369,7 +369,7 @@ pub(super) fn parse_serial_config(wire: Wire, uri: &str) -> Result<ConnectionCon
     }
     let endpoint = match parsed.transport() {
         None | Some(SERIAL) => Endpoint::Custom(parsed.authority().to_owned()),
-        Some(TCP) => endpoint(parsed.authority())?,
+        Some(TCP) => endpoint(parsed.authority(), DEFAULT_PORT)?,
         Some(_) => {
             return Err(invalid(format!(
                 "the transport code of {scheme} is serial or tcp; tls, tls-psk, udp and test \

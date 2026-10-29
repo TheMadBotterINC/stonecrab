@@ -15,7 +15,7 @@
 path = "server.py"
 origin = "fixtures/modbus/interop/register-map.toml, fixtures/modbus/interop/text-registers.toml (S49) and docs/parity/modbus.md, section \"Interop register map\" (rows MB-INTEROP-*); pymodbus 3.8.6 API documentation"
 license = "Apache-2.0"
-note = "First-party. Serves the register map over Modbus TCP on pymodbus 3.8.6. Not derived from upstream's modbus_server.py."
+note = "First-party. Serves the register map over Modbus TCP on pymodbus 3.8.6, and since S71 over mutual TLS with --tls-cert, --tls-key and --tls-ca. Not derived from upstream's modbus_server.py."
 
 [[file]]
 path = "Dockerfile"
@@ -46,3 +46,9 @@ path = "README.md"
 origin = "Authored for S27"
 license = "Apache-2.0"
 note = "First-party."
+
+[[file]]
+path = "tls.sh"
+origin = "Authored for S71 (ADR-0032) from interop.sh and the pymodbus 3.8.6 and OpenSSL 3.5 command documentation"
+license = "Apache-2.0"
+note = "First-party. Builds the image, makes a throwaway PKI with openssl inside it, runs server.py in its mutual-TLS mode, probes, runs the interop_tls_ tests, keeps evidence without keys and removes the PKI; shared by the CI job interop-tls and mise run interop-tls."

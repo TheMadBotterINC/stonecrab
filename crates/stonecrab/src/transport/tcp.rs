@@ -243,8 +243,9 @@ async fn connect_first(addresses: impl IntoIterator<Item = SocketAddr>) -> io::R
         .unwrap_or_else(|| io::Error::new(io::ErrorKind::NotFound, "name resolved to no address")))
 }
 
-/// Resolve `host:port` and connect, as one future so a single deadline covers both.
-async fn resolve_and_connect(host: &str, port: u16) -> io::Result<TcpStream> {
+/// Resolve `host:port` and connect, as one future so a single deadline covers both. The TLS
+/// transport connects with it too.
+pub(super) async fn resolve_and_connect(host: &str, port: u16) -> io::Result<TcpStream> {
     connect_first(lookup_host((host, port)).await?).await
 }
 

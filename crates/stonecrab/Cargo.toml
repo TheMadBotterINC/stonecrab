@@ -27,6 +27,10 @@ default = ["sim", "modbus", "sensors"]
 full = ["sim", "modbus", "sensors"]
 # Deadline-bounded byte transports and the Tokio TCP and UDP transports (`stonecrab::transport`).
 transport = ["dep:tokio"]
+# The TLS transport (`stonecrab::transport::TlsFactory`) and `modbus-tcp:tls` with mutual TLS:
+# rustls on the ring provider, TLS 1.3 and 1.2, trust anchors from the caller (ADR-0032). Off by
+# default; needs the transport.
+tls = ["transport", "dep:rustls", "dep:tokio-rustls"]
 # The serial transport on a blocking worker thread (`stonecrab::transport::SerialTransport`).
 # Needs the transport. `modbus` enables it for Modbus RTU (ADR-0024).
 serial = ["transport", "dep:serial2"]
@@ -197,8 +201,16 @@ name = "modbus_interop_toxiproxy"
 required-features = ["modbus", "testkit"]
 
 [[test]]
+name = "modbus_interop_tls"
+required-features = ["modbus", "testkit", "tls"]
+
+[[test]]
 name = "modbus_udp"
 required-features = ["modbus", "testkit"]
+
+[[test]]
+name = "modbus_tls"
+required-features = ["modbus", "testkit", "tls"]
 
 [[test]]
 name = "modbus_parse"
@@ -364,6 +376,10 @@ required-features = ["testkit"]
 name = "transport_udp"
 required-features = ["testkit"]
 
+[[test]]
+name = "transport_tls"
+required-features = ["tls"]
+
 # Benchmarks (slice S52, ADR-0009 addendum): Criterion supplies its own `main`, so the default
 # libtest harness is off. Run them with `mise run bench`; `mise run bench-compare` is the
 # scheduled job's 10% regression gate.
@@ -386,6 +402,8 @@ serial2 = { workspace = true, optional = true }
 serde = { workspace = true, optional = true, features = ["derive"] }
 serde_json = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }
+rustls = { workspace = true, optional = true }
+tokio-rustls = { workspace = true, optional = true }
 
 # Test and example tooling only; never part of the packaged runtime graph.
 [dev-dependencies]
@@ -397,3 +415,5 @@ tracing-subscriber.workspace = true
 # The `unix` feature adds `SerialPort::pair`, the pseudo-terminal pair of the serial tests.
 serial2 = { workspace = true, features = ["unix"] }
 roxmltree.workspace = true
+# The TLS tests generate their certificate authorities at run time with ring's Ed25519 keys.
+ring.workspace = true

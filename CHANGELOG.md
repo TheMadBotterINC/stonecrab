@@ -79,6 +79,35 @@ placeholder.
   - Build, the `modbus` feature enables `serial` (S59, E10), so a build with Modbus TCP only
     also compiles the `serial2` dependency. A build with `default-features = false` and
     without `modbus` is unchanged.
+- TLS transport and Modbus TCP over TLS (ADR-0032, slice S71, decision E11; additive, behind
+  the new opt-in `tls` feature, which is not in `default` or `full`). `stonecrab::transport::TlsFactory`
+  and `TlsSettings`: rustls 0.23 on the ring provider (with `tokio-rustls` 0.26), TLS 1.3 and
+  1.2, ring's default AEAD suites. The server must present a certificate for the endpoint's
+  host (a DNS name or an IP address) that chains to an authority of the caller's PEM trust
+  store; there are no web PKI roots, no platform store and no way to turn verification off.
+  A PEM keystore (certificate chain and unencrypted key) adds a client certificate for mutual
+  TLS. One deadline covers resolution, connect and handshake. A failed certificate check is
+  `Trust`, a server's certificate alert `Authentication` (under TLS 1.3 at the first receive),
+  other failures `Disconnected`, an unusable PEM file `InvalidConfig` naming the option and
+  never a path. `TlsSettings`'s `Debug`, and so `redacted_display`, hides the keystore path;
+  no session key is logged and no password is taken. `modbus-tcp:tls://host[:port]` (default
+  port 802) with `tls.trust-store` (required) and `tls.keystore`, upstream's names; the other
+  `tls.` keys, `verify` and `ignore-common-name` included, stay `InvalidConfig`.
+  `ModbusOptions` gains `tls: Option<TlsSettings>` under the feature, and
+  `ModbusTcpDriver::connect` builds the factory from it. `modbus-tcp:tls-psk` is refused with
+  its reason (rustls has no external pre-shared keys); the RTU and ASCII `tls` carriers stay
+  refused. Without the feature `modbus-tcp:tls` is refused as before. Dependencies (audited):
+  `rustls`, `tokio-rustls`, `ring` (C and assembly: a C compiler is needed),
+  `rustls-webpki`, `rustls-pki-types`, `untrusted`, `subtle`, `zeroize`, `getrandom` 0.2 and,
+  on Windows, `windows-sys` 0.52; `deny.toml` names `rustls` as a wrapper of the `once_cell`
+  ban; `ring` is also a dev-dependency, for the test certificate authorities made at run time
+  (no key is committed). Interop: pymodbus 3.8.6 in its image, in a new mutual-TLS mode of
+  `interop/pymodbus/server.py`, with a PKI that openssl makes in the image at run time, in the
+  new `interop-tls` CI job and `mise run interop-tls`, which `mise run interop` now includes
+  (3 of 3 locally on 2026-10-29; pymodbus closes without its alert when it refuses a client,
+  which reads as `Disconnected`). Parity rows `UTR-TLS`, `UTR-TLS-TRUST` and
+  `MB-TCP-TRANSPORTS-TLS` automated-verified; `UTR-TLS-PSK`, `UTR-TLS-PSK-CONFIG` and
+  `MB-TCP-TRANSPORTS-TLS-PSK` deferred with the refusal implemented.
 - The MSpec code generator, proven on Modbus (ADR-0019 and its addendum of 2026-10-29,
   slices S66 and S67; no crate API change). Apache PLC4X's `modbus.mspec` is vendored verbatim,
   ASF header kept, at `upstream/mspec/modbus/modbus.mspec` (maintainer decision E8; upstream

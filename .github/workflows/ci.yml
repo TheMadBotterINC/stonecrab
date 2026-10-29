@@ -209,6 +209,44 @@ jobs:
           path: target/interop-evidence/
       - run: interop/pymodbus/interop.sh stop
         if: ${{ always() }}
+  interop-tls:
+    # Modbus TCP over TLS (slice S71, ADR-0032): the driver's `modbus-tcp:tls` transport against
+    # pymodbus 3.8.6 in its mutual-TLS mode (Python's ssl, that is OpenSSL), in the image of
+    # interop/pymodbus/, with a PKI that openssl makes in that image at run time. No key is
+    # committed or uploaded; the stop step removes the PKI. The steps are the subcommands of
+    # interop/pymodbus/tls.sh, which `mise run interop-tls` (and `mise run interop`) also runs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
+        with:
+          toolchain: "1.99.1"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.148
+      # docker build -f interop/pymodbus/Dockerfile -t stonecrab-interop:local .
+      - run: interop/pymodbus/tls.sh build
+      # openssl in the image: an authority, a server and a client certificate, an unrelated
+      # authority, copied out to target/interop-tls-pki/.
+      - run: interop/pymodbus/tls.sh pki
+      # docker create on 127.0.0.1:8802, docker cp the server's files in, docker start
+      - run: interop/pymodbus/tls.sh start
+      # Probe until 60 s have elapsed (a real Modbus read over mutual TLS, see tls.sh).
+      - run: interop/pymodbus/tls.sh wait
+      # cargo nextest run --locked -p stonecrab --all-features
+      #   --run-ignored ignored-only -E 'binary(modbus_interop_tls) & test(/^tests::interop_tls_/)'
+      # The step fails when the filter does not select exactly EXPECTED_TESTS (in tls.sh) tests.
+      - run: interop/pymodbus/tls.sh tests
+      # Image id, the server certificate's summary and the server log (never a key).
+      - run: interop/pymodbus/tls.sh evidence
+        if: ${{ always() }}
+      - uses: actions/upload-artifact@v6
+        if: ${{ always() }}
+        with:
+          name: interop-tls-evidence
+          path: target/interop-evidence/tls/
+      - run: interop/pymodbus/tls.sh stop
+        if: ${{ always() }}
   interop-libmodbus:
     # The driver against a second, independent server: libmodbus 3.1.11's unit-test-server, a
     # C stack, in Docker, built from interop/libmodbus/ on a Debian trixie image pinned by

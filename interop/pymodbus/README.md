@@ -71,6 +71,25 @@ to `target/interop-evidence/`: `image-digest.txt`, `pip-freeze.txt`, `server.log
 needs the `docker` binary and a running daemon and fails with a message naming the
 missing piece otherwise.
 
+## TLS mode (slice S71)
+
+With `--tls-cert`, `--tls-key` and `--tls-ca`, `server.py` serves the same blocks over TLS 1.2
+or 1.3 with pymodbus's TLS server (MBAP frames inside the session, Python's ssl module, which
+is OpenSSL 3.5 in this image) and requires a client certificate issued by the authority in
+`--tls-ca`. `tls.sh` drives that run (ADR-0032): it builds the image, makes a throwaway PKI
+with openssl inside the image (ECDSA P-256: an authority, a server certificate for
+`127.0.0.1` and `localhost`, a client certificate and key, an unrelated authority), copies
+the server's three files into a container created on `127.0.0.1:8802` with `docker cp`,
+probes with a real read over mutual TLS, runs the three `interop_tls_` tests of
+`crates/stonecrab/tests/modbus_interop_tls.rs` and keeps the image digest, the server
+certificate's summary and the server log in `target/interop-evidence/tls/`. No key is
+committed or kept as evidence: the PKI lives in `target/interop-tls-pki/` and the `stop` step
+removes it. `mise run interop-tls` runs it alone; `mise run interop` runs it last; the CI job
+is `interop-tls`. When the server refuses a client without a certificate it closes the
+connection without sending its TLS alert, so the driver sees `Disconnected` there, not
+`Authentication`. `tls.sh` takes `INTEROP_TLS_PORT` (default 8802), `INTEROP_EVIDENCE_DIR`
+and `INTEROP_TLS_PKI_DIR`.
+
 `interop.sh` takes `INTEROP_PORT` (default 5020) and `INTEROP_EVIDENCE_DIR`. The
 Dockerfile pins the base image by digest; to move it, pull the new tag, record the index
 digest in the `FROM` line and in the comment above it, and rerun the job.

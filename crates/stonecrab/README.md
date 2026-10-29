@@ -26,6 +26,7 @@ for the contracts. Upstream compatibility is claimed only where a parity row say
 | `full` | the same set as the defaults, spelled out; the `profile_read` example requires it | `sim`, `modbus`, `sensors` | no |
 | `transport` | `stonecrab::transport`, deadline-bounded transports and the Tokio TCP transport | `tokio` | no (on through `modbus` and `testkit`) |
 | `serial` | the serial transport in `stonecrab::transport` (`SerialFactory`, `SerialTransport`) | `transport`, `serial2` | no (on through `modbus`) |
+| `tls` | the TLS transport in `stonecrab::transport` (`TlsFactory`, `TlsSettings`) and, with `modbus`, `modbus-tcp:tls` | `transport`, `rustls` and `tokio-rustls` on the `ring` provider (C code: needs a C compiler) | no |
 | `boards` | `stonecrab::boards`, direct board adapters: the MAX31855 thermocouple converter over an `SpiBus` and the ADXL345 accelerometer over an `I2cBus` | `sensors` | no |
 | `adapters-linux` | `LinuxSpiDev`, a `/dev/spidev` node read on a worker thread | `boards`, `transport` | no |
 | `testkit` | `stonecrab::testkit`, fakes, scripted peers, golden-vector loader and the driver contract suite | `transport`, `serde`, `serde_json`, `toml`, Tokio `macros` | no |
@@ -53,6 +54,7 @@ operations.
 | `modbus`: write of coils and holding registers (FC15, FC06, FC16), refused unless the connection string says `access=read-write` | interoperability-tested |
 | `modbus`: text types `CHAR`, `WCHAR`, `STRING(n)` and `WSTRING(n)`, read and written | simulator-tested |
 | `modbus`: Modbus TCP over UDP (`modbus-tcp:udp`) reads, writes and ping, with lost, delayed, duplicated and reordered replies | interoperability-tested (job `interop-udp`, run 40830080420, 6 of 6); simulator-tested on loopback UDP |
+| `modbus` and `tls`: Modbus TCP over TLS (`modbus-tcp:tls`, default port 802) reads, writes and ping over TLS 1.3 or 1.2, the server verified against the authorities of `tls.trust-store` and its host name, mutual TLS with `tls.keystore`; untrusted, expired and misnamed certificates are `Trust` | interoperability-tested (job `interop-tls`, pymodbus 3.8.6 with mutual TLS, 3 of 3 in its local run on 2026-10-29; first hosted run pending); simulator-tested on loopback sockets against rustls's server |
 | `modbus`: Modbus RTU (`modbus-rtu`) reads, writes and ping over a gateway (`modbus-rtu:tcp`) or a serial port (`modbus-rtu:///dev/ttyUSB0`), every area, writes read back, frames of 255 bytes, an exception, a unit the slave does not serve | interoperability-tested (jobs `interop-rtu`, diagslave 3.6 as `-m enc -a 1`, and `interop-rtu-pty`, as `-m rtu -a 1` on a serial device behind socat, 9 of 9 each locally and in their first hosted runs, 40838776577 and 40843548924, on 2026-10-29; and through the driver's own serial port, job `interop-serial-port`, diagslave 3.6 as `-m rtu -a 1` on a pseudo-terminal pair of a Linux host, 11 of 11 in its first hosted run, 40849466167, on 2026-10-29, with the silence before a request and the reopen of a lost port; no electrical line or device) |
 | `modbus`: Modbus RTU (`modbus-rtu`) reads, writes, ping and polling over a serial port or a gateway, with CRC errors, the silence before a request, late-reply drain and reopen | simulator-tested; reads, writes, ping, the silence before a request and the reopen of a lost port on a serial port are also interoperability-tested (job `interop-serial-port`, previous row) |
 | `modbus`: Modbus ASCII (`modbus-ascii`) reads, writes and ping over a gateway (`modbus-ascii:tcp`) or a serial port (`modbus-ascii:///dev/ttyUSB0`), every area, writes read back, frames of 511 characters, an exception, a unit the slave does not serve | interoperability-tested (job `interop-ascii`, diagslave 3.6 as `-m ascii -a 1` on a serial device behind socat, first hosted run 40843548924, 9 of 9, on 2026-10-29; and through the driver's own serial port, job `interop-serial-port`, diagslave 3.6 as `-m ascii -a 1` on a pseudo-terminal pair of a Linux host at 19200 8N1, 11 of 11 in its first hosted run, 40849466167, on 2026-10-29; a pseudo-terminal forces eight data bits and no parity, so the 7E1 of the line is not observed, and there is no electrical line or device) |
@@ -78,7 +80,10 @@ carrier of both drivers the independent server is diagslave 3.6 with socat on a
 pseudo-terminal pair of a Linux host (job `interop-serial-port`, first hosted run
 40849466167, 11 of 11 per framing, on 2026-10-29); a pseudo-terminal forces eight data bits
 and no parity and is no electrical line, so parity, data bits and flow control are not
-observed there and nothing is `hardware-verified`.
+observed there and nothing is `hardware-verified`. Over TLS the independent server is
+pymodbus 3.8.6 on Python's ssl module (OpenSSL 3.5) with mutual TLS and a PKI that openssl
+makes at run time (job `interop-tls`, 3 of 3 in its local run on 2026-10-29; its first
+hosted run is pending).
 The levels of each module are in its own documentation page (the component documents in
 `docs/components/` of this crate); the table above is the crate's view of the same
 evidence.

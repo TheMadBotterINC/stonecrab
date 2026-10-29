@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 #
-# Stonecrab interoperability peer: a Modbus TCP server on pymodbus 3.8.6.
+# Stonecrab interoperability peer: a Modbus TCP server on pymodbus 3.8.6, and, with the
+# --tls-* options, a Modbus/TCP Security server (MBAP inside TLS, slice S71, ADR-0032).
 #
 # First-party. Authored from two sources only: the register map
 # fixtures/modbus/interop/register-map.toml (rows MB-INTEROP-*) with its sibling
@@ -45,14 +46,23 @@
 #   nothing. The map's bit sizes (2000) therefore document the upstream server and are not
 #   a limit here.
 #
+# TLS
+#   With --tls-cert, --tls-key and --tls-ca the same blocks are served over TLS 1.2 or 1.3
+#   by pymodbus's TLS server (MBAP frames inside the session) with an ssl context made
+#   here: the server presents --tls-cert and --tls-key and requires a client certificate
+#   issued by the authority in --tls-ca (mutual TLS). The three files are made at run time
+#   by interop/pymodbus/tls.sh; none is committed. Nothing else changes.
+#
 # Exit status: 0 after a clean stop, 2 when the register map cannot be loaded or is
-# invalid (nothing is served in that case), 1 for any other failure.
+# invalid or the TLS files cannot be loaded (nothing is served in that case), 1 for any
+# other failure.
 
 """Serve the Stonecrab interop register map over Modbus TCP."""
 
 import argparse
 import asyncio
 import logging
+import ssl
 import sys
 import tomllib
 
@@ -62,7 +72,7 @@ from pymodbus.datastore import (
     ModbusServerContext,
     ModbusSlaveContext,
 )
-from pymodbus.server import StartAsyncTcpServer
+from pymodbus.server import StartAsyncTcpServer, StartAsyncTlsServer
 
 LOG = logging.getLogger("stonecrab.interop")
 
@@ -189,22 +199,44 @@ def trace_connect(connected):
     LOG.info("client %s", "connected" if connected else "disconnected")
 
 
-async def serve(blocks, host, port):
-    """Serve until the process is stopped."""
+def tls_context(cert, key, authority):
+    """A server context for TLS 1.2 and 1.3 that requires a client certificate."""
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.maximum_version = ssl.TLSVersion.TLSv1_3
+    context.load_cert_chain(certfile=cert, keyfile=key)
+    context.load_verify_locations(cafile=authority)
+    context.verify_mode = ssl.CERT_REQUIRED
+    return context
+
+
+async def serve(blocks, host, port, tls):
+    """Serve until the process is stopped; over TLS when `tls` is an ssl context."""
     context = ModbusServerContext(
         slaves=ModbusSlaveContext(
             di=blocks["di"], co=blocks["co"], hr=blocks["hr"], ir=blocks["ir"]
         ),
         single=True,
     )
-    LOG.info("serving Modbus TCP on %s:%d", host, port)
-    await StartAsyncTcpServer(
-        context=context,
-        address=(host, port),
-        framer=FramerType.SOCKET,
-        trace_pdu=trace_pdu,
-        trace_connect=trace_connect,
-    )
+    if tls is None:
+        LOG.info("serving Modbus TCP on %s:%d", host, port)
+        await StartAsyncTcpServer(
+            context=context,
+            address=(host, port),
+            framer=FramerType.SOCKET,
+            trace_pdu=trace_pdu,
+            trace_connect=trace_connect,
+        )
+    else:
+        LOG.info("serving Modbus TCP over TLS (mutual) on %s:%d", host, port)
+        await StartAsyncTlsServer(
+            context=context,
+            address=(host, port),
+            sslctx=tls,
+            framer=FramerType.TLS,
+            trace_pdu=trace_pdu,
+            trace_connect=trace_connect,
+        )
 
 
 def main(argv):
@@ -213,6 +245,9 @@ def main(argv):
     parser.add_argument("--text", default=DEFAULT_TEXT, help="text registers (TOML)")
     parser.add_argument("--host", default="0.0.0.0")  # noqa: S104 (a test server)
     parser.add_argument("--port", type=int, default=5020)
+    parser.add_argument("--tls-cert", help="server certificate (PEM); serve over TLS")
+    parser.add_argument("--tls-key", help="server private key (PEM)")
+    parser.add_argument("--tls-ca", help="authority of the client certificates (PEM)")
     args = parser.parse_args(argv)
     logging.basicConfig(
         stream=sys.stdout,
@@ -224,8 +259,19 @@ def main(argv):
     except MapError as error:
         LOG.error("%s", error)
         return 2
+    tls_files = (args.tls_cert, args.tls_key, args.tls_ca)
+    tls = None
+    if any(tls_files):
+        if not all(tls_files):
+            LOG.error("--tls-cert, --tls-key and --tls-ca go together")
+            return 2
+        try:
+            tls = tls_context(*tls_files)
+        except (OSError, ssl.SSLError) as error:
+            LOG.error("cannot load the TLS files: %s", error)
+            return 2
     try:
-        asyncio.run(serve(blocks, args.host, args.port))
+        asyncio.run(serve(blocks, args.host, args.port, tls))
     except KeyboardInterrupt:
         return 0
     except OSError as error:
