@@ -28,7 +28,7 @@ jobs:
         # cargo cyclonedx --format json --all-features --spec-version 1.5, then
         # cargo package --locked -p stonecrab --list
         run: scripts/sbom.sh
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: release-evidence
           path: target/release-evidence/
