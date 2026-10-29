@@ -2335,7 +2335,8 @@ notes = [
     Effectively polling: only TimerTrigger works; subscription-based triggering throws at start in this release even though the README lists it (README.md:34 vs SubscriptionTrigger.java:71-76). The README \
     YAML sample (line 127) uses 'type: subscription' as a trigger type.""",
   "Source files: EventPump, TagBatch, TransformedPlcReadResponse, config/*, triggers/*, transform/* (4277 lines total).",
-  "UNCERTAIN: Which trigger types EventPumpFactory/TriggerConfiguration map from config (not read).",
+  "Read in S69: EventPumpFactory maps trigger type timer and type subscription and refuses any other type (EventPumpFactory.java:157-205).",
+  "Read in S69: TimerTrigger.start calls java.util.Timer.schedule(task, initialDelay, interval), which is fixed delay (the comment at TimerTrigger.java:167-170 rules out fixed rate because it would burst missed ticks); the timer only hands each firing to one daemon dispatcher thread with an ArrayBlockingQueue(1) and a DiscardPolicy (115-122, 141-165); a tick during a fetch is skipped, counted and reported through onFetchSkipped (TagBatch.java:490-502); after a failure the batch backs off from 1 s doubling to 60 s and skips ticks in the window silently (84-92, 483-488, 922-942); a fetch is guarded at 300 s (94-101, 549-554); interval > 0 and initialDelay >= 0 are validated (97-103).",
 ]
 
 [inventory.tool_event_pump.operations]

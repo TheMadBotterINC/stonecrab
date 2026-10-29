@@ -27,6 +27,7 @@ too; an unknown write outcome is never collapsed into a rejection or replayed.
 | Subscription types and their bounded event queue: `SubscribeRequest`, `Subscription`, `QueuePolicy`, `LossCounters` | simulator-tested (unit and property tests; the simulator and `modbus` poll through them since S55) |
 | Polling subscriptions: the shared producer behind `Connection::subscribe` of the simulator and `modbus` | simulator-tested |
 | Connection cache: `ConnectionCache`, `LeasedConnection` (ADR-0030) | simulator-tested (the simulator and Modbus TCP over the fake transport, on the fake clock) |
+| Event pump: `EventPump`, `TagBatch`, `BatchEvent` (ADR-0031): timer batches on connections or cache leases; no subscription trigger, configuration files or value transformations | simulator-tested (the simulator and Modbus TCP over the fake transport, on the fake clock) |
 | Browse and discover | not supported |
 | Calendar values: `PlcSignedDuration`, `PlcDate`, `PlcTimeOfDay`, `PlcDateTime` (ADR-0021) | build-tested (unit and property tests); no driver decodes them yet |
 | Lists: `PlcValue::List`, `PlcValueType::List` (ADR-0022) | simulator-tested (unit tests; the Modbus driver reads and writes them through array selections over the fake transport) |
@@ -126,6 +127,69 @@ assert_eq!(cache.len(), 1);
 block_on_with(&clock, cache.close())?;
 let refused = block_on_with(&clock, cache.get("sim://bench")).err().map(|error| error.kind());
 assert_eq!(refused, Some(ErrorKind::Disconnected));
+# Ok(())
+# }
+# #[cfg(not(all(feature = "sim", feature = "testkit")))]
+# fn main() {}
+```
+
+## Event pump
+`EventPump` is the second PLC4X tool in Stonecrab (ADR-0031; upstream's `EventPump` with
+timer-triggered `TagBatch`es). A `TagBatch` is a named `ReadRequest` read in one
+`Connection::read` per fetch, on a connection it borrows (`TagBatch::on_connection`) or on
+a lease from a `ConnectionCache` taken for each fetch and given back after it
+(`TagBatch::on_cache`). Its ticks start `initial_delay` after `start_batch` and come every
+`interval`. A tick that falls due while the batch's fetch runs is skipped and counted, and
+the next fetch waits for the next tick. After a failed fetch the batch pauses for 1 s,
+doubled per further failure up to 60 s, as upstream does.
+
+The consumer awaits `recv`, which drives every started batch on the injected `Clock` while
+it waits and returns the next `BatchEvent`: the batch's name, the response or the fetch's
+error, and the ticks the batch skipped since its previous event. Nothing is spawned and
+nothing runs between calls; the queue holds at most one event per batch, so a slow consumer
+costs skipped ticks, not memory. Batches on different connections run independently. `recv`
+is cancel-safe: a read in flight stays with its batch and goes on at the next call.
+
+```rust
+# #[cfg(all(feature = "sim", feature = "testkit"))]
+# fn main() -> Result<(), Box<dyn std::error::Error>> {
+use std::sync::Arc;
+use std::time::Duration;
+use stonecrab::sim::{FailureStep, SimAddress, SimDevice, SimDriver, SimTag};
+use stonecrab::testkit::{FakeClock, block_on_with};
+use stonecrab::{
+    Clock, Connection, DriverRegistry, ErrorKind, EventPump, PlcValue, ReadRequest, Tag,
+    TagBatch, TagId,
+};
+
+let clock = FakeClock::default();
+let device = SimDevice::new();
+device.set("level", SimTag::new(PlcValue::U16(840)))?;
+let driver = SimDriver::new().with_clock(Arc::new(clock.clone())).with_device("bench", device)?;
+let bench = driver.device("bench").ok_or("no device")?;
+let mut registry = DriverRegistry::new();
+registry.register(Arc::new(driver))?;
+let connection = block_on_with(&clock, registry.connect("sim://bench"))?;
+let level = Tag::new(TagId::new("level")?, Arc::new(SimAddress::parse("STATE/level:u16")?));
+let request = ReadRequest::builder(connection.limits()).tag(level).build()?;
+
+let mut pump = EventPump::new(&clock);
+let batch = TagBatch::on_connection("tank", &*connection, request, Duration::from_millis(500))?
+    .initial_delay(Duration::from_millis(250));
+pump.add_batch(batch)?;
+pump.start_batch("tank")?;
+let start = clock.now();
+
+// The first read times out after the connection's request timeout (5 s): the ticks that
+// fell due meanwhile are skipped, and the batch goes on after a one-second pause.
+bench.push_failure(FailureStep::Timeout)?;
+let failed = block_on_with(&clock, pump.recv())?.ok_or("the batch runs")?;
+assert_eq!(failed.outcome.err().map(|error| error.kind()), Some(ErrorKind::Timeout));
+assert_eq!((failed.skipped, clock.now() - start), (10, Duration::from_millis(5250)));
+let next = block_on_with(&clock, pump.recv())?.ok_or("the batch runs")?;
+assert!(next.outcome.is_ok());
+assert_eq!((next.skipped, clock.now() - start), (1, Duration::from_millis(6250)));
+pump.close();
 # Ok(())
 # }
 # #[cfg(not(all(feature = "sim", feature = "testkit")))]

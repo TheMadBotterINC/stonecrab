@@ -78,6 +78,25 @@ placeholder.
   Subscriptions made through a lease are not restored on a replacement connection
   (`TOOL-CC-RESTORE`, deferred). Simulator-tested: 23 cases on the fake clock against the
   simulator and Modbus TCP over the fake transport.
+- The event pump, the second PLC4X tool (ADR-0031, slice S69; additive, no feature, no
+  dependency): `EventPump`, `TagBatch` and `BatchEvent` at the crate root, built under every
+  feature set. `TagBatch::on_connection(name, connection, request, interval)` reads a
+  `ReadRequest` on a borrowed connection, `TagBatch::on_cache(name, cache, connection_string,
+  request, interval)` on a lease from a `ConnectionCache` taken for each fetch and given back
+  after it, and `initial_delay` delays the first tick; a blank name, a zero interval and a
+  request with a deadline are `InvalidConfig`. `EventPump::new(clock)` holds batches by name
+  with `add_batch`, `remove_batch`, `start_batch`, `stop_batch`, `start_all`, `stop_all`,
+  `is_started` and `close` (later adds and starts are `Disconnected`). `recv` drives every
+  started batch on the injected clock with no spawned task and returns a `BatchEvent`: the
+  batch, the response or the fetch's error, and the ticks skipped since its previous event.
+  Each fetch is one `read`. A tick during a running fetch is skipped and the next fetch
+  waits for the next tick (upstream's fixed-delay timer, read for this slice); a failed
+  fetch is reported and the batch pauses 1 s, doubling to 60 s, until a fetch succeeds.
+  Batches on different connections run independently, the queue holds at most one event
+  per batch, and `recv` is cancel-safe (a read in flight goes on at the next call). The
+  subscription trigger (an upstream placeholder), configuration files and value
+  transformations are deferred. Simulator-tested: 16 cases on the fake clock against the
+  simulator and Modbus TCP over the fake transport.
 - Board adapters, the ADXL345 accelerometer over I2C (ADR-0029, slice S64; additive): under
   the existing `boards` feature (no new feature, no new dependency), `stonecrab::boards`
   gains the `I2cBus` trait (`write` and `write_read`, deadline-bounded, a NACK is

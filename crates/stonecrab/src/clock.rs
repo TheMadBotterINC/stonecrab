@@ -1,4 +1,4 @@
-use std::time::{Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use crate::OpFuture;
 
@@ -81,6 +81,27 @@ pub trait Clock: Send + Sync {
     fn sleep_until(&self, deadline: Instant) -> OpFuture<'_, ()>;
 }
 
+/// How many ticks of `interval` lie after `from`, up to and including `now`, and how far
+/// `now` is past the last of them (past `from` when there is none).
+///
+/// The grid arithmetic of the polling subscriptions (ADR-0020, addendum S55) and the event
+/// pump (ADR-0031): ticks lie on a grid of `interval` from `from`, and a zero interval has
+/// none.
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "unreachable_pub forbids plain pub in a private module"
+)]
+pub(crate) fn ticks(from: Instant, now: Instant, interval: Duration) -> (u64, Duration) {
+    let elapsed = now.saturating_duration_since(from).as_nanos();
+    let step = interval.as_nanos();
+    let whole = elapsed.checked_div(step).unwrap_or(0);
+    let rest = elapsed.checked_rem(step).unwrap_or(0);
+    (
+        u64::try_from(whole).unwrap_or(u64::MAX),
+        Duration::from_nanos(u64::try_from(rest).unwrap_or(u64::MAX)),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -122,6 +143,33 @@ mod tests {
         assert!(
             matches!(sleep.as_mut().poll(&mut cx), Poll::Ready(Ok(()))),
             "an elapsed deadline resolves on the first poll"
+        );
+    }
+
+    #[test]
+    fn ticks_count_the_grid_points_after_the_start_up_to_now() {
+        const TICK: Duration = Duration::from_millis(250);
+        let start = Instant::now();
+        assert_eq!(ticks(start, start, TICK), (0, Duration::ZERO), "none yet");
+        assert_eq!(
+            ticks(start, start + TICK * 5 / 2, TICK),
+            (2, TICK / 2),
+            "two and a half"
+        );
+        assert_eq!(
+            ticks(start, start + TICK, TICK),
+            (1, Duration::ZERO),
+            "the end counts"
+        );
+        assert_eq!(
+            ticks(start + TICK, start, TICK),
+            (0, Duration::ZERO),
+            "a now before the start"
+        );
+        assert_eq!(
+            ticks(start, start + TICK, Duration::ZERO),
+            (0, Duration::ZERO),
+            "a zero interval has no ticks"
         );
     }
 }

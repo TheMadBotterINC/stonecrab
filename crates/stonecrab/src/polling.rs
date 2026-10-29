@@ -16,6 +16,7 @@ use std::sync::{Arc, Weak};
 use std::task::{Context, Poll, Waker};
 use std::time::{Duration, Instant};
 
+use crate::clock::ticks;
 use crate::subscription::Gate;
 use crate::{
     Clock, ConnectionState, ErrorKind, ItemError, OpFuture, Operation, PlcError, PlcValue,
@@ -213,19 +214,6 @@ const fn ended(state: ConnectionState) -> bool {
     matches!(
         state,
         ConnectionState::Closing | ConnectionState::Closed | ConnectionState::Failed(_)
-    )
-}
-
-/// How many ticks of `interval` lie after `from`, up to and including `now`, and how far
-/// `now` is past the last of them (past `from` when there is none).
-fn ticks(from: Instant, now: Instant, interval: Duration) -> (u64, Duration) {
-    let elapsed = now.saturating_duration_since(from).as_nanos();
-    let step = interval.as_nanos();
-    let whole = elapsed.checked_div(step).unwrap_or(0);
-    let rest = elapsed.checked_rem(step).unwrap_or(0);
-    (
-        u64::try_from(whole).unwrap_or(u64::MAX),
-        Duration::from_nanos(u64::try_from(rest).unwrap_or(u64::MAX)),
     )
 }
 
@@ -1135,31 +1123,5 @@ mod tests {
         assert_eq!(Arc::weak_count(&device), 0, "the producer is gone");
         device.clock.advance(TICK * 4);
         assert_eq!(device.reads(), 1, "no read after unsubscribe");
-    }
-
-    #[test]
-    fn ticks_count_the_grid_points_after_the_start_up_to_now() {
-        let start = Instant::now();
-        assert_eq!(ticks(start, start, TICK), (0, Duration::ZERO), "none yet");
-        assert_eq!(
-            ticks(start, start + TICK * 5 / 2, TICK),
-            (2, TICK / 2),
-            "two and a half"
-        );
-        assert_eq!(
-            ticks(start, start + TICK, TICK),
-            (1, Duration::ZERO),
-            "the end counts"
-        );
-        assert_eq!(
-            ticks(start + TICK, start, TICK),
-            (0, Duration::ZERO),
-            "a now before the start"
-        );
-        assert_eq!(
-            ticks(start, start + TICK, Duration::ZERO),
-            (0, Duration::ZERO),
-            "a zero interval has no ticks"
-        );
     }
 }

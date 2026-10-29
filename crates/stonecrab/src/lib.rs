@@ -21,6 +21,7 @@ mod connection_cache;
 mod deadline;
 mod driver;
 mod error;
+mod event_pump;
 mod future;
 mod limits;
 mod order;
@@ -97,6 +98,7 @@ pub use connection_cache::{ConnectionCache, ConnectionCacheBuilder, LeasedConnec
 pub use deadline::Deadline;
 pub use driver::Driver;
 pub use error::{ConnectionState, Diagnostics, ErrorKind, FailureCategory, PlcError, Result};
+pub use event_pump::{BatchEvent, EventPump, TagBatch};
 pub use future::OpFuture;
 pub use limits::{ResourceLimits, ResourceLimitsBuilder};
 pub use order::{ByteOrder, WordOrder};

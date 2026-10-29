@@ -97,6 +97,10 @@ name = "core_connection_cache"
 required-features = ["sim", "modbus", "testkit"]
 
 [[test]]
+name = "core_event_pump"
+required-features = ["sim", "modbus", "testkit"]
+
+[[test]]
 name = "core_read_contract"
 required-features = ["testkit"]
 

@@ -32,6 +32,7 @@ src/connection_cache.rs
 src/deadline.rs
 src/driver.rs
 src/error.rs
+src/event_pump.rs
 src/future.rs
 src/lib.rs
 src/limits.rs
