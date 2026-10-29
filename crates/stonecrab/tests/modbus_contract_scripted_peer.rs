@@ -69,6 +69,8 @@ mod tests {
     const SILENT_PING: &str = "a ping to a silent device yields Timeout";
     const UNSUPPORTED_PING: &str = "an unsupported ping performs no I/O and changes no state";
     const SUPPORTED_PING: &str = "a supported ping answers and changes no state";
+    const UNSUPPORTED_SUBSCRIBE: &str =
+        "an unsupported subscribe performs no I/O and changes no state";
     const READ_ONLY_POLICY: &str = "a read-only policy rejects a write with no I/O";
     const UNKNOWN_NOT_REPLAYED: &str = "an unknown write outcome is never replayed";
 
@@ -177,6 +179,11 @@ mod tests {
             report.outcome(SUPPORTED_PING),
             Some(&CaseOutcome::Passed),
             "a ping over a real socket answers:\n{report}"
+        );
+        assert_eq!(
+            report.outcome(UNSUPPORTED_SUBSCRIBE),
+            Some(&CaseOutcome::Passed),
+            "a subscribe is refused before any socket I/O:\n{report}"
         );
         for name in TIMING_SKIPS {
             assert_eq!(

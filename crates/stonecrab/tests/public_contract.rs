@@ -11,12 +11,14 @@ mod tests {
         AccessPolicy, AddressOptions, AddressOptionsBuilder, ByteOrder, CancellationToken,
         Capabilities, Clock, Connection, ConnectionConfig, ConnectionConfigBuilder,
         ConnectionState, ConnectionUri, Credentials, Deadline, Diagnostics, Driver, DriverOptions,
-        DriverRegistry, Endpoint, ErrorKind, FailureCategory, ItemError, OpFuture, Operation,
-        PlcError, PlcValue, PlcValueType, ProtocolAddress, ProtocolStatus, ReadItem, ReadRequest,
-        ReadRequestBuilder, ReadResponse, ReadResponseBuilder, ReconnectPolicy, ResourceLimits,
-        ResourceLimitsBuilder, RetryPolicy, Secret, StateCell, StateWatch, SubscriptionMode, Tag,
-        TagId, Timeouts, UnknownReason, WordOrder, WriteItem, WriteOutcome, WriteRequest,
-        WriteRequestBuilder, WriteResponse, WriteResponseBuilder, WriteResult,
+        DriverRegistry, Endpoint, ErrorKind, FailureCategory, ItemError, LossCounters, OpFuture,
+        Operation, PlcError, PlcValue, PlcValueType, ProtocolAddress, ProtocolStatus, QueuePolicy,
+        ReadItem, ReadRequest, ReadRequestBuilder, ReadResponse, ReadResponseBuilder,
+        ReconnectPolicy, ResourceLimits, ResourceLimitsBuilder, RetryPolicy, Secret, StateCell,
+        StateWatch, SubscribeRequest, SubscribeRequestBuilder, Subscription, SubscriptionKind,
+        SubscriptionMode, SubscriptionSender, Tag, TagId, Timeouts, UnknownReason, WordOrder,
+        WriteItem, WriteOutcome, WriteRequest, WriteRequestBuilder, WriteResponse,
+        WriteResponseBuilder, WriteResult,
     };
 
     #[test]
@@ -51,6 +53,13 @@ mod tests {
         assert_send_sync::<StateCell>();
         assert_send_sync::<StateWatch>();
         assert_send_sync::<SubscriptionMode>();
+        assert_send_sync::<SubscriptionKind>();
+        assert_send_sync::<QueuePolicy>();
+        assert_send_sync::<SubscribeRequest>();
+        assert_send_sync::<SubscribeRequestBuilder>();
+        assert_send_sync::<Subscription>();
+        assert_send_sync::<SubscriptionSender>();
+        assert_send_sync::<LossCounters>();
         assert_send_sync::<TagId>();
         assert_send_sync::<Timeouts>();
         assert_send_sync::<Tag>();
@@ -97,6 +106,7 @@ mod tests {
         assert_send_sync::<Arc<dyn Driver>>();
         assert_send_sync::<Box<dyn Connection>>();
         assert_send::<OpFuture<'static, Box<dyn Connection>>>();
+        assert_send::<OpFuture<'static, Subscription>>();
         std::hint::black_box((take_driver, take_connection));
     }
 
@@ -128,6 +138,44 @@ mod tests {
             ),
             "watch reports the new state"
         );
+    }
+
+    // covers: SPEC mandatory-failure-cases / F6 slow consumer (the queue needs no runtime)
+    #[test]
+    fn facade_subscription_queue_can_be_polled_without_a_runtime() {
+        let mut cx = Context::from_waker(Waker::noop());
+        let limits = ResourceLimits::builder()
+            .max_queued_events(1)
+            .build()
+            .expect("valid budgets");
+        let (sender, subscription) =
+            SubscriptionSender::polling(Duration::from_secs(1), QueuePolicy::DropOldest, limits);
+        let tag = TagId::new("level").expect("valid identity");
+        for value in [1, 2] {
+            let item = ReadItem::new(tag.clone(), Ok(PlcValue::U16(value)), Instant::now());
+            assert!(
+                sender.send(item).as_mut().poll(&mut cx).is_ready(),
+                "dropping never waits"
+            );
+        }
+        assert_eq!(subscription.loss().dropped, 1, "one event made room");
+        let mut next = subscription.recv();
+        assert!(
+            matches!(
+                next.as_mut().poll(&mut cx),
+                Poll::Ready(Ok(Some(ref item))) if item.outcome().as_ref().ok() == Some(&PlcValue::U16(2))
+            ),
+            "the newest event stayed"
+        );
+        drop(next);
+        assert_eq!(subscription.mode(), SubscriptionMode::Polling, "disclosed");
+        assert_eq!(
+            subscription.interval(),
+            Some(Duration::from_secs(1)),
+            "interval"
+        );
+        assert_eq!(subscription.unsubscribe().dropped, 1, "final counts");
+        assert!(sender.is_closed(), "the producer sees the end");
     }
 
     #[test]

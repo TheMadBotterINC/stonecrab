@@ -5,6 +5,14 @@ as `stonecrab` 0.2.0 (2026-10-27); `stonecrab` 0.1.0 is the specification-stage
 placeholder.
 
 ## Unreleased
+- Subscription types and a bounded event queue (ADR-0020; additive): `SubscribeRequest`
+  and its builder, `SubscriptionKind` (cyclic, change-of-state, event), `QueuePolicy`
+  (backpressure, latest-value coalescing, drop-oldest), `LossCounters`, `Subscription`
+  (mode, sampling interval, loss, `recv`, `unsubscribe`) and `SubscriptionSender`. The
+  queue holds at most `ResourceLimits::max_queued_events` events, which is now read.
+  `Connection` gains a provided `subscribe` that returns `Unsupported(Subscribe)` with no
+  I/O; no driver overrides it yet. The contract suite gains the case "an unsupported
+  subscribe performs no I/O and changes no state" (27 cases).
 - CI (no crate changes): the `semver` job is blocking against the published 0.2.0, with
   cargo-semver-checks pinned to 0.51.0.
 - `SensorProfile::validate` rejects a measurement range with a NaN or infinite bound or

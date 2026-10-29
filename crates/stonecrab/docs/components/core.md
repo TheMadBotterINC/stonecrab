@@ -22,7 +22,8 @@ too; an unknown write outcome is never collapsed into a rejection or replayed.
 | Driver boundary: `Driver`, `Connection`, `DriverRegistry`, configuration, address options, cancellation, state watch, diagnostics | simulator-tested |
 | Values, tags, read and write batches, errors and correlation | simulator-tested |
 | The same boundary on a real wire, through `stonecrab::modbus` (reads) | interoperability-tested |
-| Subscribe, browse and discover | not supported |
+| Subscription types and their bounded event queue: `SubscribeRequest`, `Subscription`, `QueuePolicy`, `LossCounters` | build-tested (unit and property tests); no driver subscribes yet |
+| Subscribing drivers, browse and discover | not supported |
 | Calendar, byte, list and raw values (`RawValue`) | not supported |
 | Hardware verification | planned |
 
@@ -38,6 +39,12 @@ or unexpected identities and invalid sampling intervals; per-item failures remai
 Cancellation tokens, the injectable `Clock`, `OpFuture` and connection-state observation
 are primitives; the `Driver`, `Connection` and `DriverRegistry` traits define the driver
 boundary, and a connection enforces the token and the default-deadline rule (ADR-0011).
+`Connection::subscribe` is a provided method that answers `Unsupported` until a driver
+overrides it (ADR-0020). A subscription request names its kind and its `QueuePolicy`; the
+`Subscription` it yields discloses whether it polls and at which interval, holds at most
+`ResourceLimits::max_queued_events` events, and counts every event its policy gives up
+in `LossCounters`: backpressure loses none, coalescing keeps the latest value per tag,
+and dropping discards the oldest.
 A driver with options only it understands carries them in the configuration's
 `DriverOptions` slot (ADR-0008), and `Driver::parse_address` takes the caller's
 `AddressOptions` so an address convention is chosen explicitly, never inferred.

@@ -201,6 +201,12 @@ No Tokio, executor or network dependency.
   `RetryPolicy`, `AccessPolicy`, `Credentials`, `AddressOptions` (the second argument of
   `Driver::parse_address`) and the `DriverOptions` slot for options only one driver
   understands.
+- Subscriptions (ADR-0020, S54): `SubscribeRequest` with one `SubscriptionKind`
+  (`Cyclic(interval)`, `ChangeOfState`, `Event`) and a required `QueuePolicy`
+  (`Backpressure`, `CoalesceLatest`, `DropOldest`), the `Subscription` handle and event
+  stream with `LossCounters`, the producer side `SubscriptionSender`, a queue bounded by
+  `ResourceLimits::max_queued_events` (G10), and a provided `Connection::subscribe` that
+  returns `Unsupported(Subscribe)` until a driver overrides it (polling comes in S55).
 
 ### `stonecrab::codec`, always built
 
@@ -260,7 +266,7 @@ Driver)` (declared convention passed as `AddressOptions`), and
 `ScriptedPeer`, `ScriptedPeerFactory`, `FakeTransport`, `FakeTransportFactory`,
 `CountingFactory`, `LengthPrefixedFramer` (the sanctioned doubles of CODING_STANDARDS
 13.5), the golden-vector loader and `InteropMap`, and the
-`ContractSuite` every driver runs (26 cases since S47; skips are named, never silent), which driver
+`ContractSuite` every driver runs (27 cases since S54; skips are named, never silent), which driver
 authors can run against their own driver. Contract
 results: simulator 22 passed and 1 skip; Modbus over the fake transport 21 and 2; over
 loopback `ScriptedPeer` 18 and 5; against pymodbus 14 and 9.
@@ -351,6 +357,7 @@ commit; gates named were run locally before that commit.
 | S36, S45 (fix) | 2026-10-29 | The blocking `semver` job failed on run 40793164568: S45 inserted the write variants and S36 `InvalidRange` in the middle of the published `ModbusPdu` and `ProfileError` enums, shifting implicit discriminants (`enum_no_repr_variant_discriminant_changed`). The new variants now follow the published ones (no behavior change); CODING_STANDARDS 9.10 says so, and cargo-semver-checks 0.51.0 is pinned in mise with a `semver` task so the check runs before a push | check, coverage, semver (local, cargo-semver-checks 0.51.0) |
 | S42 | 2026-10-29 | Non-Java inventory of PLC4X v1.0.0 from the pinned checkout: 39 more `[inventory.*]` entries (22 Go: the SPI, five transports, 14 drivers, two tools; 9 C: SPI, four drivers, three transports, the plc4x-server stub; 2 C#: generated KNXnet/IP model only, no driver; 6 Python: SPI, mock, Modbus, UMAS, two transports), each compared with its Java entry, and a `[[backlog]]` table of 52 capabilities that exist outside Java and are absent or weaker in Java (for example Go BACnet/IP read, write, discovery and COV, Go C-Bus, Python UMAS system-bit addresses). Pending item "non-Java implementations" closed; the plan's section 4 cells that waited on S42 are filled; S41's plc4x-server citation corrected; docs only | TOML parse, ASCII check, 90 spot checks (three Go claims dropped, one citation corrected) |
 | S43 | 2026-10-29 | One parity record per upstream protocol from the S41 and S42 inventory: 19 protocol files (S7, PROFINET, EtherNet/IP with Logix, ADS, AB-ETH, OPC UA, Modbus RTU and ASCII, SLMP, UMAS, the PLC4X proxy, BACnet/IP, KNXnet/IP, C-Bus, CANopen, generic CAN, IEC 60870-5-104, Firmata, Open-Protocol with DF1, ctrlX) plus `tools.md` and `integrations.md` (E6's tracked list), upstream transport rows in `transport.md`, and the release matrix in `docs/COMPATIBILITY.md`; rows are planned (milestone) or deferred (reason), and every planned row names a `planned:` test id (pending item "Map every required behavior" closed). KNXnet/IP moved to M5 because a working Java driver exists (the plan's "Non-Java backlog" came from the corrected website lead); every manifest entry now names its parity record; docs only | parity (and its self-test), TOML parse, row-shape and unique-id checks |
+| S54 | 2026-10-29 | The subscription API (findings G07 subscribe part and G10), ADR-0020: `SubscribeRequest::builder(limits, kind, queue)` like `ReadRequest` (tags, deadline and cancel bound only the call; refuses empty, duplicate, over-budget, zero-interval and over-wide coalescing requests), `SubscriptionKind`, `QueuePolicy` (backpressure never loses, coalescing keeps the latest per tag and counts it, dropping counts every loss), `Subscription` (handle and stream: `recv`, `mode`, `interval`, `loss`, `unsubscribe`; drop ends it), `SubscriptionSender` for producers, a queue bounded by `max_queued_events` without executor types, and a provided `Connection::subscribe` returning `Unsupported(Subscribe)` with diagnostics (ping and subscribe share one private helper). Proptests per policy (bound, conservation, order, latest per tag); the contract suite has 27 cases (an unsupported subscribe performs no I/O for every policy and kind) | check, coverage, lint-attrs, parity, examples |
 
 ## Verified evidence and reproduction
 

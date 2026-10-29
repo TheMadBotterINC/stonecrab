@@ -119,6 +119,11 @@ mod tests {
                 "the sim has no ping, so {name} is skipped:\n{report}"
             );
         }
+        assert_eq!(
+            report.outcome("an unsupported subscribe performs no I/O and changes no state"),
+            Some(&CaseOutcome::Passed),
+            "the sim does not subscribe, so the refusal is checked for every queue policy:\n{report}"
+        );
         assert!(
             matches!(
                 report.outcome(UNSUPPORTED_WRITE),

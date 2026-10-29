@@ -29,6 +29,8 @@ mod request;
 mod response;
 mod secret;
 mod state;
+mod subscribe_request;
+mod subscription;
 mod tag;
 mod uri;
 mod value;
@@ -90,6 +92,10 @@ pub use request::{ReadRequest, ReadRequestBuilder};
 pub use response::{ItemError, ProtocolStatus, ReadItem, UnknownReason, WriteOutcome};
 pub use secret::Secret;
 pub use state::{StateCell, StateWatch};
+pub use subscribe_request::{
+    QueuePolicy, SubscribeRequest, SubscribeRequestBuilder, SubscriptionKind,
+};
+pub use subscription::{LossCounters, Subscription, SubscriptionSender};
 pub use tag::{ProtocolAddress, Tag, TagId};
 pub use uri::ConnectionUri;
 pub use value::{PlcValue, PlcValueType};

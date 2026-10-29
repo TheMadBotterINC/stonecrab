@@ -190,3 +190,11 @@ simulator nor `modbus-tcp` overrides it in S40 and both keep `Capabilities.ping`
 The contract suite gains the case `an unsupported ping performs no I/O and changes no
 state`, which runs for any driver that reports ping unsupported. `subscribe`, `browse` and
 `discover` are still not declared.
+
+## Addendum (2026-10-28, slice S54): `Connection::subscribe`
+
+The subscription request, the queue policies and the provided `Connection::subscribe`
+method that this ADR left out are decided in ADR-0020. The default `subscribe` performs no
+I/O and resolves to `ErrorKind::Unsupported(Operation::Subscribe)`; the "Narrow surface"
+text in `connection.rs` lists it as a provided method. `browse` and `discover` are still
+not declared.

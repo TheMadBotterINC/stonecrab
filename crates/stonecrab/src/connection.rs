@@ -4,7 +4,8 @@ use std::time::Duration;
 
 use crate::{
     Capabilities, ConnectionState, Diagnostics, ErrorKind, FailureCategory, OpFuture, Operation,
-    PlcError, ReadRequest, ReadResponse, ResourceLimits, StateWatch, WriteRequest, WriteResponse,
+    PlcError, ReadRequest, ReadResponse, ResourceLimits, StateWatch, SubscribeRequest,
+    Subscription, WriteRequest, WriteResponse,
 };
 
 /// One live link to one device: state observation, reads, writes and an explicit close.
@@ -16,13 +17,13 @@ use crate::{
 /// request) lives behind it.
 ///
 /// # Narrow surface
-/// The surface is the seven required methods below (decision D2) and one provided method,
-/// [`ping`](Self::ping), which takes no request and so needs no new type (ADR-0011,
-/// addendum of slice S40). `subscribe`, `browse` and `discover` are not here: their
-/// request and response types do not exist yet (ADR-0001 forbids empty scaffolds) and
-/// subscriptions are out of the alpha (D4). They will be added as provided methods
-/// returning [`ErrorKind::Unsupported`](crate::ErrorKind::Unsupported), as `ping` is, so
-/// adding them breaks no implementor.
+/// The surface is the seven required methods below (decision D2) and two provided methods
+/// that return [`ErrorKind::Unsupported`](crate::ErrorKind::Unsupported) until a driver
+/// overrides them: [`ping`](Self::ping), which takes no request (ADR-0011, addendum of
+/// slice S40), and [`subscribe`](Self::subscribe), which takes a [`SubscribeRequest`]
+/// (ADR-0020). `browse` and `discover` are not here: their request and response types do
+/// not exist yet (ADR-0001 forbids empty scaffolds). They will be added as provided
+/// methods in the same way, so adding them breaks no implementor.
 ///
 /// # The default-deadline rule
 /// Every operation is bounded (`CODING_STANDARDS` 8.5). A request that carries an explicit
@@ -43,10 +44,9 @@ use crate::{
 ///
 /// # Compatibility: docs/parity/core.md#CORE-CONNECTION-TRAIT
 /// Corresponds to the upstream `PlcConnection`: read and write requests execute against
-/// one connection, and capability support is queryable. Upstream's `ping` is a provided
-/// method that returns `Unsupported` until a driver overrides it; its subscription
-/// methods are deferred. See ADR-0011 for every difference from the ARCHITECTURE.md 3.1
-/// diagram.
+/// one connection, and capability support is queryable. Upstream's `ping` and subscription
+/// requests are provided methods here that return `Unsupported` until a driver overrides
+/// them. See ADR-0011 for every difference from the ARCHITECTURE.md 3.1 diagram.
 ///
 /// # Examples
 /// Code that is written against the trait works with any driver's connection. This
@@ -232,18 +232,88 @@ pub trait Connection: Send + Sync {
     /// ```
     fn ping(&self) -> OpFuture<'_, ()> {
         Box::pin(async move {
-            let diagnostics = Diagnostics {
-                operation: Some(Operation::Ping),
-                connection_state: Some(self.state()),
-                latency: Some(Duration::ZERO),
-                category: Some(FailureCategory::Validation),
-                ..Diagnostics::default()
-            };
-            Err(PlcError::new(
-                ErrorKind::Unsupported(Operation::Ping),
+            Err(unsupported(
+                Operation::Ping,
+                self.state(),
                 "this connection does not implement ping",
-            )
-            .with_diagnostics(diagnostics))
+            ))
         })
     }
+
+    /// Start delivering events for every tag of `request` into a bounded queue.
+    ///
+    /// The default implementation performs no I/O and fails with
+    /// [`ErrorKind::Unsupported`](crate::ErrorKind::Unsupported) for
+    /// [`Operation::Subscribe`], whatever the request holds; a driver that can subscribe
+    /// overrides it, sets [`Capabilities::subscribe`] and returns the [`Subscription`]
+    /// made with [`SubscriptionSender`](crate::SubscriptionSender). An override follows the
+    /// default-deadline and cancellation rules of [`read`](Self::read) for the call itself;
+    /// the subscription then lives until it is unsubscribed or dropped, or until the
+    /// connection closes or fails (ADR-0020). A polling override discloses its sampling
+    /// interval through [`Subscription::interval`] and refuses
+    /// [`SubscriptionKind::Event`](crate::SubscriptionKind::Event).
+    ///
+    /// # Errors
+    /// The default returns [`ErrorKind::Unsupported`](crate::ErrorKind::Unsupported) for
+    /// [`Operation::Subscribe`], with `Diagnostics` naming the operation, the connection
+    /// state and the `Validation` category. An override may also return the kinds of
+    /// [`read`](Self::read) for a closed connection, a foreign address, a cancelled token
+    /// and an elapsed deadline, and `Unsupported(Operation::Subscribe)` for a kind it
+    /// cannot deliver.
+    ///
+    /// # Cancel safety
+    /// The default is cancel-safe: it does no I/O and resolves at once. Dropping an
+    /// override's future before it resolves abandons the subscription; an override that
+    /// already registered it on the device removes it again.
+    ///
+    /// # Wire effects
+    /// The default sends nothing. A polling override sends nothing until its first tick
+    /// and then reads at the disclosed interval; a native override sends the protocol's
+    /// subscription request.
+    ///
+    /// # Compatibility: docs/parity/core.md#CORE-CONNECTION-TRAIT
+    /// Corresponds to the upstream `PlcConnection.subscriptionRequestBuilder()` and the
+    /// execution of the request it builds. The default reports
+    /// `Unsupported(Operation::Subscribe)`; the request and the subscription are
+    /// `docs/parity/core.md#CORE-SUBSCRIPTION`.
+    ///
+    /// # Examples
+    /// A caller falls back to reading when the connection cannot subscribe.
+    /// ```
+    /// use stonecrab::{Connection, ErrorKind, Operation, Result, SubscribeRequest, Subscription};
+    ///
+    /// async fn try_subscribe(
+    ///     connection: &dyn Connection,
+    ///     request: SubscribeRequest,
+    /// ) -> Result<Option<Subscription>> {
+    ///     match connection.subscribe(request).await {
+    ///         Ok(subscription) => Ok(Some(subscription)),
+    ///         Err(error) if error.kind() == ErrorKind::Unsupported(Operation::Subscribe) => Ok(None),
+    ///         Err(error) => Err(error),
+    ///     }
+    /// }
+    /// ```
+    fn subscribe(&self, request: SubscribeRequest) -> OpFuture<'_, Subscription> {
+        drop(request);
+        Box::pin(async move {
+            Err(unsupported(
+                Operation::Subscribe,
+                self.state(),
+                "this connection does not implement subscribe",
+            ))
+        })
+    }
+}
+
+/// The error of a provided method a connection does not override: no I/O happened, so the
+/// latency is zero and the category is `Validation`.
+fn unsupported(operation: Operation, state: ConnectionState, message: &'static str) -> PlcError {
+    let diagnostics = Diagnostics {
+        operation: Some(operation),
+        connection_state: Some(state),
+        latency: Some(Duration::ZERO),
+        category: Some(FailureCategory::Validation),
+        ..Diagnostics::default()
+    };
+    PlcError::new(ErrorKind::Unsupported(operation), message).with_diagnostics(diagnostics)
 }

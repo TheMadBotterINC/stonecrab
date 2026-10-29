@@ -7,11 +7,13 @@ use std::fmt;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::task::Poll;
+use std::time::Duration;
 
 use crate::{
     AccessPolicy, CancellationToken, Connection, ConnectionConfig, ConnectionState, Deadline,
-    Driver, ErrorKind, FailureCategory, Operation, PlcError, ProtocolAddress, ReadRequest,
-    ReadResponse, ResourceLimits, RetryPolicy, Tag, TagId, WriteRequest,
+    Driver, ErrorKind, FailureCategory, Operation, PlcError, ProtocolAddress, QueuePolicy,
+    ReadRequest, ReadResponse, ResourceLimits, RetryPolicy, SubscribeRequest, SubscriptionKind,
+    Tag, TagId, WriteRequest,
 };
 
 use super::{CaseOutcome, ContractCase, ContractFixture, ContractReport, Fault, Requires};
@@ -415,10 +417,11 @@ pub(super) enum Id {
     UnsupportedPing,
     SupportedPing,
     SilentPing,
+    UnsupportedSubscribe,
 }
 
 impl Id {
-    pub(super) const ALL: [Self; 26] = [
+    pub(super) const ALL: [Self; 27] = [
         Self::Capabilities,
         Self::Lifecycle,
         Self::Correlation,
@@ -445,6 +448,7 @@ impl Id {
         Self::UnsupportedPing,
         Self::SupportedPing,
         Self::SilentPing,
+        Self::UnsupportedSubscribe,
     ];
 
     pub(super) const fn case(self) -> ContractCase {
@@ -584,6 +588,11 @@ impl Id {
                 "F2 timeout; ADR-0011 addendum (S40)",
                 &[Requires::Ping, Requires::Fault(Fault::Timeout)],
             ),
+            Self::UnsupportedSubscribe => ContractCase::new(
+                "an unsupported subscribe performs no I/O and changes no state",
+                "F3 unsupported capability; ADR-0020 (S54)",
+                &[],
+            ),
         }
     }
 
@@ -615,6 +624,7 @@ impl Id {
             Self::UnsupportedPing => unsupported_ping(env).await,
             Self::SupportedPing => supported_ping(env).await,
             Self::SilentPing => silent_ping(env).await,
+            Self::UnsupportedSubscribe => unsupported_subscribe(env).await,
         }
     }
 }
@@ -1183,6 +1193,72 @@ async fn silent_ping(env: &Env<'_>) -> Check {
         found.category,
         Some(FailureCategory::Transport),
         "a silent ping: diagnostics.category",
+    )?;
+    release(connection).await;
+    Ok(())
+}
+
+/// One request per queue policy, each with another kind, so every policy and every kind
+/// meets the refusal. Each request carries a cancelled token and an elapsed deadline, which
+/// the default `subscribe` ignores.
+async fn unsupported_subscribe(env: &Env<'_>) -> Check {
+    if env.driver.capabilities().supports(Operation::Subscribe) {
+        return skip("driver reports subscribe supported; the case needs it unsupported");
+    }
+    let connection = env.open().await?;
+    ensure(
+        !connection.capabilities().supports(Operation::Subscribe),
+        "the connection reports subscribe although the driver does not",
+    )?;
+    let state = connection.state();
+    let before = env.probe();
+    for (kind, queue) in [
+        (
+            SubscriptionKind::Cyclic(Duration::from_secs(1)),
+            QueuePolicy::Backpressure,
+        ),
+        (SubscriptionKind::ChangeOfState, QueuePolicy::CoalesceLatest),
+        (SubscriptionKind::Event, QueuePolicy::DropOldest),
+    ] {
+        let mut builder = SubscribeRequest::builder(connection.limits(), kind, queue);
+        for tag in env.readable_tags(&[A])? {
+            builder = builder.tag(tag);
+        }
+        let token = CancellationToken::new();
+        token.cancel();
+        let request = builder
+            .deadline(Deadline::at(env.fx.clock.now()))
+            .cancel(token)
+            .build()
+            .must("building a subscribe request")?;
+        let what = format!("an unsupported subscribe under {}", shown(&queue));
+        let error = refused(
+            connection.subscribe(request).await,
+            ErrorKind::Unsupported(Operation::Subscribe),
+            &what,
+        )?;
+        let found = error.diagnostics();
+        ensure_eq(
+            found.operation,
+            Some(Operation::Subscribe),
+            &format!("{what}: diagnostics.operation"),
+        )?;
+        ensure_eq(
+            found.connection_state,
+            Some(state),
+            &format!("{what}: diagnostics.connection_state"),
+        )?;
+        ensure_eq(
+            found.category,
+            Some(FailureCategory::Validation),
+            &format!("{what}: diagnostics.category"),
+        )?;
+    }
+    env.no_io(before, "an unsupported subscribe")?;
+    ensure_eq(
+        connection.state(),
+        state,
+        "the state after an unsupported subscribe",
     )?;
     release(connection).await;
     Ok(())

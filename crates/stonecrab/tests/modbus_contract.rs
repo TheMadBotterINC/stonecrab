@@ -55,6 +55,8 @@ mod tests {
     const UNSUPPORTED_PING: &str = "an unsupported ping performs no I/O and changes no state";
     const SUPPORTED_PING: &str = "a supported ping answers and changes no state";
     const SILENT_PING: &str = "a ping to a silent device yields Timeout";
+    const UNSUPPORTED_SUBSCRIBE: &str =
+        "an unsupported subscribe performs no I/O and changes no state";
 
     fn register_map() -> InteropMap {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -199,6 +201,12 @@ mod tests {
                 "{name} ran and passed:\n{report}"
             );
         }
+        // The driver does not subscribe yet (S55), so every queue policy meets the refusal.
+        assert_eq!(
+            report.outcome(UNSUPPORTED_SUBSCRIBE),
+            Some(&CaseOutcome::Passed),
+            "the unsupported-subscribe case ran and passed:\n{report}"
+        );
         // The write cases need a driver that supports write; this one does not (D3).
         for name in [READ_ONLY_POLICY, UNKNOWN_NOT_REPLAYED] {
             assert_eq!(

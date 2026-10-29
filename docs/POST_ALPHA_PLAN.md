@@ -127,7 +127,7 @@ E1 is done and P4 is approved. Still the maintainer's: create and push the `v0.2
 | S39 | Key the word-order rule on the driver's declared multi-word types, not Modbus names (G05) | S | none | Test with a fake second driver's wide type |
 | S40 | `Operation::Ping`, `Capabilities.ping` and a provided `Connection::ping` returning `Unsupported`; contract suite cases (G07, ping part) | S | none | Contract suite proves the default is `Unsupported` with no I/O |
 
-G06 lands with E7 in the next breaking release. The subscribe part of G07 lands in S55 and the browse and discover parts in M3, each with the types it needs, so no empty scaffold ships (ADR-0001).
+G06 lands with E7 in the next breaking release. The subscribe part of G07 landed in S54 (the types and a provided `subscribe` returning `Unsupported`; S55 adds polling) and the browse and discover parts land in M3, each with the types it needs, so no empty scaffold ships (ADR-0001).
 
 ### Phase C: finish M0 (before M2)
 

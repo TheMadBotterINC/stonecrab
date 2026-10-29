@@ -68,7 +68,7 @@ assert_eq!(clock.now(), deadline);
 
 ## Driver contract suite
 
-`ContractSuite::run(driver, uri, fixture)` runs one set of 26 cases, named as sentences,
+`ContractSuite::run(driver, uri, fixture)` runs one set of 27 cases, named as sentences,
 against any `Driver` and returns a `ContractReport`. A
 `ContractFixture` is the suite's window into the device: a `readable` address, a
 `rejected` one (parseable, refused by the device), a `foreign` one, an `io_probe` counter
@@ -89,15 +89,16 @@ queued-cancellation case is not part of the suite (it needs a wait queue; see
 `crates/stonecrab/tests/sim_contract.rs`; ADR-0009's S13 addendum has the details.
 
 At the alpha the suite runs against four fixtures, and every skip is named in the
-report rather than hidden: the simulator (`tests/sim_contract.rs`: 23 passed,
+report rather than hidden: the simulator (`tests/sim_contract.rs`: 24 passed,
 3 named skips, the unsupported-write case and the two ping cases), the Modbus driver
-over a fake transport with a first-party MBAP responder (23 passed, 3 skipped: the two
+over a fake transport with a first-party MBAP responder (24 passed, 3 skipped: the two
 write cases and the unsupported-ping case), the Modbus driver over loopback sockets to a
-`ScriptedPeer` (19 passed, 7 skipped: three timing cases and the silent-ping case, two
+`ScriptedPeer` (20 passed, 7 skipped: three timing cases and the silent-ping case, two
 write cases and the unsupported-ping case) and the Modbus driver against pymodbus 3.8.6
-in the `interop` job (15 passed, 11 skipped: timing, on-demand disconnect and device
-exception, and the write cases). The results are in the parity rows `SIM-CONTRACT-SUITE`
-and `MB-CONTRACT-SUITE`.
+in the `interop` job (16 passed, 11 skipped: timing, on-demand disconnect and device
+exception, and the write cases). The unsupported-subscribe case (S54) offers one request
+per `QueuePolicy` and passes for every fixture, because no driver subscribes yet. The
+results are in the parity rows `SIM-CONTRACT-SUITE` and `MB-CONTRACT-SUITE`.
 
 ```rust,no_run
 use stonecrab::Driver;
