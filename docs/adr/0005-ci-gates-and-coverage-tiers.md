@@ -208,3 +208,32 @@ prove that the test passes or verifies the row. When it was added, all 1,301 cit
 resolved once the two stale ones were fixed. The self-test gains `fail-cited-test-renamed`,
 and every fixture now defines the names its record cites, so each fails only for its own
 defect.
+
+Addendum (S62, 2026-10-29): branch coverage, report only. CODING_STANDARDS 13.10 and
+SPEC.md ask for "branch >= 80 % where available", and the coverage paragraph of the
+Decision records `--branch` on stable 1.99.1 as unverified and not enabled. cargo-llvm-cov
+0.9.1 offers it (`--branch`, unstable) on a nightly compiler only, so a report now exists
+beside the line gate and the gate is unchanged: the thresholds, the per-module grouping
+and `scripts/coverage-gate.sh` are as before, and no branch number can fail a job.
+`scripts/branch-coverage.sh` (`mise run branch-coverage`) does one instrumented nextest
+run over the workspace with all features on the nightly pinned for the fuzz workspace
+(`fuzz/rust-toolchain.toml`, so no second nightly is pinned), installs that nightly's
+`llvm-tools-preview` when it is missing, builds into `target/branch-coverage-target` so
+the stable build of the line gate is not disturbed, and sums the lcov `BRF`/`BRH` totals
+per component with the grouping of the line gate. The weekly `scheduled` job runs it as a
+step that cannot fail the job (`continue-on-error`) and uploads
+`target/branch-coverage.txt` and the lcov file. The first numbers are in
+`docs/evidence/coverage/branch.md`. Two reasons it is not a gate yet: the mode is unstable
+in the compiler and the tool, so the count of branches can change with a nightly bump
+without any change to the code, and the count is of boolean conditions only (the true and
+false outcome of an `if`, a `while`, a match guard, an operand of `&&` or `||`; a plain
+`match` arm is not a branch), with those that a macro or a derive expands counted like
+written ones, so the number is not comparable with the line thresholds. The count also
+varies by about one branch between runs of the same tree (two runs on 2026-10-29 gave 208
+and 207 of 210 for the sensors), because a branch that depends on timing is hit in one run
+and not in the next. It becomes a gate only by a further addendum that names a threshold
+per component, after several weekly numbers show how far a nightly bump and the run-to-run
+variation move them. Rejected: gating at 80 % now (a gate that a nightly bump can fail
+without a change to the code would block merges for the wrong reason), and
+`RUSTC_BOOTSTRAP=1` on the stable toolchain (it defeats the compiler's stability promise
+for a number that is only a report).

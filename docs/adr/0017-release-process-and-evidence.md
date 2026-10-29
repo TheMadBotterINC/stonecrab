@@ -199,3 +199,74 @@ evidence. `release.toml`, `mutants.toml`, the three pins in `mise.toml` and the
 mechanics, CONTRIBUTING.md points here for the release process, and
 `docs/evidence/alpha.md` carries the release checklist state. This ADR does not change
 any gate, coverage tier or CI job of ADR-0005.
+
+## Addendum (S62, 2026-10-29): the soak and the 8-hour fuzz run as release evidence
+Two long runs belong to the evidence of a release and are run by the maintainer on the
+maintainer's own machine, because they tie it up for a day and a hosted job cannot hold
+them (a GitHub-hosted job ends after six hours, and the shared runners are too noisy for a
+memory figure). Neither is a CI job and neither can publish or tag. Slice S62 made them
+commands, and proved each with a short run (`docs/evidence/soak/`, `docs/evidence/fuzz/`);
+the long runs were not started, because they need the maintainer's approval first.
+
+**The 24-hour soak.** `scripts/soak.sh` (`mise run soak -- TARGET SECONDS`) builds the
+`soak` example in release mode and runs it for SECONDS (default 86400) against one target,
+reading four tags in a loop through the public API (`DriverRegistry`, `Connection::read`)
+and sampling the resident memory of that process every 10 s with `ps -o rss=`, which
+behaves the same on macOS and Linux. The two targets are `sim` (the simulator in the same
+process, read flat out, with a lost link, a lost reply and an undecodable reply pushed in
+turn every 5 s, so the link is reopened about every 15 s) and `pymodbus` (the interop
+peer in a container of its own on port 5021, read every 10 ms, the container restarted
+every 120 s so the driver's own reconnect runs 720 times in 24 hours). A CSV
+(`elapsed_s,rss_kib,reads,errors,reconnects`), the example's log and a Markdown report
+are written to `target/soak/TARGET/`. The commands the maintainer runs, in two shells (the
+two targets do not disturb each other), and the record:
+
+```sh
+caffeinate -i mise run soak -- sim 86400
+caffeinate -i mise run soak -- pymodbus 86400
+cp -R target/soak/sim docs/evidence/soak/24h-YYYY-MM-DD-sim      # then the same for pymodbus
+```
+
+Pass criteria. The first 20% of the run is a warm-up and is not judged. Growth is the
+median RSS of the last quarter of the remaining samples minus the median of the first
+quarter, so one spike does not move it. The run passes when all of these hold: growth is
+at most 4096 KiB (`--max-growth-kib`); the example exited 0; in the last quarter of the run
+there were more reads than errors (the link works at the end); and, for pymodbus, at
+least as many reconnects as container restarts. Fewer than 12 samples is inconclusive and
+fails. The bound is 4 MiB because the 10-minute runs drifted by at most 112 KiB after the
+warm-up (the allocator moves in 16 KiB pages), and a leak that matters is far above it
+over 24 hours. The growth is the difference of two quarter medians that lie about 0.6 of
+the run apart (the middle of the first and of the last quarter of the judged 80%), so the
+bound is reached by a steady leak of about 0.28 MiB an hour over 24 hours (4 MiB over
+14.4 hours), and by about 40 MiB an hour over 10 minutes. Leaks of that size are caught:
+two bytes per read on pymodbus (about 61 reads a second, as measured, so about 5.2 million
+reads in 24 hours), or 12 KiB leaked per container restart (720 restarts); a leak of one
+byte per read or of 6 KiB per restart passes, and so does anything smaller. On the
+simulator, which reads about a million times a second, one byte per read is caught within
+a 10-minute run. The self-test checks a 24-hour series at half and at twice the
+detectable rate. The report records the least-squares slope as information. The soak measures the Stonecrab process only; it says
+nothing about file descriptors or task counts (SPEC.md lists them for the soak), which
+`ps` does not give portably; the reconnect counts show that the link is reopened and the
+flat RSS that nothing piles up.
+
+**The 8-hour fuzz run.** `scripts/fuzz-evidence.sh 28800` (`mise run fuzz-evidence --
+28800`) runs every fuzz target concurrently for 8 hours on the nightly pinned in
+`fuzz/rust-toolchain.toml`, and writes `fuzz/target/evidence-logs/report.md`: the run's
+facts, then per target the seed inputs, runs, coverage counters, features, corpus,
+executions per second, seconds, exit status and crash artifacts. It passes when every
+target exits 0 after the full time and leaves no artifact. The record is
+`cp fuzz/target/evidence-logs/report.md docs/evidence/fuzz/8h-YYYY-MM-DD.md`. The script
+existed since S03b with a table printed to the terminal; S62 added the report file, the
+seed and executions-per-second columns and the pass criteria, and left the way the
+targets run alone.
+
+**When.** Both runs, with their reports committed, are part of the checklist of a release
+that changes `src/transport`, `src/modbus` or `src/sim`, on the commit that will be tagged
+or a descendant that changes none of those directories. A release that changes none of them
+may cite the last reports. The single-maintainer waiver of ADR-0005 applies as it does to
+the other evidence: the maintainer may waive a run, and says so in the release notes, as
+the alpha did for the gates it disclosed. The weekly
+`scheduled` job keeps running the 30-minute fuzz.
+
+**Not done.** The 24-hour soak and the 8-hour fuzz run have not been run: S62 recorded 10
+minutes of each soak target and 5 minutes of fuzzing. Neither is a claim about 24 hours.

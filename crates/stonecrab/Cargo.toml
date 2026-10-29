@@ -57,6 +57,10 @@ required-features = ["modbus"]
 name = "profile_read"
 required-features = ["full"]
 
+[[example]]
+name = "soak"
+required-features = ["full"]
+
 # Each test file that is compiled out without a feature is listed with `required-features`, so a
 # plain `cargo test` skips it (cargo prints no notice) instead of building an empty test binary;
 # naming one with `--test` reports the missing feature. The gates run `--all-features` and so

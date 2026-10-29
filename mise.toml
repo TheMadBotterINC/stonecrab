@@ -40,7 +40,10 @@
 # step is `mise run bench-compare`).
 # ADR-0005 records the coverage and waiver decisions; ADR-0017 records the release
 # process, and the pins of cargo-mutants, cargo-cyclonedx and cargo-release below.
-# scripts/fuzz-evidence.sh (the recorded 30-minute run of all fuzz targets) has no task.
+# The release evidence runs of slice S62 (ADR-0017 addendum) have tasks of their own and
+# no CI job: "mise run soak" (the 24-hour soak), "mise run fuzz-evidence" (the 8-hour
+# fuzz run) and "mise run branch-coverage" (report only; its CI step is in the weekly
+# "scheduled" job).
 
 [tools]
 rust = "1.99.1"
@@ -70,6 +73,10 @@ run = [
 description = "Per-component line coverage gate from one instrumented nextest run (ADR-0005); components are the module groups of the single crate"
 run = "scripts/coverage-gate.sh"
 
+[tasks.branch-coverage]
+description = "Report-only branch coverage per component from one instrumented nextest run on the fuzz workspace's pinned nightly, written to target/branch-coverage.txt (ADR-0005 addendum S62); the line gate of the coverage task is unchanged"
+run = "scripts/branch-coverage.sh"
+
 [tasks.lint-attrs]
 description = "Fail on crate-level lint attributes outside the section 5.1 promotions"
 run = "scripts/lint-attrs.sh"
@@ -88,6 +95,14 @@ run = [
   "cargo hack check --workspace --feature-powerset --depth 2 --no-dev-deps",
   "cargo hack check --locked --workspace --no-default-features",
 ]
+
+[tasks.fuzz-evidence]
+description = "The recorded release fuzz run: every fuzz target concurrently for SECONDS (default 1800; the release run is 28800, 8 hours), report in fuzz/target/evidence-logs/report.md (ADR-0017 addendum S62); e.g. mise run fuzz-evidence -- 28800"
+run = "scripts/fuzz-evidence.sh"
+
+[tasks.soak]
+description = "The soak run: read continuously for SECONDS (default 86400, 24 hours) against sim or pymodbus, sample the resident memory, verdict on stability, report in target/soak/TARGET/ (ADR-0017 addendum S62); e.g. mise run soak -- pymodbus 86400"
+run = "scripts/soak.sh"
 
 [tasks.machete]
 description = "Find unused dependencies"

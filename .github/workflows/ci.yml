@@ -414,7 +414,9 @@ jobs:
   scheduled:
     # Weekly evidence: the 30-minute fuzz run (S03b), the scoped mutation run of
     # mutants.toml (S32, ADR-0017; about 25 minutes with four jobs), the 10% benchmark gate
-    # (S52, ADR-0009 addendum; about 20 minutes) and an advisory dry run.
+    # (S52, ADR-0009 addendum; about 20 minutes), the report-only branch coverage (S62,
+    # ADR-0005 addendum) and an advisory dry run. The 8-hour fuzz run and the 24-hour soak
+    # are maintainer runs (ADR-0017 addendum S62): they outlast a hosted job.
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
@@ -427,7 +429,7 @@ jobs:
           toolchain: nightly-2026-10-01
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-fuzz@0.13.2,cargo-deny@0.20.2,cargo-nextest@0.9.148,cargo-mutants@27.1.0
+          tool: cargo-fuzz@0.13.2,cargo-deny@0.20.2,cargo-nextest@0.9.148,cargo-mutants@27.1.0,cargo-llvm-cov@0.9.1
       - name: Fuzz every target for 30 minutes (green with zero targets)
         run: scripts/fuzz-smoke.sh 1800
       # The stable toolchain for the mutation run; the fuzz step above needs the nightly.
@@ -461,6 +463,20 @@ jobs:
           path: |
             target/bench-compare/report.md
             target/bench-compare/report.json
+          if-no-files-found: ignore
+      # Report only (ADR-0005 addendum S62): branch coverage needs the nightly, which the
+      # script takes from fuzz/rust-toolchain.toml; no number here can fail the job.
+      - name: Branch coverage per component (report only)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: scripts/branch-coverage.sh
+      - uses: actions/upload-artifact@v6
+        if: ${{ always() }}
+        with:
+          name: branch-coverage
+          path: |
+            target/branch-coverage.txt
+            target/branch-coverage.lcov
           if-no-files-found: ignore
       - name: Advisory dry run (report only)
         run: cargo update --dry-run 2>&1 | tail -40
