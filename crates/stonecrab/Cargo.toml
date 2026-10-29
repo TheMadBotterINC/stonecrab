@@ -261,3 +261,4 @@ proptest.workspace = true
 tokio = { workspace = true, features = ["rt", "macros", "sync", "test-util", "rt-multi-thread"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
+roxmltree.workspace = true

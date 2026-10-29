@@ -18,17 +18,19 @@ Status vocabulary, as used in the Status column:
 - `implemented`: the Rust behavior exists and the listed tests pass. `implemented (data
   only)`, `(primitive)` and `(trait only)` say what the row covers when it is narrower than
   the name suggests.
-- `automated-verified`: the behavior is also checked by the `interop` CI job (S27) against
-  pymodbus 3.8.6; `MB-TCP-CONNECT` and the four read rows `MB-TCP-READ-COIL`,
-  `MB-TCP-READ-DI`, `MB-TCP-READ-HR` and `MB-TCP-READ-IR` carry it. The job ran green on
-  the hosted runner for S27 (run 40543567845, recorded in `STATUS.md`). The `MB-INTEROP-*`
-  rows are `implemented`: they describe the server's map, which the same job reads back.
-- `implemented (not automated-verified: ...)`: the four byte-order mode rows. The
-  mapping is derived from the documented layouts and cross-checked against first-party
-  vectors and the pymodbus map (big-endian, plus one little-endian REAL). The upstream
-  little-endian vectors (`Modbus-all-datatypes-little-endian.xml`) are retained verbatim
-  under `fixtures/modbus/upstream/` since S04a, but no adapter or test reads them yet
-  (S04b and S23), so the rows stay below `automated-verified`.
+- `automated-verified`: the behavior is also checked against an independent source, either
+  by the `interop` CI job (S27) against pymodbus 3.8.6, which `MB-TCP-CONNECT` and the four
+  read rows `MB-TCP-READ-COIL`, `MB-TCP-READ-DI`, `MB-TCP-READ-HR` and `MB-TCP-READ-IR`
+  carry (the job ran green on the hosted runner for S27, run 40543567845, recorded in
+  `STATUS.md`), or by the upstream PLC4X vectors retained under `fixtures/modbus/upstream/`
+  and serialized from their XML models by the S04b adapter (never by Stonecrab's codec),
+  which `MB-BYTEORDER-BE` and `MB-BYTEORDER-LE` carry. The `MB-INTEROP-*` rows are
+  `implemented`: they describe the server's map, which the same job reads back.
+- `implemented (not automated-verified: ...)`: the two byte-order mode rows
+  `MB-BYTEORDER-BE-SWAP` and `MB-BYTEORDER-LE-SWAP`. The mapping is derived from the
+  documented layouts and cross-checked against first-party vectors. No retained upstream
+  vector configures either mode (the two all-datatypes files use `BIG_ENDIAN` and
+  `LITTLE_ENDIAN`), so they stay below `automated-verified`.
 - `deferred (<owner>)`: recorded for completeness; the alpha rejects or omits the
   behavior. `; rejection implemented` after it means the parser or driver already
   refuses the form with a typed error and the listed test proves it, and `; no-gap
@@ -42,9 +44,9 @@ In the "Test ids" column an `implemented` or `automated-verified` row names real
 three mechanical parts of that: every such row names at least one backticked test id,
 every such row id is named in a `# Compatibility` section or a test, and every
 `docs/parity/<file>.md#<ROW-ID>` reference in `crates/*/src` resolves to a row here.
-Row count at the alpha: 5 `automated-verified`, 73 `implemented`, 26 `deferred` and 12
-`not reproduced` rows, plus 22 divergence rows that reuse the ids of the rows they
-qualify.
+Row count: 7 `automated-verified` (five by the `interop` job, two by the upstream vectors),
+71 `implemented`, 26 `deferred` and 12 `not reproduced` rows, plus 22 divergence rows that
+reuse the ids of the rows they qualify.
 
 How row ids are used: the first column of every table is a stable id. Rustdoc carries a
 `# Compatibility: docs/parity/modbus.md#<row-id>` section on each public item whose
@@ -334,26 +336,37 @@ documented layouts above. Precedence is the tag field (`Tag::with_byte_order` an
 
 | Row id | Upstream behavior (file:line) | Stonecrab alpha behavior | Status | Test ids |
 | --- | --- | --- | --- | --- |
-| MB-BYTEORDER-BE | `BIG_ENDIAN`, 4-byte layout `[1,2,3,4]` (BO:22-24); no swap, big-endian buffer (Opt:169; Conn:607-612). Lone narrow values are padded first (RegCodec:65-68). Vectors: REAL 3.141593 is registers `0x4049 0x0FDC`, DWORD 4242442424 is `0xFCDE 0x88B8` (Srv:95-97, 137-139). | (BigEndian, HighWordFirst). `TypedDecoder` (S23). A lone BOOL is bit 0 of the register and a lone BYTE, SINT or USINT the low byte; padding is ignored on decode. | implemented (not `automated-verified`: the upstream little-endian vectors are retained since S04a but not yet read by the S04b adapter or the S23 tests) | `byte_order_big_endian_maps_big_high`, `decode_real_3_141593_big_endian`, `decode_dword_4242442424_big_endian`, `decode_dword_layout_1234_and_4321`, `the_two_axes_are_independent`, `typed_vectors_decode_to_the_expected_values`, `register_map_decodes_every_entry_to_the_row_value`, `interop_reads_all_fifteen_holding_register_types` (implemented, S27: the pymodbus map is stored big-endian) |
-| MB-BYTEORDER-LE | `LITTLE_ENDIAN`, `[4,3,2,1]` (BO:25-27); no swap, little-endian buffer (Opt:172-178; Conn:600-606). Lone narrow values: BOOL has 7 leading pad bits, the bit, then 8 trailing; BYTE value first (RegCodec:69-75, 158-160). | (LittleEndian, LowWordFirst). `TypedDecoder` (S23). A lone BOOL is bit 8 of the register and a lone BYTE, SINT or USINT the high byte, as the upstream padding rule states (7 leading pad bits, the bit, 8 trailing; value byte first). | implemented (not `automated-verified`: the upstream little-endian vectors are retained since S04a but not yet read by the S04b adapter or the S23 tests) | `byte_order_little_endian_maps_little_low`, `decode_real_little_endian_region`, `decode_lword_layout_87654321`, `a_lone_bool_is_bit_0_under_big_and_bit_8_under_little`, `typed_vectors_decode_to_the_expected_values`, `register_map_decodes_every_entry_to_the_row_value`, `interop_little_endian_region_decodes_real` (implemented, S27: one LITTLE_ENDIAN REAL from pymodbus) |
-| MB-BYTEORDER-BE-SWAP | `BIG_ENDIAN_BYTE_SWAP`, `[2,1,4,3]` (BO:28-30); bytes swapped pairwise, then big-endian read (Opt:166-169). | (LittleEndian, HighWordFirst). `TypedDecoder` (S23). Lone narrow values follow the byte order alone (high byte, bit 8): INFERENCE, the record states the padding rule for `BIG_ENDIAN` and `LITTLE_ENDIAN` only. | implemented (not `automated-verified`: the upstream little-endian vectors are retained since S04a but not yet read by the S04b adapter or the S23 tests) | `byte_order_big_endian_byte_swap_maps_little_high`, `decode_dword_layout_2143`, `decode_lword_layout_21436587`, `typed_vectors_decode_to_the_expected_values` |
-| MB-BYTEORDER-LE-SWAP | `LITTLE_ENDIAN_BYTE_SWAP`, `[3,4,1,2]` (BO:31-33); bytes swapped pairwise, then little-endian read (Opt:166-178). | (BigEndian, LowWordFirst). `TypedDecoder` (S23). Lone narrow values follow the byte order alone (low byte, bit 0): INFERENCE, as for `BIG_ENDIAN_BYTE_SWAP`. | implemented (not `automated-verified`: the upstream little-endian vectors are retained since S04a but not yet read by the S04b adapter or the S23 tests) | `byte_order_little_endian_byte_swap_maps_big_low`, `decode_dword_layout_3412`, `decode_lword_layout_78563412`, `typed_vectors_decode_to_the_expected_values` |
+| MB-BYTEORDER-BE | `BIG_ENDIAN`, 4-byte layout `[1,2,3,4]` (BO:22-24); no swap, big-endian buffer (Opt:169; Conn:607-612). Lone narrow values are padded first (RegCodec:65-68). Vectors: REAL 3.141593 is registers `0x4049 0x0FDC`, DWORD 4242442424 is `0xFCDE 0x88B8` (Srv:95-97, 137-139). | (BigEndian, HighWordFirst). `TypedDecoder` (S23). A lone BOOL is bit 0 of the register and a lone BYTE, SINT or USINT the low byte; padding is ignored on decode. | automated-verified (retained upstream vectors, S04b: `DriverTestsuite.xml` and `Modbus-all-datatypes.xml`, `BIG_ENDIAN`, 4 + 14 read exchanges) | `upstream_big_endian_exchanges_decode_to_the_values_the_xml_reports` (implemented, S04b), `adapter_serializes_each_driver_suite_adu_deterministically` (implemented, S04b), `byte_order_big_endian_maps_big_high`, `decode_real_3_141593_big_endian`, `decode_dword_4242442424_big_endian`, `decode_dword_layout_1234_and_4321`, `the_two_axes_are_independent`, `typed_vectors_decode_to_the_expected_values`, `register_map_decodes_every_entry_to_the_row_value`, `interop_reads_all_fifteen_holding_register_types` (implemented, S27: the pymodbus map is stored big-endian) |
+| MB-BYTEORDER-LE | `LITTLE_ENDIAN`, `[4,3,2,1]` (BO:25-27); no swap, little-endian buffer (Opt:172-178; Conn:600-606). Lone narrow values: BOOL has 7 leading pad bits, the bit, then 8 trailing; BYTE value first (RegCodec:69-75, 158-160). | (LittleEndian, LowWordFirst). `TypedDecoder` (S23). A lone BOOL is bit 8 of the register and a lone BYTE, SINT or USINT the high byte, as the upstream padding rule states (7 leading pad bits, the bit, 8 trailing; value byte first). | automated-verified (retained upstream vectors, S04b: `Modbus-all-datatypes-little-endian.xml`, `LITTLE_ENDIAN`, 14 read exchanges; every case decodes to the value the XML reports) | `upstream_little_endian_exchanges_decode_to_the_values_the_xml_reports` (implemented, S04b), `upstream_little_endian_registers_are_not_the_big_endian_values` (implemented, S04b), `adapter_serializes_each_driver_suite_adu_deterministically` (implemented, S04b), `byte_order_little_endian_maps_little_low`, `decode_real_little_endian_region`, `decode_lword_layout_87654321`, `a_lone_bool_is_bit_0_under_big_and_bit_8_under_little`, `typed_vectors_decode_to_the_expected_values`, `register_map_decodes_every_entry_to_the_row_value`, `interop_little_endian_region_decodes_real` (implemented, S27: one LITTLE_ENDIAN REAL from pymodbus) |
+| MB-BYTEORDER-BE-SWAP | `BIG_ENDIAN_BYTE_SWAP`, `[2,1,4,3]` (BO:28-30); bytes swapped pairwise, then big-endian read (Opt:166-169). | (LittleEndian, HighWordFirst). `TypedDecoder` (S23). Lone narrow values follow the byte order alone (high byte, bit 8): INFERENCE, the record states the padding rule for `BIG_ENDIAN` and `LITTLE_ENDIAN` only. | implemented (not `automated-verified`: no retained upstream vector configures this mode, the two all-datatypes files use `BIG_ENDIAN` and `LITTLE_ENDIAN`) | `byte_order_big_endian_byte_swap_maps_little_high`, `decode_dword_layout_2143`, `decode_lword_layout_21436587`, `typed_vectors_decode_to_the_expected_values` |
+| MB-BYTEORDER-LE-SWAP | `LITTLE_ENDIAN_BYTE_SWAP`, `[3,4,1,2]` (BO:31-33); bytes swapped pairwise, then little-endian read (Opt:166-178). | (BigEndian, LowWordFirst). `TypedDecoder` (S23). Lone narrow values follow the byte order alone (low byte, bit 0): INFERENCE, as for `BIG_ENDIAN_BYTE_SWAP`. | implemented (not `automated-verified`: no retained upstream vector configures this mode, the two all-datatypes files use `BIG_ENDIAN` and `LITTLE_ENDIAN`) | `byte_order_little_endian_byte_swap_maps_big_low`, `decode_dword_layout_3412`, `decode_lword_layout_78563412`, `typed_vectors_decode_to_the_expected_values` |
 | MB-BYTEORDER-PRECEDENCE | Tag field over connection default (Conn:590-596). The tag field comes from the `{byte-order}` block (Tag:225-229). `equals` and `hashCode` ignore the byte order (Tag:301-319). | Tag field, then address block, then `default-payload-byte-order`; a name outside the four is `InvalidAddress` or `InvalidConfig`. S24a (`Batcher::plan`) resolves byte order and word order independently, tag over block, and leaves an unset field `None` for the connection default; the connection falls back to `ConnectionDefaults` for a field neither sets (S25); covered by `tag_order_fields_win_over_the_address_block`, `a_lone_tag_order_field_leaves_the_other_to_the_connection_default` and `member_offsets_are_relative_and_carry_type_and_order`. | implemented | `tag_field_beats_address_block_beats_the_connection_default` (implemented, S25: the tag field beats the address block beats the connection default), `a_tag_with_its_own_byte_order_decodes_differently_from_the_default` (implemented, S25), `unknown_byte_order_name_is_rejected` (implemented, S20b). The connection option `default-payload-byte-order` that fills `ConnectionDefaults` is parsed since S26 (`config_byte_order_accepts_four_upstream_names`, `the_parsed_byte_order_decodes_the_reply`) |
 
-Status note (S23, S04a): the four mode rows are `implemented` by `TypedDecoder` and are not
-`automated-verified`. The upstream little-endian all-datatypes file (`ADTLE`) is retained
-verbatim under `fixtures/modbus/upstream/tcp/` since S04a (maintainer prerequisite P4
-granted), but no adapter turns its cases into vectors yet and no test reads it: the rows
-reach `automated-verified` when the S04b adapter and the S23 tests use it, so no byte-order
-test here is an upstream vector.
-The mapping is DERIVED from the documented 4-byte layouts (and checked against the
-first-party `tcp/typed_*` vectors, written out by byte permutation, and the pymodbus
-interop map for BIG_ENDIAN plus its little-endian region), not confirmed by a run against
-a device or an upstream suite that swaps bytes. The rows move to `automated-verified`
-together, when the upstream little-endian vectors pass. Since S20b the address parser maps
-the four names in an address block through the same table (`byte_order_names_map_per_adr_0006`,
-with the `canonical()` rendering checked by `prop_canonical_round_trips`); S23's
-`byte_order_*_maps_*` tests assert that table and the decoder agree. `MB-BYTEORDER-PRECEDENCE`
+Status note (S23, S04a, S04b): `MB-BYTEORDER-BE` and `MB-BYTEORDER-LE` are
+`automated-verified` by the retained upstream vectors. The S04b adapter
+(`crates/stonecrab/tests/modbus_driver_suite_adapter.rs`) serializes the XML models of
+`DriverTestsuite.xml`, `Modbus-all-datatypes.xml` (`ADT`) and
+`Modbus-all-datatypes-little-endian.xml` (`ADTLE`) with its own mspec serializer, so the
+vectors `tcp/adu_upstream-driver-suite-*` and `tcp/adu_upstream-all-datatypes-*` are not
+produced by Stonecrab's codec or decoder, and the serializer itself reproduces the 56
+`<raw>` byte strings of the commented pcap cases of the two all-datatypes files. The
+decoder tests then decode the registers of every read response with the type and the
+payload byte order the case declares (14 types, `BIG_ENDIAN` for `DriverTestsuite.xml` and
+`ADT`, `LITTLE_ENDIAN` for `ADTLE`) and compare with the value the XML reports; every case
+passes, including the lone `BOOL`, `BYTE`, `SINT` and `USINT` of `ADTLE` (bit 8 and the
+high byte of the register) and the 4- and 8-byte integers and floats (fully reversed
+bytes). The same registers decoded as `BIG_ENDIAN` do not reproduce the reported value, so
+the vectors discriminate the mode. `LWORD` is the one type of the 15 that the files do not
+read.
+
+`MB-BYTEORDER-BE-SWAP` and `MB-BYTEORDER-LE-SWAP` stay `implemented`: neither retained
+file configures a swapped mode, so their mapping is still DERIVED from the documented
+4-byte layouts (and checked against the first-party `tcp/typed_*` vectors, written out by
+byte permutation), as is the lone-narrow-value rule for them (INFERENCE, see the rows).
+Since S20b the address parser maps the four names in an address block through the same
+table (`byte_order_names_map_per_adr_0006`, with the `canonical()` rendering checked by
+`prop_canonical_round_trips`); S23's `byte_order_*_maps_*` tests assert that table and the
+decoder agree. `MB-BYTEORDER-PRECEDENCE`
 is `implemented` since S25: the decoder takes an explicit pair, and the resolution of tag
 field, address block and `default-payload-byte-order` happens in `ModbusConnection` (S25);
 S26 parses the option.
@@ -535,6 +548,17 @@ Four of these files are retained byte for byte, ASF headers included, under
 `DriverTestsuite.xml`, `Modbus-all-datatypes.xml` and `Modbus-all-datatypes-little-endian.xml`.
 The other three are not copied.
 
+Which test loads which file (S04b): `ModbusTcpAllDatatypesIT` loads `ADT` and
+`ModbusTcpAllDatatypesLittleEndianIT` loads `ADTLE` (both
+`plc4j/drivers/modbus/src/test/java/org/apache/plc4x/java/modbus/tcp/`, line 26);
+`ModbusTcpDriverIT` loads `DTSO`, not `DTS`, and `DTS` is loaded by the Go driver test
+(`plc4go/tests/drivers/tests/modbus_driver_test.go:40`). The two differ in the
+multi-element read of two adjacent REAL tags: `DTS` sends two FC03 reads of two registers
+each (no optimizer), and `DTSO` sends one read of four registers (the optimizer merges the
+adjacent tags, `MB-READ-MERGE`). The Stonecrab batcher merges adjacent tags too, so for
+that case it sends the `DTSO` shape and the two `DTS` exchanges are response-decoding
+vectors, not a request-shape expectation for the batcher. `DTSO` is not retained.
+
 `fixtures/modbus/tcp/` holds the first-party PDU vectors (S21): the read examples of V1.1b
 sections 6.1 to 6.4, exception responses (section 7) and adversarial bytes, each listed in
 `fixtures/modbus/PROVENANCE.toml` with `protocol_spec` or `adversarial` as its source. The six
@@ -544,24 +568,37 @@ retained XML by the test `adapter_rederives_each_parser_suite_hex_from_raw_text`
 request (`000000000006ff0408d20002`) and response (99 registers) decode at the PDU layer
 and are framed by the MBAP framer; the four FC20/FC21 ("extended registers") frames are
 framed too and are `must_fail` at the PDU layer (`InvalidDiscriminator`: function codes
-outside the alpha set). The cases of `DriverTestsuite.xml` and of the two all-datatypes
-files are not yet turned into vectors; that is the S04b adapter.
+outside the alpha set). Since S04b the read exchanges of `DriverTestsuite.xml` (4) and of
+the two all-datatypes files (14 each) are vectors too, `tcp/adu_upstream-driver-suite-*`
+and `tcp/adu_upstream-all-datatypes-*`: 64 whole ADUs, a request and a response per
+exchange (the "Trans: N" in the upstream case names, and so in the vector names, is a label
+from the capture, not the transaction id of the modeled ADU, which is 1), serialized from the XML
+`ModbusADU` models by the test-only adapter
+`crates/stonecrab/tests/modbus_driver_suite_adapter.rs` (the `roxmltree` dev-dependency,
+ADR-0009 addendum) following the mspec and never Stonecrab's codec; the test
+`adapter_serializes_each_driver_suite_adu_deterministically` re-runs it and compares the
+committed `.hex`, `.expected.json` and the generated block of `PROVENANCE.toml` byte for
+byte. The expected files carry the tag, the payload byte order and the values the case
+reports, which `upstream_big_endian_exchanges_decode_to_the_values_the_xml_reports` and
+`upstream_little_endian_exchanges_decode_to_the_values_the_xml_reports` compare with
+`TypedDecoder`. The write cases (2 in `DTS`, 14 in each all-datatypes file) are
+serialized and length-checked by the adapter but not emitted as vectors: writes belong to
+S45 and S46. The file shapes the adapter found: all three files use the same
+`outgoing-plc-message` and `incoming-plc-message` steps with an XML `ModbusADU` model
+(`byteOrder="BIG_ENDIAN"` on the root is the harness order of the ADU fields; the
+payload order is the `default-payload-byte-order` driver parameter of `ADTLE`); the 26
+pcap-derived cases that run have empty step names; and each all-datatypes file carries 28
+more cases (14 queries and 14 responses, `<raw>` bytes beside an `<xml>` model) inside an
+XML comment, so no upstream runner loads them. The adapter does not emit them, but a test
+checks that its serializer turns those 56 models into exactly their `<raw>` bytes.
 
 ## UNVERIFIED
 - Generated `DataItem.staticParse` and `staticSerialize` behavior for the TIME and DATE
   family names (the generated classes are not in the repository).
-- Which XML the little-endian IT (`ModbusTcpAllDatatypesLittleEndianIT`) loads: the class is
-  not among the retained copies. `ADTLE` exists and carries the LITTLE_ENDIAN driver
-  parameter, so it is the likely file.
 - The internals of the `test` transport used by the driver test runners.
-- Whether `ADT` and `ADTLE` use the same XML-serialized `ModbusADU` step format as `DTS`.
-  Evidence so far: the step element names (`api-request`, `outgoing-plc-message`,
-  `incoming-plc-message`, `api-response`) occur 28 times each in both files; the
-  `ModbusADU` serialization inside those steps was not compared.
-- The number of wire exchanges per `DTS` case (the single and array reads show one
-  request/reply pair; the multi-element case was not counted).
-- The 27 pcap-derived "Query/Response" cases in `ADT` and the contents of
-  `manual-test-capture.pcapng`.
+- The contents of `manual-test-capture.pcapng`. The 28 "Query/Response" cases that each
+  all-datatypes file carries inside an XML comment are the only trace of the capture that
+  the repository holds.
 - Whether the RTU and ASCII connections reuse `ModbusTag` and `ModbusReadOptimizer`
   unchanged (not read; post-alpha).
 - The log level of unknown-parameter reporting: `UnknownParameterReporter` is not retained

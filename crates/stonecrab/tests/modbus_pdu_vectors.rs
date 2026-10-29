@@ -268,9 +268,14 @@ mod tests {
     #[test]
     fn the_upstream_function_04_pair_decodes_and_the_file_record_frames_are_refused() {
         let all = vectors();
+        // The driver-suite exchanges (S04b) are upstream vectors too; they are not these six.
         let upstream: Vec<&GoldenVector> = all
             .iter()
-            .filter(|v| v.source == VectorSource::UpstreamFixture)
+            .filter(|v| {
+                v.source == VectorSource::UpstreamFixture
+                    && !v.name.starts_with("tcp/adu_upstream-driver-suite-")
+                    && !v.name.starts_with("tcp/adu_upstream-all-datatypes-")
+            })
             .collect();
         assert_eq!(upstream.len(), 6, "the six frames of the parser suite");
         let named = |name: &str| {

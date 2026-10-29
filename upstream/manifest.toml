@@ -48,8 +48,7 @@ items = [
   "Map every required behavior to a planned test ID",
   "Review all configuration and address aliases before implementation",
   "Inspect the generated DataItem behavior for the TIME/DATE family (generated code is not in the repository)",
-  "Confirm which XML the little-endian IT loads and the test transport internals",
-  "Compare the XML-serialized ModbusADU step format of the all-datatypes suites with DriverTestsuite.xml",
+  "Read the test transport internals of the upstream driver test-suite runner (which XML each Modbus IT loads was settled in S04b)",
   "Check the Modbus Application Protocol V1.1b section numbers cited in docs/parity/modbus.md against a retained copy",
 ]
 
@@ -97,6 +96,10 @@ test_suites = { path = "protocols/modbus/src/test/resources/protocols/modbus/tcp
 interop_server = { path = "plc4j/drivers/modbus/src/test/resources/modbus/modbus_server.py", lines = "20-327" }
 interop_dockerfile = { path = "plc4j/drivers/modbus/src/test/resources/modbus/Dockerfile", lines = "20-42" }
 interop_test = { path = "plc4j/drivers/modbus/src/test/java/org/apache/plc4x/java/modbus/ModbusDockerIT.java", lines = "70-750" }
+it_driver_suite = { path = "plc4j/drivers/modbus/src/test/java/org/apache/plc4x/java/modbus/tcp/ModbusTcpDriverIT.java", lines = "23-27", note = "loads DriverTestsuiteOptimized.xml, not DriverTestsuite.xml (S04b)" }
+it_all_datatypes = { path = "plc4j/drivers/modbus/src/test/java/org/apache/plc4x/java/modbus/tcp/ModbusTcpAllDatatypesIT.java", lines = "23-27", note = "loads Modbus-all-datatypes.xml (S04b)" }
+it_all_datatypes_little_endian = { path = "plc4j/drivers/modbus/src/test/java/org/apache/plc4x/java/modbus/tcp/ModbusTcpAllDatatypesLittleEndianIT.java", lines = "23-27", note = "loads Modbus-all-datatypes-little-endian.xml (S04b)" }
+driver_suite_runner = { path = "plc4j/utils/test-utils/src/main/java/org/apache/plc4x/java/utils/testutils/driver/DriverTestsuiteRunner.java", lines = "50-138", note = "the runner all three ITs extend (S04b)" }
 
 [inventory.modbus_tcp.transports]
 default = "tcp"

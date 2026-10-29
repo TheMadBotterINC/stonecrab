@@ -206,6 +206,14 @@ of a checkout.
 - `VectorSource` is `upstream_fixture`, `protocol_spec`, `captured` or `adversarial`. The
   `expected.json` is authored from the specification or a capture, never by running a
   decoder; the loader only parses it.
+- The `adu_upstream-driver-suite-*` and `adu_upstream-all-datatypes-*` vectors are
+  `upstream_fixture` vectors produced from the XML `ModbusADU` models of the retained
+  PLC4X driver suites by an adapter that is not part of the kit: it is a test of the
+  repository (`tests/modbus_driver_suite_adapter.rs`) that reads XML with the
+  `roxmltree` dev-dependency and serializes with its own mspec-based serializer, so
+  neither the kit nor the published crate carries an XML parser or adapter code. Their
+  `.expected.json` carries the tag, the payload byte order and the values the XML case
+  reports.
 - `PROVENANCE.toml` has two optional arrays of tables, unknown keys rejected.
   `[[vector]]`: `name` (relative path, no extension, `/` separated), `source`, `origin`
   (upstream file and revision, or the specification section), `license` (SPDX),

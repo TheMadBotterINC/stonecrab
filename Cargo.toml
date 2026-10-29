@@ -22,6 +22,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["f
 serde = { version = "1.0", default-features = false, features = ["std"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
 toml = { version = "0.9", default-features = false, features = ["parse", "serde", "std"] }
+roxmltree = { version = "0.21", default-features = false, features = ["std"] }
 
 [workspace.lints.rust]
 unsafe_code                   = "forbid"

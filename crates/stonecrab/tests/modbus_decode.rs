@@ -1,14 +1,16 @@
 //! Tests of the typed decoder (slice S23): the golden vectors `fixtures/modbus/tcp/typed_*`,
-//! the interop register map, the layouts of the four upstream byte-order modes, the
+//! the upstream driver-suite exchanges `fixtures/modbus/tcp/adu_upstream-*` (slice S04b), the
+//! interop register map, the layouts of the four upstream byte-order modes, the
 //! single-register padding rules, the register-count and bit-area rejections and the
 //! round-trip properties (volume set by `PROPTEST_CASES`).
 //!
-//! The expected files of the vectors are written by hand from the documented layouts
-//! (docs/parity/modbus.md, "Byte order"), never by this decoder. Decode and encode are
-//! asserted separately and each against the file, so a decoder bug and an encoder bug
-//! cannot cancel out. The little-endian modes are DERIVED from those layouts: the upstream
-//! little-endian all-datatypes vectors wait for maintainer prerequisite P4, so no test here
-//! is an upstream vector.
+//! The expected files of the `typed_*` vectors are written by hand from the documented
+//! layouts (docs/parity/modbus.md, "Byte order"), never by this decoder. Decode and encode
+//! are asserted separately and each against the file, so a decoder bug and an encoder bug
+//! cannot cancel out. The upstream exchanges are serialized from the XML models of the
+//! retained PLC4X driver suites by `tests/modbus_driver_suite_adapter.rs` (not by this
+//! decoder, and not by Stonecrab's codec); their registers are decoded here with the type and
+//! the payload byte order the XML case declares and compared with the value the XML reports.
 #![cfg(all(feature = "modbus", feature = "testkit"))]
 #![forbid(unsafe_code)]
 
@@ -395,6 +397,177 @@ mod tests {
                 vector.name
             );
             assert_eq!(raw, vector.bytes, "{}: the bytes as received", vector.name);
+        }
+    }
+
+    // ---- the upstream driver-suite exchanges (S04b) ----------------------------------
+
+    /// The response vectors the adapter serialized from the case models of `file`.
+    fn upstream_responses(file: &str) -> Vec<GoldenVector> {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/modbus");
+        load_dir(&dir)
+            .expect("fixtures/modbus loads: every file listed, every listed vector present")
+            .into_iter()
+            .filter(|vector| {
+                text_at(vector, &["upstream", "file"]) == Some(file)
+                    && text_at(vector, &["pdu", "direction"]) == Some("response")
+            })
+            .collect()
+    }
+
+    fn value_at<'a>(vector: &'a GoldenVector, path: &[&str]) -> Option<&'a serde_json::Value> {
+        path.iter()
+            .try_fold(vector.expected.as_ref()?, |value, key| value.get(*key))
+    }
+
+    fn text_at<'a>(vector: &'a GoldenVector, path: &[&str]) -> Option<&'a str> {
+        value_at(vector, path)?.as_str()
+    }
+
+    /// Whether `got` is the value the XML reports as `text`: exact for integers, `BOOL` and
+    /// `REAL` (the text is the shortest decimal of the `f32`), within half a unit of the last
+    /// written digit for `LREAL` (the text `2.71828182846` is a rounded `e`).
+    fn matches_upstream(got: &PlcValue, data_type: ModbusDataType, text: &str) -> bool {
+        if let PlcValue::F64(float) = got {
+            let want: f64 = text.parse().expect("a decimal");
+            let places = text
+                .split_once('.')
+                .map_or(0, |(_, fraction)| fraction.len());
+            let unit = 10_f64.powi(
+                i32::try_from(places)
+                    .expect("a few places")
+                    .saturating_neg(),
+            );
+            return (float - want).abs() <= unit / 2.0;
+        }
+        let decimal = text.strip_prefix("0x").map_or_else(
+            || text.to_owned(),
+            |hex| {
+                u64::from_str_radix(hex, 16)
+                    .expect("hex digits")
+                    .to_string()
+            },
+        );
+        same(got, &named_value(data_type, &decimal))
+    }
+
+    /// Decode every response of `file` under `mode_name` (the order the file declares) and
+    /// compare each element with the value the case reports. Returns the types seen.
+    fn check_upstream_file(file: &str, mode_name: &str) -> BTreeSet<&'static str> {
+        let mut seen = BTreeSet::new();
+        for vector in upstream_responses(file) {
+            let at = &vector.name;
+            assert_eq!(
+                text_at(&vector, &["upstream", "byte_order"]),
+                Some(mode_name),
+                "{at}: the order the XML declares"
+            );
+            let data_type = type_named(
+                text_at(&vector, &["upstream", "tag", "data_type"]).expect("the declared type"),
+            );
+            // The ADU is the 7 byte header, the function code, the byte count, then registers.
+            let registers = registers_of(vector.bytes.get(9..).expect("an ADU with a payload"));
+            let listed = value_at(&vector, &["pdu", "registers"])
+                .and_then(serde_json::Value::as_array)
+                .expect("the register list");
+            assert_eq!(registers.len(), listed.len(), "{at}: register count");
+            let values = value_at(&vector, &["upstream", "values"])
+                .and_then(serde_json::Value::as_array)
+                .expect("the reported values");
+            let width = usize::from(data_type.register_size());
+            assert_eq!(
+                registers.len(),
+                values.len().saturating_mul(width),
+                "{at}: registers per element"
+            );
+            for (chunk, value) in registers.chunks(width).zip(values) {
+                let want = value
+                    .get("text")
+                    .and_then(serde_json::Value::as_str)
+                    .expect("text");
+                assert_eq!(
+                    value.get("type").and_then(serde_json::Value::as_str),
+                    Some(data_type.upstream_name()),
+                    "{at}: the reported value has the tag's type"
+                );
+                let got = decode(chunk, data_type, mode_named(mode_name));
+                assert!(
+                    matches_upstream(&got, data_type, want),
+                    "{at}: {chunk:04X?} decode to {got:?}, the XML reports {want}"
+                );
+            }
+            seen.insert(data_type.upstream_name());
+        }
+        seen
+    }
+
+    // covers: MB-BYTEORDER-BE
+    #[test]
+    fn upstream_big_endian_exchanges_decode_to_the_values_the_xml_reports() {
+        let driver_suite = check_upstream_file("DriverTestsuite.xml", "BIG_ENDIAN");
+        assert_eq!(
+            driver_suite,
+            BTreeSet::from(["REAL"]),
+            "the four driver-suite reads"
+        );
+        assert_eq!(
+            upstream_responses("DriverTestsuite.xml").len(),
+            4,
+            "read exchanges"
+        );
+        let all = check_upstream_file("Modbus-all-datatypes.xml", "BIG_ENDIAN");
+        assert_eq!(
+            all.len(),
+            14,
+            "every type but LWORD, which the file does not read"
+        );
+        assert_eq!(
+            upstream_responses("Modbus-all-datatypes.xml").len(),
+            14,
+            "read exchanges"
+        );
+    }
+
+    // covers: MB-BYTEORDER-LE
+    #[test]
+    fn upstream_little_endian_exchanges_decode_to_the_values_the_xml_reports() {
+        let file = "Modbus-all-datatypes-little-endian.xml";
+        let seen = check_upstream_file(file, "LITTLE_ENDIAN");
+        assert_eq!(
+            seen.len(),
+            14,
+            "every type but LWORD, which the file does not read"
+        );
+        assert_eq!(upstream_responses(file).len(), 14, "read exchanges");
+    }
+
+    // covers: MB-BYTEORDER-LE
+    #[test]
+    fn upstream_little_endian_registers_are_not_the_big_endian_values() {
+        let file = "Modbus-all-datatypes-little-endian.xml";
+        for vector in upstream_responses(file) {
+            let data_type = type_named(
+                text_at(&vector, &["upstream", "tag", "data_type"]).expect("the declared type"),
+            );
+            let registers = registers_of(vector.bytes.get(9..).expect("an ADU with a payload"));
+            let reported = value_at(&vector, &["upstream", "values"])
+                .and_then(serde_json::Value::as_array)
+                .and_then(|values| values.first())
+                .and_then(|value| value.get("text"))
+                .and_then(serde_json::Value::as_str)
+                .expect("the reported value");
+            let misread = TypedDecoder::decode_registers(
+                &registers,
+                data_type,
+                BIG_ENDIAN.0,
+                BIG_ENDIAN.1,
+                budget(64),
+            );
+            assert!(
+                !matches!(&misread, Ok(got) if matches_upstream(got, data_type, reported)),
+                "{}: the vector would pass under the wrong order",
+                vector.name
+            );
         }
     }
 

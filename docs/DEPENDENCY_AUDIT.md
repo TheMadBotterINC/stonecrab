@@ -358,3 +358,35 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
   parser written only to avoid a dependency that never reaches a published crate).
 - Review date: 2026-10-27. `cargo-deny` passes advisory, license, ban and source checks;
   this records the trust boundary, not a memory-safety certification.
+
+## roxmltree 0.21.2 (stonecrab, dev-dependency)
+- Purpose: parse the retained PLC4X driver-suite XML files in the test-only adapter
+  `crates/stonecrab/tests/modbus_driver_suite_adapter.rs` (slice S04b, ADR-0009 addendum).
+  The files are repository fixtures, not network input. The crate is a dev-dependency of
+  `stonecrab`, so it is not in the published manifest's dependencies and
+  `cargo tree -e normal --all-features -p stonecrab` does not list it.
+- License: MIT OR Apache-2.0.
+- Features: `[workspace.dependencies]` has `roxmltree = { version = "0.21",
+  default-features = false, features = ["std"] }`. `std` enables `memchr/std`;
+  `positions` (node positions in the text) stays off.
+- Transitive crates in this configuration: `memchr` 2.8.3 only, already audited under
+  `serde_json` (`default-features = false`; its own `std` feature is enabled by
+  `roxmltree/std`). `roxmltree` is not dependency-free: its manifest declares `memchr`.
+- Unsafe: `roxmltree` is `#![forbid(unsafe_code)]` (`src/lib.rs:17`) and its sources do not
+  mention the keyword elsewhere (on 2026-10-28); it has no `build.rs`, no proc macro and no
+  native code. `memchr` is as recorded under `serde_json`. First-party code stays
+  `forbid(unsafe_code)`.
+- Resource bounds: `ParsingOptions::default()` refuses DTDs (`allow_dtd: false`), so no
+  entity expansion happens; the node count limit is left at its default because the
+  parsed files are the three retained fixtures.
+- Banned crates: `cargo tree --workspace --all-features -e normal,dev,build -i <name>` for
+  each of `once_cell`, `lazy_static`, `log`, `time` and `chrono`: the two existing paths
+  (`once_cell` through `tracing-core`, `lazy_static` through `sharded-slab`, both wrapped in
+  `deny.toml`) are unchanged, and the other three match no package. `roxmltree` and
+  `memchr` add no path, so no `deny.toml` change is needed.
+- Alternatives: a string scan of the XML (S04a does this for the `<raw>` elements of the
+  parser suite, but the driver suites need element structure, attributes and nesting), and
+  `quick-xml` or `xmltree` (larger or with more dependencies; `roxmltree` is the
+  read-only tree reader the plan names).
+- Review date: 2026-10-28. `cargo-deny` passes advisory, license, ban and source checks;
+  this records the trust boundary, not a memory-safety certification.

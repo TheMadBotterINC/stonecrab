@@ -1,0 +1,4 @@
+# ADU bytes: the 7 byte MBAP header (transaction id, protocol id, length, unit id), then the PDU.
+# Serialized by the S04b adapter (crates/stonecrab/tests/modbus_driver_suite_adapter.rs) from the XML model of the step "unnamed incoming-plc-message at position 4" of test case "34 Query: Trans: 11; Unit: 1, Func: 3: Read Holding Registers" in fixtures/modbus/upstream/tcp/Modbus-all-datatypes.xml (Apache PLC4X v1.0.0, commit ea229918), following modbus.mspec; Stonecrab's codec is not involved, and a test re-runs the adapter and compares this file byte for byte.
+# Transaction 1, protocol id 0, length 5 (unit id plus 4 PDU bytes), unit id 1. Function 0x03 (read holding registers) response: byte count 2, register count 1.
+00 01 00 00 00 05 01 03 02 00 2A

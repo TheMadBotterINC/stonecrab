@@ -1,0 +1,36 @@
+{
+  "adus": [
+    {
+      "transaction_id": 1,
+      "protocol_id": 0,
+      "length": 7,
+      "unit_id": 1,
+      "pdu": "03 04 48 9F 8C F1"
+    }
+  ],
+  "leftover": 0,
+  "pdu": {
+    "direction": "response",
+    "function": 3,
+    "registers": [18591, 36081]
+  },
+  "upstream": {
+    "file": "Modbus-all-datatypes-little-endian.xml",
+    "case": "52 Query: Trans: 17; Unit: 1, Func: 3: Read Holding Registers",
+    "step": "unnamed incoming-plc-message at position 4",
+    "exchange": 1,
+    "byte_order": "LITTLE_ENDIAN",
+    "tag": {
+      "name": "hurz",
+      "address": "holding-register:14:DINT",
+      "data_type": "DINT",
+      "elements": 1
+    },
+    "values": [
+      {
+        "type": "DINT",
+        "text": "-242442424"
+      }
+    ]
+  }
+}

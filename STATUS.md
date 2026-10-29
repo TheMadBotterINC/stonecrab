@@ -164,7 +164,9 @@ landed; the table of landed slices below keeps the crate names the slices used t
   vectors authored from the Modbus Application Protocol V1.1b or built to fail), the
   interop register map and `PROVENANCE.toml`. Since S04a (P4 approved 2026-10-28),
   `upstream/tcp/` retains four Apache PLC4X test files verbatim with NOTICE attribution,
-  and the six frames of the parser suite are `tcp/adu_upstream-*` vectors.
+  and the six frames of the parser suite are `tcp/adu_upstream-*` vectors; since S04b the
+  32 read exchanges of the driver suite and the two all-datatypes suites are 64 more,
+  serialized from the XML models by a test-only adapter (`modbus_driver_suite_adapter.rs`).
 - `upstream/manifest.toml`: the pinned Apache PLC4X baseline and the Modbus TCP inventory.
 - Release process and evidence (ADR-0017 as amended): `release.toml` (cargo-release with
   publish, push and tag off; tag name `v{{version}}`), `mutants.toml`, the
@@ -340,6 +342,7 @@ commit; gates named were run locally before that commit.
 | S65 | 2026-10-28 | ADR-0019, the MSpec code generator, accepted under decision E3 (the maintainer may revisit): option (A), a native Rust generator `tools/stonecrab-codegen` in its own unpublished workspace (like `fuzz/`), parsing all of MSpec and emitting a growing, explicitly matrixed subset over `stonecrab::codec`, failing on anything else; output in `crates/stonecrab/src/<driver>/generated` with an `@generated` provenance header (tool version, mspec path, upstream commit, sha256) and no timestamp; S66 proves it on Modbus as a `#[cfg(test)]` module against the hand codec over the whole vector corpus; the S67 `regen` gate regenerates twice offline and requires a clean tree. Vendoring `modbus.mspec` under `upstream/mspec/` needs the maintainer's approval (P4 covered test vectors, not protocol descriptions); no code | link and citation check (docs only) |
 | S36 | 2026-10-28 | Profile range validation (finding G01): `SensorProfile::validate` reports `ProfileError::InvalidRange` when a range has a NaN or infinite bound or `min > max` (equal bounds are valid), in document and field order after the unit; before, an inverted range made every value Uncertain and a NaN bound skipped the check. Tests for inverted, NaN, infinite and equal bounds, the property-test oracle and the several-faults order test updated, a hostile-range fuzz seed (the target exercises the loader only), ADR-0016 addendum, SENSORS-VALIDATION row and component doc; the pipeline is unchanged | check, coverage, lint-attrs, parity, fuzz (fuzz_sensors_profile_toml, 60 s) |
 | S39 | 2026-10-28 | The word-order rule follows the driver (finding G05): `ProtocolAddress::spans_multiple_words` (provided, default false; Modbus answers true for every type wider than one register, from its register count, not a name list) and `SensorProfile::validate_for(&dyn Driver)`, which runs every `validate` rule, then parses each measurement address and reports `AddressRejected`, `MissingByteOrder` and `MissingWordOrder` in document order; `tags` runs it, so Modbus profiles without orders are still refused there. Behavior change: `validate` alone no longer reports the order errors (CHANGELOG, ADR-0016 addendum, SENSORS-VALIDATION). `WIDE_MODBUS_TYPES` is gone; the testkit's `ConventionDriver::with_wide_addresses` is the second driver in the tests (`sensors_word_order.rs`, 8 tests); sensors and modbus stay at 100% lines | check, coverage, lint-attrs, parity, examples |
+| S04b | 2026-10-28 | Driver-suite XML adapter: `roxmltree` 0.21.2 as a dev-dependency only (ADR-0009 addendum: the alpha's testkit `fixtures` feature would now reach the published crate), the adapter is the test file `modbus_driver_suite_adapter.rs` with its own serializer from `modbus.mspec`, and its output is checked byte for byte against the committed vectors; 32 read exchanges (DriverTestsuite.xml 4, each all-datatypes file 14) become 64 `adu_upstream-*` vectors with PROVENANCE entries and counts. The typed-decoder tests decode every big-endian and little-endian response to the value the XML reports (a discriminator test shows the little-endian ones fail as big-endian), so `MB-BYTEORDER-BE` and `-LE` are `automated-verified`; the swap modes stay `implemented` (no retained file configures them). Findings: the all-datatypes files share the driver-suite step format (pending item 8 closed), upstream's `ModbusTcpDriverIT` loads `DriverTestsuiteOptimized.xml` (item 7 narrowed), and their 16-bit write cases pair an FC06 request with an FC16 response | check, coverage, lint-attrs, parity, dependencies, machete, package list (with --allow-dirty before the commit) |
 
 ## Verified evidence and reproduction
 
@@ -555,16 +558,16 @@ in its S31 addendum, the parity gate.
   (fingerprint, SHA-512 and the trust caveat are in the manifest's `[signature]` table);
   the archive contents were not inventoried against the pinned commit.
 - `inventory_complete = false`: S41 (2026-10-28) closed the source inventory and the
-  Modbus RTU/ASCII item; the open items in the manifest `[pending]` table are:
+  Modbus RTU/ASCII item, and S04b the step-format comparison; the open items in the
+  manifest `[pending]` table are:
   1. Inventory capabilities in non-Java implementations (S42).
   2. Map every required behavior to a planned test ID (S43).
   3. Review all configuration and address aliases before implementation.
   4. Inspect the generated `DataItem` behavior for the TIME/DATE family (generated code
      is not in the repository).
-  5. Confirm which XML the little-endian IT loads and the test transport internals.
-  6. Compare the XML-serialized `ModbusADU` step format of the all-datatypes suites with
-     `DriverTestsuite.xml`.
-  7. Check the Modbus Application Protocol V1.1b section numbers cited in
+  5. Read the test transport internals of the upstream driver test-suite runner (S04b
+     settled which XML each Modbus IT loads).
+  6. Check the Modbus Application Protocol V1.1b section numbers cited in
      `docs/parity/modbus.md` against a retained copy.
 
 **M0 is not complete.** The manifest holds 62 `[inventory.*]` entries with file and line
@@ -615,10 +618,12 @@ Deferred features, each a deferred row in `docs/parity/modbus.md` or an item of 
 - **A plain `cargo test` runs the reduced suite** (no `testkit` feature, so the test files
   that need the kit are skipped without a notice) and the kit's own tests need a checkout;
   see "Important implementation and tooling details".
-- **Upstream vectors**: S04a retains four Apache-2.0 PLC4X test files and derives the six
-  parser-suite frames; the driver-suite and all-datatypes exchanges become vectors only
-  with the S04b adapter. Until the little-endian ones pass in the decoder tests, the four
-  byte-order mode rows stay `implemented` instead of `automated-verified`.
+- **Upstream vectors**: S04a and S04b turn the four retained Apache-2.0 PLC4X test files
+  into 70 vectors. Every big-endian and little-endian exchange decodes to the value the
+  XML expects, so `MB-BYTEORDER-BE` and `MB-BYTEORDER-LE` are `automated-verified`; no
+  retained file configures a swapped mode, so the two swap rows stay `implemented`. The
+  write cases are retained but not vectors yet (S45, S46); `DriverTestsuiteOptimized.xml`,
+  the file upstream's own driver IT loads, is not retained.
 - **Not verified by the interop run**: timing over a real clock, dropped links and device
   exceptions on demand (a stock pymodbus has no fault hooks), unit-id correlation, and any
   server other than pymodbus 3.8.6.

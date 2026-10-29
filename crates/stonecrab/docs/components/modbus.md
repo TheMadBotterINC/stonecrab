@@ -154,7 +154,7 @@ The layers underneath, with their evidence:
 | PDU codec for function codes 01 to 04 and the exception PDU | unit-tested; vector-tested; property-tested; fuzzed |
 | MBAP framing (`MbapFramer`, `MbapHeader`, `ModbusAdu`, `TransactionId`) | unit-tested; vector-tested; fuzzed |
 | Session: transaction ids, reply correlation by transaction id, unit id and function code, exception mapping (`ModbusSession`, `exception_item_error`) | unit-tested on the in-memory transport |
-| Typed register decoding and byte order (`TypedDecoder`) | unit-tested; vector-tested; property-tested; the little-endian modes are derived from the documented layouts, not yet confirmed by upstream vectors |
+| Typed register decoding and byte order (`TypedDecoder`) | unit-tested; vector-tested; property-tested; `BIG_ENDIAN` and `LITTLE_ENDIAN` confirmed by the retained upstream PLC4X vectors; the two byte-swap modes are derived from the documented layouts |
 | Read batching (`Batcher`) | unit-tested; property-tested |
 | Connection and driver (`ModbusConnection`, `ModbusTcpDriver`) | unit-tested on the in-memory transport; contract-suite-tested on the in-memory transport and over loopback sockets; one read run over loopback; ten reads and the contract suite against pymodbus 3.8.6 |
 
@@ -179,10 +179,11 @@ error rather than ignoring it; operations that have no API at all do not exist:
   milestone M2 (no row yet);
 - the upstream gap-filling read optimizer: Stonecrab merges adjacent or overlapping tags
   only (`MB-READ-GAP`), and a background reconnect task: reconnect is request-driven;
-- the upstream driver-suite and all-datatypes exchanges as vectors: the four upstream
-  test files are retained since S04a and the six parser-suite frames are vectors, but the
-  exchanges wait for the S04b adapter, so the byte-order rows stay below
-  `automated-verified`.
+- the two byte-swap modes (`BIG_ENDIAN_BYTE_SWAP`, `LITTLE_ENDIAN_BYTE_SWAP`) as upstream
+  vectors: the retained PLC4X files configure only `BIG_ENDIAN` and `LITTLE_ENDIAN`, so
+  those two rows stay `implemented`, not `automated-verified`;
+- the write exchanges of the upstream driver suites: the adapter serializes them but emits
+  no vector, because writes come after the alpha.
 
 ## Interoperability
 The `interop` job of the repository's CI builds `interop/pymodbus/` (a first-party Modbus
@@ -572,9 +573,14 @@ names are four pairs of them (ADR-0006) and lay the value `0x01020304` out as sh
 | `LITTLE_ENDIAN_BYTE_SWAP` | `BigEndian` | `LowWordFirst` | `[3,4,1,2]` |
 
 The mapping is derived from the documented layouts. The first-party vectors and the
-pymodbus register map agree with it. The upstream little-endian test file is retained
-since S04a, but its exchanges become vectors only with the S04b adapter, so the byte-order
-rows of the parity record are `implemented`, not `automated-verified`.
+pymodbus register map agree with it, and since S04b so do the retained upstream PLC4X
+exchanges: the read responses of `DriverTestsuite.xml` and `Modbus-all-datatypes.xml`
+decode under `BIG_ENDIAN`, and those of `Modbus-all-datatypes-little-endian.xml` under
+`LITTLE_ENDIAN`, to the value each XML case reports (the vectors are serialized from the
+XML models by a test-only adapter, not by Stonecrab's codec). The rows
+`MB-BYTEORDER-BE` and `MB-BYTEORDER-LE` of the parity record are therefore
+`automated-verified`; no upstream file configures the two byte-swap modes, so their rows
+are `implemented`.
 
 A lone `BOOL`, `BYTE`, `SINT` or `USINT` occupies one register: the low byte (and, for a
 `BOOL`, bit 0) under `BigEndian`, the high byte (bit 8) under `LittleEndian`. The other

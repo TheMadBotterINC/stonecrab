@@ -307,3 +307,48 @@ compiling doctest on the type and on every method. The consumer is
 the probe and the frame count as `device_reads`. S26's loopback run keeps its own probe
 (opens plus the requests the responder counted), which is exact there, and does not use
 this double.
+
+## Addendum (S04b): `roxmltree` is a dev-dependency and the adapter is a test
+Slice S04b adds the driver-suite XML adapter. Decision 1 and decision 2 placed `roxmltree`
+in the unpublished testkit behind a feature `fixtures`. Since ADR-0018 the testkit is a
+feature of the published crate, so a feature-gated `roxmltree` would be an optional
+dependency of the published manifest. It is instead a **dev-dependency** of `stonecrab`
+(`[workspace.dependencies]`: `roxmltree = { version = "0.21", default-features = false,
+features = ["std"] }`, DEPENDENCY_AUDIT entry added), and the adapter lives in the test
+target, `crates/stonecrab/tests/modbus_driver_suite_adapter.rs`, not in `src/`. This
+relaxes decision 2 for `roxmltree` only, as a dev-dependency of `stonecrab` (build and test
+time, never a dependency or a feature). The published crate gains no (non-dev) dependency,
+no feature and no source line;
+`cargo tree -e normal --all-features -p stonecrab` does not list `roxmltree` (checked on
+2026-10-28), and `positions`, the one other feature of the crate, stays off.
+
+**What the adapter does.** It parses `DriverTestsuite.xml`, `Modbus-all-datatypes.xml` and
+`Modbus-all-datatypes-little-endian.xml` (retained since S04a) and finds the XML-serialized
+`ModbusADU` of every outgoing and incoming step. Its own serializer follows
+`protocols/modbus/.../modbus.mspec` (the PDUs that occur are a five-row table; `length` and
+`byteCount` are derived, as the mspec has them, and the adapter fails when the XML spells
+out another value) and never calls Stonecrab's codec or decoder (SPEC.md 'Code generation
+and upstream maintenance', requirement 7). For each read exchange it renders the request
+and the response as `tcp/adu_upstream-<suite>-<case>-ex<n>-<request|response>` (`.hex`,
+`.expected.json`, and a `[[vector]]` entry in an adapter-generated block of
+`PROVENANCE.toml`) from the same model. It fails on any step shape it does not know (a raw
+bytes step, an exception PDU, an unlisted PDU, a width that differs from the mspec).
+`adapter_serializes_each_driver_suite_adu_deterministically` re-runs it and compares the
+committed files and the block byte for byte, so drift or a hand edit fails; running that
+test once with `STONECRAB_REGENERATE_ADAPTER_VECTORS` set rewrites them.
+
+**Result.** The alpha plan's assumption that the all-datatypes files use the
+`DriverTestsuite.xml` model format holds: all three files use the same
+`outgoing-plc-message` and `incoming-plc-message` steps with an XML `ModbusADU`. The
+adapter counts 4 read exchanges in `DriverTestsuite.xml` (single 1, array 1, multi-element
+2) and 14 in each all-datatypes file, 64 vectors in all; the 2 + 14 + 14 write cases are
+serialized and checked but not emitted (S45 and S46 own writes). The "Query/Response"
+pcap-derived cases are 28 per all-datatypes file inside an XML comment, so no runner loads
+them; a test feeds their `<xml>` models to the serializer and requires their `<raw>` bytes
+back, which is an independent check of the serializer.
+
+**D23 check (2026-10-28).** `cargo tree --workspace --all-features -e normal,dev,build -i
+<name>` for each name: `once_cell` and `lazy_static` keep their one wrapped path each
+(`tracing-core` and `sharded-slab`); `log`, `time` and `chrono` match no package.
+`roxmltree` adds a single crate, `memchr`, which is already in the tree through
+`serde_json` and has no path to a banned crate. No `deny.toml` change.

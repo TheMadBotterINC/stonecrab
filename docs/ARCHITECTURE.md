@@ -1392,9 +1392,10 @@ out the backoff and reopens, and the read in flight when the peer closed fails w
 
 **Byte-order mapping (D14, ADR-0006).** Upstream's four-valued `ModbusByteOrder` is two
 core axes. The mapping is derived from the documented 4-byte layouts and is
-`implemented`, not `automated-verified`, until the upstream little-endian vectors pass
-(retained since S04a; vectors with the S04b adapter). Precedence: the tag field, then the
-address block, then `default-payload-byte-order`; never inferred.
+`implemented`, and `automated-verified` for `BIG_ENDIAN` and `LITTLE_ENDIAN` since S04b
+(the retained upstream vectors pass; the byte-swap modes are in no upstream file).
+Precedence: the tag field, then the address block, then `default-payload-byte-order`;
+never inferred.
 
 | Upstream name | `ByteOrder` | `WordOrder` | `0x01020304` on the wire |
 | --- | --- | --- | --- |
@@ -1418,8 +1419,8 @@ address block, then `default-payload-byte-order`; never inferred.
 - the upstream gap-filling read optimizer (the batcher never reads a gap, divergence
   `MB-READ-GAP`) and a background reconnect task (D15; eager reconnect is the first M2
   slice);
-- the upstream driver-suite and all-datatypes vectors: the files are retained since S04a
-  and the parser-suite frames are vectors; the exchanges wait for the S04b adapter.
+- the upstream write exchanges: the driver-suite and all-datatypes read exchanges are
+  vectors since S04b (serialized by a test-only adapter); the write cases are not emitted.
 
 The diagram's `Framing`, `RtuFramer`, `ModbusRtuDriver`, write PDU variants and the
 `count` on `ModbusAddress` are therefore deferred or changed as stated; the rest of the
@@ -1923,7 +1924,8 @@ the crate because a separate test crate would be a dev-dependency cycle. It ship
 own driver. The loaders and some of its tests read repository files, so they run from a
 checkout. **Deferred:** `DifferentialRunner` and `UpstreamHarness` (M5), the
 hardware runner and `HardwareRecord` (M2S). Since S04a the upstream parser-suite frames
-are vectors beside the first-party ones; the driver-suite exchanges wait for S04b.
+are vectors beside the first-party ones, and since S04b so are the driver-suite and
+all-datatypes read exchanges (a test-only adapter, not a testkit item).
 
 ---
 

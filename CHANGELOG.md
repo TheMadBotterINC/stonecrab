@@ -37,6 +37,13 @@ placeholder.
   maintainer tool, `tools/stonecrab-codegen`, proven first on Modbus against the
   hand-written codec through the vector corpus, with a provenance header and an offline
   `regen` gate; nothing is generated yet.
+- Upstream driver-suite vectors (no crate changes): a test-only adapter
+  (`tests/modbus_driver_suite_adapter.rs`, the `roxmltree` dev-dependency) serializes the
+  XML models of the retained PLC4X driver suites with its own mspec serializer and emits 64
+  vectors, the request and response of 32 read exchanges, under `fixtures/modbus/tcp/`
+  (none of them in the published crate). `TypedDecoder` decodes every one to the value
+  the XML reports, so `MB-BYTEORDER-BE` and `MB-BYTEORDER-LE` are `automated-verified`; the
+  two byte-swap modes are in no upstream file and stay `implemented`.
 
 ## Alpha
 The first pre-release is `stonecrab` 0.2.0, one crate (ADR-0018). Its section below opens

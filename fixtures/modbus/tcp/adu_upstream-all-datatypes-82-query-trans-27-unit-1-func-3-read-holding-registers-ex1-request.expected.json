@@ -1,0 +1,31 @@
+{
+  "adus": [
+    {
+      "transaction_id": 1,
+      "protocol_id": 0,
+      "length": 6,
+      "unit_id": 1,
+      "pdu": "03 00 1B 00 04"
+    }
+  ],
+  "leftover": 0,
+  "pdu": {
+    "direction": "request",
+    "function": 3,
+    "start": 27,
+    "quantity": 4
+  },
+  "upstream": {
+    "file": "Modbus-all-datatypes.xml",
+    "case": "82 Query: Trans: 27; Unit: 1, Func: 3: Read Holding Registers",
+    "step": "unnamed outgoing-plc-message at position 3",
+    "exchange": 1,
+    "byte_order": "BIG_ENDIAN",
+    "tag": {
+      "name": "hurz",
+      "address": "holding-register:28:LREAL",
+      "data_type": "LREAL",
+      "elements": 1
+    }
+  }
+}

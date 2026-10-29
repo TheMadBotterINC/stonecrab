@@ -875,11 +875,28 @@ mod tests {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/modbus");
         let vectors = load_dir(&dir).expect("fixtures/modbus loads: every file is listed");
         assert!(!vectors.is_empty(), "the Modbus vectors");
-        let upstream = vectors
+        let upstream: Vec<_> = vectors
             .iter()
             .filter(|v| v.source == VectorSource::UpstreamFixture)
+            .collect();
+        // The driver-suite adapter (S04b, tests/modbus_driver_suite_adapter.rs) owns the
+        // vectors named after DriverTestsuite.xml and the two all-datatypes files.
+        let parser_suite = upstream
+            .iter()
+            .filter(|v| {
+                !v.name.starts_with("tcp/adu_upstream-driver-suite-")
+                    && !v.name.starts_with("tcp/adu_upstream-all-datatypes-")
+            })
             .count();
-        assert_eq!(upstream, 6, "the six <raw> elements of the parser suite");
+        assert_eq!(
+            parser_suite, 6,
+            "the six <raw> elements of the parser suite"
+        );
+        assert_eq!(
+            upstream.len(),
+            70,
+            "the six plus the 64 request and response vectors of the 32 driver-suite read exchanges"
+        );
         assert!(
             vectors.iter().all(|v| v.source != VectorSource::Captured),
             "nothing is captured from a device yet"

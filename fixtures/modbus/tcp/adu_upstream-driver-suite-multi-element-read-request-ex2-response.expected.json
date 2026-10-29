@@ -1,0 +1,36 @@
+{
+  "adus": [
+    {
+      "transaction_id": 2,
+      "protocol_id": 0,
+      "length": 7,
+      "unit_id": 1,
+      "pdu": "03 04 40 49 0F DB"
+    }
+  ],
+  "leftover": 0,
+  "pdu": {
+    "direction": "response",
+    "function": 3,
+    "registers": [16457, 4059]
+  },
+  "upstream": {
+    "file": "DriverTestsuite.xml",
+    "case": "Multi element read request",
+    "step": "Receive Second Item Modbus Input-Register Read Response",
+    "exchange": 2,
+    "byte_order": "BIG_ENDIAN",
+    "tag": {
+      "name": "hurz2",
+      "address": "holding-register:3:REAL",
+      "data_type": "REAL",
+      "elements": 1
+    },
+    "values": [
+      {
+        "type": "REAL",
+        "text": "3.1415927"
+      }
+    ]
+  }
+}
