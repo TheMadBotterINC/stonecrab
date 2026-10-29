@@ -1,0 +1,6 @@
+{
+  "direction": "request",
+  "error": "OversizedLength",
+  "length": 10000,
+  "max": 9999
+}

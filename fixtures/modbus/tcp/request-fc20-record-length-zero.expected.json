@@ -1,0 +1,6 @@
+{
+  "direction": "request",
+  "error": "InvalidDiscriminator",
+  "field": "record length",
+  "value": 0
+}

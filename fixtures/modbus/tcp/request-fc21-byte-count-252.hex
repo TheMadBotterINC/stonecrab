@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as a request.
+# byte count 252 (0xFC), one over the 0xFB bound; no data follows because the count is refused first
+15 FC

@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as a request.
+# byte count 7 but only six data bytes follow
+14 07 06 00 01 00 00 00

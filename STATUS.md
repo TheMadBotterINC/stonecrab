@@ -247,23 +247,27 @@ one operation in flight, applies bounded read retry and never retries a write.
 
 ### `stonecrab::modbus`, feature `modbus`
 
-Modbus TCP, reads only (ADR-0015; hand-written, nothing generated): the address types and
-grammar (`ModbusAddress::parse`, the explicit-convention rule for bare `40001` forms, the
-`{unit-id, byte-order}` block), the PDU codec for function codes 01 to 04, the write PDUs
-upstream emits (FC06, FC15 and FC16, with `ModbusPdu::write_request` choosing among them;
-S45, not yet on the wire) and the exception PDU, MBAP framing (`MbapFramer`), `TypedDecoder` for the 15 types under the four
-byte-order modes, `Batcher` (adjacent or overlapping merge only, 125 registers and 2000
-bits per chunk), `ModbusSession` (reply accepted only when transaction id, unit id and
-function code match), `ModbusConnection` and `ConnectionDefaults`, and `ModbusTcpDriver`
-with `ModbusOptions` (the six upstream parameters with upstream defaults plus
-`address-convention`; unknown keys are `InvalidConfig`). `write` (S46) is refused unless
-the connection string says `access=read-write`, then sends one request per item (FC15 for
-coils, FC06 or FC16 for holding registers): an echo is `Confirmed`, an exception
-`Rejected`, a frame sent without a usable answer `Unknown` and never replayed, and the
-items after an `Unknown` are not sent. `ping` reads the configured `ping-address` once
-(S47): any correlated reply, an
-exception included, is success, as upstream does (quirk d). Deferred items are in "Known
-gaps".
+Modbus TCP (ADR-0015; hand-written, nothing generated): the address types and grammar
+(`ModbusAddress::parse`, the explicit-convention rule for bare `40001` forms with the
+`plc4x`, `one-based-40001` and `zero-based` conventions of S51, the `{unit-id, byte-order}`
+block, the array selections `[i]`, `[lo..hi]` and `;base` of S48 (ADR-0022) and the
+extended registers of S50, selections included), the PDU codec for function codes 01 to 06,
+15, 16, 20 and 21 and the exception PDU, MBAP framing (`MbapFramer`), `TypedDecoder` for the
+15 types under the four byte-order modes and for lists of them, `Batcher` (adjacent or
+overlapping merge only; 125 registers, 120 extended registers and 2000 bits per chunk),
+`ModbusSession` (reply accepted only when transaction id, unit id and function code match),
+`ModbusConnection` and `ConnectionDefaults`, and `ModbusTcpDriver` with `ModbusOptions` (the
+six upstream parameters with upstream defaults plus `address-convention` and `access`;
+unknown keys are `InvalidConfig`). `write` (S46) is refused unless the connection string
+says `access=read-write`, then sends one request per item (FC15 for coils, FC06 or FC16 for
+holding registers, FC21 cut at the file ends for extended registers): an echo is
+`Confirmed`, an exception `Rejected`, a frame sent without a usable answer `Unknown` and
+never replayed, and the items after an `Unknown` are not sent. `ping` reads the configured
+`ping-address` once (S47): any correlated reply, an exception included, is success, as
+upstream does (quirk d). `subscribe` polls (S55), and a connection opened inside a Tokio
+runtime reconnects in the background and enforces `Timeouts.idle` (S57). Extended registers
+are `implemented`, not `automated-verified`: no interop peer serves FC20 or FC21. Deferred
+items are in "Known gaps".
 
 ### `stonecrab::sensors`, feature `sensors`
 
@@ -399,6 +403,7 @@ commit; gates named were run locally before that commit.
 | S48 | 2026-10-29 | Lists and Modbus array selections (finding G08, the list part), ADR-0022: `PlcValue::List(Vec<PlcValue>)` and `PlcValueType::List` appended (a range address carries the List hint, so the existing write builder refuses a scalar to a range and a list to an index before any I/O); the grammar `[i]`, inclusive `[lo..hi]` and `;base` on the long, Nx and bare forms (one dimension; numbers checked into u32; an index below the base or hi below lo refused); `[i]` resolves to the element's own address, a range sets `ModbusAddress::elements()` and is one tag and one read item whose whole span must end by wire 65535 and fit one read (2000 bits, 125 registers); byte and word order per element; a write takes a List of exactly the element count (FC15, FC16, FC06 for one register) and a list wider than one PDU is refused with `ResourceLimit`; the legacy-form hint is offered only when it parses; `ping-address` may be a range, read whole as upstream does. Divergences recorded: a sub-register element takes one register, `[4..4]` reads a list of one, an over-wide write is refused. The odd-byte-offset rule waits for CHAR and STRING (S49); whether a profile's `count` maps to a selection is open | check, coverage (core and modbus 100%), lint-attrs, parity, examples, semver; package steps with --allow-dirty (the task itself refuses an uncommitted tree) |
 | S56 | 2026-10-29 | Staleness and the acquisition loop (finding G09 resolved), ADR-0023: `StaleTracker` in `stonecrab::sensors`, pure logic per profile with no clock of its own (`record`, `expire(now)`, `next_expiry()`); a retained measurement is `Stale` once its age (now minus `received_mono`) exceeds `stale_after`, exclusive at the threshold, reported once, value and timestamps kept, the earlier quality in the new field `Measurement::quality_before_stale`; a measurement without a value erases nothing. `Acquisition::new(&profile, &dyn Driver, &dyn Connection, &dyn Clock, interval)` reads through `Connection::read` (not S55 subscriptions: one interval per subscription, item-by-item delivery and grid catch-up would break `min_interval`), raises a faster interval to `min_interval`, reads everything due together in one request, hands fresh measurements and stale transitions out of `recv()` with no spawned task, ends when the connection closes, and refuses a clock that cannot pace it. 17 tests on FakeClock against the simulator and Modbus over the fake transport, including wall-clock jumps and dropped `recv` calls. Also reconciles the deferred list of this file and ARCHITECTURE notes left stale by S45 to S58 | check, coverage (sensors 100%), lint-attrs, parity, examples, semver; package steps with --allow-dirty |
 | span tests (fix) | 2026-10-29 | Under load, `cargo test` failed two span tests of `modbus_connection` ("a read span", "the tick read has its own read span") while nextest passed them: in tracing-core 0.1.36 a callsite another test first hits while the binary installs its global tap is filed before it asks the default dispatcher for its interest, so it can keep `never` after the install-time rebuild, and its spans are lost. The `traced` helpers of `modbus_connection` and `modbus_session` now call `tracing::callsite::rebuild_interest_cache()` once the tap is installed | check; both binaries under 12 busy loops: unfixed 1 failure in 300 runs, fixed 0 in 300 |
+| S50 | 2026-10-29 | Extended registers through FC20 and FC21 (`MB-ADDR-EXTENDED` implemented, ADR-0015 addendum): `extended-register:N`, `6x` and the bare `6` form under an explicit convention, the address being the register number (0 refused), file = address / 10000 + 1 and record = address % 10000 as upstream sends them (its parser-suite frames decode byte for byte), the last address 655349999 (upstream's 655359999 would need file 65536; divergence `MB-LIMIT-EXT`); reads in chunks of at most 120 registers (125 would answer over the 245 data bytes V1.1b allows), one FC20 request per chunk cut at file ends and every sub-response checked and joined in order (upstream used the first only, `MB-QUIRK-B` fixed); writes as one FC21 request per item cut the same way and confirmed only by the whole echo. Merged with S48 by a dedicated merge (ADR-0022 addendum of 2026-10-29): selections work on the extended registers, offsets count through the files, a selection is at most 120 registers, and a list written across a file end at most 118. No interop peer serves FC20 or FC21, so the evidence is fake-transport and responder tests | check (1542 tests), coverage (modbus 100%), lint-attrs, parity, examples, semver, fuzz smoke (10 s per target), package list |
 
 ## Verified evidence and reproduction
 
@@ -658,10 +663,10 @@ Deferred features, each a deferred row in `docs/parity/modbus.md` or an item of 
   subscriptions (with OPC UA, M3). Writes (S45, S46), ping (S47), polling subscriptions
   (S55), the stale tracker and acquisition loop (S56), and eager reconnect with
   `Timeouts.idle` (S57) have shipped.
-- **Extended registers** (FC20 and FC21, S50) and **strings** (`STRING`, `WSTRING`,
-  `CHAR`, `WCHAR`, S49): the parser rejects each with a typed error. The Modbus `TIME` and
-  `DATE` names stay rejected because upstream has no Modbus encoding for them (S44); the
-  calendar values shipped in S53 (ADR-0021), array selections in S48 (ADR-0022) and the
+- **Strings** (`STRING`, `WSTRING`, `CHAR`, `WCHAR`, S49): the parser rejects each with a
+  typed error. The Modbus `TIME` and `DATE` names stay rejected because upstream has no
+  Modbus encoding for them (S44); the calendar values shipped in S53 (ADR-0021), array
+  selections in S48 (ADR-0022), extended registers with their selections in S50 and the
   `zero-based` and `one-based-40001` conventions in S51.
 - **Modbus RTU and ASCII** (S59, S60; the serial transport shipped in S58); UDP (S61), TLS
   and TLS-PSK (M3 or the parity backlog); board adapters (M2S); OPC UA (M3, after the

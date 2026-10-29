@@ -107,6 +107,114 @@ mod tests {
         );
     }
 
+    /// An extended-register tag at register `address`.
+    fn extended(name: &str, address: u32, data_type: ModbusDataType) -> Tag {
+        let built = ModbusAddress::extended(address)
+            .data_type(data_type)
+            .build()
+            .expect("valid address");
+        tag_of(name, built)
+    }
+
+    /// The file and record a chunk starts at: (file, start).
+    fn position(chunk: &Chunk) -> (Option<u16>, u16) {
+        (chunk.file.map(NonZeroU16::get), chunk.start)
+    }
+
+    // covers: MB-READ-MERGE, MB-ADDR-EXTENDED
+    #[test]
+    fn extended_tags_merge_like_the_other_register_areas_over_their_addresses() {
+        let chunks = plan(&[
+            extended("c", 12, ModbusDataType::DInt),
+            extended("a", 10, ModbusDataType::Int),
+            extended("b", 11, ModbusDataType::Int),
+            extended("far", 20, ModbusDataType::Int),
+        ]);
+        assert_eq!(chunks.len(), 2, "the gap before 20 starts a new chunk");
+        let [block, alone] = chunks.as_slice() else {
+            panic!("two chunks");
+        };
+        assert_eq!(block.area, ModbusArea::ExtendedRegister);
+        assert_eq!((position(block), block.quantity), ((Some(1), 10), 4));
+        assert_eq!(ids(block), ["a", "b", "c"], "ordered by address");
+        let offsets: Vec<u16> = block.members.iter().map(|m| m.offset).collect();
+        assert_eq!(
+            offsets,
+            [0, 1, 2],
+            "offsets count registers from the chunk start"
+        );
+        assert_eq!((position(alone), alone.quantity), ((Some(1), 20), 1));
+        for chunk in plan(&[holding("h", 0, ModbusDataType::Int), coil("c", 0)]) {
+            assert_eq!(chunk.file, None, "the other areas have no file");
+        }
+    }
+
+    // covers: MB-READ-MERGE, MB-ADDR-EXTENDED
+    #[test]
+    fn a_chunk_starts_in_its_first_file_and_may_run_into_the_next() {
+        // Address 9999 is the last record of file 1 and address 10000 the first of file 2.
+        let chunks = plan(&[
+            extended("last", 9_999, ModbusDataType::Int),
+            extended("first", 10_000, ModbusDataType::Int),
+        ]);
+        let [chunk] = chunks.as_slice() else {
+            panic!("adjacent across the file end: one chunk");
+        };
+        assert_eq!((position(chunk), chunk.quantity), ((Some(1), 9_999), 2));
+        assert_eq!(ids(chunk), ["last", "first"]);
+
+        // A tag that itself crosses the end of a file.
+        let chunks = plan(&[extended("wide", 9_999, ModbusDataType::DInt)]);
+        assert_eq!(
+            chunks.first().map(|c| (position(c), c.quantity)),
+            Some(((Some(1), 9_999), 2))
+        );
+
+        // Files count from 1 and the last one is 65535.
+        let chunks = plan(&[
+            extended("one", 1, ModbusDataType::Int),
+            extended("start", 10_000, ModbusDataType::Int),
+            extended("end", 655_349_999, ModbusDataType::Int),
+        ]);
+        let starts: Vec<_> = chunks.iter().map(position).collect();
+        assert_eq!(
+            starts,
+            [(Some(1), 1), (Some(2), 0), (Some(65_535), 9_999)],
+            "three chunks, each at its file and record"
+        );
+    }
+
+    // covers: MB-LIMIT-REGISTERS, MB-ADDR-EXTENDED
+    #[test]
+    fn an_extended_chunk_holds_at_most_120_registers() {
+        let run = |count: u32| -> Vec<Chunk> {
+            let tags: Vec<Tag> = (1..=count)
+                .map(|n| extended(&format!("t{n}"), n, ModbusDataType::Int))
+                .collect();
+            plan(&tags)
+        };
+        let quantities =
+            |chunks: &[Chunk]| -> Vec<u16> { chunks.iter().map(|c| c.quantity).collect() };
+        assert_eq!(quantities(&run(120)), [120]);
+        assert_eq!(
+            quantities(&run(121)),
+            [120, 1],
+            "121 are cut at 120, not at 125"
+        );
+        assert_eq!(quantities(&run(250)), [120, 120, 10]);
+        // The holding registers keep their 125.
+        let holding_run: Vec<Tag> = (0..125_u16)
+            .map(|n| holding(&format!("h{n}"), n, ModbusDataType::Int))
+            .collect();
+        assert_eq!(quantities(&plan(&holding_run)), [125]);
+        // A configured bound below 120 still applies.
+        let tags: Vec<Tag> = (1..=30_u32)
+            .map(|n| extended(&format!("t{n}"), n, ModbusDataType::Int))
+            .collect();
+        let small = Batcher::plan(&tags, &limits(10, 2000, 1024)).expect("plannable");
+        assert_eq!(quantities(&small), [10, 10, 10]);
+    }
+
     // covers: MB-READ-MERGE
     #[test]
     fn batcher_merges_overlapping_tags() {

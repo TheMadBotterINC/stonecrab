@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as the response to function 20.
+# one sub-response of length 4 (reference type and 3 data bytes): not whole registers
+14 05 04 06 00 00 00

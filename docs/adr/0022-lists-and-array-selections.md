@@ -167,3 +167,72 @@ properties. `crates/stonecrab/tests/modbus_selection_io.rs` reads lists from all
 and writes them through `ModbusTcpDriver` over the fake transport, including the upstream
 array read; `crates/stonecrab/tests/modbus_write_vectors.rs` replays the upstream array
 write. `scripts/coverage-gate.sh` holds core and modbus at 100% lines.
+
+## Addendum: selections on the extended registers (2026-10-29)
+Slices S48 (this ADR) and S50 (the extended registers, the S50 addendum of ADR-0015) were
+built apart and merged on 2026-10-29. Upstream gives the extended registers the selection
+grammar of the other areas: `ModbusTagExtendedRegister` builds its patterns from
+`Tag:47-48` (`TagExt:32-34`) and resolves a selection as the holding registers do
+(`TagExt:95-108`), and `ModbusTagTest.testExtended_INT_ARRAY_RANGE` (`MTT`) reads
+`extended-register:1[0..%d]:INT` in four spellings. Every decision above and every
+decision of the S50 addendum stands; this addendum decides how they combine, and the S50
+addendum points here.
+
+1. **Grammar.** Every extended-register form (`extended-register:N`, `6xNNNNN`, the bare
+   `6NNNNN` under a convention) takes `[i]`, `[lo..hi]` and `;base` between the number and
+   the type (decision 4). The number is the register address under every convention (S50
+   decision 2) and is checked before a selection moves it, as on the other areas:
+   `extended-register:0[1]:INT` is refused because address 0 does not exist. Upstream
+   checks the moved address instead (`TagExt:85-97`, `Tag:195-197`) and would take it as
+   address 1 (INFERENCE from the code, not observed by a run).
+2. **Offsets count registers through the files.** Element `k` starts `k` times
+   `register_size()` registers after the number (decision 5), on the register address
+   counted through all the files, not on the 16-bit record: `extended-register:1[4]:DINT`
+   is address 9, as `ModbusSelectionOffsetTest.theOtherRegisterAreasScaleToo` asserts
+   upstream, and `extended-register:9998[1]:DINT` is address 10000, record 0 of file 2.
+   `offset()` and `file_number()` place the first register of a selection.
+3. **An index is the element's own address.** `extended-register:9997[1]:DINT` equals
+   `extended-register:9999:DINT`, so it is cut at the end of file 1 as that address is.
+4. **The span.** The whole selected span, from the first register of the first element to
+   the last register of the last, ends at or before 655349999 (S50 decision 3,
+   `MB-LIMIT-EXT`); a first element past it is refused with the address it would start at.
+5. **One read is 120 registers, not 125.** Decision 5 makes "fits one read" a property of
+   the address, checked when it is built, and S50 decision 4 sets one file record read at
+   120 registers, the most whose answer fits the 245 data bytes of a response wherever the
+   span lies. A selection on the extended registers is therefore at most 120 registers
+   (`MAX_READ_EXTENDED_REGISTERS`), `InvalidAddress` past it, where upstream allows 125
+   (`TagExt:106-108`; `MTT` with `allowedMax` 125): a read of 125 registers asks for an
+   answer of 252 data bytes in one file or 254 across the end of a file, which no device
+   may send (V1.1b section 6.14). The message cites `MB-LIMIT-REGISTERS`, where the bound
+   is recorded; the divergence row is `MB-ADDR-EXTENDED`. A configured
+   `max-registers-per-request` below 120 bounds an extended list at read time as it bounds
+   the other register areas (`ResourceLimit`, nothing sent).
+6. **Reads.** A selection is one tag to the batcher over its register addresses: it merges
+   with adjacent extended tags into chunks of at most 120 registers, and a chunk across the
+   end of a file is one FC20 request of one sub-request per file. The registers of the
+   sub-responses are joined in order before an element is decoded, so an element may take
+   its high word from one file and its low word from the next. A device exception fails the
+   whole list.
+7. **Writes.** A range takes a `List` of exactly its element count, refused before any I/O
+   otherwise (decision 6). The elements are laid out as they would be alone and go out in
+   order as one FC21 request, cut at the end of each file into one sub-request per file and
+   confirmed only by an echo of the whole request (S50 decision 5). FC21 carries 251 data
+   bytes, 7 per sub-request beside 2 per register: every list inside one file fits (at most
+   120 of the 122 registers one sub-request can carry), and a list across the end of a file
+   fits up to 118 registers. A list of 119 or 120 registers across the end of a file reads
+   but is the item's `Rejected` with `ResourceLimit` and no request, as a list wider than
+   one FC16 is (decision 6).
+8. **Canonical text.** `extended-register:A[0..N-1]:TYPE`, `A` the address of the first
+   register, which parses back to an equal address under every convention.
+
+Compliance: in `crates/stonecrab/tests/modbus_selection.rs`,
+`upstream_extended_register_ranges_agree_across_forms_up_to_120` (the upstream test with
+its selection, at 120 instead of 125),
+`an_extended_selection_moves_the_register_address_by_whole_elements`,
+`an_extended_selection_ends_at_or_before_655349999_and_fits_one_file_record_read`,
+`prop_an_extended_selection_is_the_address_plus_index_times_width` and
+`prop_an_extended_list_canonical_round_trips`; `crates/stonecrab/tests/modbus_extended_selection.rs`
+reads and writes extended lists through `ModbusTcpDriver` on strict fake-transport scripts
+and the first-party responder. One S50 test changed with its premise:
+`an_extended_register_takes_the_types_a_holding_register_takes` (`tests/modbus_parse.rs`)
+expected `extended-register:1[0..1]:INT` to be refused and now expects the list of two.

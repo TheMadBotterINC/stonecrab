@@ -1,6 +1,16 @@
 {
   "direction": "request",
-  "error": "InvalidDiscriminator",
-  "field": "function code",
-  "value": 20
+  "function": 20,
+  "records": [
+    {
+      "file": 4,
+      "record": 1,
+      "length": 2
+    },
+    {
+      "file": 3,
+      "record": 9,
+      "length": 2
+    }
+  ]
 }

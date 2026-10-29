@@ -568,7 +568,8 @@ mod tests {
         assert_eq!(accept("holding-register:1[4]:INT").offset(), 4);
         assert_eq!(accept("holding-register:1[4]:DINT").offset(), 8);
         assert_eq!(accept("holding-register:1[2]:LINT").offset(), 8);
-        // theOtherRegisterAreasScaleToo (extended registers are MB-ADDR-EXTENDED)
+        // theOtherRegisterAreasScaleToo (its extended-register half is in
+        // an_extended_selection_moves_the_register_address_by_whole_elements)
         assert_eq!(accept("input-register:1[4]:DINT").offset(), 8);
         // bitAreasAreNotScaled
         assert_eq!(accept("coil:1[4]:BOOL").offset(), 4);
@@ -606,8 +607,9 @@ mod tests {
     // covers: MB-ADDR-SELECTION, MB-LIMIT-COILS, MB-LIMIT-REGISTERS / transcribed from upstream
     // plc4j/drivers/modbus/src/test/java/org/apache/plc4x/java/modbus/ModbusTagTest.java
     // (verifyModbusTag for the coil, discrete-input, holding and input ranges; the extended
-    // area is MB-ADDR-EXTENDED): every count up to the limit parses the same in all four
-    // spellings, the next one is refused, and the canonical text reads back equal
+    // range is upstream_extended_register_ranges_agree_across_forms_up_to_120): every count
+    // up to the limit parses the same in all four spellings, the next one is refused, and the
+    // canonical text reads back equal
     #[test]
     fn upstream_modbus_tag_test_ranges_agree_across_forms_up_to_the_limit() {
         let plc4x = named("plc4x");
@@ -679,6 +681,273 @@ mod tests {
         }
         // aCountTooWideToBeANumberIsAnInvalidTagNotANumberFormatError
         assert_rejected_naming("holding-register:1[0..99999999998]:INT", "too large");
+    }
+
+    // covers: MB-ADDR-SELECTION, MB-ADDR-EXTENDED, MB-LIMIT-REGISTERS / transcribed from
+    // upstream plc4j/drivers/modbus/src/test/java/org/apache/plc4x/java/modbus/ModbusTagTest.java
+    // (testExtended_INT_ARRAY_RANGE, Apache PLC4X v1.0.0 commit ea229918), with the selection
+    // that the_four_spellings_of_extended_register_1_are_one_address in tests/modbus_parse.rs
+    // leaves out: every count up to the limit parses the same in all four spellings, at
+    // logical and register address 1 ("Addresses for extended memory start at address 0
+    // instead of 1"), the next count is refused, and the canonical text reads back equal.
+    // Upstream's allowedMax is 125 (TagExt:106-108); Stonecrab's is 120, the most one file
+    // record read carries (ADR-0022, addendum of 2026-10-29), so the counts 121 to 125 that
+    // upstream accepts are refused here.
+    #[test]
+    fn upstream_extended_register_ranges_agree_across_forms_up_to_120() {
+        let plc4x = named("plc4x");
+        let forms = [
+            "extended-register:1[0..%d]:INT",
+            "60001[0..%d]:INT",
+            "600001[0..%d]:INT",
+            "6x00001[0..%d]:INT",
+        ];
+        let text = |form: &str, last: u16| form.replace("%d", &last.to_string());
+        for count in 1..=120_u16 {
+            let first = accept_with(&text(forms[0], count - 1), &plc4x);
+            assert_eq!(first.area(), ModbusArea::ExtendedRegister, "x{count}");
+            assert_eq!(first.elements(), NonZeroU16::new(count), "x{count}");
+            assert_eq!(first.logical_address(), 1, "x{count}: logical address");
+            assert_eq!(
+                (first.file_number().map(NonZeroU16::get), first.offset()),
+                (Some(1), 1),
+                "x{count}: record 1 of file 1"
+            );
+            for form in &forms[1..] {
+                assert_eq!(
+                    accept_with(&text(form, count - 1), &plc4x),
+                    first,
+                    "{form} x{count}"
+                );
+            }
+        }
+        for form in forms {
+            for last in 120..=125_u16 {
+                let refused = ModbusAddress::parse(&text(form, last), &plc4x);
+                let message = refused.map_or_else(|error| error.to_string(), |_| String::new());
+                assert!(
+                    message.contains("more than the 120 one read carries"),
+                    "{form} with {} registers: {message}",
+                    last + 1
+                );
+            }
+            let address = accept_with(&text(form, 42), &plc4x);
+            assert_eq!(
+                accept_with(&address.canonical(), &plc4x),
+                address,
+                "{form}: the canonical text"
+            );
+        }
+    }
+
+    // covers: MB-ADDR-SELECTION, MB-ADDR-EXTENDED / an element offset on the extended
+    // registers counts registers from the register address, through the end of a file, and
+    // an index is the element's own address; the first case is transcribed from upstream
+    // plc4j/drivers/modbus/src/test/java/org/apache/plc4x/java/modbus/base/tag/ModbusSelectionOffsetTest.java
+    // (theOtherRegisterAreasScaleToo: an extended address "is not shifted by the protocol
+    // offset the way the others are, so its base stays 1 and the eight-register advance lands
+    // on 9")
+    #[test]
+    fn an_extended_selection_moves_the_register_address_by_whole_elements() {
+        let placed = |address: &ModbusAddress| {
+            (
+                address.logical_address(),
+                address.file_number().map(NonZeroU16::get),
+                address.offset(),
+                address.elements().map(NonZeroU16::get),
+            )
+        };
+        for (text, expected) in [
+            ("extended-register:1[4]:DINT", (9, Some(1), 9, None)),
+            ("extended-register:1[4..7;1]:INT", (4, Some(1), 4, Some(4))),
+            ("6x00001[2]:LREAL", (9, Some(1), 9, None)),
+            // An index or a range may start in the next file, or run into it.
+            ("extended-register:9998[1]:DINT", (10_000, Some(2), 0, None)),
+            (
+                "extended-register:9997[1..2]:DINT",
+                (9_999, Some(1), 9_999, Some(2)),
+            ),
+            (
+                "extended-register:29998[0..3]:INT",
+                (29_998, Some(3), 9_998, Some(4)),
+            ),
+        ] {
+            assert_eq!(placed(&accept(text)), expected, "{text}");
+        }
+        for (indexed, direct) in [
+            ("extended-register:1[4]:DINT", "extended-register:9:DINT"),
+            (
+                "extended-register:9997[1]:DINT",
+                "extended-register:9999:DINT",
+            ),
+            ("6x09990[6;1]:DINT", "extended-register:10000:DINT"),
+        ] {
+            assert_eq!(accept(indexed), accept(direct), "{indexed} is {direct}");
+        }
+        assert_eq!(
+            accept("extended-register:9999[0..0]:DINT").elements(),
+            NonZeroU16::new(1),
+            "a range of one is a list of one"
+        );
+        // The canonical text writes the range after the address of the first element.
+        let range = accept("6x00001[4..7;1]:DINT");
+        assert_eq!(
+            range.canonical(),
+            "extended-register:7[0..3]:DINT",
+            "canonical"
+        );
+        assert_eq!(accept(&range.canonical()), range, "reads back");
+        // The number is checked before a selection moves it: address 0 does not exist.
+        for text in [
+            "extended-register:0[1]:INT",
+            "extended-register:0[0..1]",
+            "6x00000[2]",
+        ] {
+            assert_rejected_naming(text, "address 0 does not exist");
+        }
+        // No convention shifts an extended register, a selection included.
+        for convention in ["plc4x", "one-based-40001", "zero-based"] {
+            for text in ["extended-register:1[4]:DINT", "600001[4]:DINT"] {
+                assert_eq!(
+                    accept_with(text, &named(convention)),
+                    accept("extended-register:9:DINT"),
+                    "{text} under {convention}"
+                );
+            }
+        }
+    }
+
+    // covers: MB-LIMIT-EXT, MB-LIMIT-REGISTERS, MB-ADDR-EXTENDED / the whole selected span
+    // ends at or before extended address 655349999, and a list fits one file record read, 120
+    // registers where upstream allows 125 (ADR-0022, addendum of 2026-10-29); at and past
+    // each bound, by the parser and by the builder
+    #[test]
+    fn an_extended_selection_ends_at_or_before_655349999_and_fits_one_file_record_read() {
+        for (text, first, elements) in [
+            (
+                "extended-register:655349880[0..119]:INT",
+                655_349_880,
+                Some(120),
+            ),
+            (
+                "extended-register:655349998[0..1]:INT",
+                655_349_998,
+                Some(2),
+            ),
+            (
+                "extended-register:655349999[0..0]:INT",
+                655_349_999,
+                Some(1),
+            ),
+            ("extended-register:655349998[1]:INT", 655_349_999, None),
+            ("extended-register:655349988[2]:LREAL", 655_349_996, None),
+            ("extended-register:1[0..119]:INT", 1, Some(120)),
+            ("extended-register:1[0..59]:DINT", 1, Some(60)),
+            ("extended-register:1[0..29]:LREAL", 1, Some(30)),
+            ("extended-register:9950[0..119]:INT", 9_950, Some(120)),
+        ] {
+            let address = accept(text);
+            assert_eq!(
+                (
+                    address.logical_address(),
+                    address.elements().map(NonZeroU16::get)
+                ),
+                (first, elements),
+                "{text}: fits"
+            );
+        }
+        for (text, needle) in [
+            (
+                "extended-register:655349881[0..119]:INT",
+                "a list of 120 INT at extended-register address 655349881 spans 120 \
+                 register(s) and passes the last address 655349999",
+            ),
+            (
+                "extended-register:655349999[0..1]:INT",
+                "passes the last address 655349999",
+            ),
+            (
+                "extended-register:655349989[2]:LREAL",
+                "passes the last address 655349999",
+            ),
+            (
+                "extended-register:655349999[1]:INT",
+                "the selection starts at extended-register address 655350000, past the last \
+                 address 655349999 (docs/parity/modbus.md#MB-LIMIT-EXT)",
+            ),
+            (
+                "extended-register:999999999[0]:INT",
+                "starts at extended-register address 999999999",
+            ),
+            (
+                "extended-register:1[0..120]:INT",
+                "a list of 121 INT spans 121 registers, more than the 120 one read carries \
+                 (docs/parity/modbus.md#MB-LIMIT-REGISTERS)",
+            ),
+            (
+                "extended-register:1[0..124]:INT",
+                "spans 125 registers, more than the 120",
+            ),
+            (
+                "extended-register:1[0..60]:DINT",
+                "spans 122 registers, more than the 120",
+            ),
+            (
+                "extended-register:1[0..30]:LREAL",
+                "spans 124 registers, more than the 120",
+            ),
+            ("extended-register:1[0..70000]:INT", "holds 70001 elements"),
+        ] {
+            assert_rejected_naming(text, needle);
+        }
+        let count = |value: u16| NonZeroU16::new(value).expect("non-zero");
+        let built = ModbusAddress::extended(655_349_880)
+            .elements(count(120))
+            .build()
+            .expect("the last 120 registers");
+        assert_eq!(
+            built,
+            accept("extended-register:655349880[0..119]:INT"),
+            "the builder makes the parser's address"
+        );
+        for (address, elements) in [(655_349_881, 120), (1, 121), (0, 1)] {
+            let refused = ModbusAddress::extended(address)
+                .elements(count(elements))
+                .build();
+            assert_eq!(
+                refused.map_err(|e| e.kind()),
+                Err(ErrorKind::InvalidAddress),
+                "{address} x{elements}"
+            );
+        }
+    }
+
+    // covers: MB-ADDR-LEGACY-ARRAY, MB-ADDR-EXTENDED / the legacy count forms are refused on
+    // the extended registers too, with the replacement only when it parses there
+    #[test]
+    fn a_legacy_count_on_an_extended_register_is_hinted_only_when_the_range_fits() {
+        assert_eq!(
+            hint_of(&reject("extended-register:1:INT[4]")),
+            Some("extended-register:1[0..3]:INT"),
+            "a count of four"
+        );
+        assert_eq!(
+            hint_of(&reject("6x09999:DINT:2")),
+            Some("6x09999[0..1]:DINT"),
+            "two DINTs across the end of file 1"
+        );
+        // 121 registers do not fit one file record read; the files end at 655349999.
+        for text in [
+            "extended-register:1:INT[121]",
+            "extended-register:655349999:INT[2]",
+        ] {
+            let message = reject(text);
+            assert_eq!(hint_of(&message), None, "{text}: {message}");
+            assert!(
+                message.contains("for example 'holding-register:1[0..3]:INT'"),
+                "{text}: {message}"
+            );
+        }
     }
 
     // covers: MB-ADDR-LEGACY-ARRAY / transcribed from upstream
@@ -807,11 +1076,106 @@ mod tests {
             prop_assert_eq!(left.is_err(), right.is_err(), "{} vs {}", indexed, direct);
         }
 
+        // covers: MB-ADDR-SELECTION, MB-ADDR-EXTENDED, MB-LIMIT-EXT, MB-LIMIT-REGISTERS / on
+        // the extended registers a selection is the register address plus (index - base)
+        // elements, in the file and record of that address, an index is the element's own
+        // address, and the span fits (at most 120 registers, ending at or before 655349999)
+        // or is refused
+        #[test]
+        fn prop_an_extended_selection_is_the_address_plus_index_times_width(
+            number in prop_oneof![
+                1_u32..=655_349_999,
+                9_900_u32..=10_100,
+                655_349_800_u32..=655_349_999
+            ],
+            listed in proptest::sample::select(TYPES.to_vec()),
+            base in 0_u32..=100,
+            ahead in prop_oneof![0_u32..=200, 0_u32..=5_000_000],
+            extra in proptest::option::of(prop_oneof![0_u32..=130, 0_u32..=2_100]),
+        ) {
+            let name = listed.upstream_name();
+            let lo = base.saturating_add(ahead);
+            let selection = match extra {
+                Some(extra) => format!("[{lo}..{};{base}]", lo.saturating_add(extra)),
+                None => format!("[{lo};{base}]"),
+            };
+            let text = format!("extended-register:{number}{selection}:{name}");
+            let element = u64::from(listed.register_size());
+            let start = u64::from(number)
+                .saturating_add(u64::from(ahead).saturating_mul(element));
+            let count = extra.map_or(1, |extra| u64::from(extra).saturating_add(1));
+            let span = count.saturating_mul(element);
+            let fits = start.saturating_add(span) <= 655_350_000 && span <= 120;
+            match ModbusAddress::parse(&text, &none()) {
+                Ok(address) => {
+                    prop_assert!(fits, "{} was accepted", text);
+                    prop_assert_eq!(u64::from(address.logical_address()), start, "{}", text);
+                    prop_assert_eq!(
+                        address.file_number().map(|file| u64::from(file.get())),
+                        start.checked_div(10_000).map(|files| files.saturating_add(1)),
+                        "{}",
+                        text
+                    );
+                    prop_assert_eq!(
+                        Some(u64::from(address.offset())),
+                        start.checked_rem(10_000),
+                        "{}",
+                        text
+                    );
+                    prop_assert_eq!(
+                        address.elements().map(|count| u64::from(count.get())),
+                        extra.map(|_| count),
+                        "{}",
+                        text
+                    );
+                    if extra.is_none() {
+                        let direct = format!("extended-register:{start}:{name}");
+                        prop_assert_eq!(
+                            ModbusAddress::parse(&direct, &none()).ok(),
+                            Some(address),
+                            "{} vs {}",
+                            text,
+                            direct
+                        );
+                    }
+                }
+                Err(error) => {
+                    prop_assert!(!fits, "{} was refused: {}", text, error);
+                    prop_assert_eq!(error.kind(), ErrorKind::InvalidAddress);
+                }
+            }
+        }
+
+        // covers: MB-ADDR-SELECTION, MB-ADDR-EXTENDED / an extended list's canonical text
+        // reads back to an equal address
+        #[test]
+        fn prop_an_extended_list_canonical_round_trips(
+            address in prop_oneof![1_u32..=655_349_999, 655_349_800_u32..=655_349_999],
+            listed in proptest::sample::select(TYPES.to_vec()),
+            count in 1_u16..=130,
+        ) {
+            let built = ModbusAddress::extended(address)
+                .data_type(listed)
+                .elements(NonZeroU16::new(count).expect("non-zero"))
+                .build();
+            // A list past the last address or wider than one read is not an address.
+            let Ok(built) = built else {
+                return Ok(());
+            };
+            let canonical = built.canonical();
+            prop_assert_eq!(
+                ModbusAddress::parse(&canonical, &none()).ok(),
+                Some(built),
+                "{}",
+                canonical
+            );
+        }
+
         // covers: SPEC mandatory-failure-cases / F3 invalid register (selection text never
         // panics and is never anything but InvalidAddress when refused)
         #[test]
         fn prop_selection_text_never_panics(selection in "\\[[0-9.;,\\[\\] a-z-]{0,24}") {
-            for area in ["holding-register:1", "coil:1", "4x00001"] {
+            for area in ["holding-register:1", "coil:1", "4x00001", "extended-register:1"] {
                 let text = format!("{area}{selection}:INT");
                 if let Err(error) = ModbusAddress::parse(&text, &none()) {
                     prop_assert_eq!(error.kind(), ErrorKind::InvalidAddress, "{}", text);

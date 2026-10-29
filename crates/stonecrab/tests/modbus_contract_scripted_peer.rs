@@ -40,6 +40,10 @@
 
 #[cfg(test)]
 #[path = "support/responder.rs"]
+#[expect(
+    dead_code,
+    reason = "the module is shared with modbus_extended.rs; these tests read and write no extended register"
+)]
 mod responder;
 
 #[cfg(test)]

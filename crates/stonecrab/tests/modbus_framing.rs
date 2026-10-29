@@ -105,8 +105,8 @@ mod tests {
         usize::try_from(value.as_u64().expect("a number")).expect("a size")
     }
 
-    /// The framer cuts the ADUs the expected file lists. (`must_fail` is not the test: the
-    /// four upstream function 0x14 and 0x15 frames are framed and fail at the PDU layer.)
+    /// The framer cuts the ADUs the expected file lists. (`must_fail` is not the test: a
+    /// vector can be framed and still fail at the PDU layer.)
     fn frames(vector: &GoldenVector) -> bool {
         vector
             .expected
@@ -491,10 +491,9 @@ mod tests {
             assert_eq!(header.length, length, "{name}: length");
             assert_eq!(header.unit_id, UnitId::from(unit_id), "{name}: unit");
             assert_eq!(adu.pdu().len(), pdu_len, "{name}: pdu length");
-            assert_eq!(
-                vector.must_fail,
-                !name.contains("read-input-registers"),
-                "{name}: only the function 0x14 and 0x15 frames fail, and at the PDU layer"
+            assert!(
+                !vector.must_fail,
+                "{name}: framed, and decoded by the PDU layer"
             );
         }
     }

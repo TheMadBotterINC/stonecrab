@@ -1,5 +1,4 @@
 # PDU bytes only: no MBAP header, no unit identifier.
 # Modbus Application Protocol V1.1b section 6.14, Read File Record, response example.
-# Two sub-responses of 2 registers. Decoded as the response to function 0x14
-# the codec refuses it: file record access is out of the alpha scope.
+# Two sub-responses of 2 registers each.
 14 0C 05 06 0D FE 00 20 05 06 33 CD 00 40

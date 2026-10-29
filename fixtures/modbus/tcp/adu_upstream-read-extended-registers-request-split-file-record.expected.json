@@ -11,8 +11,18 @@
   "leftover": 0,
   "pdu": {
     "direction": "request",
-    "error": "InvalidDiscriminator",
-    "field": "function code",
-    "value": 20
+    "function": 20,
+    "records": [
+      {
+        "file": 3,
+        "record": 9998,
+        "length": 2
+      },
+      {
+        "file": 4,
+        "record": 0,
+        "length": 8
+      }
+    ]
   }
 }

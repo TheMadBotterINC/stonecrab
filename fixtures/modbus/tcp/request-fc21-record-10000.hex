@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as a request.
+# one sub-request of file 1 at record 10000 (0x2710), one register
+15 09 06 00 01 27 10 00 01 00 00

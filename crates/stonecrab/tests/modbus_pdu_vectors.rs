@@ -19,8 +19,8 @@ mod tests {
         BoundedReader, BoundedWriter, ParseError, coil_byte_count, unpack_bits_lsb_first,
     };
     use stonecrab::modbus::{
-        ExceptionCode, FunctionCode, MAX_PDU_BYTES, MbapHeader, ModbusArea, ModbusPdu,
-        decode_request, decode_response, encode_request, encode_response,
+        ExceptionCode, FileRecord, FileRecordRead, FunctionCode, MAX_PDU_BYTES, MbapHeader,
+        ModbusArea, ModbusPdu, decode_request, decode_response, encode_request, encode_response,
     };
     use stonecrab::testkit::{GoldenVector, VectorSource, load_dir};
 
@@ -93,6 +93,51 @@ mod tests {
             .collect()
     }
 
+    /// The `records` list of a file record vector, as JSON values.
+    fn records(vector: &GoldenVector) -> Vec<serde_json::Value> {
+        vector
+            .expected
+            .as_ref()
+            .and_then(|expected| expected.get("records"))
+            .and_then(|records| records.as_array())
+            .unwrap_or_else(|| panic!("{}: expected.json lists `records`", vector.name))
+            .clone()
+    }
+
+    fn word(value: &serde_json::Value, key: &str) -> u16 {
+        value
+            .get(key)
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|number| u16::try_from(number).ok())
+            .unwrap_or_else(|| panic!("a record has a 16-bit `{key}`"))
+    }
+
+    /// The registers of a JSON list of numbers.
+    fn words(value: &serde_json::Value) -> Vec<u16> {
+        value
+            .as_array()
+            .expect("a list of registers")
+            .iter()
+            .map(|item| {
+                item.as_u64()
+                    .and_then(|number| u16::try_from(number).ok())
+                    .expect("a register")
+            })
+            .collect()
+    }
+
+    /// The write sub-requests of a Write File Record vector.
+    fn write_records(vector: &GoldenVector) -> Vec<FileRecord> {
+        records(vector)
+            .iter()
+            .map(|record| FileRecord {
+                file: word(record, "file"),
+                record: word(record, "record"),
+                registers: words(record.get("registers").expect("registers")),
+            })
+            .collect()
+    }
+
     fn is_request(vector: &GoldenVector) -> bool {
         match text(vector, "direction") {
             Some("request") => true,
@@ -132,6 +177,19 @@ mod tests {
                     start: small(vector, "start"),
                     registers: registers_of(vector),
                 },
+                20 => ModbusPdu::ReadFileRecord {
+                    records: records(vector)
+                        .iter()
+                        .map(|record| FileRecordRead {
+                            file: word(record, "file"),
+                            record: word(record, "record"),
+                            length: word(record, "length"),
+                        })
+                        .collect(),
+                },
+                21 => ModbusPdu::WriteFileRecord {
+                    records: write_records(vector),
+                },
                 other => panic!("{}: request function {other}", vector.name),
             };
         }
@@ -151,6 +209,16 @@ mod tests {
                     function,
                     start: small(vector, "start"),
                     quantity: small(vector, "quantity"),
+                };
+            }
+            20 => {
+                return ModbusPdu::ReadFileRecordResponse {
+                    records: records(vector).iter().map(words).collect(),
+                };
+            }
+            21 => {
+                return ModbusPdu::WriteFileRecordResponse {
+                    records: write_records(vector),
                 };
             }
             _ => {}
@@ -254,7 +322,7 @@ mod tests {
     #[test]
     fn every_function_has_a_valid_and_a_negative_vector() {
         let all = vectors();
-        for function in [1_u64, 2, 3, 4, 6, 15, 16] {
+        for function in [1_u64, 2, 3, 4, 6, 15, 16, 20, 21] {
             let of_function = |direction: &str, must_fail: bool| {
                 all.iter().any(|vector| {
                     text(vector, "direction") == Some(direction)
@@ -283,7 +351,7 @@ mod tests {
             });
             assert!(exception, "FC{function}: a valid exception response");
         }
-        for function in [1_u8, 2, 3, 4, 6, 15, 16] {
+        for function in [1_u8, 2, 3, 4, 6, 15, 16, 20, 21] {
             let negative_request = all.iter().any(|vector| {
                 vector.must_fail
                     && text(vector, "direction") == Some("request")
@@ -295,25 +363,39 @@ mod tests {
 
     // covers: SPEC mandatory-failure-cases / F1 malformed discriminators, unexpected function codes
     #[test]
-    fn the_unsupported_write_and_file_record_functions_have_vectors() {
+    fn the_unsupported_write_function_and_function_zero_have_vectors() {
         let names: BTreeSet<String> = rejected().into_iter().map(|v| v.name).collect();
         for name in [
             "tcp/request-write-single-coil",
-            "tcp/request-read-file-record",
-            "tcp/response-read-file-record",
             "tcp/request-function-zero",
             "tcp/response-function-zero",
-            "tcp/adu_upstream-read-extended-registers-request-split-file-record",
-            "tcp/adu_upstream-read-extended-registers-response-split-file-record",
-            "tcp/adu_upstream-write-extended-registers-request-file-record",
-            "tcp/adu_upstream-write-extended-registers-request-split-file-record",
         ] {
             assert!(names.contains(name), "{name} is listed");
         }
     }
 
+    // covers: MB-ADDR-EXTENDED, MB-TCP-WRITE
     #[test]
-    fn the_upstream_function_04_pair_decodes_and_the_file_record_frames_are_refused() {
+    fn the_file_record_examples_of_the_specification_are_accepted_vectors() {
+        let names: BTreeSet<String> = accepted().into_iter().map(|v| v.name).collect();
+        for name in [
+            "tcp/request-read-file-record",
+            "tcp/response-read-file-record",
+            "tcp/request-write-file-record",
+            "tcp/response-write-file-record",
+            "tcp/read-file-record-exception",
+            "tcp/write-file-record-exception",
+        ] {
+            assert!(names.contains(name), "{name} is accepted");
+        }
+    }
+
+    // The four function 0x14 and 0x15 frames of the parser suite are what upstream's
+    // getReadRequestPdu and getWriteRequestPdu build for a tag cut at a file end
+    // (Conn:411-432, 467-487).
+    // covers: MB-ADDR-EXTENDED, MB-TCP-WRITE
+    #[test]
+    fn the_upstream_function_04_pair_and_the_file_record_frames_decode() {
         let all = vectors();
         // The driver-suite exchanges (S04b) are upstream vectors too; they are not these six.
         let upstream: Vec<&GoldenVector> = all
@@ -352,22 +434,51 @@ mod tests {
         for (index, value) in [(10, 1), (40, 4), (48, 475), (50, 470), (52, 19000)] {
             assert_eq!(registers.get(index), Some(&value), "register {index}");
         }
-        for (name, function) in [
-            ("read-extended-registers-request-split-file-record", 0x14),
-            ("read-extended-registers-response-split-file-record", 0x14),
-            ("write-extended-registers-request-file-record", 0x15),
-            ("write-extended-registers-request-split-file-record", 0x15),
-        ] {
+        let item = |file, record, length| FileRecordRead {
+            file,
+            record,
+            length,
+        };
+        let part = |file, record, registers: &[u16]| FileRecord {
+            file,
+            record,
+            registers: registers.to_vec(),
+        };
+        let wanted = [
+            (
+                "read-extended-registers-request-split-file-record",
+                ModbusPdu::ReadFileRecord {
+                    records: vec![item(3, 9_998, 2), item(4, 0, 8)],
+                },
+            ),
+            (
+                "read-extended-registers-response-split-file-record",
+                ModbusPdu::ReadFileRecordResponse {
+                    records: vec![vec![0; 2], vec![0; 8]],
+                },
+            ),
+            (
+                "write-extended-registers-request-file-record",
+                ModbusPdu::WriteFileRecord {
+                    records: vec![part(2, 0, &[8])],
+                },
+            ),
+            (
+                "write-extended-registers-request-split-file-record",
+                ModbusPdu::WriteFileRecord {
+                    records: vec![part(1, 9_999, &[0]), part(2, 0, &[0])],
+                },
+            ),
+        ];
+        for (name, pdu) in wanted {
             let vector = named(name);
-            assert!(vector.must_fail, "{name}");
-            assert_eq!(vector.bytes.first(), Some(&function), "{name}: function");
-            assert!(
-                matches!(
-                    decode(vector),
-                    Err(ParseError::InvalidDiscriminator { value, .. }) if value == u64::from(function)
-                ),
-                "{name}: the PDU codec refuses function {function:#04x}"
+            assert!(!vector.must_fail, "{name}");
+            assert_eq!(
+                vector.bytes.first(),
+                Some(&pdu.function().as_u8()),
+                "{name}: function"
             );
+            assert_eq!(decode(vector), Ok(pdu), "{name}: decoded");
         }
     }
 

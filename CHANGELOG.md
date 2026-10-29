@@ -41,6 +41,38 @@ placeholder.
   `recv`, a whole-read failure as `recv`'s error, and `None` once the connection closes or
   fails. No task is spawned and the queue holds at most one event per measurement. No new
   dependency. New parity rows `SENSORS-STALE` and `SENSORS-ACQUISITION`.
+- Extended registers (ADR-0015 addendum; additive): `modbus-tcp` reads them with function
+  code 20 and writes them with function code 21. The address grammar accepts
+  `extended-register:N[:TYPE]`, `6xNNNNN` and, with an explicit `address-convention`, the
+  bare `6NNNNN`, with the 15 types a holding register takes. The number is the register
+  address under every convention (no one-based shift; 0 does not exist; the last is
+  655349999, record 9999 of file 65535, where upstream's 655359999 would name file 65536).
+  Address `A` is record `A % 10000` of file `A / 10000 + 1`. A read or write that crosses the
+  end of a file is one request with a sub-request per file, and the registers of every
+  sub-response are used (upstream keeps the first only, `MB-QUIRK-B`); adjacent tags merge
+  into chunks of at most 120 registers; a write is confirmed only by an echo of the whole
+  request. New public items, all after the existing variants or new: `ModbusArea::ExtendedRegister`,
+  `FunctionCode::{ReadFileRecord, WriteFileRecord}`, `ModbusPdu::{ReadFileRecord,
+  ReadFileRecordResponse, WriteFileRecord, WriteFileRecordResponse}` with
+  `ModbusPdu::read_file_record_request` and `write_file_record_request`, `FileRecordRead`,
+  `FileRecord`, `MAX_READ_EXTENDED_REGISTERS`, `ModbusAddress::{extended, file_number}` and
+  `Chunk::file`. Behavior change: function codes 20 and 21 and the text `extended-register`,
+  `6x` and the bare `6` prefix are no longer rejected, and `FunctionCode::from_u8(0x14)` is
+  `ReadFileRecord` where it was `Unknown(0x14)`. No interop peer serves function codes 20
+  or 21 (pymodbus, libmodbus and modbus-tk do not), so the evidence is the specification
+  examples, the four upstream parser-suite frames and the first-party responder on the fake
+  transport. Parity rows `MB-ADDR-EXTENDED` and `MB-LIMIT-EXT` are `implemented`.
+- Array selections on the extended registers (ADR-0022 addendum of 2026-10-29, where the
+  two entries above meet): every extended form takes `[i]`, `[lo..hi]` and `;base`. Offsets
+  count registers from the register address through the end of a file
+  (`extended-register:1[4]:DINT` is address 9, as upstream), an index is the element's own
+  address, and the number is checked before a selection moves it. A range ends at or before
+  655349999 and holds at most the 120 registers of one file record read: 121 to 125, which
+  upstream accepts but no device may answer, are `InvalidAddress`. A range across the end of
+  a file is read by one function 20 request, its elements decoded from the joined
+  sub-responses, and written by one function 21 request; a list whose request would pass the
+  251 data bytes of function 21 (more than 118 registers across the end of a file) is the
+  item's `ResourceLimit` rejection, with no request.
 - Calendar values (ADR-0021; additive): `PlcValue` and `PlcValueType` gain
   `SignedDuration`, `Date`, `TimeOfDay` and `DateTime` after `Duration`, holding the new
   root types `PlcSignedDuration` (an `i64` nanosecond count; IEC `TIME` and `LTIME`),

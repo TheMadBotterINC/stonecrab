@@ -138,7 +138,9 @@ impl Default for ConnectionDefaults {
 /// contract:
 ///
 /// - **Batching.** A read request is planned by [`Batcher::plan`] into chunks, one wire
-///   request each (function codes 01 to 04, at most 125 registers or 2000 bits), and the
+///   request each (function codes 01 to 04, at most 125 registers or 2000 bits; function
+///   code 20 for extended registers, at most 120, cut at the end of each 10000-register
+///   file into one sub-request per file whose data is joined in order), and the
 ///   chunks run one after another. `ReadResponse::split_into` is the number of chunks.
 ///   Every item is decoded from its chunk's reply with [`TypedDecoder`], with the byte and
 ///   word order of the tag, else of its address, else of [`ConnectionDefaults`].
@@ -160,10 +162,10 @@ impl Default for ConnectionDefaults {
 ///   exception is an answer, not a failure, and is never retried. A write is never
 ///   retried, whatever the policy says.
 /// - **Writes.** [`write`](Connection::write) sends one request per item (function 15 for
-///   a coil, 06 or 16 for holding registers), one after another, and gives each item its
-///   own outcome: `Confirmed` for an echo, `Rejected` for a device exception or an item
-///   that cannot be written, `Unknown` for a request that went out and got no usable
-///   answer. It is refused first while the access policy is read-only, which is the
+///   a coil, 06 or 16 for holding registers, 21 for extended registers), one after another,
+///   and gives each item its own outcome: `Confirmed` for an echo, `Rejected` for a device
+///   exception or an item that cannot be written, `Unknown` for a request that went out and
+///   got no usable answer. It is refused first while the access policy is read-only, which is the
 ///   default; `access=read-write` in the connection string, or
 ///   `ConnectionConfig::builder(..).access(AccessPolicy::ReadWrite)`, grants it.
 /// - **One operation in flight.** `Capabilities.concurrency` is 1: a read, write or ping
@@ -566,7 +568,13 @@ impl Link {
         self.ensure_open(&op)?;
         let _slot = self.acquire(&op)?;
         let address = &self.ping_address;
-        let pdu = read_pdu(address.area(), address.offset(), address.width());
+        let read = read_pdu(
+            address.area(),
+            address.file_number(),
+            address.offset(),
+            address.width(),
+        );
+        let pdu = read?;
         let unit_id = address.unit_id().unwrap_or(self.defaults.unit_id);
         let deadline = self.chunk_deadline(&op, None)?;
         // The session has proved the reply against the request, so a data reply and an
@@ -624,8 +632,8 @@ impl Link {
             return Err(refuse(PlcError::new(
                 ErrorKind::Unsupported(Operation::Write),
                 format!(
-                    "tag {} is a {}, which is read-only; only coils and holding registers are \
-                     written",
+                    "tag {} is a {}, which is read-only; only coils, holding registers and \
+                     extended registers are written",
                     item.tag().id(),
                     area.long_name()
                 ),
@@ -667,21 +675,29 @@ impl Link {
             })
             .collect::<Result<Vec<_>>>()
             .map_err(refuse)?;
-        let payload = if area.is_bit_area() {
-            let bits: Vec<bool> = registers
-                .iter()
-                .map(|element| element.first().is_some_and(|word| word & 1 == 1))
-                .collect();
-            pack_bits_lsb_first(&bits)
+        let built = if let Some(file) = address.file_number() {
+            // One request carries the whole value, the elements of a list in order, cut at
+            // the end of each file; one wider than a request carries is refused unsent.
+            let run: Vec<u16> = registers.into_iter().flatten().collect();
+            ModbusPdu::write_file_record_request(file.get(), address.offset(), &run)
         } else {
-            registers
-                .iter()
-                .flatten()
-                .copied()
-                .flat_map(u16::to_be_bytes)
-                .collect()
+            let payload = if area.is_bit_area() {
+                let bits: Vec<bool> = registers
+                    .iter()
+                    .map(|element| element.first().is_some_and(|word| word & 1 == 1))
+                    .collect();
+                pack_bits_lsb_first(&bits)
+            } else {
+                registers
+                    .iter()
+                    .flatten()
+                    .copied()
+                    .flat_map(u16::to_be_bytes)
+                    .collect()
+            };
+            ModbusPdu::write_request(area, address.offset(), address.width(), &payload)
         };
-        ModbusPdu::write_request(area, address.offset(), address.width(), &payload)
+        built
             .map(|pdu| Planned {
                 unit_id: address.unit_id().unwrap_or(self.defaults.unit_id),
                 pdu,
@@ -775,7 +791,8 @@ impl Link {
                 WriteOutcome::Rejected(self.stamp_item(op, refusal, answer))
             }
             ModbusPdu::WriteSingleRegisterResponse { .. }
-            | ModbusPdu::WriteMultipleResponse { .. } => WriteOutcome::Confirmed,
+            | ModbusPdu::WriteMultipleResponse { .. }
+            | ModbusPdu::WriteFileRecordResponse { .. } => WriteOutcome::Confirmed,
             // The session proves every reply against its request, so a read reply to a
             // write cannot come out of it; it is not a confirmation if it ever does.
             ModbusPdu::ReadBitsResponse { .. }
@@ -786,7 +803,10 @@ impl Link {
             | ModbusPdu::ReadInputRegisters { .. }
             | ModbusPdu::WriteMultipleCoils { .. }
             | ModbusPdu::WriteSingleRegister { .. }
-            | ModbusPdu::WriteMultipleRegisters { .. } => WriteOutcome::Unknown(UNCONFIRMED),
+            | ModbusPdu::WriteMultipleRegisters { .. }
+            | ModbusPdu::ReadFileRecordResponse { .. }
+            | ModbusPdu::ReadFileRecord { .. }
+            | ModbusPdu::WriteFileRecord { .. } => WriteOutcome::Unknown(UNCONFIRMED),
         }
     }
 
@@ -854,7 +874,7 @@ impl Link {
         total: usize,
         chunk: &Chunk,
     ) -> Result<Answer> {
-        let pdu = read_pdu(chunk.area, chunk.start, chunk.quantity);
+        let pdu = read_pdu(chunk.area, chunk.file, chunk.start, chunk.quantity)?;
         let unit_id = chunk.unit_id.unwrap_or(self.defaults.unit_id);
         let mut attempts: u32 = 0;
         loop {
@@ -1042,21 +1062,39 @@ const fn unknown_reason(kind: ErrorKind) -> UnknownReason {
     }
 }
 
-/// The read request PDU: function code by area, wire start and quantity.
-const fn read_pdu(area: ModbusArea, start: u16, quantity: u16) -> ModbusPdu {
-    match area {
+/// The read request PDU: function code by area, wire start and quantity. An extended
+/// register is read by Read File Record at `file` and the record `start`, cut at the end
+/// of each file into one sub-request per file.
+fn read_pdu(
+    area: ModbusArea,
+    file: Option<NonZeroU16>,
+    start: u16,
+    quantity: u16,
+) -> Result<ModbusPdu> {
+    Ok(match area {
         ModbusArea::Coil => ModbusPdu::ReadCoils { start, quantity },
         ModbusArea::DiscreteInput => ModbusPdu::ReadDiscreteInputs { start, quantity },
         ModbusArea::HoldingRegister => ModbusPdu::ReadHoldingRegisters { start, quantity },
         ModbusArea::InputRegister => ModbusPdu::ReadInputRegisters { start, quantity },
-    }
+        ModbusArea::ExtendedRegister => {
+            let Some(file) = file else {
+                return Err(PlcError::new(
+                    ErrorKind::Internal,
+                    "an extended register without a file number",
+                ));
+            };
+            ModbusPdu::read_file_record_request(file.get(), start, quantity)
+                .map_err(PlcError::from)?
+        }
+    })
 }
 
 /// The value of one member in a chunk's reply, or the error that is the member's alone.
 ///
 /// An exception reply fails every member the same way ([`exception_item_error`]). A data
 /// reply is cut at the member's offset and decoded with the member's type and the order it
-/// resolved to, `defaults` standing in for what the tag and address left unset. A reply of
+/// resolved to, `defaults` standing in for what the tag and address left unset; the reply
+/// of a file record read is the registers of its sub-requests joined in order. A reply of
 /// the wrong shape for the area cannot come out of the session, which proves every reply
 /// against its request; it is `MalformedData` here rather than a panic.
 fn decode_member(
@@ -1071,27 +1109,33 @@ fn decode_member(
             "the reply does not have the shape of the area that was read",
         ))
     };
+    // A file record reply is the registers of its sub-responses, joined in order, so an
+    // element may take its registers from two files.
+    let joined: Vec<u16> = if let ModbusPdu::ReadFileRecordResponse { records } = reply {
+        records.iter().flatten().copied().collect()
+    } else {
+        Vec::new()
+    };
     // The value of the element at `offset` registers or bits into the reply.
     let element = |offset: usize| match reply {
         ModbusPdu::Exception { function, code } => Err(exception_item_error(*function, *code)),
         ModbusPdu::ReadBitsResponse { bytes, .. } if area.is_bit_area() => {
             TypedDecoder::decode_bits(bytes, offset, member.data_type, RAW_BUDGET)
         }
-        ModbusPdu::ReadRegistersResponse { registers, .. } if !area.is_bit_area() => {
-            let end = offset.saturating_add(usize::from(member.data_type.register_size()));
-            // A reply too short for the element decodes as the wrong register count, which
-            // keeps the bytes that did arrive.
-            let words = registers.get(offset..end).unwrap_or(&[]);
-            TypedDecoder::decode_registers(
-                words,
-                member.data_type,
-                member.byte_order.unwrap_or(defaults.byte_order),
-                member.word_order.unwrap_or(defaults.word_order),
-                RAW_BUDGET,
-            )
+        ModbusPdu::ReadRegistersResponse { registers, .. }
+            if !area.is_bit_area() && area != ModbusArea::ExtendedRegister =>
+        {
+            decode_registers_at(registers, offset, member, defaults)
+        }
+        ModbusPdu::ReadFileRecordResponse { .. } if area == ModbusArea::ExtendedRegister => {
+            decode_registers_at(&joined, offset, member, defaults)
         }
         ModbusPdu::ReadBitsResponse { .. }
         | ModbusPdu::ReadRegistersResponse { .. }
+        | ModbusPdu::ReadFileRecordResponse { .. }
+        | ModbusPdu::ReadFileRecord { .. }
+        | ModbusPdu::WriteFileRecord { .. }
+        | ModbusPdu::WriteFileRecordResponse { .. }
         | ModbusPdu::ReadCoils { .. }
         | ModbusPdu::ReadDiscreteInputs { .. }
         | ModbusPdu::ReadHoldingRegisters { .. }
@@ -1115,6 +1159,26 @@ fn decode_member(
                 .map(PlcValue::List)
         }
     }
+}
+
+/// The value of the element of `member` that starts `offset` registers into the `registers`
+/// of a chunk's reply. A reply too short for the element decodes as the wrong register
+/// count, which keeps the bytes that did arrive.
+fn decode_registers_at(
+    registers: &[u16],
+    offset: usize,
+    member: &Member,
+    defaults: ConnectionDefaults,
+) -> std::result::Result<PlcValue, ItemError> {
+    let end = offset.saturating_add(usize::from(member.data_type.register_size()));
+    let words = registers.get(offset..end).unwrap_or(&[]);
+    TypedDecoder::decode_registers(
+        words,
+        member.data_type,
+        member.byte_order.unwrap_or(defaults.byte_order),
+        member.word_order.unwrap_or(defaults.word_order),
+        RAW_BUDGET,
+    )
 }
 
 /// An `InvalidConfig` error of opening the connection.
@@ -1249,8 +1313,9 @@ impl Connection for ModbusConnection {
     /// [`ErrorKind::Cancelled`].
     ///
     /// # Wire effects
-    /// Transmits one read request frame (function code 01, 02, 03 or 04) per chunk, and
-    /// again per retry. Nothing is ever written to the device.
+    /// Transmits one read request frame (function code 01, 02, 03 or 04, or 20 for the
+    /// extended registers) per chunk, and again per retry. Nothing is ever written to the
+    /// device.
     fn read(&self, request: ReadRequest) -> OpFuture<'_, ReadResponse> {
         self.link.read(request)
     }
@@ -1265,12 +1330,16 @@ impl Connection for ModbusConnection {
     /// of the tag, else of the address, else of [`ConnectionDefaults`]; a coil takes a
     /// `BOOL`; the request is function 15 for a coil (even one), function 06 for a holding
     /// register payload of exactly 2 bytes and function 16 for any other
-    /// ([`ModbusPdu::write_request`]). A range selection ([`ModbusAddress::elements`])
-    /// takes a [`PlcValue::List`] of exactly its element count, each element laid out as it
-    /// would be alone, in one request. An item that cannot be laid out (a discrete input or
-    /// an input register, a value or a list that does not fit its address, which is
-    /// `InvalidConfig`, or a list wider than one request carries, which is `ResourceLimit`)
-    /// is `Rejected` without a request and does not stop the others. Then one operation runs at a time, the request deadline is checked, and
+    /// ([`ModbusPdu::write_request`]), and function 21 for an extended register, cut at the
+    /// end of each file into one sub-request per file
+    /// ([`ModbusPdu::write_file_record_request`]). A range selection
+    /// ([`ModbusAddress::elements`]) takes a [`PlcValue::List`] of exactly its element count,
+    /// each element laid out as it would be alone, in one request, on the extended registers
+    /// too. An item that cannot be laid out (a discrete input or an input register, a value
+    /// or a list that does not fit its address, which is `InvalidConfig`, or a list wider
+    /// than one request carries, which is `ResourceLimit`: 124 registers or 1969 coils, and
+    /// on the extended registers more than 118 registers across the end of a file) is
+    /// `Rejected` without a request and does not stop the others. Then one operation runs at a time, the request deadline is checked, and
     /// the requests go out in order, each under `min(request deadline, now +
     /// timeouts.request)` taken when it starts.
     ///
@@ -1299,8 +1368,9 @@ impl Connection for ModbusConnection {
     /// The counterpart of upstream `ModbusTcpConnection.onWrite`: one PDU per tag, chained
     /// sequentially, coils through function 15, a 2-byte holding-register payload through
     /// function 06 and any other through function 16, discrete inputs and input registers
-    /// refused (`MB-TCP-WRITE`). A list is written element by element as upstream does,
-    /// except that an element narrower than a register keeps a register of its own
+    /// refused (`MB-TCP-WRITE`), extended registers through function 21 (Conn:467-487). A
+    /// list is written element by element as upstream does, except that an element narrower
+    /// than a register keeps a register of its own
     /// (docs/parity/modbus.md#MB-ADDR-SELECTION). Stonecrab refuses a write while the access policy is
     /// read-only (`MB-WRITE-ACCESS`), reports a write with no usable answer as `Unknown`
     /// where upstream reports an error code and goes on (`MB-WRITE-UNKNOWN`), and requires
@@ -1589,7 +1659,7 @@ impl Connection for ModbusConnection {
 #[cfg(test)]
 #[cfg(feature = "testkit")]
 mod tests {
-    use crate::testkit::{FakeClock, FakeTransportFactory};
+    use crate::testkit::{FakeClock, FakeTransportFactory, block_on_with};
     use crate::{AddressOptions, Endpoint, TagId};
 
     use super::*;
@@ -1647,6 +1717,78 @@ mod tests {
         assert_eq!(error.kind(), ErrorKind::InvalidAddress, "exception 02");
     }
 
+    // covers: MB-ADDR-EXTENDED / the reply of a file record read is the registers of its
+    // sub-responses in order, and only an extended register takes it
+    #[test]
+    fn a_file_record_reply_is_joined_in_order_for_an_extended_member() {
+        let defaults = ConnectionDefaults::default();
+        let file_reply = ModbusPdu::ReadFileRecordResponse {
+            records: vec![vec![0x0001], vec![0x0002, 0x0003]],
+        };
+        let registers = ModbusPdu::ReadRegistersResponse {
+            function: crate::modbus::FunctionCode::ReadHoldingRegisters,
+            registers: vec![1],
+        };
+        let dint = member(ModbusDataType::DInt, 0);
+        let across = member(ModbusDataType::DInt, 1);
+        // Registers 1 and 2 are the last of one sub-response and the first of the next.
+        assert_eq!(
+            decode_member(&file_reply, ModbusArea::ExtendedRegister, &dint, defaults)
+                .expect("two registers"),
+            PlcValue::I32(0x0001_0002)
+        );
+        assert_eq!(
+            decode_member(&file_reply, ModbusArea::ExtendedRegister, &across, defaults)
+                .expect("two registers"),
+            PlcValue::I32(0x0002_0003)
+        );
+        for (reply, area) in [
+            (&file_reply, ModbusArea::HoldingRegister),
+            (&registers, ModbusArea::ExtendedRegister),
+        ] {
+            let error = decode_member(reply, area, &dint, defaults).expect_err("wrong shape");
+            assert_eq!(error.kind(), ErrorKind::MalformedData, "{area:?}");
+        }
+    }
+
+    // covers: MB-TCP-READ-COIL, MB-TCP-READ-DI, MB-TCP-READ-HR, MB-TCP-READ-IR, MB-ADDR-EXTENDED
+    // / the read request of each area, and of an extended register that has no file, which no
+    // address can make
+    #[test]
+    fn the_read_request_follows_the_area() {
+        let file = NonZeroU16::new(2);
+        let (start, quantity) = (7, 2);
+        for (area, expected) in [
+            (ModbusArea::Coil, ModbusPdu::ReadCoils { start, quantity }),
+            (
+                ModbusArea::DiscreteInput,
+                ModbusPdu::ReadDiscreteInputs { start, quantity },
+            ),
+            (
+                ModbusArea::HoldingRegister,
+                ModbusPdu::ReadHoldingRegisters { start, quantity },
+            ),
+            (
+                ModbusArea::InputRegister,
+                ModbusPdu::ReadInputRegisters { start, quantity },
+            ),
+        ] {
+            assert_eq!(
+                read_pdu(area, None, start, quantity).expect("a request"),
+                expected,
+                "{area:?}"
+            );
+        }
+        assert_eq!(
+            read_pdu(ModbusArea::ExtendedRegister, file, 9_999, 2).expect("a request"),
+            ModbusPdu::read_file_record_request(2, 9_999, 2).expect("the same request")
+        );
+        let error = read_pdu(ModbusArea::ExtendedRegister, None, 0, 1).expect_err("no file");
+        assert_eq!(error.kind(), ErrorKind::Internal);
+        let error = read_pdu(ModbusArea::ExtendedRegister, file, 0, 121).expect_err("too long");
+        assert_eq!(error.kind(), ErrorKind::ResourceLimit);
+    }
+
     // covers: ALPHA_PLAN S25 / a reply too short for a member keeps the bytes that arrived
     #[test]
     fn a_reply_too_short_for_the_member_is_a_wrong_register_count() {
@@ -1672,6 +1814,50 @@ mod tests {
         )
         .expect_err("offset past the reply");
         assert_eq!(error.kind(), ErrorKind::MalformedData, "past the end");
+    }
+
+    // covers: MB-ADDR-EXTENDED / a chunk the batcher could not have planned is refused before
+    // anything is sent
+    #[test]
+    fn an_extended_chunk_that_cannot_be_encoded_is_refused_without_a_request() {
+        let clock = FakeClock::default();
+        let factory = FakeTransportFactory::new(clock.clone());
+        let config =
+            ConnectionConfig::builder("modbus-tcp", Endpoint::Custom("fake://plc".to_owned()))
+                .build()
+                .expect("config");
+        let connection = Link::build(
+            &config,
+            Arc::new(factory.clone()),
+            Arc::new(clock.clone()),
+            ConnectionDefaults::default(),
+        )
+        .expect("connection");
+        let address =
+            ModbusAddress::parse("extended-register:1", &AddressOptions::default()).expect("ok");
+        let tag = Tag::new(TagId::new("a").expect("tag id"), Arc::new(address));
+        let request = ReadRequest::builder(connection.limits)
+            .tag(tag)
+            .build()
+            .expect("request");
+        let op = Op {
+            connection: &connection,
+            operation: Operation::Read,
+            started: clock.now(),
+        };
+        let chunk = Chunk {
+            unit_id: None,
+            area: ModbusArea::ExtendedRegister,
+            start: 0,
+            file: NonZeroU16::new(1),
+            quantity: 121,
+            members: Vec::new(),
+        };
+        let error = block_on_with(&clock, connection.exchange(&op, &request, 0, 1, &chunk))
+            .err()
+            .expect("121 registers answer in more than 245 bytes");
+        assert_eq!(error.kind(), ErrorKind::ResourceLimit);
+        assert!(factory.opens().is_empty(), "no transport was needed");
     }
 
     // covers: ALPHA_PLAN S25 / a response the builder refuses is an Internal error

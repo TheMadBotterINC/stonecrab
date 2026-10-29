@@ -1,19 +1,21 @@
 //! Decodes arbitrary bytes as a Modbus PDU: as a request, and as the response to each of the
-//! four read functions, the three write functions (06, 15, 16) plus two unsupported ones.
+//! four read functions, the three write functions (06, 15, 16), the two file record
+//! functions (20, 21) plus an unsupported one.
 //!
 //! The target must never panic. Every accepted PDU must stay inside the protocol bounds, must
 //! name the function it was decoded for, and must re-encode to exactly the input bytes (so
 //! padding bits, byte counts and exception codes are all preserved); an accepted read
 //! response must also survive the reply check (without a panic) against a request of its
-//! function, and an accepted write request and the echo built from its fields must pass it.
+//! function, and an accepted write request (a file record write included) and the echo built
+//! from its fields must pass it.
 //! (No `forbid(unsafe_code)` here: `fuzz_target!` expands to an `extern` fn.)
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
 use stonecrab::codec::{BoundedReader, BoundedWriter};
 use stonecrab::modbus::{
-    ExceptionCode, FunctionCode, MAX_PDU_BYTES, ModbusPdu, decode_request, decode_response,
-    encode_request, encode_response,
+    ExceptionCode, FileRecordRead, FunctionCode, MAX_PDU_BYTES, ModbusPdu, decode_request,
+    decode_response, encode_request, encode_response,
 };
 
 fuzz_target!(|data: &[u8]| {
@@ -40,8 +42,9 @@ fuzz_target!(|data: &[u8]| {
         FunctionCode::WriteSingleRegister,
         FunctionCode::WriteMultipleCoils,
         FunctionCode::WriteMultipleRegisters,
+        FunctionCode::ReadFileRecord,
+        FunctionCode::WriteFileRecord,
         FunctionCode::Unknown(0x05),
-        FunctionCode::Unknown(0x14),
         FunctionCode::from_u8(first & 0x7F),
     ];
     for expected in expected_functions {
@@ -82,6 +85,26 @@ fuzz_target!(|data: &[u8]| {
                     "echoed quantity {quantity} of {function:?}"
                 );
             }
+            ModbusPdu::ReadFileRecordResponse { records } => {
+                let data: usize = records.iter().map(|run| 2 + 2 * run.len()).sum();
+                assert!(
+                    !records.is_empty() && records.iter().all(|run| !run.is_empty()),
+                    "a file record read answers with registers"
+                );
+                assert!(data <= 245, "file record response data {data}");
+            }
+            ModbusPdu::WriteFileRecordResponse { records } => {
+                let data: usize = records.iter().map(|record| 7 + 2 * record.registers.len()).sum();
+                assert!((9..=251).contains(&data), "file record echo data {data}");
+                assert!(
+                    records.iter().all(|record| {
+                        !record.registers.is_empty()
+                            && record.record <= 9_999
+                            && usize::from(record.record) + record.registers.len() <= 10_000
+                    }),
+                    "every echoed sub-request stays inside its file"
+                );
+            }
             ModbusPdu::Exception { code, .. } => {
                 assert!(
                     !matches!(
@@ -109,6 +132,23 @@ fuzz_target!(|data: &[u8]| {
                 response.check_reply_to(&request),
                 Ok(()),
                 "an echo answers the request built from its own fields"
+            );
+            continue;
+        }
+        if let ModbusPdu::ReadFileRecordResponse { records } = &response {
+            // Sub-requests that ask for as many registers as each sub-response holds.
+            let asked = records
+                .iter()
+                .map(|run| FileRecordRead {
+                    file: 1,
+                    record: 0,
+                    length: u16::try_from(run.len()).unwrap_or(u16::MAX),
+                })
+                .collect();
+            assert_eq!(
+                response.check_reply_to(&ModbusPdu::ReadFileRecord { records: asked }),
+                Ok(()),
+                "a file record read answers the request that asked for what it holds"
             );
             continue;
         }
@@ -162,6 +202,9 @@ fn request_for_echo(response: &ModbusPdu) -> Option<ModbusPdu> {
             start: *start,
             registers: vec![0; usize::from(*quantity)],
         }),
+        ModbusPdu::WriteFileRecordResponse { records } => Some(ModbusPdu::WriteFileRecord {
+            records: records.clone(),
+        }),
         _ => None,
     }
 }
@@ -199,6 +242,25 @@ fn check_write_request(request: &ModbusPdu) {
                 start: *start,
                 quantity: u16::try_from(registers.len()).unwrap_or(u16::MAX),
             }
+        }
+        ModbusPdu::WriteFileRecord { records } => {
+            let data: usize = records.iter().map(|record| 7 + 2 * record.registers.len()).sum();
+            assert!((9..=251).contains(&data), "file record data {data}");
+            ModbusPdu::WriteFileRecordResponse {
+                records: records.clone(),
+            }
+        }
+        ModbusPdu::ReadFileRecord { records } => {
+            assert!(
+                (1..=35).contains(&records.len())
+                    && records.iter().all(|item| {
+                        item.length >= 1
+                            && item.record <= 9_999
+                            && usize::from(item.record) + usize::from(item.length) <= 10_000
+                    }),
+                "every sub-request is a run inside its file"
+            );
+            return;
         }
         _ => return,
     };

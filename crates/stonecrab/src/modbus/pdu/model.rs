@@ -3,8 +3,71 @@
 use crate::codec::{ParseError, coil_byte_count};
 use crate::modbus::ModbusArea;
 
-use super::codec::check_request;
-use super::{ExceptionCode, FunctionCode, MAX_WRITE_COILS, MAX_WRITE_REGISTERS};
+use super::codec::{check_read_records, check_request, check_write_records, split_span};
+use super::{
+    ExceptionCode, FILE_WRITE_HEADER_BYTES, FunctionCode, MAX_FILE_WRITE_BYTES,
+    MAX_READ_EXTENDED_REGISTERS, MAX_WRITE_COILS, MAX_WRITE_REGISTERS,
+};
+
+/// One sub-request of a Read File Record request (function code 20): `length` registers
+/// from `record` of `file`.
+///
+/// The reference type of the wire (always 6) is not a field: the codec writes it and
+/// refuses any other. A record number runs from 0 to 9999 and the registers may not pass
+/// the end of the file, which the codec checks (V1.1b section 6.14).
+///
+/// # Examples
+/// ```
+/// use stonecrab::modbus::{FileRecordRead, ModbusPdu};
+///
+/// // V1.1b section 6.14: file 4, records 1 to 2.
+/// let item = FileRecordRead { file: 4, record: 1, length: 2 };
+/// let request = ModbusPdu::ReadFileRecord { records: vec![item] };
+/// assert_eq!(request.function().as_u8(), 0x14);
+/// ```
+///
+/// # Compatibility: docs/parity/modbus.md#MB-ADDR-EXTENDED
+/// The upstream `ModbusPDUReadFileRecordRequestItem`; its `referenceType` is always 6 in
+/// the driver.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FileRecordRead {
+    /// The file number, as on the wire.
+    pub file: u16,
+    /// The first record, 0 to 9999.
+    pub record: u16,
+    /// Number of registers, at least 1.
+    pub length: u16,
+}
+
+/// One sub-request of a Write File Record request (function code 21), or one of its echo:
+/// `registers` written from `record` of `file`.
+///
+/// The record length of the wire is the number of registers, so it is not a field. The
+/// reference type (always 6) is written and checked by the codec.
+///
+/// # Examples
+/// ```
+/// use stonecrab::modbus::{FileRecord, ModbusPdu};
+///
+/// // V1.1b section 6.15: three registers into file 4 from record 7.
+/// let item = FileRecord { file: 4, record: 7, registers: vec![0x06AF, 0x04BE, 0x100D] };
+/// let request = ModbusPdu::WriteFileRecord { records: vec![item] };
+/// assert_eq!(request.function().as_u8(), 0x15);
+/// ```
+///
+/// # Compatibility: docs/parity/modbus.md#MB-ADDR-EXTENDED
+/// The upstream `ModbusPDUWriteFileRecordRequestItem`. The upstream mspec reads the data of
+/// a response item as `recordLength` bytes where the specification echoes `2 * recordLength`
+/// (`ModbusPDUWriteFileRecordResponseItem`); this codec follows the specification.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FileRecord {
+    /// The file number, as on the wire.
+    pub file: u16,
+    /// The first record, 0 to 9999.
+    pub record: u16,
+    /// The register values in wire order, at least 1.
+    pub registers: Vec<u16>,
+}
 
 /// One Modbus PDU: a read or write request, its normal response or an exception response.
 ///
@@ -37,7 +100,9 @@ use super::{ExceptionCode, FunctionCode, MAX_WRITE_COILS, MAX_WRITE_REGISTERS};
 /// and `Exception` is the error PDU (rows `MB-EXC-*`). The write variants are the PDUs
 /// upstream builds for `MB-TCP-WRITE`: `ModbusPDUWriteMultipleCoilsRequest`,
 /// `ModbusPDUWriteSingleRegisterRequest` and
-/// `ModbusPDUWriteMultipleHoldingRegistersRequest` with their responses.
+/// `ModbusPDUWriteMultipleHoldingRegistersRequest` with their responses. The four file
+/// record variants are `ModbusPDUReadFileRecordRequest` and `...Response` and
+/// `ModbusPDUWriteFileRecordRequest` and `...Response` (`MB-ADDR-EXTENDED`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ModbusPdu {
@@ -132,6 +197,28 @@ pub enum ModbusPdu {
         /// The quantity of the request.
         quantity: u16,
     },
+    /// Function 0x14: read the registers of the `records`, one run per sub-request, 1 to
+    /// 35 of them.
+    ReadFileRecord {
+        /// The sub-requests, in the order their data is answered.
+        records: Vec<FileRecordRead>,
+    },
+    /// The normal response to function 0x14: the registers of each sub-request, in the
+    /// order of the request.
+    ReadFileRecordResponse {
+        /// One run of registers per sub-request, each at least 1.
+        records: Vec<Vec<u16>>,
+    },
+    /// Function 0x15: write the registers of each of the `records`.
+    WriteFileRecord {
+        /// The sub-requests: 7 bytes and 2 per register each, 251 bytes at most together.
+        records: Vec<FileRecord>,
+    },
+    /// The normal response to function 0x15: the request, echoed whole.
+    WriteFileRecordResponse {
+        /// The sub-requests of the request, as the device repeated them.
+        records: Vec<FileRecord>,
+    },
 }
 
 impl ModbusPdu {
@@ -160,6 +247,12 @@ impl ModbusPdu {
                 FunctionCode::WriteSingleRegister
             }
             Self::WriteMultipleRegisters { .. } => FunctionCode::WriteMultipleRegisters,
+            Self::ReadFileRecord { .. } | Self::ReadFileRecordResponse { .. } => {
+                FunctionCode::ReadFileRecord
+            }
+            Self::WriteFileRecord { .. } | Self::WriteFileRecordResponse { .. } => {
+                FunctionCode::WriteFileRecord
+            }
             Self::ReadBitsResponse { function, .. }
             | Self::ReadRegistersResponse { function, .. }
             | Self::WriteMultipleResponse { function, .. }
@@ -178,6 +271,8 @@ impl ModbusPdu {
                 | Self::WriteMultipleCoils { .. }
                 | Self::WriteSingleRegister { .. }
                 | Self::WriteMultipleRegisters { .. }
+                | Self::ReadFileRecord { .. }
+                | Self::WriteFileRecord { .. }
         )
     }
 
@@ -194,8 +289,10 @@ impl ModbusPdu {
     /// PDU and sends nothing.
     ///
     /// # Errors
-    /// [`ParseError::InvalidDiscriminator`] when the area is read-only (field
-    /// `write area`, the value its prefix digit) or the quantity is 0;
+    /// [`ParseError::InvalidDiscriminator`] when the area is read-only or an extended
+    /// register, which has its own request
+    /// ([`write_file_record_request`](Self::write_file_record_request)) (field `write
+    /// area`, the value its prefix digit), or the quantity is 0;
     /// [`ParseError::OversizedLength`] when the quantity is over 1968 coils or 123
     /// registers or `start + quantity` passes the address space; [`ParseError::Truncated`]
     /// or [`ParseError::TrailingBytes`] when the payload is not exactly the length the
@@ -272,28 +369,176 @@ impl ModbusPdu {
                     _ => Self::WriteMultipleRegisters { start, registers },
                 })
             }
-            ModbusArea::DiscreteInput | ModbusArea::InputRegister => {
-                Err(ParseError::InvalidDiscriminator {
-                    field: "write area",
-                    value: u64::from(area.prefix_digit()),
-                })
-            }
+            ModbusArea::DiscreteInput
+            | ModbusArea::InputRegister
+            | ModbusArea::ExtendedRegister => Err(ParseError::InvalidDiscriminator {
+                field: "write area",
+                value: u64::from(area.prefix_digit()),
+            }),
         }
+    }
+
+    /// The Read File Record request for `quantity` registers from `record` of `file`, cut
+    /// at the end of each 10000-record file into one sub-request per file.
+    ///
+    /// A span that stays in its file is one sub-request. A span that passes record 9999
+    /// continues at record 0 of the next file number, as the extended registers of a device
+    /// are laid out (file `n` holds the registers `(n - 1) * 10000` to `n * 10000 - 1`).
+    /// The sub-requests come in span order, so the data of the response, joined in order,
+    /// is the data of the span. The function chooses a PDU and sends nothing.
+    ///
+    /// # Errors
+    /// [`ParseError::InvalidDiscriminator`] when the quantity is 0 (field `quantity`);
+    /// [`ParseError::OversizedLength`] when the quantity is over
+    /// [`MAX_READ_EXTENDED_REGISTERS`](crate::modbus::MAX_READ_EXTENDED_REGISTERS), the
+    /// record is over 9999 or the span runs past file number 65535.
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab::modbus::{FileRecordRead, ModbusPdu};
+    ///
+    /// // Two registers at the end of file 1 and none past it: one sub-request.
+    /// let inside = ModbusPdu::read_file_record_request(1, 9_998, 2)?;
+    /// assert_eq!(
+    ///     inside,
+    ///     ModbusPdu::ReadFileRecord {
+    ///         records: vec![FileRecordRead { file: 1, record: 9_998, length: 2 }],
+    ///     }
+    /// );
+    ///
+    /// // Three registers from the last record of file 1 continue in file 2.
+    /// let split = ModbusPdu::read_file_record_request(1, 9_999, 3)?;
+    /// assert_eq!(
+    ///     split,
+    ///     ModbusPdu::ReadFileRecord {
+    ///         records: vec![
+    ///             FileRecordRead { file: 1, record: 9_999, length: 1 },
+    ///             FileRecordRead { file: 2, record: 0, length: 2 },
+    ///         ],
+    ///     }
+    /// );
+    ///
+    /// // A record outside a file is refused.
+    /// assert!(ModbusPdu::read_file_record_request(1, 10_000, 1).is_err());
+    /// # Ok::<(), stonecrab::codec::ParseError>(())
+    /// ```
+    ///
+    /// # Compatibility: docs/parity/modbus.md#MB-ADDR-EXTENDED
+    /// The split is upstream's `getReadRequestPdu` (Conn:411-432): one request, one
+    /// sub-request per file. The quantity bound is Stonecrab's own, see
+    /// [`MAX_READ_EXTENDED_REGISTERS`](crate::modbus::MAX_READ_EXTENDED_REGISTERS).
+    pub fn read_file_record_request(
+        file: u16,
+        record: u16,
+        quantity: u16,
+    ) -> Result<Self, ParseError> {
+        if quantity > MAX_READ_EXTENDED_REGISTERS {
+            return Err(ParseError::OversizedLength {
+                length: usize::from(quantity),
+                max: usize::from(MAX_READ_EXTENDED_REGISTERS),
+            });
+        }
+        let records: Vec<FileRecordRead> = split_span(file, record, quantity)?
+            .into_iter()
+            .map(|(file, record, length)| FileRecordRead {
+                file,
+                record,
+                length,
+            })
+            .collect();
+        check_read_records(&records)?;
+        Ok(Self::ReadFileRecord { records })
+    }
+
+    /// The Write File Record request for `registers` written from `record` of `file`, cut
+    /// at the end of each 10000-record file into one sub-request per file.
+    ///
+    /// The cut is the one of [`read_file_record_request`](Self::read_file_record_request):
+    /// the registers are dealt out in order, the first sub-request holding those up to
+    /// record 9999 and the next starting at record 0 of the next file number. One request
+    /// carries all of them, so the device sees the span as one write. The function chooses
+    /// a PDU and sends nothing.
+    ///
+    /// # Errors
+    /// [`ParseError::InvalidDiscriminator`] when `registers` is empty (field `quantity`);
+    /// [`ParseError::OversizedLength`] when the record is over 9999, the span runs past
+    /// file number 65535 or the sub-requests together are longer than the 251 data bytes a
+    /// request may carry (checked before the registers are copied).
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab::modbus::{FileRecord, ModbusPdu};
+    ///
+    /// let request = ModbusPdu::write_file_record_request(1, 9_999, &[0x0001, 0x0002])?;
+    /// assert_eq!(
+    ///     request,
+    ///     ModbusPdu::WriteFileRecord {
+    ///         records: vec![
+    ///             FileRecord { file: 1, record: 9_999, registers: vec![0x0001] },
+    ///             FileRecord { file: 2, record: 0, registers: vec![0x0002] },
+    ///         ],
+    ///     }
+    /// );
+    /// assert!(ModbusPdu::write_file_record_request(1, 0, &[]).is_err());
+    /// # Ok::<(), stonecrab::codec::ParseError>(())
+    /// ```
+    ///
+    /// # Compatibility: docs/parity/modbus.md#MB-TCP-WRITE
+    /// The cut and the single request are upstream's `getWriteRequestPdu` (Conn:467-487).
+    pub fn write_file_record_request(
+        file: u16,
+        record: u16,
+        registers: &[u16],
+    ) -> Result<Self, ParseError> {
+        // Even one sub-request is 7 bytes and 2 per register, so this bound comes before
+        // anything is copied.
+        let data_bytes = registers
+            .len()
+            .saturating_mul(2)
+            .saturating_add(FILE_WRITE_HEADER_BYTES);
+        if data_bytes > MAX_FILE_WRITE_BYTES {
+            return Err(ParseError::OversizedLength {
+                length: data_bytes,
+                max: MAX_FILE_WRITE_BYTES,
+            });
+        }
+        let quantity = u16::try_from(registers.len()).unwrap_or(u16::MAX);
+        let mut rest = registers;
+        let mut records = Vec::new();
+        for (file, record, length) in split_span(file, record, quantity)? {
+            let (run, after) = rest
+                .split_at_checked(usize::from(length))
+                .unwrap_or((rest, &[]));
+            records.push(FileRecord {
+                file,
+                record,
+                registers: run.to_vec(),
+            });
+            rest = after;
+        }
+        check_write_records(&records)?;
+        Ok(Self::WriteFileRecord { records })
     }
 
     /// Checks that `self`, a response, answers `request`, which the response itself cannot
     /// prove: the function must be the request's, and the data must be exactly as long as
     /// the request's quantity (ceil(quantity / 8) bytes for bits, `quantity` registers)
     /// for a read, or echo the request's address and quantity (address and value for
-    /// function 06) for a write. An exception only has to name the request's function.
+    /// function 06) for a write. A file record read must answer every sub-request, in order,
+    /// with as many registers as it asked for; a file record write must echo every
+    /// sub-request whole, registers included. An exception only has to name the request's
+    /// function.
     ///
     /// # Errors
     /// [`ParseError::InvalidDiscriminator`] when `request` is not a request, when `self`
     /// is not a response, when the function differs (the `value` is the offending function
     /// number) or when a write response echoes the wrong value (the field is `echoed start
     /// address`, `echoed quantity` or `echoed value` and the `value` is what the response
-    /// holds; the address is judged first); [`ParseError::Truncated`] when read data is
-    /// shorter than the quantity needs and [`ParseError::TrailingBytes`] when it is longer.
+    /// holds; the address is judged first; for a file record write the fields are `echoed
+    /// record count`, `echoed file number`, `echoed record number`, `echoed record length`
+    /// and `echoed record data`, judged in that order record by record, and for a file
+    /// record read `record count`); [`ParseError::Truncated`] when read data is shorter than
+    /// the quantity needs and [`ParseError::TrailingBytes`] when it is longer.
     ///
     /// # Examples
     /// ```
@@ -381,6 +626,25 @@ impl ModbusPdu {
                 },
             ) => check_echo("echoed start address", usize::from(*start), *echoed_start)
                 .and_then(|()| check_echo("echoed quantity", registers.len(), *echoed_quantity)),
+            (
+                Self::ReadFileRecord { records: asked },
+                Self::ReadFileRecordResponse { records: answered },
+            ) => check_same("record count", asked.len(), answered.len()).and_then(|()| {
+                asked.iter().zip(answered).try_for_each(|(ask, data)| {
+                    check_length(
+                        usize::from(ask.length).saturating_mul(2),
+                        data.len().saturating_mul(2),
+                    )
+                })
+            }),
+            (
+                Self::WriteFileRecord { records: sent },
+                Self::WriteFileRecordResponse { records: echoed },
+            ) => check_same("echoed record count", sent.len(), echoed.len()).and_then(|()| {
+                sent.iter()
+                    .zip(echoed)
+                    .try_for_each(|(sent, echoed)| check_record_echo(sent, echoed))
+            }),
             _ => Err(discriminator("response function code", self.function())),
         }
     }
@@ -409,12 +673,44 @@ pub(super) const fn check_length(needed: usize, available: usize) -> Result<(), 
 
 /// Compares a field of a write response with the request's.
 fn check_echo(field: &'static str, sent: usize, echoed: u16) -> Result<(), ParseError> {
-    if sent == usize::from(echoed) {
+    check_same(field, sent, usize::from(echoed))
+}
+
+/// Compares a count or a field with what the response holds.
+fn check_same(field: &'static str, sent: usize, got: usize) -> Result<(), ParseError> {
+    if sent == got {
         Ok(())
     } else {
         Err(ParseError::InvalidDiscriminator {
             field,
-            value: u64::from(echoed),
+            value: u64::try_from(got).unwrap_or(u64::MAX),
         })
+    }
+}
+
+/// Compares one sub-request of a file record write with its echo, field by field.
+fn check_record_echo(sent: &FileRecord, echoed: &FileRecord) -> Result<(), ParseError> {
+    check_echo("echoed file number", usize::from(sent.file), echoed.file)?;
+    check_echo(
+        "echoed record number",
+        usize::from(sent.record),
+        echoed.record,
+    )?;
+    check_same(
+        "echoed record length",
+        sent.registers.len(),
+        echoed.registers.len(),
+    )?;
+    match sent
+        .registers
+        .iter()
+        .zip(&echoed.registers)
+        .find(|(sent, echoed)| sent != echoed)
+    {
+        Some((_, echoed)) => Err(ParseError::InvalidDiscriminator {
+            field: "echoed record data",
+            value: u64::from(*echoed),
+        }),
+        None => Ok(()),
     }
 }

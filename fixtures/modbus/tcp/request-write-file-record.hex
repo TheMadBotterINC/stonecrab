@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Modbus Application Protocol V1.1b section 6.15, Write File Record, request example.
+# One sub-request: three registers into file 4 from record 7.
+15 0D 06 00 04 00 07 00 03 06 AF 04 BE 10 0D

@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as the response to function 20.
+# one sub-response with reference type 5 instead of 6
+14 04 03 05 00 01

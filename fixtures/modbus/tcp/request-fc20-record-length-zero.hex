@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as a request.
+# one sub-request of file 1 record 0 with record length 0
+14 07 06 00 01 00 00 00 00

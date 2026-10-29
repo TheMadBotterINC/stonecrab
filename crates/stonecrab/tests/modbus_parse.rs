@@ -692,36 +692,199 @@ mod tests {
         }
     }
 
-    // covers: SPEC mandatory-failure-cases / F3 invalid register
+    // The four spellings of extended register 1 of ModbusTagTest.testExtended_INT_ARRAY_RANGE
+    // (plc4j/drivers/modbus/src/test/java/org/apache/plc4x/java/modbus/ModbusTagTest.java,
+    // Apache PLC4X v1.0.0 commit ea229918), here without the array selection: "All forms of
+    // defining the tag MUST result in an identical modbus tag", and logical address 1 is wire
+    // address 1 ("Addresses for extended memory start at address 0 instead of 1"). The test
+    // with its selection is `upstream_extended_register_ranges_agree_across_forms_up_to_120`
+    // in tests/modbus_selection.rs (MB-ADDR-SELECTION).
+    // covers: MB-ADDR-EXTENDED
     #[test]
-    fn extended_register_is_rejected_at_parse_time() {
-        for text in [
-            "extended-register:1",
-            "extended-register:1:INT",
-            "extended-register",
-            "extended-registers:1",
-        ] {
-            assert_rejected_naming(text, "extended registers");
+    fn the_four_spellings_of_extended_register_1_are_one_address() {
+        let long = accept("extended-register:1:INT");
+        for text in ["extended-register:1", "6x00001", "6x00001:INT", "6x0001"] {
+            assert_eq!(accept(text), long, "{text}");
         }
+        for text in ["60001", "600001", "60001:INT"] {
+            assert_eq!(accept_plc4x(text), long, "{text} with the plc4x convention");
+        }
+        assert_eq!(long.area(), ModbusArea::ExtendedRegister, "area");
+        assert_eq!(long.logical_address(), 1, "logical address");
+        assert_eq!(long.offset(), 1, "record 1 ...");
+        assert_eq!(
+            long.file_number().map(std::num::NonZeroU16::get),
+            Some(1),
+            "... of file 1"
+        );
+        assert_eq!(
+            long.canonical(),
+            "extended-register:1:INT",
+            "canonical text"
+        );
+        assert_eq!(accept(&long.canonical()), long, "reads back");
+    }
+
+    // covers: MB-ADDR-EXTENDED, MB-ADDR-BARE-40001
+    #[test]
+    fn the_bare_6_form_needs_an_explicit_convention_like_the_other_areas() {
+        for text in ["60001", "600001", "60001:INT"] {
+            let message = reject(text);
+            assert!(
+                message.contains("ambiguous") && message.contains("extended-register"),
+                "{text}: {message}"
+            );
+        }
+        for convention in ["plc4x", "one-based-40001", "zero-based"] {
+            assert_eq!(
+                ModbusAddress::parse("60001", &with(convention))
+                    .expect("accepted")
+                    .logical_address(),
+                1,
+                "{convention}"
+            );
+        }
+    }
+
+    // covers: MB-ADDR-EXTENDED
+    #[test]
+    fn an_extended_address_is_the_register_address_under_every_convention() {
+        for convention in ["plc4x", "one-based-40001", "zero-based"] {
+            let options = with(convention);
+            for (text, number) in [
+                ("extended-register:1", 1_u32),
+                ("extended-register:9999", 9_999),
+                ("extended-register:10000", 10_000),
+                ("extended-register:29998:DINT", 29_998),
+                ("6x65535", 65_535),
+                ("6x65536", 65_536),
+                ("665536", 65_536),
+                ("extended-register:655349999", 655_349_999),
+            ] {
+                let address = ModbusAddress::parse(text, &options)
+                    .unwrap_or_else(|e| panic!("{text} under {convention}: {e}"));
+                assert_eq!(
+                    address.logical_address(),
+                    number,
+                    "{text} under {convention}"
+                );
+            }
+        }
+        // File numbers are 1-based on the wire: address 10000 is record 0 of file 2.
+        let boundary = accept("extended-register:10000");
+        assert_eq!(
+            boundary.file_number().map(std::num::NonZeroU16::get),
+            Some(2)
+        );
+        assert_eq!(boundary.offset(), 0);
+    }
+
+    // Upstream rejects logical address 0 (ModbusTag.java:195-197, "address must be greater
+    // than zero") and addresses over 655359999 (ModbusTagExtendedRegister.java:36, 86-88).
+    // covers: MB-ADDR-EXTENDED, MB-LIMIT-EXT
+    #[test]
+    fn extended_address_0_and_the_end_of_the_files_are_rejected() {
+        for convention in ["plc4x", "one-based-40001", "zero-based"] {
+            let options = with(convention);
+            for text in ["extended-register:0", "6x00000", "60000", "6x0000"] {
+                let error = reject_with(text, &options).to_string();
+                assert!(
+                    error.contains("address 0 does not exist"),
+                    "{text}: {error}"
+                );
+            }
+        }
+        for text in [
+            "extended-register:655350000",
+            "extended-register:655359999",
+            "extended-register:999999999",
+            "extended-register:655349999:DINT",
+            "extended-register:655349997:LREAL",
+        ] {
+            let error = reject(text);
+            assert!(error.contains("passes the last address"), "{text}: {error}");
+        }
+        assert_eq!(
+            accept("extended-register:655349998:DINT").logical_address(),
+            655_349_998,
+            "the last DINT"
+        );
+        assert!(
+            reject("extended-register:1000000000").contains("digits"),
+            "ten digits"
+        );
+        assert!(reject("extended-register:").contains("missing address number"));
+        assert!(reject("extended-register").contains("expected ':'"));
+        assert!(reject("extended-registers:1").contains("expected ':'"));
+        assert!(reject("6x").contains("4 or 5 digits"));
+        assert!(reject("6x123").contains("4 or 5 digits"));
+    }
+
+    // Upstream ModbusTagDataTypeTest.testExtended_DataType reads INT, UINT, DINT and REAL at
+    // extended-register:1 (widths 1, 1, 2, 2); the other types are those of the holding
+    // registers.
+    // covers: MB-ADDR-EXTENDED
+    #[test]
+    fn an_extended_register_takes_the_types_a_holding_register_takes() {
+        for (name, kind) in [
+            ("BOOL", ModbusDataType::Bool),
+            ("BYTE", ModbusDataType::Byte),
+            ("WORD", ModbusDataType::Word),
+            ("DWORD", ModbusDataType::DWord),
+            ("LWORD", ModbusDataType::LWord),
+            ("SINT", ModbusDataType::SInt),
+            ("USINT", ModbusDataType::USInt),
+            ("INT", ModbusDataType::Int),
+            ("UINT", ModbusDataType::UInt),
+            ("DINT", ModbusDataType::DInt),
+            ("UDINT", ModbusDataType::UDInt),
+            ("LINT", ModbusDataType::LInt),
+            ("ULINT", ModbusDataType::ULInt),
+            ("REAL", ModbusDataType::Real),
+            ("LREAL", ModbusDataType::LReal),
+        ] {
+            let extended = accept(&format!("extended-register:1:{name}"));
+            let holding = accept(&format!("holding-register:1:{name}"));
+            assert_eq!(extended.data_type(), kind, "{name}");
+            assert_eq!(
+                extended.data_type().register_size(),
+                holding.data_type().register_size(),
+                "{name} width"
+            );
+            assert_eq!(
+                extended.spans_multiple_words(),
+                holding.spans_multiple_words(),
+                "{name} spans"
+            );
+        }
+        assert_eq!(
+            accept("extended-register:1").data_type(),
+            ModbusDataType::Int
+        );
+        assert_eq!(
+            accept("extended-register:7:DINT{unit-id: 9, byte-order: 'LITTLE_ENDIAN'}").canonical(),
+            "extended-register:7:DINT{unit-id: 9, byte-order: 'LITTLE_ENDIAN'}"
+        );
+        assert_rejected_naming("extended-register:1:STRING", "STRING");
+        // Since the merge with S48 the extended registers take the selection the other areas
+        // take (ADR-0022, addendum of 2026-10-29); before it, this was a typed rejection.
+        let range = accept("extended-register:1[0..1]:INT");
+        assert_eq!(
+            range.elements().map(std::num::NonZeroU16::get),
+            Some(2),
+            "a list of two INTs"
+        );
+        assert_eq!(range.canonical(), "extended-register:1[0..1]:INT");
     }
 
     // covers: SPEC mandatory-failure-cases / F3 invalid register
     #[test]
-    fn six_x_prefix_is_rejected_at_parse_time() {
-        for text in ["6x00001", "6x", "6x00001:INT"] {
-            assert_rejected_naming(text, "extended registers");
-        }
-        // The bare 6 prefix is the same area, with or without the convention.
-        assert_rejected_naming("60001", "extended registers");
-        assert!(
-            reject_with("60001", &plc4x())
-                .to_string()
-                .contains("extended registers"),
-            "bare 6 with the convention"
-        );
+    fn prefix_digits_without_an_area_are_rejected() {
         assert_rejected_naming("2x00001", "no area uses prefix digit 2");
         assert_rejected_naming("5x00001", "no area uses prefix digit 5");
+        assert_rejected_naming("7x00001", "no area uses prefix digit 7");
         assert_rejected_naming("9x00001", "no area uses prefix digit 9");
+        assert_rejected_naming("2x00001", "6 (extended-register)");
     }
 
     // covers: SPEC mandatory-failure-cases / F3 invalid register
@@ -1107,11 +1270,13 @@ mod tests {
                 "4001",
                 "4000001",
                 "20001",
-                "60001",
                 "4x001",
                 "4x000001",
                 "2x00001",
-                "6x00001",
+                "6001",
+                "6000001",
+                "6x001",
+                "6x000001",
                 "holding-register:",
                 "holding-register:1234567890",
                 "holding-register:0x10",

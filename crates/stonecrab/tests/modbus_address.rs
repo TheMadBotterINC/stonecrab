@@ -140,6 +140,14 @@ mod tests {
                 "input-register",
                 ModbusDataType::Int,
             ),
+            (
+                ModbusArea::ExtendedRegister,
+                false,
+                true,
+                6,
+                "extended-register",
+                ModbusDataType::Int,
+            ),
         ];
         for (area, bit, writable, digit, name, default_type) in table {
             assert_eq!(area.is_bit_area(), bit, "{name}: is_bit_area");
@@ -152,10 +160,14 @@ mod tests {
                 "{name}: default type"
             );
         }
-        let digits: HashSet<u8> = ALL_AREAS.iter().map(|a| a.prefix_digit()).collect();
+        let digits: HashSet<u8> = ALL_AREAS
+            .iter()
+            .chain([&ModbusArea::ExtendedRegister])
+            .map(|a| a.prefix_digit())
+            .collect();
         assert_eq!(
             digits.len(),
-            4,
+            5,
             "prefix digits are distinct (there is no 2x area)"
         );
     }
@@ -299,6 +311,114 @@ mod tests {
                 "{area:?}: convention"
             );
             assert_eq!(address.area(), area, "{area:?}: area");
+        }
+    }
+
+    // covers: MB-ADDR-EXTENDED, MB-LIMIT-EXT
+    #[test]
+    fn an_extended_address_is_a_file_and_a_record() {
+        // Address, file number on the wire, record in the file.
+        let table = [
+            (1_u32, 1_u16, 1_u16),
+            (9_999, 1, 9_999),
+            (10_000, 2, 0),
+            (10_001, 2, 1),
+            (29_998, 3, 9_998),
+            (655_340_000, 65_535, 0),
+            (655_349_999, 65_535, 9_999),
+        ];
+        for (number, file, record) in table {
+            let address = ModbusAddress::extended(number)
+                .build()
+                .expect("addressable");
+            assert_eq!(
+                address.area(),
+                ModbusArea::ExtendedRegister,
+                "{number}: area"
+            );
+            assert_eq!(
+                address.file_number().map(std::num::NonZeroU16::get),
+                Some(file),
+                "{number}: file"
+            );
+            assert_eq!(address.offset(), record, "{number}: record");
+            assert_eq!(address.logical_address(), number, "{number}: no shift");
+            assert_eq!(
+                address.data_type(),
+                ModbusDataType::Int,
+                "{number}: default type"
+            );
+            assert_eq!(
+                address.canonical(),
+                format!("extended-register:{number}:INT"),
+                "{number}: canonical"
+            );
+        }
+        let through_builder = ModbusAddress::builder(ModbusArea::ExtendedRegister, 7)
+            .build()
+            .expect("a u16 address");
+        assert_eq!(
+            through_builder,
+            ModbusAddress::extended(7).build().expect("same"),
+            "the builder reads a u16 as the address"
+        );
+        for area in ALL_AREAS {
+            let address = ModbusAddress::builder(area, 0).build().expect("valid");
+            assert_eq!(address.file_number(), None, "{area:?}: no file");
+        }
+    }
+
+    // covers: MB-ADDR-EXTENDED, MB-LIMIT-EXT
+    #[test]
+    fn extended_address_zero_and_the_end_of_the_files_are_refused() {
+        let message = |result: stonecrab::Result<ModbusAddress>| {
+            let error = result.expect_err("refused");
+            assert_eq!(error.kind(), ErrorKind::InvalidAddress);
+            error.to_string()
+        };
+        assert!(
+            message(ModbusAddress::extended(0).build()).contains("address 0 does not exist"),
+            "address 0"
+        );
+        assert!(
+            message(ModbusAddress::builder(ModbusArea::ExtendedRegister, 0).build())
+                .contains("address 0 does not exist"),
+            "address 0 through builder"
+        );
+        // Upstream accepts up to 655359999 and would send file 65536 for the last 10000
+        // addresses, which the 16-bit file number cannot hold.
+        for number in [
+            655_350_000_u32,
+            655_359_998,
+            655_359_999,
+            655_360_000,
+            u32::MAX,
+        ] {
+            assert!(
+                message(ModbusAddress::extended(number).build())
+                    .contains("passes the last address"),
+                "{number}"
+            );
+        }
+        for (kind, last_ok) in [
+            (ModbusDataType::Int, 655_349_999_u32),
+            (ModbusDataType::DInt, 655_349_998),
+            (ModbusDataType::LReal, 655_349_996),
+        ] {
+            assert!(
+                ModbusAddress::extended(last_ok)
+                    .data_type(kind)
+                    .build()
+                    .is_ok(),
+                "{kind:?} at {last_ok}"
+            );
+            assert!(
+                ModbusAddress::extended(last_ok.saturating_add(1))
+                    .data_type(kind)
+                    .build()
+                    .is_err(),
+                "{kind:?} one past {last_ok}"
+            );
         }
     }
 
@@ -663,7 +783,7 @@ mod tests {
         assert_eq!(
             format!("{address:?}"),
             "ModbusAddress { unit_id: Some(UnitId(10)), area: HoldingRegister, offset: 15, \
-             data_type: Int, byte_order: Some((LittleEndian, LowWordFirst)), \
+             file: None, data_type: Int, byte_order: Some((LittleEndian, LowWordFirst)), \
              convention: Plc4xCompatible, elements: None }",
             "derived Debug text"
         );

@@ -808,11 +808,13 @@ const fn operation_name(function: FunctionCode) -> &'static str {
     match function {
         FunctionCode::WriteSingleRegister
         | FunctionCode::WriteMultipleCoils
-        | FunctionCode::WriteMultipleRegisters => "write",
+        | FunctionCode::WriteMultipleRegisters
+        | FunctionCode::WriteFileRecord => "write",
         FunctionCode::ReadCoils
         | FunctionCode::ReadDiscreteInputs
         | FunctionCode::ReadHoldingRegisters
         | FunctionCode::ReadInputRegisters
+        | FunctionCode::ReadFileRecord
         | FunctionCode::Unknown(_) => "read",
     }
 }
@@ -905,6 +907,7 @@ mod tests {
             FunctionCode::WriteSingleRegister,
             FunctionCode::WriteMultipleCoils,
             FunctionCode::WriteMultipleRegisters,
+            FunctionCode::WriteFileRecord,
         ] {
             assert_eq!(operation_name(function), "write", "{function:?}");
         }
@@ -913,6 +916,7 @@ mod tests {
             FunctionCode::ReadDiscreteInputs,
             FunctionCode::ReadHoldingRegisters,
             FunctionCode::ReadInputRegisters,
+            FunctionCode::ReadFileRecord,
             FunctionCode::Unknown(0x2B),
         ] {
             assert_eq!(operation_name(function), "read", "{function:?}");

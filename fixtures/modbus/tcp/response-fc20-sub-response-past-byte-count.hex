@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as the response to function 20.
+# byte count 4, but the sub-response declares 4 data bytes and only 2 are left
+14 04 05 06 00 01

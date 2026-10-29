@@ -2,11 +2,11 @@
 
 /// The function code of a PDU.
 ///
-/// The codec speaks the read function codes 01 to 04 and the three write codes upstream
-/// emits: 06, 15 (0x0F) and 16 (0x10). Every other value, including Write Single Coil (05,
-/// which upstream never sends) and the file record codes 20 and 21 (0x14, 0x15), is
-/// [`Unknown`](Self::Unknown): the codec carries the number and refuses to decode a PDU
-/// that uses it. Use [`from_u8`](Self::from_u8) to build a value so that a number with a
+/// The codec speaks the read function codes 01 to 04, the three write codes upstream
+/// emits (06, 15 (0x0F) and 16 (0x10)) and the file record codes 20 and 21 (0x14, 0x15)
+/// that carry the extended registers. Every other value, including Write Single Coil (05,
+/// which upstream never sends), is [`Unknown`](Self::Unknown): the codec carries the
+/// number and refuses to decode a PDU that uses it. Use [`from_u8`](Self::from_u8) to build a value so that a number with a
 /// named variant never ends up as `Unknown`.
 ///
 /// # Examples
@@ -24,7 +24,9 @@
 /// The four read variants are the upstream read PDUs: FC01 `MB-TCP-READ-COIL`, FC02
 /// `MB-TCP-READ-DI`, FC03 `MB-TCP-READ-HR` and FC04 `MB-TCP-READ-IR`. The three write
 /// variants are the PDUs upstream builds for `MB-TCP-WRITE`; FC05 stays `Unknown`
-/// (`MB-QUIRK-C`).
+/// (`MB-QUIRK-C`). The two file record variants are the PDUs upstream builds for
+/// `MB-ADDR-EXTENDED`; they come after `Unknown` because a new variant of a published enum
+/// goes after the existing ones (coding standards, section 9.10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum FunctionCode {
@@ -44,17 +46,22 @@ pub enum FunctionCode {
     WriteMultipleRegisters,
     /// Any other function code, kept as the number that was on the wire.
     Unknown(u8),
+    /// 0x14 (20), read file record: the read of the extended registers.
+    ReadFileRecord,
+    /// 0x15 (21), write file record: the write of the extended registers.
+    WriteFileRecord,
 }
 
 impl FunctionCode {
-    /// The function code for `value`, `Unknown` when it is not 0x01 to 0x04, 0x06, 0x0F or
-    /// 0x10.
+    /// The function code for `value`, `Unknown` when it is not 0x01 to 0x04, 0x06, 0x0F,
+    /// 0x10, 0x14 or 0x15.
     ///
     /// # Examples
     /// ```
     /// use stonecrab::modbus::FunctionCode;
     /// assert_eq!(FunctionCode::from_u8(1), FunctionCode::ReadCoils);
     /// assert_eq!(FunctionCode::from_u8(0), FunctionCode::Unknown(0));
+    /// assert_eq!(FunctionCode::from_u8(0x14), FunctionCode::ReadFileRecord);
     /// ```
     #[must_use]
     pub const fn from_u8(value: u8) -> Self {
@@ -66,6 +73,8 @@ impl FunctionCode {
             0x06 => Self::WriteSingleRegister,
             0x0F => Self::WriteMultipleCoils,
             0x10 => Self::WriteMultipleRegisters,
+            0x14 => Self::ReadFileRecord,
+            0x15 => Self::WriteFileRecord,
             other => Self::Unknown(other),
         }
     }
@@ -77,6 +86,7 @@ impl FunctionCode {
     /// use stonecrab::modbus::FunctionCode;
     /// assert_eq!(FunctionCode::ReadInputRegisters.as_u8(), 4);
     /// assert_eq!(FunctionCode::Unknown(0x2B).as_u8(), 0x2B);
+    /// assert_eq!(FunctionCode::WriteFileRecord.as_u8(), 0x15);
     /// ```
     #[must_use]
     pub const fn as_u8(self) -> u8 {
@@ -88,6 +98,8 @@ impl FunctionCode {
             Self::WriteSingleRegister => 0x06,
             Self::WriteMultipleCoils => 0x0F,
             Self::WriteMultipleRegisters => 0x10,
+            Self::ReadFileRecord => 0x14,
+            Self::WriteFileRecord => 0x15,
             Self::Unknown(value) => value,
         }
     }

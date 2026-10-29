@@ -8,8 +8,9 @@ mod tests {
     use stonecrab::PlcError;
     use stonecrab::codec::{BoundedReader, BoundedWriter, ParseError};
     use stonecrab::modbus::{
-        ExceptionCode, FunctionCode, MAX_PDU_BYTES, MAX_READ_BITS, MAX_READ_REGISTERS, ModbusArea,
-        ModbusPdu, decode_request, decode_response, encode_request, encode_response,
+        ExceptionCode, FileRecord, FileRecordRead, FunctionCode, MAX_PDU_BYTES, MAX_READ_BITS,
+        MAX_READ_EXTENDED_REGISTERS, MAX_READ_REGISTERS, ModbusArea, ModbusPdu, decode_request,
+        decode_response, encode_request, encode_response,
     };
 
     const COILS: FunctionCode = FunctionCode::ReadCoils;
@@ -21,6 +22,8 @@ mod tests {
     const WRITE_COILS: FunctionCode = FunctionCode::WriteMultipleCoils;
     const WRITE_REGISTERS: FunctionCode = FunctionCode::WriteMultipleRegisters;
     const WRITES: [FunctionCode; 3] = [WRITE_ONE, WRITE_COILS, WRITE_REGISTERS];
+    const READ_FILE: FunctionCode = FunctionCode::ReadFileRecord;
+    const WRITE_FILE: FunctionCode = FunctionCode::WriteFileRecord;
     /// The ten exception codes V1.1b section 7 defines.
     const DEFINED: [u8; 10] = [1, 2, 3, 4, 5, 6, 7, 8, 10, 11];
 
@@ -77,9 +80,9 @@ mod tests {
     }
 
     // covers: MB-TCP-READ-COIL, MB-TCP-READ-DI, MB-TCP-READ-HR, MB-TCP-READ-IR
-    // covers: MB-TCP-WRITE, MB-QUIRK-C
+    // covers: MB-TCP-WRITE, MB-QUIRK-C, MB-ADDR-EXTENDED
     #[test]
-    fn function_codes_round_trip_and_name_only_the_four_reads_and_three_writes() {
+    fn function_codes_round_trip_and_name_only_the_reads_writes_and_file_records() {
         for value in 0..=u8::MAX {
             let code = FunctionCode::from_u8(value);
             assert_eq!(code.as_u8(), value, "function {value:#04x} round trip");
@@ -88,7 +91,7 @@ mod tests {
                 value | 0x80,
                 "exception byte of {value:#04x}"
             );
-            let named = matches!(value, 1..=4 | 6 | 15 | 16);
+            let named = matches!(value, 1..=4 | 6 | 15 | 16 | 20 | 21);
             assert_eq!(
                 !matches!(code, FunctionCode::Unknown(_)),
                 named,
@@ -102,6 +105,10 @@ mod tests {
         assert_eq!(FunctionCode::from_u8(6), WRITE_ONE, "0x06");
         assert_eq!(FunctionCode::from_u8(15), WRITE_COILS, "0x0F");
         assert_eq!(FunctionCode::from_u8(16), WRITE_REGISTERS, "0x10");
+        assert_eq!(FunctionCode::from_u8(20), READ_FILE, "0x14");
+        assert_eq!(FunctionCode::from_u8(21), WRITE_FILE, "0x15");
+        assert_eq!(READ_FILE.exception_code(), 0x94, "exception byte of FC20");
+        assert_eq!(WRITE_FILE.exception_code(), 0x95, "exception byte of FC21");
         assert_eq!(
             FunctionCode::from_u8(5),
             FunctionCode::Unknown(5),
@@ -306,7 +313,7 @@ mod tests {
     // covers: SPEC mandatory-failure-cases / F1 malformed discriminators, unexpected function codes
     #[test]
     fn request_with_any_other_function_code_is_refused() {
-        for value in (0..=u8::MAX).filter(|value| !matches!(value, 1..=4 | 6 | 15 | 16)) {
+        for value in (0..=u8::MAX).filter(|value| !matches!(value, 1..=4 | 6 | 15 | 16 | 20 | 21)) {
             assert_eq!(
                 request(&[value, 0x00, 0x01, 0x00, 0x01]),
                 Err(invalid("function code", u64::from(value))),
@@ -468,7 +475,9 @@ mod tests {
     // covers: SPEC mandatory-failure-cases / F1 malformed discriminators, unexpected function codes
     #[test]
     fn response_for_an_unsupported_function_is_refused_precisely() {
-        for number in (0..=0x7F_u8).filter(|number| !matches!(number, 1..=4 | 6 | 15 | 16)) {
+        for number in
+            (0..=0x7F_u8).filter(|number| !matches!(number, 1..=4 | 6 | 15 | 16 | 20 | 21))
+        {
             let expected = FunctionCode::from_u8(number);
             for first in [number, number | 0x80] {
                 assert_eq!(
@@ -736,7 +745,7 @@ mod tests {
             "registers under FC01"
         );
         assert_eq!(
-            encoded_response(&registers_response(FunctionCode::Unknown(0x14), &[1])),
+            encoded_response(&registers_response(READ_FILE, &[1])),
             Err(invalid("response function code", 0x14)),
             "registers under FC20"
         );
@@ -760,7 +769,7 @@ mod tests {
             Err(invalid("exception code", 2)),
             "Unknown(2) would decode as IllegalDataAddress"
         );
-        for raw in [0, 5, 0x14, 0x15] {
+        for raw in [0, 5, 0x2B] {
             assert_eq!(
                 encoded_response(&exception(
                     FunctionCode::Unknown(raw),
@@ -1667,6 +1676,865 @@ mod tests {
             let picked = ModbusPdu::write_request(area, start, quantity, &payload).expect("legal");
             let wire = encoded_request(&picked).expect("a selected request encodes");
             assert_eq!(request(&wire), Ok(picked), "{area:?} {start} {quantity}");
+        }
+    }
+
+    // -------------------------------------------------------------- file records (FC20, FC21)
+
+    fn read_item(file: u16, record: u16, length: u16) -> FileRecordRead {
+        FileRecordRead {
+            file,
+            record,
+            length,
+        }
+    }
+
+    fn write_item(file: u16, record: u16, registers: &[u16]) -> FileRecord {
+        FileRecord {
+            file,
+            record,
+            registers: registers.to_vec(),
+        }
+    }
+
+    fn read_file(items: &[FileRecordRead]) -> ModbusPdu {
+        ModbusPdu::ReadFileRecord {
+            records: items.to_vec(),
+        }
+    }
+
+    fn write_file(items: &[FileRecord]) -> ModbusPdu {
+        ModbusPdu::WriteFileRecord {
+            records: items.to_vec(),
+        }
+    }
+
+    fn file_response(records: &[&[u16]]) -> ModbusPdu {
+        ModbusPdu::ReadFileRecordResponse {
+            records: records.iter().map(|run| run.to_vec()).collect(),
+        }
+    }
+
+    /// V1.1b section 6.14, the request example: file 4 records 1 and 2, then file 3
+    /// records 9 and 10.
+    const SPEC_READ_REQUEST: [u8; 16] = [
+        0x14, 0x0E, 0x06, 0x00, 0x04, 0x00, 0x01, 0x00, 0x02, 0x06, 0x00, 0x03, 0x00, 0x09, 0x00,
+        0x02,
+    ];
+
+    /// V1.1b section 6.14, the response example.
+    const SPEC_READ_RESPONSE: [u8; 14] = [
+        0x14, 0x0C, 0x05, 0x06, 0x0D, 0xFE, 0x00, 0x20, 0x05, 0x06, 0x33, 0xCD, 0x00, 0x40,
+    ];
+
+    /// V1.1b section 6.15, the request example (and its response, which repeats it): three
+    /// registers into file 4 from record 7.
+    const SPEC_WRITE_REQUEST: [u8; 15] = [
+        0x15, 0x0D, 0x06, 0x00, 0x04, 0x00, 0x07, 0x00, 0x03, 0x06, 0xAF, 0x04, 0xBE, 0x10, 0x0D,
+    ];
+
+    /// A Write File Record PDU of one sub-request of `registers` registers in file 1.
+    fn one_write_item(count: u8, registers: u16) -> Vec<u8> {
+        let mut bytes = vec![0x15, count, 0x06, 0x00, 0x01, 0x00, 0x00];
+        bytes.extend_from_slice(&registers.to_be_bytes());
+        let end = bytes
+            .len()
+            .saturating_add(usize::from(registers).saturating_mul(2));
+        bytes.resize(end, 0xAB);
+        bytes
+    }
+
+    // covers: MB-ADDR-EXTENDED
+    #[test]
+    fn file_record_examples_of_the_specification_decode_and_encode() {
+        let read = read_file(&[read_item(4, 1, 2), read_item(3, 9, 2)]);
+        assert_eq!(
+            request(&SPEC_READ_REQUEST),
+            Ok(read.clone()),
+            "6.14 request"
+        );
+        assert_eq!(
+            encoded_request(&read),
+            Ok(SPEC_READ_REQUEST.to_vec()),
+            "6.14 request encodes"
+        );
+        let answer = file_response(&[&[0x0DFE, 0x0020], &[0x33CD, 0x0040]]);
+        assert_eq!(
+            response(&SPEC_READ_RESPONSE, READ_FILE),
+            Ok(answer.clone()),
+            "6.14 response"
+        );
+        assert_eq!(
+            encoded_response(&answer),
+            Ok(SPEC_READ_RESPONSE.to_vec()),
+            "6.14 response encodes"
+        );
+        assert_eq!(answer.check_reply_to(&read), Ok(()), "6.14 answers 6.14");
+
+        let write = write_file(&[write_item(4, 7, &[0x06AF, 0x04BE, 0x100D])]);
+        assert_eq!(
+            request(&SPEC_WRITE_REQUEST),
+            Ok(write.clone()),
+            "6.15 request"
+        );
+        assert_eq!(
+            encoded_request(&write),
+            Ok(SPEC_WRITE_REQUEST.to_vec()),
+            "6.15 request encodes"
+        );
+        let echo = ModbusPdu::WriteFileRecordResponse {
+            records: vec![write_item(4, 7, &[0x06AF, 0x04BE, 0x100D])],
+        };
+        assert_eq!(
+            response(&SPEC_WRITE_REQUEST, WRITE_FILE),
+            Ok(echo.clone()),
+            "6.15 response is the request"
+        );
+        assert_eq!(
+            encoded_response(&echo),
+            Ok(SPEC_WRITE_REQUEST.to_vec()),
+            "6.15 response encodes"
+        );
+        assert_eq!(echo.check_reply_to(&write), Ok(()), "6.15 echoes 6.15");
+        assert_eq!(read.function(), READ_FILE, "function of a read request");
+        assert_eq!(answer.function(), READ_FILE, "function of a read response");
+        assert_eq!(write.function(), WRITE_FILE, "function of a write request");
+        assert_eq!(echo.function(), WRITE_FILE, "function of a write response");
+    }
+
+    // covers: MB-ADDR-EXTENDED
+    // covers: SPEC mandatory-failure-cases / F1 malformed discriminators, truncated payloads
+    #[test]
+    fn read_file_record_byte_count_is_whole_sub_requests_of_7_to_245() {
+        assert_eq!(
+            request(&[0x14]),
+            Err(ParseError::Truncated {
+                needed: 1,
+                available: 0
+            })
+        );
+        assert_eq!(request(&[0x14, 0x00]), Err(invalid("byte count", 0)), "0");
+        for count in [1_u8, 6, 8, 13, 15, 244] {
+            let mut bytes = vec![0x14, count];
+            bytes.resize(2 + usize::from(count), 0);
+            assert_eq!(
+                request(&bytes),
+                Err(invalid("byte count", u64::from(count))),
+                "{count} is not a multiple of 7"
+            );
+        }
+        for count in [246_u8, 252, 255] {
+            assert_eq!(
+                request(&[0x14, count]),
+                Err(oversized(usize::from(count), 245)),
+                "{count} is over 0xF5"
+            );
+        }
+        // The byte count is proved before the data is read.
+        assert_eq!(
+            request(&[0x14, 0x07, 0x06, 0x00, 0x01, 0x00, 0x00, 0x00]),
+            Err(ParseError::Truncated {
+                needed: 7,
+                available: 6
+            }),
+            "one byte short of one sub-request"
+        );
+        let mut long = SPEC_READ_REQUEST.to_vec();
+        long.push(0);
+        assert_eq!(
+            request(&long),
+            Err(ParseError::TrailingBytes { remaining: 1 }),
+            "a byte after the sub-requests"
+        );
+        // 35 sub-requests of one register each are the most a request holds.
+        let mut full = vec![0x14, 0xF5];
+        for _ in 0..35 {
+            full.extend_from_slice(&[0x06, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01]);
+        }
+        assert_eq!(
+            request(&full),
+            Ok(read_file(&[read_item(1, 0, 1); 35])),
+            "245 bytes"
+        );
+        assert_eq!(
+            encoded_request(&read_file(&[read_item(1, 0, 1); 35])),
+            Ok(full)
+        );
+        assert_eq!(
+            encoded_request(&read_file(&[read_item(1, 0, 1); 36])),
+            Err(oversized(252, 245)),
+            "36 sub-requests"
+        );
+    }
+
+    // covers: MB-ADDR-EXTENDED
+    // covers: SPEC mandatory-failure-cases / F1 malformed discriminators, oversized lengths
+    #[test]
+    fn read_file_record_sub_requests_are_checked_one_by_one() {
+        let item = |kind: u8, file: u16, record: u16, length: u16| {
+            let mut bytes = vec![0x14, 0x07, kind];
+            for word in [file, record, length] {
+                bytes.extend_from_slice(&word.to_be_bytes());
+            }
+            bytes
+        };
+        assert_eq!(
+            request(&item(5, 1, 0, 1)),
+            Err(invalid("reference type", 5)),
+            "reference type 5"
+        );
+        assert_eq!(
+            request(&item(0, 1, 0, 1)),
+            Err(invalid("reference type", 0)),
+            "reference type 0"
+        );
+        assert_eq!(
+            request(&item(6, 1, 0, 0)),
+            Err(invalid("record length", 0)),
+            "length 0"
+        );
+        assert_eq!(
+            request(&item(6, 1, 10_000, 1)),
+            Err(oversized(10_000, 9_999)),
+            "record 10000"
+        );
+        assert_eq!(
+            request(&item(6, 1, 0x270F, 1)),
+            Ok(read_file(&[read_item(1, 9_999, 1)])),
+            "record 0x270F is the last"
+        );
+        assert_eq!(
+            request(&item(6, 1, 9_999, 2)),
+            Err(oversized(10_001, 10_000)),
+            "a run past the last record of its file"
+        );
+        assert_eq!(
+            request(&item(6, 1, 9_880, 120)),
+            Ok(read_file(&[read_item(1, 9_880, 120)])),
+            "a run to the last record fits the file"
+        );
+        // File numbers are 0 to 0xFFFF on the wire (V1.1b section 6.14).
+        assert_eq!(
+            request(&item(6, 0, 0, 1)),
+            Ok(read_file(&[read_item(0, 0, 1)])),
+            "file 0"
+        );
+        assert_eq!(
+            request(&item(6, 0xFFFF, 0, 1)),
+            Ok(read_file(&[read_item(0xFFFF, 0, 1)])),
+            "file 65535"
+        );
+    }
+
+    // covers: MB-ADDR-EXTENDED, MB-LIMIT-PDU
+    #[test]
+    fn read_file_record_asks_for_no_more_than_a_response_can_hold() {
+        // One sub-response costs 2 bytes beside its registers, 245 bytes at most in all.
+        assert_eq!(
+            request(&one_read(121)),
+            Ok(read_file(&[read_item(1, 0, 121)])),
+            "121 registers answer in 244 bytes"
+        );
+        assert_eq!(
+            request(&one_read(122)),
+            Err(oversized(246, 245)),
+            "122 registers answer in 246 bytes"
+        );
+        let four = |length: u16| {
+            let mut bytes = vec![0x14, 28];
+            for _ in 0..4 {
+                bytes.extend_from_slice(&[0x06, 0x00, 0x01, 0x00, 0x00]);
+                bytes.extend_from_slice(&length.to_be_bytes());
+            }
+            bytes
+        };
+        assert_eq!(request(&four(30)), Err(oversized(248, 245)), "four of 30");
+        assert!(request(&four(29)).is_ok(), "four of 29 answer in 240 bytes");
+        assert_eq!(
+            encoded_request(&read_file(&[read_item(1, 0, 122)])),
+            Err(oversized(246, 245)),
+            "the encoder refuses the same"
+        );
+        assert_eq!(
+            encoded_request(&read_file(&[])),
+            Err(invalid("byte count", 0)),
+            "no sub-request"
+        );
+        assert_eq!(
+            encoded_request(&read_file(&[read_item(1, 9_999, 2)])),
+            Err(oversized(10_001, 10_000)),
+            "a run past its file"
+        );
+    }
+
+    /// A Read File Record request for `length` registers from file 1 record 0.
+    fn one_read(length: u16) -> Vec<u8> {
+        let mut bytes = vec![0x14, 0x07, 0x06, 0x00, 0x01, 0x00, 0x00];
+        bytes.extend_from_slice(&length.to_be_bytes());
+        bytes
+    }
+
+    // covers: MB-ADDR-EXTENDED
+    // covers: SPEC mandatory-failure-cases / F1 malformed discriminators, truncated payloads
+    #[test]
+    fn read_file_record_response_lengths_are_proved_before_they_are_trusted() {
+        assert_eq!(
+            response(&[0x14], READ_FILE),
+            Err(ParseError::Truncated {
+                needed: 1,
+                available: 0
+            })
+        );
+        assert_eq!(
+            response(&[0x14, 0x00], READ_FILE),
+            Err(invalid("byte count", 0)),
+            "0"
+        );
+        assert_eq!(
+            response(&[0x14, 0xF6], READ_FILE),
+            Err(oversized(246, 245)),
+            "246"
+        );
+        assert_eq!(
+            response(&[0x14, 0x04, 0x03, 0x06, 0x00], READ_FILE),
+            Err(ParseError::Truncated {
+                needed: 4,
+                available: 3
+            }),
+            "a byte count the data does not reach"
+        );
+        assert_eq!(
+            response(&[0x14, 0x04, 0x03, 0x06, 0x00, 0x01, 0x09], READ_FILE),
+            Err(ParseError::TrailingBytes { remaining: 1 }),
+            "a byte after the data"
+        );
+        for length in [0_u8, 1, 2, 4, 6] {
+            assert_eq!(
+                response(&[0x14, 0x07, length, 0x06, 0, 0, 0, 0, 0], READ_FILE),
+                Err(invalid("file response length", u64::from(length))),
+                "sub-response length {length}"
+            );
+        }
+        assert_eq!(
+            response(&[0x14, 0x04, 0x03, 0x05, 0x00, 0x01], READ_FILE),
+            Err(invalid("reference type", 5)),
+            "reference type 5"
+        );
+        assert_eq!(
+            response(&[0x14, 0x04, 0x05, 0x06, 0x00, 0x01], READ_FILE),
+            Err(ParseError::Truncated {
+                needed: 4,
+                available: 2
+            }),
+            "a sub-response that runs past the byte count"
+        );
+        assert_eq!(
+            response(&[0x14, 0x05, 0x03, 0x06, 0x00, 0x01, 0x03], READ_FILE),
+            Err(ParseError::Truncated {
+                needed: 1,
+                available: 0
+            }),
+            "half a sub-response after a whole one"
+        );
+        // 121 registers fill 244 bytes, the most one sub-response can have.
+        let mut full = vec![0x14, 244, 243, 0x06];
+        full.resize(full.len() + 242, 0x11);
+        assert_eq!(
+            response(&full, READ_FILE),
+            Ok(file_response(&[&[0x1111; 121]])),
+            "121 registers"
+        );
+        assert_eq!(
+            encoded_response(&file_response(&[&[0x1111; 121]])),
+            Ok(full),
+            "121 registers encode"
+        );
+        assert_eq!(
+            encoded_response(&file_response(&[&[0; 122]])),
+            Err(oversized(246, 245)),
+            "122 registers"
+        );
+        assert_eq!(
+            encoded_response(&file_response(&[])),
+            Err(invalid("byte count", 0)),
+            "no sub-response"
+        );
+        assert_eq!(
+            encoded_response(&file_response(&[&[1], &[]])),
+            Err(invalid("record length", 0)),
+            "an empty sub-response"
+        );
+    }
+
+    // covers: MB-ADDR-EXTENDED
+    // covers: SPEC mandatory-failure-cases / F1 malformed discriminators, truncated payloads
+    #[test]
+    fn write_file_record_data_length_is_9_to_251_and_fills_the_sub_requests() {
+        assert_eq!(
+            request(&[0x15]),
+            Err(ParseError::Truncated {
+                needed: 1,
+                available: 0
+            })
+        );
+        for count in [0_u8, 1, 8] {
+            let mut bytes = vec![0x15, count];
+            bytes.resize(2 + usize::from(count), 0);
+            assert_eq!(
+                request(&bytes),
+                Err(invalid("byte count", u64::from(count))),
+                "{count} is below 9"
+            );
+        }
+        assert_eq!(request(&[0x15, 0xFC]), Err(oversized(252, 251)), "252");
+        let mut short = one_write_item(122, 0);
+        short.truncate(8);
+        assert_eq!(
+            request(&short),
+            Err(ParseError::Truncated {
+                needed: 122,
+                available: 6
+            }),
+            "data the byte count does not reach"
+        );
+        let largest = one_write_item(251, 122);
+        assert_eq!(largest.len(), MAX_PDU_BYTES, "a full PDU");
+        assert_eq!(
+            request(&largest),
+            Ok(write_file(&[write_item(1, 0, &[0xABAB; 122])])),
+            "251 bytes of data"
+        );
+        assert_eq!(
+            encoded_request(&write_file(&[write_item(1, 0, &[0xABAB; 122])])),
+            Ok(largest),
+            "251 bytes encode"
+        );
+        assert_eq!(
+            encoded_request(&write_file(&[write_item(1, 0, &[0; 123])])),
+            Err(oversized(253, 251)),
+            "123 registers"
+        );
+        assert_eq!(
+            encoded_request(&write_file(&[write_item(1, 0, &vec![0; 65_536])])),
+            Err(oversized(65_536, 65_535)),
+            "a record of more registers than its 16-bit length counts"
+        );
+        let mut trailing = SPEC_WRITE_REQUEST.to_vec();
+        trailing.push(0);
+        assert_eq!(
+            request(&trailing),
+            Err(ParseError::TrailingBytes { remaining: 1 }),
+            "a byte after the data"
+        );
+        // The sub-requests fill the byte count exactly: a declared length that the data
+        // does not hold, and a stray half sub-request, are refused.
+        assert_eq!(
+            request(&[
+                0x15, 0x0B, 0x06, 0x00, 0x01, 0x00, 0x00, 0x00, 0x03, 1, 2, 3, 4
+            ]),
+            Err(ParseError::Truncated {
+                needed: 6,
+                available: 4
+            }),
+            "three registers declared, two present"
+        );
+        assert_eq!(
+            request(&[
+                0x15, 0x0A, 0x06, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 1, 2, 0x06
+            ]),
+            Err(ParseError::Truncated {
+                needed: 2,
+                available: 0
+            }),
+            "a sub-request that ends after its reference type"
+        );
+    }
+
+    // covers: MB-ADDR-EXTENDED
+    // covers: SPEC mandatory-failure-cases / F1 malformed discriminators, oversized lengths
+    #[test]
+    fn write_file_record_sub_requests_are_checked_one_by_one() {
+        let item = |kind: u8, record: u16, length: u16, data: usize| {
+            let mut bytes = vec![
+                0x15,
+                u8::try_from(7 + data).expect("short"),
+                kind,
+                0x00,
+                0x01,
+            ];
+            for word in [record, length] {
+                bytes.extend_from_slice(&word.to_be_bytes());
+            }
+            bytes.resize(bytes.len() + data, 0);
+            bytes
+        };
+        assert_eq!(
+            request(&item(5, 0, 1, 2)),
+            Err(invalid("reference type", 5)),
+            "reference type 5"
+        );
+        assert_eq!(
+            request(&item(6, 0, 0, 2)),
+            Err(invalid("record length", 0)),
+            "length 0"
+        );
+        assert_eq!(
+            request(&item(6, 10_000, 1, 2)),
+            Err(oversized(10_000, 9_999)),
+            "record 10000"
+        );
+        assert_eq!(
+            request(&item(6, 9_999, 2, 4)),
+            Err(oversized(10_001, 10_000)),
+            "a run past its file"
+        );
+        assert_eq!(
+            request(&item(6, 9_999, 1, 2)),
+            Ok(write_file(&[write_item(1, 9_999, &[0])])),
+            "the last record"
+        );
+        assert_eq!(
+            encoded_request(&write_file(&[])),
+            Err(invalid("byte count", 0)),
+            "no sub-request"
+        );
+        assert_eq!(
+            encoded_request(&write_file(&[write_item(1, 0, &[])])),
+            Err(invalid("record length", 0)),
+            "a sub-request of no register"
+        );
+        assert_eq!(
+            encoded_request(&write_file(&[write_item(1, 9_999, &[1, 2])])),
+            Err(oversized(10_001, 10_000)),
+            "a run past its file"
+        );
+        let mut two = vec![0x15, 22];
+        two.extend(SPEC_WRITE_REQUEST.iter().skip(2));
+        two.extend_from_slice(&[0x06, 0x00, 0x05, 0x00, 0x00, 0x00, 0x01, 0x12, 0x34]);
+        assert_eq!(
+            request(&two),
+            Ok(write_file(&[
+                write_item(4, 7, &[0x06AF, 0x04BE, 0x100D]),
+                write_item(5, 0, &[0x1234])
+            ])),
+            "two sub-requests"
+        );
+    }
+
+    // covers: MB-ADDR-EXTENDED
+    #[test]
+    fn exception_responses_name_the_file_record_functions() {
+        for function in [READ_FILE, WRITE_FILE] {
+            for code in DEFINED {
+                let bytes = [function.exception_code(), code];
+                assert_eq!(
+                    response(&bytes, function),
+                    Ok(ModbusPdu::Exception {
+                        function,
+                        code: ExceptionCode::from_u8(code),
+                    }),
+                    "{function:?} code {code}"
+                );
+            }
+            assert_eq!(
+                response(&[function.exception_code(), 9], function),
+                Err(invalid("exception code", 9)),
+                "{function:?} code 9"
+            );
+            assert_eq!(
+                encoded_response(&ModbusPdu::Exception {
+                    function,
+                    code: ExceptionCode::IllegalDataAddress
+                }),
+                Ok(vec![function.exception_code(), 2]),
+                "{function:?} encodes"
+            );
+        }
+        assert_eq!(
+            response(&[0x15, 0x09], READ_FILE),
+            Err(invalid("function code", 0x15)),
+            "the other function"
+        );
+    }
+
+    // covers: MB-ADDR-EXTENDED
+    #[test]
+    fn file_record_pdus_are_refused_in_the_wrong_direction() {
+        let read = read_file(&[read_item(1, 0, 1)]);
+        let answer = file_response(&[&[1]]);
+        let write = write_file(&[write_item(1, 0, &[1])]);
+        let echo = ModbusPdu::WriteFileRecordResponse {
+            records: vec![write_item(1, 0, &[1])],
+        };
+        for pdu in [&answer, &echo] {
+            assert_eq!(
+                encoded_request(pdu),
+                Err(invalid(
+                    "request function code",
+                    u64::from(pdu.function().as_u8())
+                )),
+                "a response is not a request"
+            );
+        }
+        for pdu in [&read, &write] {
+            assert_eq!(
+                encoded_response(pdu),
+                Err(invalid(
+                    "response function code",
+                    u64::from(pdu.function().as_u8())
+                )),
+                "a request is not a response"
+            );
+        }
+        assert_eq!(
+            encoded_response(&ModbusPdu::WriteMultipleResponse {
+                function: READ_FILE,
+                start: 0,
+                quantity: 1
+            }),
+            Err(invalid("response function code", 0x14)),
+            "a write echo under FC20"
+        );
+    }
+
+    // covers: MB-ADDR-EXTENDED
+    #[test]
+    fn a_file_record_span_is_cut_at_the_end_of_each_file() {
+        let plan =
+            |file, record, quantity| ModbusPdu::read_file_record_request(file, record, quantity);
+        assert_eq!(
+            plan(1, 0, 1),
+            Ok(read_file(&[read_item(1, 0, 1)])),
+            "the first register"
+        );
+        assert_eq!(
+            plan(1, 9_998, 2),
+            Ok(read_file(&[read_item(1, 9_998, 2)])),
+            "a span that ends exactly at the end of the file"
+        );
+        assert_eq!(
+            plan(1, 9_999, 1),
+            Ok(read_file(&[read_item(1, 9_999, 1)])),
+            "the last register of the file"
+        );
+        assert_eq!(
+            plan(3, 9_998, 10),
+            Ok(read_file(&[read_item(3, 9_998, 2), read_item(4, 0, 8)])),
+            "the split of the upstream test case (file 3 record 9998, then file 4)"
+        );
+        assert_eq!(
+            plan(65_535, 9_999, 1),
+            Ok(read_file(&[read_item(65_535, 9_999, 1)])),
+            "the last register of the last file"
+        );
+        assert_eq!(
+            plan(65_535, 9_999, 2),
+            Err(oversized(65_536, 65_535)),
+            "a span past the last file"
+        );
+        assert_eq!(plan(1, 0, 0), Err(invalid("quantity", 0)), "quantity 0");
+        assert_eq!(
+            plan(1, 10_000, 1),
+            Err(oversized(10_000, 9_999)),
+            "record 10000"
+        );
+        assert_eq!(
+            plan(1, 0, MAX_READ_EXTENDED_REGISTERS),
+            Ok(read_file(&[read_item(1, 0, 120)])),
+            "120 registers"
+        );
+        assert_eq!(
+            plan(1, 9_950, MAX_READ_EXTENDED_REGISTERS),
+            Ok(read_file(&[read_item(1, 9_950, 50), read_item(2, 0, 70)])),
+            "120 registers across a file end still answer in 244 bytes"
+        );
+        assert_eq!(
+            plan(1, 0, MAX_READ_EXTENDED_REGISTERS + 1),
+            Err(oversized(121, 120)),
+            "121 registers"
+        );
+        assert_eq!(MAX_READ_EXTENDED_REGISTERS, 120, "the constant");
+
+        let write = |file, record, registers: &[u16]| {
+            ModbusPdu::write_file_record_request(file, record, registers)
+        };
+        assert_eq!(
+            write(2, 5, &[1, 2]),
+            Ok(write_file(&[write_item(2, 5, &[1, 2])])),
+            "inside a file"
+        );
+        assert_eq!(
+            write(2, 9_998, &[1, 2]),
+            Ok(write_file(&[write_item(2, 9_998, &[1, 2])])),
+            "to the last record"
+        );
+        assert_eq!(
+            write(1, 9_999, &[1, 2, 3, 4]),
+            Ok(write_file(&[
+                write_item(1, 9_999, &[1]),
+                write_item(2, 0, &[2, 3, 4])
+            ])),
+            "a value across the end of a file is one request of two sub-requests"
+        );
+        assert_eq!(
+            write(1, 0, &[]),
+            Err(invalid("quantity", 0)),
+            "no registers"
+        );
+        assert_eq!(
+            write(1, 10_000, &[1]),
+            Err(oversized(10_000, 9_999)),
+            "record 10000"
+        );
+        assert_eq!(
+            write(65_535, 9_999, &[1, 2]),
+            Err(oversized(65_536, 65_535)),
+            "past the last file"
+        );
+        assert_eq!(
+            write(1, 0, &[0; 123]),
+            Err(oversized(253, 251)),
+            "123 registers do not fit 251 bytes"
+        );
+        assert!(
+            write(1, 0, &[0; 122]).is_ok(),
+            "122 registers fill 251 bytes"
+        );
+        assert_eq!(
+            write(1, 0, &vec![0; 65_536]),
+            Err(oversized(131_079, 251)),
+            "more registers than a u16 counts are refused before they are copied"
+        );
+        assert_eq!(
+            write(1, 9_999, &[0; 121]),
+            Err(oversized(256, 251)),
+            "two sub-requests cost 7 more bytes"
+        );
+        assert_eq!(
+            ModbusPdu::write_request(ModbusArea::ExtendedRegister, 0, 1, &[0, 1]),
+            Err(invalid("write area", 6)),
+            "an extended register has its own request"
+        );
+    }
+
+    // covers: MB-ADDR-EXTENDED, MB-TCP-WRITE
+    #[test]
+    fn check_reply_to_proves_file_record_answers_and_echoes() {
+        let read = read_file(&[read_item(3, 9_998, 2), read_item(4, 0, 3)]);
+        assert_eq!(
+            file_response(&[&[1, 2], &[3, 4, 5]]).check_reply_to(&read),
+            Ok(()),
+            "every sub-request answered, in order"
+        );
+        assert_eq!(
+            file_response(&[&[1, 2]]).check_reply_to(&read),
+            Err(invalid("record count", 1)),
+            "a sub-response missing"
+        );
+        assert_eq!(
+            file_response(&[&[1, 2], &[3, 4, 5], &[6]]).check_reply_to(&read),
+            Err(invalid("record count", 3)),
+            "a sub-response too many"
+        );
+        assert_eq!(
+            file_response(&[&[1, 2], &[3, 4]]).check_reply_to(&read),
+            Err(ParseError::Truncated {
+                needed: 6,
+                available: 4
+            }),
+            "a sub-response one register short"
+        );
+        assert_eq!(
+            file_response(&[&[1, 2, 9], &[3, 4, 5]]).check_reply_to(&read),
+            Err(ParseError::TrailingBytes { remaining: 2 }),
+            "a sub-response one register long"
+        );
+        assert_eq!(
+            ModbusPdu::Exception {
+                function: READ_FILE,
+                code: ExceptionCode::IllegalDataAddress
+            }
+            .check_reply_to(&read),
+            Ok(()),
+            "an exception of the function"
+        );
+        assert_eq!(
+            bits_response(COILS, &[1]).check_reply_to(&read),
+            Err(invalid("function code", 1)),
+            "another function"
+        );
+
+        let write = write_file(&[write_item(1, 9_999, &[1]), write_item(2, 0, &[2, 3])]);
+        let echo = |records: &[FileRecord]| ModbusPdu::WriteFileRecordResponse {
+            records: records.to_vec(),
+        };
+        assert_eq!(
+            echo(&[write_item(1, 9_999, &[1]), write_item(2, 0, &[2, 3])]).check_reply_to(&write),
+            Ok(()),
+            "the request, repeated"
+        );
+        assert_eq!(
+            echo(&[write_item(1, 9_999, &[1])]).check_reply_to(&write),
+            Err(invalid("echoed record count", 1)),
+            "a sub-request not echoed"
+        );
+        assert_eq!(
+            echo(&[write_item(7, 9_999, &[1]), write_item(2, 0, &[2, 3])]).check_reply_to(&write),
+            Err(invalid("echoed file number", 7)),
+            "another file"
+        );
+        assert_eq!(
+            echo(&[write_item(1, 9_998, &[1]), write_item(2, 0, &[2, 3])]).check_reply_to(&write),
+            Err(invalid("echoed record number", 9_998)),
+            "another record"
+        );
+        assert_eq!(
+            echo(&[write_item(1, 9_999, &[1]), write_item(2, 0, &[2])]).check_reply_to(&write),
+            Err(invalid("echoed record length", 1)),
+            "another length"
+        );
+        assert_eq!(
+            echo(&[write_item(1, 9_999, &[1]), write_item(2, 0, &[2, 9])]).check_reply_to(&write),
+            Err(invalid("echoed record data", 9)),
+            "other data"
+        );
+        assert_eq!(
+            echo(&[write_item(1, 9_999, &[1])]).check_reply_to(&read),
+            Err(invalid("function code", 0x15)),
+            "an echo is no answer to a read"
+        );
+        assert_eq!(
+            ModbusPdu::Exception {
+                function: WRITE_FILE,
+                code: ExceptionCode::ServerDeviceFailure
+            }
+            .check_reply_to(&write),
+            Ok(()),
+            "an exception of the function"
+        );
+    }
+
+    // covers: MB-ADDR-EXTENDED
+    #[test]
+    fn every_planned_file_record_request_encodes_and_decodes_back() {
+        for (file, record, quantity) in [
+            (1, 0, 1),
+            (1, 9_999, 2),
+            (4, 9_990, 120),
+            (65_535, 9_990, 10),
+        ] {
+            let read = ModbusPdu::read_file_record_request(file, record, quantity).expect("legal");
+            let wire = encoded_request(&read).expect("a planned read encodes");
+            assert_eq!(request(&wire), Ok(read), "read {file} {record} {quantity}");
+            let registers = vec![0x5A5A; usize::from(quantity.min(118))];
+            let write =
+                ModbusPdu::write_file_record_request(file, record, &registers).expect("legal");
+            let wire = encoded_request(&write).expect("a planned write encodes");
+            assert_eq!(
+                request(&wire),
+                Ok(write),
+                "write {file} {record} {quantity}"
+            );
         }
     }
 }

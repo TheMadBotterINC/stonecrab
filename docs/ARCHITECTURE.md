@@ -1416,10 +1416,11 @@ never inferred.
 
 - browse and discovery (M3 or the parity backlog); writes shipped in S45 and S46,
   polling subscriptions in S55 and ping in S47;
-- extended registers (FC20 and FC21, S50), `STRING`, `WSTRING`, `CHAR`, `WCHAR` (S49) and
-  the `TIME` and `DATE` family: the parser rejects each with a typed error (calendar values
-  exist since S53, ADR-0021, but upstream has no Modbus encoding for them); array
-  selections shipped in S48 (ADR-0022);
+- `STRING`, `WSTRING`, `CHAR`, `WCHAR` (S49) and the `TIME` and `DATE` family: the parser
+  rejects each with a typed error (calendar values exist since S53, ADR-0021, but upstream
+  has no Modbus encoding for them); array selections shipped in S48 (ADR-0022) and the
+  extended registers (FC20 and FC21) in S50, selections on them included (ADR-0022
+  addendum of 2026-10-29);
 - `ModbusRtuDriver`, `RtuFramer`, `Crc16Modbus` and the `Framing` enum (M2; the serial
   transport shipped in S58); UDP, TLS and TLS-PSK transports (M3 or the parity backlog);
 - the upstream gap-filling read optimizer (the batcher never reads a gap, divergence

@@ -12,8 +12,9 @@
   "pdu": {
     "direction": "response",
     "function": 20,
-    "error": "InvalidDiscriminator",
-    "field": "unsupported function code",
-    "value": 20
+    "records": [
+      [0, 0],
+      [0, 0, 0, 0, 0, 0, 0, 0]
+    ]
   }
 }

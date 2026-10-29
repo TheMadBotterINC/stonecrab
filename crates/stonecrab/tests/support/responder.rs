@@ -1,6 +1,7 @@
 //! A first-party Modbus TCP device for the contract run: it answers function codes 01 to 04,
-//! 06, 15 and 16 from the interop register map, byte for byte over the MBAP layout. A write
-//! changes the block it names, so a later read sees it.
+//! 06, 15 and 16 from the interop register map, and the file record codes 20 and 21 from a
+//! sparse store of extended registers, byte for byte over the MBAP layout. A write changes
+//! the block it names, so a later read sees it.
 //!
 //! This is a test harness, not a double of a Stonecrab trait: it is the peer's side of the
 //! protocol, built from this crate's own codec (`decode_request`, `encode_response`,
@@ -21,15 +22,15 @@
     reason = "plain pub in a privately included module: pub(crate) would trip redundant_pub_crate"
 )]
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use bytes::{Bytes, BytesMut};
 use stonecrab::codec::{BoundedReader, BoundedWriter, pack_bits_lsb_first, unpack_bits_lsb_first};
 use stonecrab::modbus::{
-    ExceptionCode, FunctionCode, MAX_PDU_BYTES, MbapHeader, ModbusAdu, ModbusPdu, decode_request,
-    encode_response,
+    ExceptionCode, FileRecord, FunctionCode, MAX_PDU_BYTES, MbapHeader, ModbusAdu, ModbusPdu,
+    decode_request, encode_response,
 };
 use stonecrab::testkit::{InteropMap, Reaction, Reactor, RegisterEntry};
 
@@ -56,6 +57,23 @@ struct Blocks {
     input: Vec<u16>,
     coils: Vec<bool>,
     discrete: Vec<bool>,
+    /// The extended registers by register address, `(file - 1) * 10000 + record`; one that
+    /// nothing was written to holds zero, in any file up to `files`.
+    extended: BTreeMap<u32, u16>,
+    /// The number of files the device has: a sub-request of a file above it is ILLEGAL
+    /// DATA ADDRESS.
+    files: u16,
+}
+
+/// Registers in one file, record numbers 0 to 9999.
+const FILE_REGISTERS: u32 = 10_000;
+
+/// The register address of `record` in `file` (files count from 1), `None` for file 0.
+fn extended_address(file: u16, record: u16) -> Option<u32> {
+    let before = u32::from(file.checked_sub(1)?);
+    before
+        .checked_mul(FILE_REGISTERS)?
+        .checked_add(u32::from(record))
 }
 
 /// State shared by every responder of one device and by the fixture hooks.
@@ -129,6 +147,8 @@ impl Device {
                 input,
                 coils,
                 discrete,
+                extended: BTreeMap::new(),
+                files: u16::MAX,
             })),
             shared: Arc::new(Shared::default()),
         }
@@ -153,6 +173,29 @@ impl Device {
     /// The coil at a logical address (wire address plus one).
     pub fn coil(&self, logical: usize) -> Option<bool> {
         self.with_blocks(|blocks| blocks.coils.get(logical).copied())
+    }
+
+    /// The extended register at `address` (the register address counted through all the
+    /// files, 10000 to a file; address 0 is record 0 of file 1). A register nothing was
+    /// written to is zero.
+    pub fn extended(&self, address: u32) -> u16 {
+        self.with_blocks(|blocks| blocks.extended.get(&address).copied().unwrap_or(0))
+    }
+
+    /// Put `values` into the extended registers from `address`, as a device's own program
+    /// would.
+    pub fn put_extended(&self, address: u32, values: &[u16]) {
+        self.with_blocks(|blocks| {
+            for (register, value) in (address..).zip(values) {
+                blocks.extended.insert(register, *value);
+            }
+        });
+    }
+
+    /// Limit the device to `files` files: a sub-request of a higher file is ILLEGAL DATA
+    /// ADDRESS. A device has all 65535 files until this is called.
+    pub fn limit_extended_files(&self, files: u16) {
+        self.with_blocks(|blocks| blocks.files = files);
     }
 
     fn with_blocks<R>(&self, f: impl FnOnce(&mut Blocks) -> R) -> R {
@@ -249,7 +292,7 @@ impl Device {
         let Ok(request) = decode_request(&mut BoundedReader::new(pdu)) else {
             // A function this device does not serve is ILLEGAL FUNCTION; a known function
             // with a quantity outside its bounds is ILLEGAL DATA VALUE.
-            let known = matches!(first, 1..=4 | 6 | 15 | 16);
+            let known = matches!(first, 1..=4 | 6 | 15 | 16 | 20 | 21);
             let code = if known {
                 ExceptionCode::IllegalDataValue
             } else {
@@ -309,6 +352,37 @@ impl Device {
                 }
                 _ => unaddressable(function),
             },
+            ModbusPdu::ReadFileRecord { records } => {
+                let runs: Option<Vec<Vec<u16>>> = records
+                    .iter()
+                    .map(|item| {
+                        let first = extended_address(item.file, item.record)?;
+                        (item.file <= blocks.files).then_some(())?;
+                        Some(
+                            (first..)
+                                .take(usize::from(item.length))
+                                .map(|register| {
+                                    blocks.extended.get(&register).copied().unwrap_or(0)
+                                })
+                                .collect(),
+                        )
+                    })
+                    .collect();
+                runs.map_or_else(
+                    || unaddressable(function),
+                    |records| ModbusPdu::ReadFileRecordResponse { records },
+                )
+            }
+            ModbusPdu::WriteFileRecord { records } => {
+                if stores(blocks, records) {
+                    self.shared.applied.fetch_add(1, Ordering::Relaxed);
+                    ModbusPdu::WriteFileRecordResponse {
+                        records: records.clone(),
+                    }
+                } else {
+                    unaddressable(function)
+                }
+            }
             // A response or an exception is not a request (and the enum is non-exhaustive).
             _ => refused(function, ExceptionCode::IllegalFunction),
         });
@@ -316,6 +390,30 @@ impl Device {
         encode_response(&response, &mut writer).ok()?;
         Some(writer.into_bytes())
     }
+}
+
+/// Put the sub-requests of a Write File Record into the extended registers; false, with
+/// nothing changed, if one names a file the device does not have.
+fn stores(blocks: &mut Blocks, records: &[FileRecord]) -> bool {
+    let placed: Option<Vec<(u32, &[u16])>> = records
+        .iter()
+        .map(|item| {
+            (item.file <= blocks.files).then_some(())?;
+            Some((
+                extended_address(item.file, item.record)?,
+                item.registers.as_slice(),
+            ))
+        })
+        .collect();
+    let Some(placed) = placed else {
+        return false;
+    };
+    for (first, registers) in placed {
+        for (register, value) in (first..).zip(registers) {
+            blocks.extended.insert(register, *value);
+        }
+    }
+    true
 }
 
 /// The reply to a register read: the registers, or ILLEGAL DATA ADDRESS.

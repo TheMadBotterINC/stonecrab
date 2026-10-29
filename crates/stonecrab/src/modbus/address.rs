@@ -12,7 +12,7 @@
 use std::fmt;
 use std::num::NonZeroU16;
 
-use crate::modbus::{MAX_READ_BITS, MAX_READ_REGISTERS};
+use crate::modbus::{MAX_READ_BITS, MAX_READ_EXTENDED_REGISTERS, MAX_READ_REGISTERS};
 use crate::{
     AddressOptions, ByteOrder, ErrorKind, PlcError, PlcValueType, ProtocolAddress, Result,
     WordOrder,
@@ -20,6 +20,14 @@ use crate::{
 
 /// Number of addresses in one Modbus data area: wire offsets run from 0 to 65535.
 const ADDRESS_SPACE: u32 = 65_536;
+
+/// Registers in one file of the extended-register area (V1.1b section 6.14): an extended
+/// address counts registers through all the files, 10000 to a file.
+const FILE_REGISTERS: u32 = 10_000;
+
+/// The last extended-register address a request can name: record 9999 of file 65535, the
+/// last file number of the wire.
+const LAST_EXTENDED: u32 = 655_349_999;
 
 /// Longest unrecognised data type name echoed back in an error message.
 const NAME_ECHO_LIMIT: usize = 32;
@@ -107,13 +115,15 @@ impl fmt::Display for UnitId {
     }
 }
 
-/// One of the four Modbus data areas the alpha reads.
+/// One of the five Modbus data areas the driver reads.
 ///
-/// Coils and discrete inputs are bit areas (one bit per address); holding registers and
-/// input registers are register areas (one 16-bit register per address). Coils and
-/// holding registers are writable on the wire and the two input areas are read-only; the
-/// alpha reads all four and writes none. The enum is `#[non_exhaustive]` because the
-/// deferred `extended-register` area (`6x`) joins it in a later milestone.
+/// Coils and discrete inputs are bit areas (one bit per address); holding registers, input
+/// registers and extended registers are register areas (one 16-bit register per address).
+/// Coils, holding registers and extended registers are writable on the wire and the two
+/// input areas are read-only. Extended registers are the records of the files of the file
+/// record function codes 20 and 21: an address counts registers through all the files,
+/// 10000 to a file, and the file number on the wire is 1-based (see
+/// [`ModbusAddress::file_number`]). The enum is `#[non_exhaustive]`.
 ///
 /// # Examples
 /// ```
@@ -128,8 +138,10 @@ impl fmt::Display for UnitId {
 ///
 /// # Compatibility: docs/parity/modbus.md#MB-ADDR-LONG
 /// The long names are the upstream area keywords (`MB-ADDR-LONG`) and the prefix digits
-/// are the `0x`, `1x`, `3x` and `4x` forms (docs/parity/modbus.md#MB-ADDR-SHORT-4X).
-/// There is no `2x` area upstream.
+/// are the `0x`, `1x`, `3x`, `4x` and `6x` forms (docs/parity/modbus.md#MB-ADDR-SHORT-4X).
+/// There is no `2x` area upstream. The extended-register area is
+/// docs/parity/modbus.md#MB-ADDR-EXTENDED; it comes last because a new variant of a
+/// published enum goes after the existing ones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum ModbusArea {
@@ -141,6 +153,9 @@ pub enum ModbusArea {
     HoldingRegister,
     /// Read-only 16-bit registers, function code 04; upstream prefix `3x`.
     InputRegister,
+    /// Read/write 16-bit registers of the files of function codes 20 (read) and 21
+    /// (write); upstream prefix `6x`.
+    ExtendedRegister,
 }
 
 impl ModbusArea {
@@ -156,11 +171,12 @@ impl ModbusArea {
     pub const fn is_bit_area(self) -> bool {
         match self {
             Self::Coil | Self::DiscreteInput => true,
-            Self::HoldingRegister | Self::InputRegister => false,
+            Self::HoldingRegister | Self::InputRegister | Self::ExtendedRegister => false,
         }
     }
 
-    /// Whether the protocol allows writing the area (coils and holding registers).
+    /// Whether the protocol allows writing the area (coils, holding registers and extended
+    /// registers).
     ///
     /// # Examples
     /// ```
@@ -171,12 +187,12 @@ impl ModbusArea {
     #[must_use]
     pub const fn is_writable(self) -> bool {
         match self {
-            Self::Coil | Self::HoldingRegister => true,
+            Self::Coil | Self::HoldingRegister | Self::ExtendedRegister => true,
             Self::DiscreteInput | Self::InputRegister => false,
         }
     }
 
-    /// The digit that starts the upstream short forms: 0, 1, 3 or 4.
+    /// The digit that starts the upstream short forms: 0, 1, 3, 4 or 6.
     ///
     /// # Examples
     /// ```
@@ -185,6 +201,7 @@ impl ModbusArea {
     /// assert_eq!(ModbusArea::DiscreteInput.prefix_digit(), 1);
     /// assert_eq!(ModbusArea::InputRegister.prefix_digit(), 3);
     /// assert_eq!(ModbusArea::HoldingRegister.prefix_digit(), 4);
+    /// assert_eq!(ModbusArea::ExtendedRegister.prefix_digit(), 6);
     /// ```
     #[must_use]
     pub const fn prefix_digit(self) -> u8 {
@@ -193,11 +210,12 @@ impl ModbusArea {
             Self::DiscreteInput => 1,
             Self::InputRegister => 3,
             Self::HoldingRegister => 4,
+            Self::ExtendedRegister => 6,
         }
     }
 
-    /// The long-form area keyword: `coil`, `discrete-input`, `holding-register` or
-    /// `input-register`.
+    /// The long-form area keyword: `coil`, `discrete-input`, `holding-register`,
+    /// `input-register` or `extended-register`.
     ///
     /// # Examples
     /// ```
@@ -211,6 +229,7 @@ impl ModbusArea {
             Self::DiscreteInput => "discrete-input",
             Self::HoldingRegister => "holding-register",
             Self::InputRegister => "input-register",
+            Self::ExtendedRegister => "extended-register",
         }
     }
 
@@ -578,7 +597,8 @@ impl AddressConvention {
 /// [`PlcValue::List`](crate::PlcValue::List): what the range selection `[lo..hi]` of the
 /// text grammar produces. A list takes `elements` times the element's width, one bit on a
 /// coil or discrete input and [`ModbusDataType::register_size`] registers on a register
-/// area, and each element has the layout it has alone (ADR-0022).
+/// area, the extended registers included, and each element has the layout it has alone
+/// (ADR-0022).
 ///
 /// # Canonical text
 /// [`ProtocolAddress::canonical`] renders the unambiguous long form
@@ -603,7 +623,10 @@ impl AddressConvention {
 /// The number is one-based. [`ModbusAddress::parse`] accepts this text with no
 /// convention, `plc4x` or `one-based-40001` and returns an equal address, which
 /// `prop_canonical_round_trips` checks; under `zero-based` the same text names the next
-/// register up, so a zero-based reader writes the number minus one.
+/// register up, so a zero-based reader writes the number minus one. The extended-register
+/// area is the exception: its number is the register address under every convention
+/// (`extended-register:30000:INT` is address 30000, in file 4 at record 0), and the
+/// number 0 does not exist.
 ///
 /// # Examples
 /// ```
@@ -617,6 +640,11 @@ impl AddressConvention {
 /// assert_eq!(address.logical_address(), 16);
 /// assert_eq!(address.protocol(), "modbus");
 /// assert_eq!(address.canonical(), "holding-register:16:INT");
+///
+/// // An extended register is a file and a record: address 30000 is record 0 of file 4.
+/// let extended = ModbusAddress::extended(30_000).build()?;
+/// assert_eq!((extended.file_number().map(|file| file.get()), extended.offset()), (Some(4), 0));
+/// assert_eq!(extended.canonical(), "extended-register:30000:INT");
 /// # Ok::<(), stonecrab::PlcError>(())
 /// ```
 ///
@@ -635,6 +663,8 @@ pub struct ModbusAddress {
     unit_id: Option<UnitId>,
     area: ModbusArea,
     offset: u16,
+    /// The file number of an extended register; `offset` is then the record in it.
+    file: Option<NonZeroU16>,
     data_type: ModbusDataType,
     byte_order: Option<(ByteOrder, WordOrder)>,
     convention: AddressConvention,
@@ -649,6 +679,7 @@ impl ModbusAddress {
         unit_id: None,
         area: ModbusArea::HoldingRegister,
         offset: 0,
+        file: None,
         data_type: ModbusDataType::Bool,
         byte_order: None,
         convention: AddressConvention::Plc4xCompatible,
@@ -656,6 +687,10 @@ impl ModbusAddress {
     };
 
     /// Start building an address at a zero-based wire `offset` of `area`.
+    ///
+    /// For [`ModbusArea::ExtendedRegister`] the `offset` is the register address (see
+    /// [`extended`](Self::extended)), which is not zero-based: address 0 is refused by
+    /// [`build`](ModbusAddressBuilder::build).
     ///
     /// Defaults, documented on [`ModbusAddressBuilder`]: the area's default data type, no
     /// unit identifier, no byte order, [`AddressConvention::Plc4xCompatible`] and one
@@ -670,15 +705,46 @@ impl ModbusAddress {
     /// # Ok::<(), stonecrab::PlcError>(())
     /// ```
     pub const fn builder(area: ModbusArea, offset: u16) -> ModbusAddressBuilder {
-        ModbusAddressBuilder {
-            area,
-            offset,
-            unit_id: None,
-            data_type: None,
-            byte_order: None,
-            convention: AddressConvention::Plc4xCompatible,
-            elements: None,
-        }
+        // A `const fn` cannot call `u32::from`, and `as` is not used in library code.
+        let [low, high] = offset.to_le_bytes();
+        ModbusAddressBuilder::at(area, u32::from_le_bytes([low, high, 0, 0]))
+    }
+
+    /// Start building an extended-register address: register `address` of the files of
+    /// function codes 20 and 21, counted through all the files, 10000 to a file.
+    ///
+    /// The address is its own logical number: there is no one-based shift, and 0 does not
+    /// exist. Address `n` is record `n % 10000` of file `n / 10000 + 1`, so the largest
+    /// address, 655349999, is record 9999 of file 65535. A value wider than the registers
+    /// left in a file continues at record 0 of the next file.
+    ///
+    /// Defaults are those of [`builder`](Self::builder): `INT`, no unit identifier, no byte
+    /// order, one element. [`build`](ModbusAddressBuilder::build) refuses address 0, a span
+    /// past 655349999 and a list ([`elements`](ModbusAddressBuilder::elements)) wider than
+    /// the 120 registers one file record read carries.
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab::ErrorKind;
+    /// use stonecrab::modbus::{ModbusAddress, ModbusDataType};
+    ///
+    /// // Address 9999 is the last record of file 1, and a DINT there ends in file 2.
+    /// let address = ModbusAddress::extended(9_999).data_type(ModbusDataType::DInt).build()?;
+    /// assert_eq!(address.file_number().map(|file| file.get()), Some(1));
+    /// assert_eq!(address.offset(), 9_999);
+    ///
+    /// let zero = ModbusAddress::extended(0).build();
+    /// assert_eq!(zero.map_err(|e| e.kind()), Err(ErrorKind::InvalidAddress));
+    /// # Ok::<(), stonecrab::PlcError>(())
+    /// ```
+    ///
+    /// # Compatibility: docs/parity/modbus.md#MB-ADDR-EXTENDED
+    /// The address is upstream's `ModbusTagExtendedRegister` address: equal to the logical
+    /// address (`getLogicalAddress`), 0 rejected. Upstream accepts addresses up to
+    /// 655359999, of which those from 655350000 name file 65536, beyond the 16 bits of the
+    /// wire; Stonecrab refuses them (docs/parity/modbus.md#MB-LIMIT-EXT).
+    pub const fn extended(address: u32) -> ModbusAddressBuilder {
+        ModbusAddressBuilder::at(ModbusArea::ExtendedRegister, address)
     }
 
     /// The unit identifier written in the address, `None` when the address names none
@@ -705,7 +771,9 @@ impl ModbusAddress {
     }
 
     /// The zero-based wire address that goes into the request PDU; for a list, the wire
-    /// address of its first element.
+    /// address of its first element. For an extended register it is the record number in
+    /// [`file_number`](Self::file_number)'s file, 0 to 9999, because the register address
+    /// does not fit 16 bits.
     #[must_use]
     pub const fn offset(&self) -> u16 {
         self.offset
@@ -738,6 +806,49 @@ impl ModbusAddress {
         self.elements
     }
 
+    /// The file number of an extended register as it goes on the wire, 1 to 65535, `None`
+    /// for every other area. [`offset`](Self::offset) is then the record in that file. For
+    /// a list they place its first register; the list may continue in the next file.
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab::modbus::{ModbusAddress, ModbusArea};
+    ///
+    /// let first = ModbusAddress::extended(1).build()?;
+    /// assert_eq!(first.file_number().map(|file| file.get()), Some(1));
+    /// let holding = ModbusAddress::builder(ModbusArea::HoldingRegister, 1).build()?;
+    /// assert_eq!(holding.file_number(), None);
+    /// # Ok::<(), stonecrab::PlcError>(())
+    /// ```
+    #[must_use]
+    pub const fn file_number(&self) -> Option<NonZeroU16> {
+        self.file
+    }
+
+    /// The address of the first register in the numbering of its area: the wire offset, or
+    /// for an extended register its position counted through the files (`(file - 1) *
+    /// 10000 + record`, at most 655349999).
+    pub(crate) fn linear_address(&self) -> u32 {
+        match self.file {
+            Some(file) => u32::from(file.get())
+                .saturating_sub(1)
+                .saturating_mul(FILE_REGISTERS)
+                .saturating_add(u32::from(self.offset)),
+            None => u32::from(self.offset),
+        }
+    }
+
+    /// The file number and the record of an extended-register `address`, `None` when the
+    /// address is past file 65535.
+    pub(crate) fn split_extended(address: u32) -> Option<(NonZeroU16, u16)> {
+        let file = address.checked_div(FILE_REGISTERS)?.checked_add(1)?;
+        let record = address.checked_rem(FILE_REGISTERS)?;
+        Some((
+            NonZeroU16::new(u16::try_from(file).ok()?)?,
+            u16::try_from(record).ok()?,
+        ))
+    }
+
     /// How many registers or bits a read of the address covers: the element count times
     /// one bit, or times the data type's register count.
     pub(crate) const fn width(&self) -> u16 {
@@ -749,13 +860,22 @@ impl ModbusAddress {
         }
     }
 
-    /// The one-based logical address people write: the wire offset plus one, 1 to 65536.
+    /// The logical address people write: the wire offset plus one, 1 to 65536, or for an
+    /// extended register the register address itself, 1 to 655349999.
     ///
     /// # Compatibility: docs/parity/modbus.md#MB-ADDR-LONG
-    /// Upstream's wire address is the logical address minus one (`PROTOCOL_ADDRESS_OFFSET`).
+    /// Upstream's wire address is the logical address minus one (`PROTOCOL_ADDRESS_OFFSET`),
+    /// except for extended registers, whose logical address is their address
+    /// (docs/parity/modbus.md#MB-ADDR-EXTENDED).
     #[must_use]
     pub fn logical_address(&self) -> u32 {
-        u32::from(self.offset).saturating_add(1)
+        match self.area {
+            ModbusArea::ExtendedRegister => self.linear_address(),
+            ModbusArea::Coil
+            | ModbusArea::DiscreteInput
+            | ModbusArea::HoldingRegister
+            | ModbusArea::InputRegister => u32::from(self.offset).saturating_add(1),
+        }
     }
 
     /// The scalar type read at the address.
@@ -855,7 +975,8 @@ impl ProtocolAddress for ModbusAddress {
 #[must_use = "a builder does nothing until build() is called"]
 pub struct ModbusAddressBuilder {
     area: ModbusArea,
-    offset: u16,
+    /// The wire offset, or for an extended register the register address.
+    offset: u32,
     unit_id: Option<UnitId>,
     data_type: Option<ModbusDataType>,
     byte_order: Option<(ByteOrder, WordOrder)>,
@@ -864,6 +985,21 @@ pub struct ModbusAddressBuilder {
 }
 
 impl ModbusAddressBuilder {
+    /// A builder of `area` at `offset` with every default: the offset is the wire offset,
+    /// or for an extended register the register address, and [`build`](Self::build)
+    /// checks it.
+    const fn at(area: ModbusArea, offset: u32) -> Self {
+        Self {
+            area,
+            offset,
+            unit_id: None,
+            data_type: None,
+            byte_order: None,
+            convention: AddressConvention::Plc4xCompatible,
+            elements: None,
+        }
+    }
+
     /// Set the unit identifier.
     ///
     /// Every `u8` is accepted, including [`UnitId::BROADCAST`] and
@@ -926,16 +1062,19 @@ impl ModbusAddressBuilder {
     /// Validate the parts and create the address.
     ///
     /// Three checks run: the data type must fit the area, the registers or bits the address
-    /// occupies must end at or before the last wire address 65535, and a list must fit one
-    /// read request (2000 bits or 125 registers). Nothing else is checked; in particular
-    /// the unit identifier and byte order are always valid.
+    /// occupies must end at or before the last wire address 65535 (for an extended register,
+    /// the last address 655349999, and the address may not be 0), and a list must fit one
+    /// read request (2000 bits or 125 registers, and on the extended registers the 120 of
+    /// one file record read). Nothing else is checked; in particular the unit identifier and
+    /// byte order are always valid.
     ///
     /// # Errors
     /// Returns [`ErrorKind::InvalidAddress`] when a bit area (coil or discrete input) is
     /// given any type other than `BOOL`, when `offset` plus the width passes the end of the
     /// 65536-address map (for example `REAL` at wire offset 65535, `LREAL` at 65533, or
-    /// two `INT`s at 65535), or when a list is wider than one read carries (2001 coils, 63
-    /// `DINT`s).
+    /// two `INT`s at 65535), when an extended register has address 0 or its width passes
+    /// address 655349999, or when a list is wider than one read carries (2001 coils, 63
+    /// `DINT`s, or 61 `DINT`s on the extended registers).
     ///
     /// # Examples
     /// ```
@@ -962,7 +1101,11 @@ impl ModbusAddressBuilder {
     /// (docs/parity/modbus.md#MB-ADDR-BIT-TYPES). An offset above 65535 cannot be
     /// expressed (docs/parity/modbus.md#MB-LIMIT-ADDR). The width of a list is measured in
     /// bits or registers, as upstream measures it at parse time
-    /// (docs/parity/modbus.md#MB-LIMIT-COILS, docs/parity/modbus.md#MB-LIMIT-REGISTERS).
+    /// (docs/parity/modbus.md#MB-LIMIT-COILS, docs/parity/modbus.md#MB-LIMIT-REGISTERS). An
+    /// extended register has no one-based shift, its address 0 is refused as upstream refuses
+    /// it, and its limit is docs/parity/modbus.md#MB-LIMIT-EXT; a list there must fit one
+    /// file record read, 120 registers where upstream allows 125
+    /// (docs/parity/modbus.md#MB-ADDR-EXTENDED).
     pub fn build(self) -> Result<ModbusAddress> {
         let data_type = self
             .data_type
@@ -976,11 +1119,7 @@ impl ModbusAddressBuilder {
             )));
         }
         let element = element_width(self.area, data_type);
-        let (unit, limit, row) = if self.area.is_bit_area() {
-            ("bit", MAX_READ_BITS, "MB-LIMIT-COILS")
-        } else {
-            ("register", MAX_READ_REGISTERS, "MB-LIMIT-REGISTERS")
-        };
+        let (unit, limit, row) = read_limit(self.area);
         let (count, what) = match self.elements {
             Some(count) => (
                 count.get(),
@@ -989,14 +1128,22 @@ impl ModbusAddressBuilder {
             None => (1, data_type.upstream_name().to_owned()),
         };
         let size = u32::from(element).saturating_mul(u32::from(count));
-        let end = u32::from(self.offset).saturating_add(size);
-        if end > ADDRESS_SPACE {
-            return Err(invalid_address(format!(
-                "{what} at wire offset {} spans {size} {unit}(s) and passes the last address \
-                 65535 (docs/parity/modbus.md#MB-LIMIT-SPAN)",
-                self.offset,
-            )));
-        }
+        let (offset, file) = if self.area == ModbusArea::ExtendedRegister {
+            self.extended_position(&what, size)?
+        } else {
+            let end = self.offset.saturating_add(size);
+            let offset = u16::try_from(self.offset)
+                .ok()
+                .filter(|_| end <= ADDRESS_SPACE);
+            let Some(offset) = offset else {
+                return Err(invalid_address(format!(
+                    "{what} at wire offset {} spans {size} {unit}(s) and passes the last \
+                     address 65535 (docs/parity/modbus.md#MB-LIMIT-SPAN)",
+                    self.offset,
+                )));
+            };
+            (offset, None)
+        };
         if size > u32::from(limit) {
             return Err(invalid_address(format!(
                 "{what} spans {size} {unit}s, more than the {limit} one read carries \
@@ -1006,7 +1153,8 @@ impl ModbusAddressBuilder {
         Ok(ModbusAddress {
             unit_id: self.unit_id,
             area: self.area,
-            offset: self.offset,
+            offset,
+            file,
             data_type,
             byte_order: self.byte_order,
             convention: self.convention,
@@ -1029,6 +1177,48 @@ pub(crate) const fn element_width(area: ModbusArea, data_type: ModbusDataType) -
     }
 }
 
+/// What one read of `area` is counted in, the most it carries and the parity row of that
+/// bound: 2000 bits, 125 registers, or on the extended registers the 120 that one file
+/// record read carries (ADR-0015, S50 addendum).
+const fn read_limit(area: ModbusArea) -> (&'static str, u16, &'static str) {
+    match area {
+        ModbusArea::Coil | ModbusArea::DiscreteInput => ("bit", MAX_READ_BITS, "MB-LIMIT-COILS"),
+        ModbusArea::HoldingRegister | ModbusArea::InputRegister => {
+            ("register", MAX_READ_REGISTERS, "MB-LIMIT-REGISTERS")
+        }
+        ModbusArea::ExtendedRegister => (
+            "register",
+            MAX_READ_EXTENDED_REGISTERS,
+            "MB-LIMIT-REGISTERS",
+        ),
+    }
+}
+
+impl ModbusAddressBuilder {
+    /// The record and file of the first extended register, after the checks that make the
+    /// address sendable: not 0, and every one of its `size` registers at or before the
+    /// last address. `what` names the type, or the list, in the message.
+    fn extended_position(&self, what: &str, size: u32) -> Result<(u16, Option<NonZeroU16>)> {
+        if self.offset == 0 {
+            return Err(extended_zero());
+        }
+        // Both the first and the last register must be in a file of the wire.
+        let last = self.offset.saturating_add(size).saturating_sub(1);
+        match (
+            ModbusAddress::split_extended(self.offset),
+            ModbusAddress::split_extended(last),
+        ) {
+            (Some((file, record)), Some(_)) => Ok((record, Some(file))),
+            _ => Err(invalid_address(format!(
+                "{what} at extended-register address {} spans {size} register(s) and passes \
+                 the last address {LAST_EXTENDED}, record 9999 of file 65535 \
+                 (docs/parity/modbus.md#MB-LIMIT-EXT)",
+                self.offset,
+            ))),
+        }
+    }
+}
+
 /// The upstream `ModbusByteOrder` name for a ([`ByteOrder`], [`WordOrder`]) pair.
 ///
 /// Total over all four combinations; the derivation is the table on [`ByteOrder`].
@@ -1047,12 +1237,13 @@ fn invalid_address(message: String) -> PlcError {
 
 // ---- text grammar: ModbusAddress::parse and its scanner ----
 
-/// The four areas the alpha reads, in prefix-digit order.
-const AREAS: [ModbusArea; 4] = [
+/// The five areas, in prefix-digit order.
+const AREAS: [ModbusArea; 5] = [
     ModbusArea::Coil,
     ModbusArea::DiscreteInput,
     ModbusArea::InputRegister,
     ModbusArea::HoldingRegister,
+    ModbusArea::ExtendedRegister,
 ];
 
 /// The four (byte order, word order) pairs, each with its upstream mode name derived by
@@ -1086,8 +1277,8 @@ impl ModbusAddress {
     /// | Form | Example | Needs a convention |
     /// | --- | --- | --- |
     /// | long, `AREA:N` or `AREA:N:TYPE` | `holding-register:16:INT` | no |
-    /// | prefixed short, `0x`, `1x`, `3x`, `4x` plus 4 or 5 digits | `4x00016:INT` | no |
-    /// | bare short, prefix digit `0`, `1`, `3`, `4` plus 4 or 5 digits | `40016:INT` | yes |
+    /// | prefixed short, `0x`, `1x`, `3x`, `4x`, `6x` plus 4 or 5 digits | `4x00016:INT` | no |
+    /// | bare short, prefix digit `0`, `1`, `3`, `4`, `6` plus 4 or 5 digits | `40016:INT` | yes |
     ///
     /// Every form may carry a selection between the number and the type, in the upstream
     /// array notation (ADR-0022):
@@ -1100,22 +1291,28 @@ impl ModbusAddress {
     ///
     /// The number names element 0 (with `;base`, element `base`), and element `k` starts
     /// `k` bits further on a coil or discrete input and `k` times
-    /// [`ModbusDataType::register_size`] registers further on a register area; so
-    /// `holding-register:1[4]:DINT` is wire offset 8 and `[4..7;1]` reads the elements at
-    /// offsets 3 to 6. A range is one address with [`elements`](Self::elements) set: it is
-    /// read and written as one [`PlcValue::List`](crate::PlcValue::List), must end at or
-    /// before wire address 65535 and must fit one read (2000 bits or 125 registers). An
-    /// index is resolved here and gives the same address as the element's own number.
+    /// [`ModbusDataType::register_size`] registers further on a register area, the
+    /// extended registers included; so `holding-register:1[4]:DINT` is wire offset 8,
+    /// `extended-register:1[4]:DINT` is extended address 9, and `[4..7;1]` reads the
+    /// elements at offsets 3 to 6. A range is one address with
+    /// [`elements`](Self::elements) set: it is read and written as one
+    /// [`PlcValue::List`](crate::PlcValue::List), must end at or before wire address 65535
+    /// (on the extended registers, address 655349999) and must fit one read (2000 bits or
+    /// 125 registers, and on the extended registers 120). An index is resolved here and
+    /// gives the same address as the element's own number.
     ///
-    /// `AREA` is `coil`, `discrete-input`, `holding-register` or `input-register`; the
-    /// long form takes 1 to 9 digits. With no convention, `plc4x` or `one-based-40001`
-    /// the number is the one-based logical address: the wire offset is the number minus
-    /// one, so `holding-register:16` reads wire address 15 and the numbers run from 1 to
-    /// 65536. With `zero-based` the number is the wire offset itself, from 0 to 65535, so
-    /// `holding-register:16` reads wire address 16 and the bare `40016` too. The rule is
-    /// the same for every form; see [`AddressConvention`] for the table. When the type is
-    /// omitted it is `BOOL` for the bit areas and `INT` for the register areas. `TYPE` is
-    /// one of the 15 upper-case names of
+    /// `AREA` is `coil`, `discrete-input`, `holding-register`, `input-register` or
+    /// `extended-register`; the long form takes 1 to 9 digits. With no convention, `plc4x`
+    /// or `one-based-40001` the number is the one-based logical address: the wire offset is
+    /// the number minus one, so `holding-register:16` reads wire address 15 and the numbers
+    /// run from 1 to 65536. With `zero-based` the number is the wire offset itself, from 0
+    /// to 65535, so `holding-register:16` reads wire address 16 and the bare `40016` too.
+    /// The rule is the same for every form; see [`AddressConvention`] for the table. The
+    /// extended registers (`extended-register:N`, `6xNNNNN`, the bare `6NNNNN`) are the
+    /// exception: the number is the register address under every convention, 1 to
+    /// 655349999, with no shift, and the convention only decides whether the bare form is
+    /// accepted. When the type is omitted it is `BOOL` for the bit areas and `INT` for the
+    /// register areas. `TYPE` is one of the 15 upper-case names of
     /// [`ModbusDataType`]. An address may end with a block
     /// `{unit-id: N, byte-order: 'NAME'}` holding either key or both, in any order:
     /// `unit-id` is a decimal integer from 0 to 255 and `byte-order` a quoted (single or
@@ -1152,11 +1349,11 @@ impl ModbusAddress {
     /// `[index]` or `[lo..hi]` with an optional `;base` in decimal digits, has a second
     /// dimension (a second bracket group or a comma), an upper bound below its lower bound,
     /// an index below its base or a number beyond `u32`, or a range wider than one read
-    /// carries (2001 bits, 126 registers); `STRING`, `WSTRING`, `CHAR`, `WCHAR`, a
-    /// parenthesised length and the `TIME` and `DATE`
-    /// family; `extended-register`, `6x` and the bare `6` prefix; the legacy
-    /// `AREA:N:TYPE[n]` and `AREA:N:TYPE:n` forms (the message gives the replacement
-    /// spelling when it parses, otherwise a general example); and a
+    /// carries (2001 bits, 126 registers, or 121 on the extended registers); `STRING`,
+    /// `WSTRING`, `CHAR`, `WCHAR`, a parenthesised length and the `TIME` and `DATE` family;
+    /// an extended-register number of 0 or past 655349999, or a type or selection that
+    /// ends past it; the legacy `AREA:N:TYPE[n]` and `AREA:N:TYPE:n` forms (the message
+    /// gives the replacement spelling when it parses, otherwise a general example); and a
     /// malformed address block (unterminated, unknown or repeated key, `unit-id` that is
     /// not an integer from 0 to 255, unquoted or unknown `byte-order`).
     ///
@@ -1189,6 +1386,10 @@ impl ModbusAddress {
     /// assert_eq!(range.canonical(), "holding-register:1[0..1]:REAL");
     /// let index = ModbusAddress::parse("4x00001[4]:DINT", &none)?;
     /// assert_eq!(index, ModbusAddress::parse("holding-register:9:DINT", &none)?);
+    ///
+    /// // On the extended registers the element offset moves the register address.
+    /// let extended = ModbusAddress::parse("extended-register:1[4]:DINT", &none)?;
+    /// assert_eq!(extended, ModbusAddress::parse("extended-register:9:DINT", &none)?);
     /// # Ok::<(), stonecrab::PlcError>(())
     /// ```
     ///
@@ -1198,9 +1399,10 @@ impl ModbusAddress {
     /// (docs/parity/modbus.md#MB-ADDR-BARE-40001), non-`BOOL` types on bit areas fail
     /// here rather than at read time (docs/parity/modbus.md#MB-ADDR-BIT-TYPES), a
     /// `unit-id` outside 0..=255 is rejected (docs/parity/modbus.md#MB-CFG-UNIT-ID),
-    /// `4x:INT` is a typed error (docs/parity/modbus.md#MB-QUIRK-G) and the deferred
-    /// forms are typed rejections (docs/parity/modbus.md#MB-ADDR-STRING,
-    /// docs/parity/modbus.md#MB-ADDR-EXTENDED, docs/parity/modbus.md#MB-TYPE-TIME). The
+    /// `4x:INT` is a typed error (docs/parity/modbus.md#MB-QUIRK-G), the extended-register
+    /// forms are docs/parity/modbus.md#MB-ADDR-EXTENDED (limit
+    /// docs/parity/modbus.md#MB-LIMIT-EXT) and the deferred forms are typed rejections
+    /// (docs/parity/modbus.md#MB-ADDR-STRING, docs/parity/modbus.md#MB-TYPE-TIME). The
     /// selection is docs/parity/modbus.md#MB-ADDR-SELECTION and the legacy array forms
     /// docs/parity/modbus.md#MB-ADDR-LEGACY-ARRAY.
     /// Limits: docs/parity/modbus.md#MB-LIMIT-ADDR, docs/parity/modbus.md#MB-LIMIT-SPAN
@@ -1240,12 +1442,18 @@ impl ModbusAddress {
         let (area, number, rest) = locate(head, convention.is_some())?;
         let (selection, rest) = split_selection(rest)?;
         let data_type = parse_type(head, rest, area, selection.is_none(), options)?;
-        let offset = wire_offset(number, convention.unwrap_or_default())?;
-        let (offset, elements) = match selection {
-            Some(selection) => selection.resolve(offset, element_width(area, data_type))?,
-            None => (offset, None),
+        // An extended register is its own number under every convention. The number is
+        // checked before a selection moves it, on every area.
+        let start = if area == ModbusArea::ExtendedRegister {
+            extended_number(number)?
+        } else {
+            u32::from(wire_offset(number, convention.unwrap_or_default())?)
         };
-        let mut builder = Self::builder(area, offset)
+        let (start, elements) = match selection {
+            Some(selection) => selection.resolve(area, start, element_width(area, data_type))?,
+            None => (start, None),
+        };
+        let mut builder = ModbusAddressBuilder::at(area, start)
             .data_type(data_type)
             .convention(AddressConvention::Plc4xCompatible);
         if let Some(count) = elements {
@@ -1308,9 +1516,6 @@ fn locate(head: &str, explicit: bool) -> Result<Located<'_>> {
             return locate_long(area, after);
         }
     }
-    if head.starts_with("extended-register") {
-        return Err(extended_register());
-    }
     let bytes = head.as_bytes();
     match (bytes.first(), bytes.get(1)) {
         (Some(prefix), Some(b'x')) if prefix.is_ascii_digit() => locate_short(
@@ -1327,8 +1532,8 @@ fn locate(head: &str, explicit: bool) -> Result<Located<'_>> {
 fn unrecognised(head: &str) -> PlcError {
     invalid_address(format!(
         "unrecognised address '{}': expected AREA:N[:TYPE] with AREA coil, discrete-input, \
-         holding-register or input-register, or a short form such as 4x00001 \
-         (docs/parity/modbus.md#MB-ADDR-LONG)",
+         holding-register, input-register or extended-register, or a short form such as \
+         4x00001 (docs/parity/modbus.md#MB-ADDR-LONG)",
         excerpt(head)
     ))
 }
@@ -1394,15 +1599,9 @@ fn locate_bare(digit: u8, head: &str, explicit: bool) -> Result<Located<'_>> {
     Ok((area, decimal_value(digits), rest))
 }
 
-/// The prefix digit of the deferred extended-register area.
-const EXTENDED_PREFIX: u8 = 6;
-
-/// The area whose prefix digit is `digit`; `6` (extended registers) and every other digit
-/// are typed rejections.
+/// The area whose prefix digit is `digit`; every digit without an area is a typed
+/// rejection.
 fn area_for_prefix(digit: u8) -> Result<ModbusArea> {
-    if digit == EXTENDED_PREFIX {
-        return Err(extended_register());
-    }
     AREAS
         .into_iter()
         .find(|area| area.prefix_digit() == digit)
@@ -1412,16 +1611,9 @@ fn area_for_prefix(digit: u8) -> Result<ModbusArea> {
 fn unknown_prefix(digit: u8) -> PlcError {
     invalid_address(format!(
         "no area uses prefix digit {digit}: the prefixes are 0 (coil), 1 (discrete-input), \
-         3 (input-register) and 4 (holding-register) (docs/parity/modbus.md#MB-ADDR-SHORT-4X)"
+         3 (input-register), 4 (holding-register) and 6 (extended-register) \
+         (docs/parity/modbus.md#MB-ADDR-SHORT-4X)"
     ))
-}
-
-fn extended_register() -> PlcError {
-    invalid_address(
-        "extended registers (extended-register, 6x) are not supported in the alpha: they \
-         are deferred to a later milestone (docs/parity/modbus.md#MB-ADDR-EXTENDED)"
-            .to_owned(),
-    )
 }
 
 /// A short form must have exactly 4 or 5 digits.
@@ -1435,6 +1627,24 @@ fn short_digits(digits: &str, prefix: u8) -> Result<()> {
             digits.len()
         )))
     }
+}
+
+/// The number of an extended register as written: its register address under every
+/// convention, of which 0 does not exist.
+fn extended_number(number: u32) -> Result<u32> {
+    if number == 0 {
+        Err(extended_zero())
+    } else {
+        Ok(number)
+    }
+}
+
+fn extended_zero() -> PlcError {
+    invalid_address(
+        "extended-register address 0 does not exist: the first is 1 \
+         (docs/parity/modbus.md#MB-ADDR-EXTENDED)"
+            .to_owned(),
+    )
 }
 
 /// The zero-based wire offset for a number written under `convention`.
@@ -1549,16 +1759,29 @@ struct Selection {
 }
 
 impl Selection {
-    /// The wire offset of the first element and, for a range, the element count, from the
-    /// wire offset of the address and the width of one element.
-    fn resolve(self, offset: u16, width: u16) -> Result<(u16, Option<NonZeroU16>)> {
-        let start = u64::from(self.first)
+    /// The address of the first element and, for a range, the element count, from the
+    /// address the number of `area` names and the width of one element. The address is a
+    /// wire offset, or on the extended registers a register address; a first element past
+    /// the last address of the area is refused here, and the end of the span is the
+    /// builder's check.
+    fn resolve(
+        self,
+        area: ModbusArea,
+        start: u32,
+        width: u16,
+    ) -> Result<(u32, Option<NonZeroU16>)> {
+        let moved = u64::from(self.first)
             .saturating_mul(u64::from(width))
-            .saturating_add(u64::from(offset));
-        let Ok(start) = u16::try_from(start) else {
+            .saturating_add(u64::from(start));
+        let (last, place, row) = if area == ModbusArea::ExtendedRegister {
+            (LAST_EXTENDED, "extended-register address", "MB-LIMIT-EXT")
+        } else {
+            (LAST_WIRE, "wire offset", "MB-LIMIT-SPAN")
+        };
+        let Some(first) = u32::try_from(moved).ok().filter(|first| *first <= last) else {
             return Err(invalid_address(format!(
-                "the selection starts at wire offset {start}, past the last address 65535 \
-                 (docs/parity/modbus.md#MB-LIMIT-SPAN)"
+                "the selection starts at {place} {moved}, past the last address {last} \
+                 (docs/parity/modbus.md#{row})"
             )));
         };
         let count = match self.count {
@@ -1569,14 +1792,14 @@ impl Selection {
                     .ok_or_else(|| {
                         invalid_address(format!(
                             "the selection holds {count} elements, more than one read \
-                             carries: at most 2000 bits or 125 registers \
-                             (docs/parity/modbus.md#MB-ADDR-SELECTION)"
+                             carries: at most 2000 bits, 125 registers or 120 extended \
+                             registers (docs/parity/modbus.md#MB-ADDR-SELECTION)"
                         ))
                     })?,
             ),
             None => None,
         };
-        Ok((start, count))
+        Ok((first, count))
     }
 }
 

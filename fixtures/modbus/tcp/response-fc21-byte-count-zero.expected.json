@@ -1,0 +1,7 @@
+{
+  "direction": "response",
+  "function": 21,
+  "error": "InvalidDiscriminator",
+  "field": "byte count",
+  "value": 0
+}

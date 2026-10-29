@@ -1,0 +1,6 @@
+{
+  "direction": "request",
+  "error": "InvalidDiscriminator",
+  "field": "reference type",
+  "value": 5
+}

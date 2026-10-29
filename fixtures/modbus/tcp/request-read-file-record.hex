@@ -1,4 +1,4 @@
 # PDU bytes only: no MBAP header, no unit identifier.
 # Modbus Application Protocol V1.1b section 6.14, Read File Record, request example.
-# Two sub-requests. File record access is out of the alpha scope.
+# Two sub-requests: file 4 records 1 and 2, file 3 records 9 and 10.
 14 0E 06 00 04 00 01 00 02 06 00 03 00 09 00 02

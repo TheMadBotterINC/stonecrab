@@ -3,12 +3,15 @@ Native Modbus TCP driver for Stonecrab (alpha), `stonecrab::modbus`, behind the 
 feature (on by default). The alpha scope is the function codes 01 (read coils), 02 (read
 discrete inputs), 03 (read holding registers) and 04 (read input registers) over TCP with
 MBAP framing, writes of coils and holding registers (function codes 15, 06 and 16, refused
-unless the connection says `access=read-write`), a ping that reads one address, and
+unless the connection says `access=read-write`), the extended registers through the file
+record function codes 20 (read) and 21 (write) since S50, a ping that reads one address, and
 polling subscriptions (cyclic and change-of-state, since S55). RTU, ASCII, TLS, UDP,
-extended registers, string types, browse and discovery are out of scope for the alpha and
-are listed under "Not in the alpha" below.
+string types, browse and discovery are out of scope for the alpha and are listed under "Not
+in the alpha" below.
 The driver has been checked against an independent server, pymodbus 3.8.6, and no physical
-device.
+device. No independent server serves the file record function codes, so the extended
+registers are checked against the specification examples, the upstream PLC4X frames and a
+first-party device on the in-memory transport only.
 
 This module offers `ModbusTcpDriver`, the `Driver` of the `modbus-tcp` scheme, with
 `ModbusOptions`, the parsed connection parameters; `ModbusConnection` with
@@ -18,8 +21,8 @@ request over a connection and return the reply that answers it; and the layers
 underneath: `UnitId`, `ModbusArea`, `ModbusDataType`, `AddressConvention` and
 `ModbusAddress` (built with its builder or parsed from text with `ModbusAddress::parse`),
 `Batcher`, `BatchLimits`, `Chunk` and `Member`, the PDU types `FunctionCode`,
-`ExceptionCode` and `ModbusPdu` with `encode_request`, `decode_request`, `decode_response`
-and `encode_response`, the framing types `MbapHeader`, `TransactionId`, `ModbusAdu` and
+`ExceptionCode`, `ModbusPdu`, `FileRecordRead` and `FileRecord` with `encode_request`,
+`decode_request`, `decode_response` and `encode_response`, the framing types `MbapHeader`, `TransactionId`, `ModbusAdu` and
 `MbapFramer`, and `TypedDecoder`, which turns registers or coil bits into `PlcValue`s.
 `SystemClock`, the Tokio-backed clock the driver uses by default, is re-exported from
 `stonecrab::transport`. The `modbus` feature turns on the `transport` feature (and with
@@ -146,9 +149,10 @@ device has been tried.
 | Capability | Support level |
 | --- | --- |
 | Read: coils, discrete inputs, holding registers and input registers (function codes 01 to 04) as the 15 numeric and bit types | interoperability-tested |
-| Array selections `[i]`, `[lo..hi]` and `;base`: a range read and written as one `PlcValue::List` | simulator-tested |
+| Array selections `[i]`, `[lo..hi]` and `;base`: a range read and written as one `PlcValue::List`, on every area (the extended registers included) | simulator-tested |
 | Ping: one read of `ping-address` (`Connection::ping`) | interoperability-tested |
 | Write: coils and holding registers (function codes 15, 06 and 16), `Unknown` after a request that went out unanswered | interoperability-tested |
+| Extended registers: read by function code 20 and write by function code 21, cut at the end of each 10000-register file (`extended-register:N`, `6x`, bare `6`) | simulator-tested |
 | Subscribe by polling: cyclic and change-of-state, event refused (`Connection::subscribe`) | simulator-tested |
 | Browse and discover | not supported |
 | Connection string and parameters (`parse_config`) | simulator-tested |
@@ -165,7 +169,7 @@ The layers underneath, with their evidence:
 | Address types: `UnitId`, `ModbusArea`, `ModbusDataType`, `ModbusAddress` | unit-tested; property-tested; fuzzed |
 | Address text grammar and parser (`ModbusAddress::parse`) | unit-tested; fuzzed |
 | Connection-string parser (`ModbusTcpDriver::parse_config`) | unit-tested; property-tested; fuzzed |
-| PDU codec for function codes 01 to 04, 06, 15 and 16 and the exception PDU | unit-tested; vector-tested; property-tested; fuzzed |
+| PDU codec for function codes 01 to 04, 06, 15, 16, 20 and 21 and the exception PDU | unit-tested; vector-tested; property-tested; fuzzed |
 | MBAP framing (`MbapFramer`, `MbapHeader`, `ModbusAdu`, `TransactionId`) | unit-tested; vector-tested; fuzzed |
 | Session: transaction ids, reply correlation by transaction id, unit id and function code, exception mapping (`ModbusSession`, `exception_item_error`) | unit-tested on the in-memory transport |
 | Typed register decoding and byte order (`TypedDecoder`) | unit-tested; vector-tested; property-tested; `BIG_ENDIAN` and `LITTLE_ENDIAN` confirmed by the retained upstream PLC4X vectors; the two byte-swap modes are derived from the documented layouts |
@@ -178,14 +182,15 @@ Each item is a deferred row of the
 with its owner. Where the parser or driver can see the request it rejects it with a typed
 error rather than ignoring it; operations that have no API at all do not exist:
 
-- writes of extended registers (FC21, `MB-ADDR-EXTENDED`) and of a coil with function code
-  05 (upstream never sends it, `MB-QUIRK-C`); the other writes are in the driver (see
-  "Connection");
+- a write of a coil with function code 05 (upstream never sends it, `MB-QUIRK-C`); the
+  other writes, extended registers included, are in the driver (see "Connection");
 - browse and discovery (`MB-TCP-BROWSE`, `MB-TCP-DISCOVER`): these operations do not
   exist in the API; subscriptions poll since S55 (`MB-TCP-SUBSCRIBE`, see "Connection");
-- extended registers (FC20 and FC21, `extended-register`, `6x`), `STRING`, `WSTRING`,
-  `CHAR`, `WCHAR`, the `TIME` and `DATE` family, a selection of more than one dimension and
-  the legacy array form (`MB-ADDR-*`, `MB-TYPE-*`);
+- `STRING`, `WSTRING`, `CHAR`, `WCHAR`, the `TIME` and `DATE` family, a selection of more
+  than one dimension and the legacy array form (`MB-ADDR-*`, `MB-TYPE-*`);
+- the extended registers on any independent server: none of pymodbus 3.8.6, libmodbus
+  3.1.11 and modbus-tk serves function codes 20 and 21 (`MB-ADDR-EXTENDED` is
+  `implemented`, not `automated-verified`);
 - UDP, TLS and TLS-PSK transports (`MB-TCP-TRANSPORTS-*`); RTU and ASCII framing are
   milestone M2 (no row yet);
 - the upstream gap-filling read optimizer, by decision (S51, ADR-0015 addendum): Stonecrab
@@ -291,12 +296,12 @@ Under `zero-based` the number is the wire offset itself, see the conventions bel
 | Form | Examples | Accepted |
 | --- | --- | --- |
 | long: `AREA:N` or `AREA:N:TYPE`, N has 1 to 9 digits | `holding-register:16:INT`, `coil:1` | always |
-| prefixed short: `0x`, `1x`, `3x` or `4x` plus 4 or 5 digits | `4x00016:INT`, `0x0010` | always |
-| bare short: prefix digit `0`, `1`, `3` or `4` plus 4 or 5 digits | `40001`, `400001`, `10001` | only with an `address-convention` |
+| prefixed short: `0x`, `1x`, `3x`, `4x` or `6x` plus 4 or 5 digits | `4x00016:INT`, `0x0010` | always |
+| bare short: prefix digit `0`, `1`, `3`, `4` or `6` plus 4 or 5 digits | `40001`, `400001`, `10001` | only with an `address-convention` |
 
-`AREA` is `coil`, `discrete-input`, `holding-register` or `input-register`, and the prefixes
-are `0x` coil, `1x` discrete input, `3x` input register and `4x` holding register; there is
-no `2x`. `0x0010` is coil 10, a decimal number that happens to start with the coil prefix,
+`AREA` is `coil`, `discrete-input`, `holding-register`, `input-register` or
+`extended-register`, and the prefixes are `0x` coil, `1x` discrete input, `3x` input
+register, `4x` holding register and `6x` extended register; there is no `2x`. `0x0010` is coil 10, a decimal number that happens to start with the coil prefix,
 not hexadecimal. When no type is written it is `BOOL` for the bit areas (coil, discrete
 input) and `INT` for the register areas. `TYPE` is one of the 15 upper-case names `BOOL`,
 `BYTE`, `WORD`, `DWORD`, `LWORD`, `SINT`, `USINT`, `INT`, `UINT`, `DINT`, `UDINT`, `LINT`,
@@ -334,6 +339,28 @@ text follows the PLC4X grammar and `one-based-40001` only that the numbers are t
 one-based Modicon numbers of a device manual. A profile or connection that uses a
 zero-based map should select `zero-based` rather than subtract one by hand.
 
+The extended registers are the one area that ignores the convention's offset. The number
+is the register address, counted through all the files of the device, 10000 to a file:
+`extended-register:1`, `6x00001` and (with a convention) `60001` are address 1, address 0
+does not exist (upstream rejects it too) and the last address is 655349999, record 9999 of
+file 65535. Address `A` is record `A % 10000` of file `A / 10000 + 1` (files count from 1 on
+the wire), so a value that starts in the last registers of a file continues at record 0 of
+the next, and one read or write carries it as one request of a sub-request per file. A chunk
+of tags is at most 120 registers, not 125, so that the response fits the 245 data bytes of a
+file record reply. The 15 types of the holding registers are accepted, `INT` by default.
+
+```rust
+use stonecrab::AddressOptions;
+use stonecrab::modbus::ModbusAddress;
+
+let address = ModbusAddress::parse("extended-register:10000:DINT", &AddressOptions::default())?;
+assert_eq!(address.file_number().map(|file| file.get()), Some(2));
+assert_eq!(address.offset(), 0, "the record in file 2");
+assert_eq!(address.logical_address(), 10_000);
+assert!(ModbusAddress::parse("extended-register:0", &AddressOptions::default()).is_err());
+# Ok::<(), stonecrab::PlcError>(())
+```
+
 An address is the wire offset it names, so one register read under two conventions
 compares equal and carries `AddressConvention::Plc4xCompatible`. The text `canonical()`
 renders is always the one-based long form, which parses back to an equal address with no
@@ -368,17 +395,32 @@ batcher: it merges with adjacent tags, counts whole against `max-registers-per-r
 `max-coils-per-request` and gives one read item; a write takes a `PlcValue::List` of
 exactly its count (see "Connection").
 
+On the extended registers the number is the register address and a selection counts
+registers from it the same way, through the end of a file (ADR-0022, addendum of
+2026-10-29): `extended-register:1[4]:DINT` is address 9 and
+`extended-register:9998[1]:DINT` is address 10000, record 0 of file 2. The number is
+checked before the selection moves it, so `extended-register:0[1]` is refused. A range
+must end at or before 655349999 and fit one file record read, 120 registers (upstream
+allows 125, whose answer no device may send). It may cross the end of a file: it is read
+by one function 20 request whose sub-responses are joined in order, so an element may take
+its registers from two files, and written by one function 21 request cut the same way,
+which carries 251 data bytes: every list inside one file fits, and up to 118 registers
+across the end of a file.
+
 Rejected with `ErrorKind::InvalidAddress`, each message naming the reason:
 
 - empty input, input over 256 bytes, control characters, and any text no form matches;
 - a bare short form without the explicit convention, and an unknown convention name;
-- logical address 0, above 65536, hexadecimal digits (`holding-register:0x0010`), more
+- logical address 0, above 65536 (except the extended registers, see above), hexadecimal digits (`holding-register:0x0010`), more
   than 9 digits in the long form, other than 4 or 5 in a short form, `4x:INT` with no digits;
 - lowercase or unknown type names (`holding-register:16:i16`);
 - a type other than `BOOL` on a coil or discrete input (upstream fails these only at read
   time);
 - a span past wire address 65535, a selection that starts or ends past it, and a range
-  wider than one read (2001 bits, 126 registers);
+  wider than one read (2001 bits, 126 registers, or 121 on the extended registers);
+- extended-register address 0 (a selection does not move it to 1), above 655349999, or
+  with a type or selection that passes it (upstream accepts up to 655359999, but the last
+  10000 addresses would be file 65536, which the wire cannot name);
 - a selection that is not `[i]` or `[lo..hi]` with an optional `;base` in decimal digits,
   has a second dimension (`[0..1][2]`, `[1,2]`), an upper bound below its lower bound, an
   index below its base or a number beyond `u32`;
@@ -386,8 +428,7 @@ Rejected with `ErrorKind::InvalidAddress`, each message naming the reason:
   `AREA:N[0..3]:INT`, `[0]` for a count of 1, and only when that replacement parses;
   otherwise the general example);
 - the features deferred past the alpha: `STRING`, `WSTRING`, `CHAR`, `WCHAR` and
-  `STRING(n)`, the `TIME` and `DATE` family, `extended-register`, `6x` and the bare `6`
-  prefix;
+  `STRING(n)`, and the `TIME` and `DATE` family;
 - a malformed config block: unterminated, unknown or repeated key, `unit-id` outside
   0..=255, unquoted or unknown `byte-order`.
 
@@ -679,9 +720,12 @@ at a time (a concurrent read or ping is `Backpressure`) and an expired request d
 `Timeout`. The tags are planned into chunks by `Batcher::plan` and the chunks run one
 after another:
 
-- each chunk is one read request (function code 01 to 04) to the unit of its addresses, or
-  the default unit, under the deadline `min(request deadline, now + timeouts.request)`
-  taken when the attempt starts;
+- each chunk is one read request (function code 01 to 04, or 20 for extended registers) to
+  the unit of its addresses, or the default unit, under the deadline `min(request deadline,
+  now + timeouts.request)` taken when the attempt starts; an extended-register chunk that
+  runs past record 9999 of a file is one function 20 request with a sub-request per file,
+  the reply is proved to answer each of them with the registers asked for, and the
+  registers of all of them are joined in order (`MB-ADDR-EXTENDED`);
 - a device exception fails every member of that chunk with `exception_item_error` and the
   next chunk still runs; a reply that does not decode fails the member alone;
 - a chunk whose exchange fails is retried under the `RetryPolicy` of the configuration
@@ -712,17 +756,21 @@ outcome:
 - the value is encoded for the data type of its address in the byte and word order of the
   tag, else of the address block, else of `ConnectionDefaults`; a coil takes a `BOOL`; the
   request is function 15 for a coil (even one), 06 for a holding-register payload of
-  exactly 2 bytes and 16 for any other;
+  exactly 2 bytes and 16 for any other, and function 21 for an extended register, cut at
+  the end of each file into one sub-request per file of the same request;
 - a range selection takes a `PlcValue::List` of exactly its element count, each element
   encoded as it would be alone, in one request (function 15 for coils, 16 for holding
-  registers, 06 for a one-element list of a one-register type); a scalar written to a
-  range, or a list to one element, is refused by the request builder with `InvalidConfig`;
+  registers, 06 for a one-element list of a one-register type, 21 for extended registers,
+  cut at the end of each file); a scalar written to a range, or a list to one element, is
+  refused by the request builder with `InvalidConfig`;
 - a discrete input or an input register, a value that does not fit its address (a list
   of another length or with an element of another representation included, with
-  `InvalidConfig`), and a list wider than one write carries (124 registers, 1969 coils,
-  with `ResourceLimit`) are `Rejected` with no request, and the other items go on;
-- an echo that repeats the request is `Confirmed`; a device exception is `Rejected`, with
-  the exception as the item error and its code as the protocol status;
+  `InvalidConfig`), and a list wider than one write carries (124 registers, 1969 coils, or
+  on the extended registers more than 118 registers across the end of a file, with
+  `ResourceLimit`) are `Rejected` with no request, and the other items go on;
+- an echo that repeats the request is `Confirmed` (for function 21, every sub-request with
+  its registers); a device exception is `Rejected`, with the exception as the item error
+  and its code as the protocol status;
 - a request that went out and got no usable answer (the deadline passed, the link was
   lost, the token fired, or the reply did not decode or did not echo the request) is
   `WriteOutcome::Unknown` and is never retried or replayed, whatever the `RetryPolicy`

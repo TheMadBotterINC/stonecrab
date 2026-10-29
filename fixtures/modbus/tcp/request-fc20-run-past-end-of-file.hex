@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as a request.
+# file 1 from record 9999 for 2 registers: the run ends at record 10000
+14 07 06 00 01 27 0F 00 02

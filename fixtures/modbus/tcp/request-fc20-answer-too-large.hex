@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as a request.
+# file 1 from record 0 for 122 registers: the response would be 246 bytes, one over the 245 a response holds
+14 07 06 00 01 00 00 00 7A

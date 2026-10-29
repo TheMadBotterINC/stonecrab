@@ -1,0 +1,4 @@
+# PDU bytes only: no MBAP header, no unit identifier.
+# Decoded as a request.
+# the sub-request declares 3 registers (6 bytes) and the byte count leaves 4
+15 0B 06 00 01 00 00 00 03 00 00 00 00

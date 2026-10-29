@@ -106,6 +106,14 @@ name = "modbus_device_replays"
 required-features = ["modbus", "sensors", "testkit"]
 
 [[test]]
+name = "modbus_extended"
+required-features = ["modbus", "testkit"]
+
+[[test]]
+name = "modbus_extended_selection"
+required-features = ["modbus", "testkit"]
+
+[[test]]
 name = "modbus_feature"
 required-features = ["modbus"]
 

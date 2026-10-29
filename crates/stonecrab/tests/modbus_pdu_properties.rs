@@ -7,8 +7,8 @@ mod tests {
     use proptest::prelude::*;
     use stonecrab::codec::{BoundedReader, BoundedWriter};
     use stonecrab::modbus::{
-        FunctionCode, MAX_PDU_BYTES, ModbusArea, ModbusPdu, decode_request, decode_response,
-        encode_request, encode_response,
+        FileRecord, FileRecordRead, FunctionCode, MAX_PDU_BYTES, ModbusArea, ModbusPdu,
+        decode_request, decode_response, encode_request, encode_response,
     };
 
     const READS: [FunctionCode; 4] = [
@@ -23,6 +23,9 @@ mod tests {
         FunctionCode::WriteMultipleCoils,
         FunctionCode::WriteMultipleRegisters,
     ];
+
+    const FILE_RECORDS: [FunctionCode; 2] =
+        [FunctionCode::ReadFileRecord, FunctionCode::WriteFileRecord];
 
     fn request_of(function: FunctionCode, start: u16, quantity: u16) -> ModbusPdu {
         match function.as_u8() {
@@ -160,6 +163,100 @@ mod tests {
             }
         }
 
+        // A Read File Record request is legal exactly when it has 1 to 35 sub-requests, each of
+        // at least one register inside records 0 to 9999 and ending at or before record 9999,
+        // and the answer fits the 245 data bytes of a response (V1.1b section 6.14).
+        // covers: MB-ADDR-EXTENDED, MB-LIMIT-PDU
+        // covers: SPEC mandatory-failure-cases / F1 oversized lengths
+        #[test]
+        fn prop_read_file_record_round_trips_exactly_when_it_is_legal(
+            items in proptest::collection::vec(
+                (
+                    any::<u16>(),
+                    prop_oneof![0_u16..=9_999, 9_990_u16..=10_010, any::<u16>()],
+                    prop_oneof![0_u16..=130, 9_990_u16..=10_010, any::<u16>()],
+                ),
+                0..38,
+            ),
+        ) {
+            let records: Vec<FileRecordRead> = items
+                .iter()
+                .map(|(file, record, length)| FileRecordRead { file: *file, record: *record, length: *length })
+                .collect();
+            let answer: usize = items
+                .iter()
+                .map(|(_, _, length)| 2_usize.saturating_add(usize::from(*length).saturating_mul(2)))
+                .sum();
+            let legal = (1..=35).contains(&items.len())
+                && items.iter().all(|(_, record, length)| {
+                    *length >= 1
+                        && *record <= 9_999
+                        && usize::from(*record).saturating_add(usize::from(*length)) <= 10_000
+                })
+                && answer <= 245;
+            let pdu = ModbusPdu::ReadFileRecord { records };
+            let mut writer = BoundedWriter::new(MAX_PDU_BYTES);
+            let encoded = encode_request(&pdu, &mut writer);
+            prop_assert_eq!(encoded.is_ok(), legal);
+            if legal {
+                prop_assert_eq!(decode_request(&mut BoundedReader::new(writer.as_slice())), Ok(pdu));
+            }
+        }
+
+        // A Write File Record request is legal exactly when it has at least one sub-request,
+        // each of at least one register ending inside its file, in at most 251 data bytes.
+        // covers: MB-ADDR-EXTENDED, MB-TCP-WRITE, MB-LIMIT-PDU
+        // covers: SPEC mandatory-failure-cases / F1 oversized lengths
+        #[test]
+        fn prop_write_file_record_round_trips_exactly_when_it_is_legal(
+            items in proptest::collection::vec(
+                (
+                    any::<u16>(),
+                    prop_oneof![0_u16..=9_999, 9_990_u16..=10_010],
+                    proptest::collection::vec(any::<u16>(), 0..70),
+                ),
+                0..5,
+            ),
+        ) {
+            let records: Vec<FileRecord> = items
+                .iter()
+                .map(|(file, record, registers)| FileRecord { file: *file, record: *record, registers: registers.clone() })
+                .collect();
+            let data: usize = items
+                .iter()
+                .map(|(_, _, registers)| 7_usize.saturating_add(registers.len().saturating_mul(2)))
+                .sum();
+            let legal = !items.is_empty()
+                && items.iter().all(|(_, record, registers)| {
+                    !registers.is_empty()
+                        && *record <= 9_999
+                        && usize::from(*record).saturating_add(registers.len()) <= 10_000
+                })
+                && data <= 251;
+            let request = ModbusPdu::WriteFileRecord { records: records.clone() };
+            let echo = ModbusPdu::WriteFileRecordResponse { records };
+            let mut writer = BoundedWriter::new(MAX_PDU_BYTES);
+            let encoded = encode_request(&request, &mut writer);
+            prop_assert_eq!(encoded.is_ok(), legal);
+            let mut echo_writer = BoundedWriter::new(MAX_PDU_BYTES);
+            prop_assert_eq!(encode_response(&echo, &mut echo_writer).is_ok(), legal);
+            if legal {
+                prop_assert_eq!(writer.as_slice(), echo_writer.as_slice(), "the echo is the request");
+                prop_assert_eq!(
+                    decode_request(&mut BoundedReader::new(writer.as_slice())),
+                    Ok(request.clone())
+                );
+                prop_assert_eq!(
+                    decode_response(
+                        &mut BoundedReader::new(echo_writer.as_slice()),
+                        FunctionCode::WriteFileRecord
+                    ),
+                    Ok(echo.clone())
+                );
+                prop_assert_eq!(echo.check_reply_to(&request), Ok(()));
+            }
+        }
+
         // covers: SPEC mandatory-failure-cases / F1 malformed discriminators, truncated payloads
         #[test]
         fn prop_decode_never_panics_and_accepted_bytes_re_encode(
@@ -180,6 +277,10 @@ mod tests {
                 vec![0x86],
                 vec![0x8F],
                 vec![0x90],
+                vec![0x14],
+                vec![0x15],
+                vec![0x94],
+                vec![0x95],
             ];
             for prefix in prefixes {
                 let mut input = prefix;
@@ -191,7 +292,7 @@ mod tests {
                     prop_assert_eq!(encode_request(&pdu, &mut writer), Ok(()));
                     prop_assert_eq!(writer.as_slice(), input.as_slice());
                 }
-                for function in READS.into_iter().chain(WRITES) {
+                for function in READS.into_iter().chain(WRITES).chain(FILE_RECORDS) {
                     if let Ok(pdu) = decode_response(&mut BoundedReader::new(&input), function) {
                         let mut writer = BoundedWriter::new(MAX_PDU_BYTES);
                         prop_assert_eq!(encode_response(&pdu, &mut writer), Ok(()));

@@ -36,9 +36,9 @@
 # repository gives them. The six vectors tcp/adu_upstream-* are the six <raw> elements of
 # upstream/tcp/ParserSerializerTestsuite.xml, source "upstream_fixture": whole ADUs, MBAP
 # header included, so they are framing vectors like the other tcp/adu_* ones. Two (the
-# function 0x04 request and response) decode at the PDU layer; the four function 0x14 and
-# 0x15 ("extended registers") vectors are framed by the MBAP framer but are must_fail
-# there: the PDU codec does not speak function codes 0x14 and 0x15. A test
+# function 0x04 request and response) decode at the PDU layer, and so do the four function
+# 0x14 and 0x15 ("extended registers") vectors since slice S50, which added the file record
+# PDUs to the codec (before it they were must_fail there). A test
 # (adapter_rederives_each_parser_suite_hex_from_raw_text) re-derives every one of the six
 # .hex files from the <raw> text of the retained XML by a string scan. The read exchanges
 # of the other three files (DriverTestsuite.xml and the two all-datatypes files) are the
@@ -443,8 +443,6 @@ name = "tcp/response-read-file-record"
 source = "protocol_spec"
 origin = "Modbus Application Protocol V1.1b, section 6.14 (Read File Record), response example"
 license = "Apache-2.0"
-must_fail = true
-note = "ParseError::InvalidDiscriminator: function 0x14 (read file record) is not decoded"
 
 [[vector]]
 name = "tcp/response-pdu-254-bytes"
@@ -539,8 +537,6 @@ name = "tcp/request-read-file-record"
 source = "protocol_spec"
 origin = "Modbus Application Protocol V1.1b, section 6.14 (Read File Record), request example"
 license = "Apache-2.0"
-must_fail = true
-note = "ParseError::InvalidDiscriminator: function 0x14 (read file record) is not decoded"
 
 [[vector]]
 name = "tcp/request-exception-pdu"
@@ -1703,32 +1699,244 @@ name = "tcp/adu_upstream-read-extended-registers-request-split-file-record"
 source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/ParserSerializerTestsuite.xml, test case \"Read Extended Registers Request Split File Record\" (kept at fixtures/modbus/upstream/tcp/ParserSerializerTestsuite.xml)"
 license = "Apache-2.0"
-must_fail = true
-note = "A whole ADU the framer accepts. ParseError::InvalidDiscriminator at the PDU layer: function code 0x14 (read file record) is not decoded. Retained for framing tests and PDU-layer negative tests only."
+note = "A whole ADU the framer accepts and the PDU layer decodes: a Read File Record request cut at the end of file 3 (S50)."
 
 [[vector]]
 name = "tcp/adu_upstream-read-extended-registers-response-split-file-record"
 source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/ParserSerializerTestsuite.xml, test case \"Read Extended Registers Response Split File Record\" (kept at fixtures/modbus/upstream/tcp/ParserSerializerTestsuite.xml)"
 license = "Apache-2.0"
-must_fail = true
-note = "A whole ADU the framer accepts. ParseError::InvalidDiscriminator at the PDU layer: function code 0x14 (read file record) is not decoded. Retained for framing tests and PDU-layer negative tests only."
+note = "A whole ADU the framer accepts and the PDU layer decodes: the Read File Record response of the split request, two sub-responses (S50)."
 
 [[vector]]
 name = "tcp/adu_upstream-write-extended-registers-request-file-record"
 source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/ParserSerializerTestsuite.xml, test case \"Write Extended Registers Request File Record\" (kept at fixtures/modbus/upstream/tcp/ParserSerializerTestsuite.xml)"
 license = "Apache-2.0"
-must_fail = true
-note = "A whole ADU the framer accepts. ParseError::InvalidDiscriminator at the PDU layer: function code 0x15 (write file record) is not decoded. Retained for framing tests and PDU-layer negative tests only."
+note = "A whole ADU the framer accepts and the PDU layer decodes: a Write File Record request of one register (S50)."
 
 [[vector]]
 name = "tcp/adu_upstream-write-extended-registers-request-split-file-record"
 source = "upstream_fixture"
 origin = "apache/plc4x commit ea229918f5d07700e04d7d69ab1645da679cb700, protocols/modbus/src/test/resources/protocols/modbus/tcp/ParserSerializerTestsuite.xml, test case \"Write Extended Registers Request Split File Record\" (kept at fixtures/modbus/upstream/tcp/ParserSerializerTestsuite.xml)"
 license = "Apache-2.0"
+note = "A whole ADU the framer accepts and the PDU layer decodes: a Write File Record request cut at the end of file 1 (S50)."
+
+[[vector]]
+name = "tcp/request-write-file-record"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.15 (Write File Record), request example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/response-write-file-record"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 6.15 (Write File Record), response example"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/read-file-record-exception"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 7 (Exception Responses), same shape for function 20"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/write-file-record-exception"
+source = "protocol_spec"
+origin = "Modbus Application Protocol V1.1b, section 7 (Exception Responses), same shape for function 21"
+license = "Apache-2.0"
+
+[[vector]]
+name = "tcp/request-fc20-byte-count-not-a-multiple-of-7"
+source = "adversarial"
+origin = "Authored to break the request decoder: a Read File Record byte count of 8, which is not whole sub-requests of 7 bytes"
+license = "Apache-2.0"
 must_fail = true
-note = "A whole ADU the framer accepts. ParseError::InvalidDiscriminator at the PDU layer: function code 0x15 (write file record) is not decoded. Retained for framing tests and PDU-layer negative tests only."
+note = "ParseError::InvalidDiscriminator: a Read File Record byte count of 8, which is not whole sub-requests of 7 bytes"
+
+[[vector]]
+name = "tcp/request-fc20-byte-count-zero"
+source = "adversarial"
+origin = "Authored to break the request decoder: a Read File Record byte count of 0"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: a Read File Record byte count of 0"
+
+[[vector]]
+name = "tcp/request-fc20-byte-count-246"
+source = "adversarial"
+origin = "Authored to break the request decoder: a Read File Record byte count of 246, one over the limit of 245"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::OversizedLength: a Read File Record byte count of 246, one over the limit of 245"
+
+[[vector]]
+name = "tcp/request-fc20-reference-type-5"
+source = "adversarial"
+origin = "Authored to break the request decoder: a Read File Record sub-request with reference type 5"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: a Read File Record sub-request with reference type 5"
+
+[[vector]]
+name = "tcp/request-fc20-record-length-zero"
+source = "adversarial"
+origin = "Authored to break the request decoder: a Read File Record sub-request of 0 registers"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: a Read File Record sub-request of 0 registers"
+
+[[vector]]
+name = "tcp/request-fc20-record-10000"
+source = "adversarial"
+origin = "Authored to break the request decoder: a Read File Record sub-request at record 10000, one over the limit of 9999"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::OversizedLength: a Read File Record sub-request at record 10000, one over the limit of 9999"
+
+[[vector]]
+name = "tcp/request-fc20-run-past-end-of-file"
+source = "adversarial"
+origin = "Authored to break the request decoder: a Read File Record run of 2 registers from record 9999, past the end of the file"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::OversizedLength: a Read File Record run of 2 registers from record 9999, past the end of the file"
+
+[[vector]]
+name = "tcp/request-fc20-answer-too-large"
+source = "adversarial"
+origin = "Authored to break the request decoder: a Read File Record request whose answer would be 246 bytes, one over the limit of 245"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::OversizedLength: a Read File Record request whose answer would be 246 bytes, one over the limit of 245"
+
+[[vector]]
+name = "tcp/request-fc20-truncated-by-one-byte"
+source = "adversarial"
+origin = "Authored to break the request decoder: a Read File Record byte count of 7 with 6 data bytes"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::Truncated: a Read File Record byte count of 7 with 6 data bytes"
+
+[[vector]]
+name = "tcp/request-fc20-one-trailing-byte"
+source = "adversarial"
+origin = "Authored to break the request decoder: a byte after the sub-requests of a Read File Record request"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::TrailingBytes: a byte after the sub-requests of a Read File Record request"
+
+[[vector]]
+name = "tcp/response-fc20-byte-count-zero"
+source = "adversarial"
+origin = "Authored to break the response decoder: a Read File Record response byte count of 0"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: a Read File Record response byte count of 0"
+
+[[vector]]
+name = "tcp/response-fc20-even-sub-response-length"
+source = "adversarial"
+origin = "Authored to break the response decoder: a Read File Record sub-response whose length is even, so not a reference type and whole registers"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: a Read File Record sub-response whose length is even, so not a reference type and whole registers"
+
+[[vector]]
+name = "tcp/response-fc20-reference-type-5"
+source = "adversarial"
+origin = "Authored to break the response decoder: a Read File Record sub-response with reference type 5"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: a Read File Record sub-response with reference type 5"
+
+[[vector]]
+name = "tcp/response-fc20-sub-response-past-byte-count"
+source = "adversarial"
+origin = "Authored to break the response decoder: a Read File Record sub-response that runs past the byte count"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::Truncated: a Read File Record sub-response that runs past the byte count"
+
+[[vector]]
+name = "tcp/response-fc20-byte-count-exceeds-data"
+source = "adversarial"
+origin = "Authored to break the response decoder: a Read File Record response byte count of 4 with 3 data bytes"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::Truncated: a Read File Record response byte count of 4 with 3 data bytes"
+
+[[vector]]
+name = "tcp/request-fc21-byte-count-below-9"
+source = "adversarial"
+origin = "Authored to break the request decoder: a Write File Record byte count of 8, below the 9 of one sub-request of one register"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: a Write File Record byte count of 8, below the 9 of one sub-request of one register"
+
+[[vector]]
+name = "tcp/request-fc21-byte-count-252"
+source = "adversarial"
+origin = "Authored to break the request decoder: a Write File Record byte count of 252, one over the limit of 251"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::OversizedLength: a Write File Record byte count of 252, one over the limit of 251"
+
+[[vector]]
+name = "tcp/request-fc21-reference-type-5"
+source = "adversarial"
+origin = "Authored to break the request decoder: a Write File Record sub-request with reference type 5"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: a Write File Record sub-request with reference type 5"
+
+[[vector]]
+name = "tcp/request-fc21-record-length-zero"
+source = "adversarial"
+origin = "Authored to break the request decoder: a Write File Record sub-request of 0 registers"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: a Write File Record sub-request of 0 registers"
+
+[[vector]]
+name = "tcp/request-fc21-record-10000"
+source = "adversarial"
+origin = "Authored to break the request decoder: a Write File Record sub-request at record 10000, one over the limit of 9999"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::OversizedLength: a Write File Record sub-request at record 10000, one over the limit of 9999"
+
+[[vector]]
+name = "tcp/request-fc21-run-past-end-of-file"
+source = "adversarial"
+origin = "Authored to break the request decoder: a Write File Record run of 2 registers from record 9999, past the end of the file"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::OversizedLength: a Write File Record run of 2 registers from record 9999, past the end of the file"
+
+[[vector]]
+name = "tcp/request-fc21-data-short"
+source = "adversarial"
+origin = "Authored to break the request decoder: a Write File Record sub-request that declares more registers than the byte count holds"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::Truncated: a Write File Record sub-request that declares more registers than the byte count holds"
+
+[[vector]]
+name = "tcp/request-fc21-one-trailing-byte"
+source = "adversarial"
+origin = "Authored to break the request decoder: a byte after the sub-requests of a Write File Record request"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::TrailingBytes: a byte after the sub-requests of a Write File Record request"
+
+[[vector]]
+name = "tcp/response-fc21-byte-count-zero"
+source = "adversarial"
+origin = "Authored to break the response decoder: a Write File Record response byte count of 0"
+license = "Apache-2.0"
+must_fail = true
+note = "ParseError::InvalidDiscriminator: a Write File Record response byte count of 0"
 
 # BEGIN adapter-generated entries (slice S04b)
 # Written by crates/stonecrab/tests/modbus_driver_suite_adapter.rs and compared with this file by

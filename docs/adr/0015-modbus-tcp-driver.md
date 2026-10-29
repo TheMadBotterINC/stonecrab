@@ -1118,3 +1118,77 @@ companions in `tests/modbus_parse.rs`,
 `tests/modbus_config.rs`, `a_profile_may_declare_any_of_the_three_conventions` in
 `tests/sensors_validation.rs` and the fuzz target `fuzz_modbus_address`, which reads every
 input under all four options and has five new seeds.
+
+## Addendum: extended registers (slice S50, 2026-10-29)
+This addendum records the S50 change. It supersedes the S45 addendum where that says that
+function codes 20 and 21 decode as `Unknown`, and decision 5 where that says the extended
+registers are a typed rejection.
+
+1. **Function codes 20 and 21.** `FunctionCode::ReadFileRecord` (0x14) and
+   `WriteFileRecord` (0x15) are new, appended after `Unknown` (CODING_STANDARDS 9.10), and
+   `ModbusPdu` gains `ReadFileRecord`, `ReadFileRecordResponse`, `WriteFileRecord` and
+   `WriteFileRecordResponse` after its last variant, with the public sub-request types
+   `FileRecordRead` and `FileRecord`. The codec follows V1.1b sections 6.14 and 6.15: reference
+   type 6, record numbers 0 to 9999, a run of at least one register that ends inside its
+   file, a read request of 1 to 35 sub-requests (byte count 7 to 245, a multiple of 7) whose
+   answer fits the 245 data bytes of a response, a read response of 1 to 245 data bytes in
+   sub-responses of an odd length of 3 or more, and a write request and its echo of 9 to 251
+   data bytes. Every length is compared with its bound before anything is allocated, and the
+   fuzz target `fuzz_modbus_pdu` decodes both responses and checks the echo of a write.
+2. **The address model.** `ModbusArea::ExtendedRegister` is the last variant. The number
+   written is the register address under every convention: there is no one-based shift,
+   address 0 does not exist (upstream, Tag:195-197) and `address-convention` only decides
+   whether the bare `6NNNNN` form is accepted. An address `A` is record `A % 10000` of file
+   `A / 10000 + 1`: the file number counts from 1 on the wire, as the upstream frames
+   carry it (the parser-suite vector reads file 3 for address 29998), and file 0 of the
+   specification is never sent. `ModbusAddress` keeps `offset()` as the number that goes
+   into the PDU, which for this area is the record, and gains `file_number()` and the
+   builder `ModbusAddress::extended`; `Chunk` gains `file`. The signatures of the published
+   items are unchanged, so the change is additive.
+3. **The upper limit is 655349999, not upstream's 655359999.** The last 10000 addresses
+   upstream accepts would be sent as file 65536, which the 16-bit field cannot hold. They
+   are refused at parse time (`MB-LIMIT-EXT`), so no request that cannot be encoded is ever
+   planned.
+4. **Read path.** Adjacent extended tags merge in `Batcher::plan` as the other register
+   areas do (upstream's optimizer does the same, Opt:98-100). A chunk is at most 120
+   registers, not 125, because every sub-response costs two bytes beside its registers and
+   120 registers in two files answer in 244 of the 245 bytes (125 would answer in 254
+   bytes, which no device may send). A chunk that runs past record 9999 of a file is one
+   FC20 request with one sub-request per file; the reply is proved to answer every
+   sub-request, in order, with the registers asked for, and the registers are joined in
+   order. This fixes `MB-QUIRK-B` (upstream reads the first item only).
+5. **Write path.** Each item is one FC21 request, cut the same way, so the device sees a
+   value across a file end as one write. The reply must repeat the request whole, registers
+   included, to be `Confirmed`; anything else that went out and does not confirm is
+   `Unknown`, and a device exception is `Rejected` (decisions 4 to 6 of the S46 addendum
+   apply unchanged). The upstream mspec reads `recordLength` bytes of the data of an echoed
+   record where V1.1b echoes `2 * recordLength`; the codec follows the specification.
+6. **Evidence.** No interop peer serves function codes 20 or 21 (pymodbus 3.8.6,
+   libmodbus 3.1.11 and modbus-tk do not), so `MB-ADDR-EXTENDED` is `implemented` and not
+   `automated-verified`: it rests on the specification examples, the four upstream
+   parser-suite frames and the first-party responder over the fake transport. A
+   device that serves them is the next evidence.
+7. **Not changed.** The serial drivers inherit the codec and the address model when they
+   exist; the ping address may name an extended register and is then read by FC20.
+
+Alternatives considered. Sending one FC20 or FC21 request per file instead of one request of
+several sub-requests would leave a half-written value if the second request failed, and is
+not what upstream sends. Counting files from 0 (`A / 10000`) would send file 0 for the first
+10000 registers, which the specification's file numbers (from 1 for any device that
+numbers its files) and the upstream frames contradict.
+
+Compliance: `a_file_record_span_is_cut_at_the_end_of_each_file`,
+`read_file_record_asks_for_no_more_than_a_response_can_hold`,
+`write_file_record_data_length_is_9_to_251_and_fills_the_sub_requests` and their companions
+in `tests/modbus_pdu.rs`, the vectors of `tests/modbus_pdu_vectors.rs` (the specification
+examples, the four upstream frames and the adversarial `request-fc20-*`, `response-fc20-*`,
+`request-fc21-*` and `response-fc21-*` files), the grammar tests of `tests/modbus_parse.rs`,
+the planning tests of `tests/modbus_batch.rs`, the connection tests of
+`tests/modbus_extended.rs` and the fuzz target `fuzz_modbus_pdu` with eight new seeds.
+
+Selections. The array selections of ADR-0022 (`[i]`, `[lo..hi]`, `;base`) were merged with
+this slice on 2026-10-29, and the addendum of that date to ADR-0022 decides how the two
+combine: element offsets count registers through the files, the whole selected span ends
+at or before 655349999, a selection holds at most the 120 registers of one file record read
+(where upstream allows 125), and a list is written as one FC21 request of at most 251 data
+bytes.

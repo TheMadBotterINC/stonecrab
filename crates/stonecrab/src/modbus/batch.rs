@@ -7,7 +7,9 @@
 //! starts a new chunk, so a read never covers an address the caller did not ask for. A
 //! chunk never exceeds the register or coil limit of [`BatchLimits`] and never holds more
 //! than `max_items` tags. The connection (S25) sends one request per chunk and uses each
-//! [`Member`] to decode its tag from the chunk's registers or bits.
+//! [`Member`] to decode its tag from the chunk's registers or bits. Extended registers are
+//! planned like the other register areas over their register addresses; a chunk may cross
+//! the end of a file, which the connection cuts into one sub-request per file.
 
 use std::any::Any;
 use std::num::{NonZeroU16, NonZeroUsize};
@@ -18,6 +20,10 @@ use crate::modbus::{ModbusAddress, ModbusArea, ModbusDataType, UnitId};
 
 /// Most registers one read request may carry (function codes 03 and 04, V1.1b section 6.3).
 const PROTOCOL_MAX_REGISTERS: u16 = crate::modbus::MAX_READ_REGISTERS;
+
+/// Most registers one Read File Record request may ask for (function code 20), fewer than
+/// a register read because every sub-response costs two bytes of the 245 a response holds.
+const MAX_READ_EXTENDED_REGISTERS: u16 = crate::modbus::MAX_READ_EXTENDED_REGISTERS;
 
 /// Most bits one read request may carry (function codes 01 and 02, V1.1b section 6.1).
 const PROTOCOL_MAX_COILS: u16 = crate::modbus::MAX_READ_BITS;
@@ -142,12 +148,19 @@ impl BatchLimits {
         self.items
     }
 
-    /// The bound for chunks of `area`: bits for bit areas, registers otherwise.
+    /// The bound for chunks of `area`: bits for bit areas, registers otherwise, and for
+    /// the extended registers also the most a file record response can hold.
     const fn limit_for(&self, area: ModbusArea) -> u16 {
-        if area.is_bit_area() {
-            self.coils.get()
-        } else {
-            self.registers.get()
+        match area {
+            ModbusArea::Coil | ModbusArea::DiscreteInput => self.coils.get(),
+            ModbusArea::HoldingRegister | ModbusArea::InputRegister => self.registers.get(),
+            ModbusArea::ExtendedRegister => {
+                if self.registers.get() < MAX_READ_EXTENDED_REGISTERS {
+                    self.registers.get()
+                } else {
+                    MAX_READ_EXTENDED_REGISTERS
+                }
+            }
         }
     }
 }
@@ -167,7 +180,8 @@ impl Default for BatchLimits {
 /// `offset` counts registers (register areas) or bits (bit areas) from the chunk's
 /// `start`, so a member occupies `offset..offset + width` of the chunk's data, where the
 /// width of one element is `data_type.register_size()` on register areas and 1 on bit
-/// areas, times `elements` for a list.
+/// areas, times `elements` for a list. On the extended registers the chunk's data is the
+/// registers of all its sub-requests, joined in order.
 ///
 /// # Compatibility: docs/parity/modbus.md#MB-BYTEORDER-PRECEDENCE
 /// `byte_order` and `word_order` are each resolved tag field over address block; a field
@@ -206,8 +220,13 @@ pub struct Chunk {
     pub unit_id: Option<UnitId>,
     /// The data area all members share.
     pub area: ModbusArea,
-    /// Zero-based wire offset of the first register or bit read.
+    /// Zero-based wire offset of the first register or bit read; for an extended register
+    /// the record number in [`file`](Self::file)'s file.
     pub start: u16,
+    /// The file number (1 to 65535) of the first extended register read, `None` for the
+    /// other areas. A chunk that runs past record 9999 continues at record 0 of the next
+    /// file.
+    pub file: Option<NonZeroU16>,
     /// Number of registers (register areas) or bits (bit areas) to read, at least 1.
     pub quantity: u16,
     /// The tags served by this read, ordered by `offset`.
@@ -247,7 +266,8 @@ pub struct Batcher;
 struct Entry<'a> {
     unit_id: Option<UnitId>,
     area: ModbusArea,
-    offset: u16,
+    /// The wire offset, or for an extended register its address through all the files.
+    offset: u32,
     /// Registers (register areas) or bits (bit areas) the tag occupies.
     width: u16,
     tag: &'a Tag,
@@ -258,7 +278,7 @@ struct Entry<'a> {
 struct Open {
     unit_id: Option<UnitId>,
     area: ModbusArea,
-    start: u16,
+    start: u32,
     /// One past the last register or bit covered so far.
     end: u32,
     members: Vec<Member>,
@@ -340,7 +360,7 @@ impl Batcher {
                 ));
             }
             let order = resolve_order(entry.tag, entry.address);
-            let end = u32::from(entry.offset).saturating_add(u32::from(entry.width));
+            let end = entry.offset.saturating_add(u32::from(entry.width));
             match open.as_mut() {
                 Some(chunk) if chunk.accepts(entry, end, limit) => {
                     chunk.absorb(entry, end, order);
@@ -375,27 +395,35 @@ impl Open {
     /// span bound. The member bound needs no check here: `plan` has already refused more
     /// than `max_items` tags in total, so no chunk can hold more.
     fn accepts(&self, entry: &Entry<'_>, end: u32, limit: u16) -> bool {
-        let grown = self.end.max(end).saturating_sub(u32::from(self.start));
+        let grown = self.end.max(end).saturating_sub(self.start);
         self.unit_id == entry.unit_id
             && self.area == entry.area
-            && u32::from(entry.offset) <= self.end
+            && entry.offset <= self.end
             && grown <= u32::from(limit)
     }
 
     fn absorb(&mut self, entry: &Entry<'_>, end: u32, order: Order) {
         // Entries are sorted by offset, so the offset is never below `start`, and the
         // acceptance check kept the distance within the `u16` bound.
-        let offset = entry.offset.saturating_sub(self.start);
+        let offset = u16::try_from(entry.offset.saturating_sub(self.start)).unwrap_or(u16::MAX);
         self.end = self.end.max(end);
         self.members.push(entry.member(offset, order));
     }
 
     fn finish(self) -> Chunk {
-        let span = self.end.saturating_sub(u32::from(self.start));
+        let span = self.end.saturating_sub(self.start);
+        // An extended start was validated as an address of file 65535 or lower.
+        let (file, start) = if self.area == ModbusArea::ExtendedRegister {
+            ModbusAddress::split_extended(self.start)
+                .map_or((None, u16::MAX), |(file, record)| (Some(file), record))
+        } else {
+            (None, u16::try_from(self.start).unwrap_or(u16::MAX))
+        };
         Chunk {
             unit_id: self.unit_id,
             area: self.area,
-            start: self.start,
+            start,
+            file,
             // The span was kept within a `u16` limit by `accepts`.
             quantity: u16::try_from(span).unwrap_or(u16::MAX),
             members: self.members,
@@ -439,7 +467,7 @@ fn entry(tag: &Tag) -> Result<Entry<'_>> {
     Ok(Entry {
         unit_id: address.unit_id(),
         area: address.area(),
-        offset: address.offset(),
+        offset: address.linear_address(),
         width: address.width(),
         tag,
         address,
