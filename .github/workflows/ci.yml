@@ -611,9 +611,9 @@ jobs:
           cargo install cargo-geiger --version 0.14.0 --locked
           cargo geiger --locked --all-features --manifest-path "$PWD/crates/stonecrab/Cargo.toml"
   semver:
-    # Blocking since S35. The baseline is the latest stonecrab on crates.io (0.2.0). An
-    # unchanged version in Cargo.toml is checked as a minor release, so a breaking change
-    # fails until the version bump that announces it (CODING_STANDARDS 9.10).
+    # Blocking since S35. The baseline is the latest stonecrab on crates.io (0.3.0 since
+    # 2026-10-29). An unchanged version in Cargo.toml is checked as a minor release, so a
+    # breaking change fails until the version bump that announces it (CODING_STANDARDS 9.10).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

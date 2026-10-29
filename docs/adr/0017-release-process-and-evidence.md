@@ -270,3 +270,24 @@ the alpha did for the gates it disclosed. The weekly
 
 **Not done.** The 24-hour soak and the 8-hour fuzz run have not been run: S62 recorded 10
 minutes of each soak target and 5 minutes of fuzzing. Neither is a claim about 24 hours.
+
+## Addendum (2026-10-29): the 0.3.0 release
+`stonecrab` 0.3.0 followed decisions 3 and 4 under the maintainer's approval E12 (STATUS.md,
+"Maintainer decisions (2026-10-29)"), the separate approval decision 3 asks for, given for
+that version only.
+- Release commit `66ae100` (`chore(release): stonecrab 0.3.0`), signed off and not
+  GPG-signed (no signing key is configured); its hosted CI run 40884031994 passed every job.
+- Pre-flight on that commit, with `git status --porcelain` empty before and after: `mise run
+  check`, `coverage`, `package` (a fresh `CARGO_HOME`, the list equal to
+  `packaging/stonecrab.txt`), `interop` (every peer, TLS included), `sbom` (written to
+  `target/release-evidence/sbom/`, not committed) and `regen` passed, and so did `cargo
+  package` and `cargo publish --dry-run` (139 files).
+- `cargo publish --locked -p stonecrab` was accepted at 13:51 UTC with the maintainer's own
+  `cargo login`; no token is in the repository or a log.
+- The tag is annotated and not signed, as decision 4 allows when no key is configured:
+  `v0.3.0`, tag object `7a2439f`, on `66ae100`, pushed by name after crates.io accepted the
+  crate.
+- Not done: the 24-hour soak and the 8-hour fuzz run of the S62 addendum, which this release
+  needed because it changes `src/transport`, `src/modbus` and `src/sim`; the maintainer
+  waived them (decision E9) and the release notes say so. The `release-evidence` workflow
+  was not dispatched and there is no GitHub release; both stay with the maintainer.

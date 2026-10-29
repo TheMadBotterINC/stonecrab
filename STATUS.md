@@ -23,7 +23,9 @@ are the maintainer's (see "Recommended continuation").
 - Published on crates.io: **`stonecrab` 0.2.0**, the alpha, on 2026-10-27 from commit
   `640665a` after the maintainer's explicit approval (hosted run 40612938390 green);
   `stonecrab` 0.1.0, the specification-stage placeholder, stays listed as an old version.
-- Published on crates.io: **`stonecrab` 0.3.0** on 2026-10-29 (decision E12), the version
+- Published on crates.io: **`stonecrab` 0.3.0** on 2026-10-29 at 13:51 UTC (decision E12)
+  from commit `66ae100` (hosted run 40884031994 green), tagged `v0.3.0` (annotated tag
+  object `7a2439f`; not signed, since no signing key is configured). It is the version
   since slice S74, because the sensor `unit` became `Option<String>` (G06), a breaking
   change; CHANGELOG.md has its section and the migration note. The next breaking change
   moves master to 0.4.0 with its own note (CODING_STANDARDS 9.10).
@@ -476,6 +478,7 @@ commit; gates named were run locally before that commit.
 | S71 | 2026-10-29 | TLS (decision E11, ADR-0032; an ADR-0018 addendum for the feature): an opt-in `tls` feature (in neither the default set nor `full`) adds `rustls` 0.23 with the `ring` provider and `tokio-rustls` 0.26 (licenses within deny.toml; `rustls` joins the `once_cell` wrappers, and the copies in `fuzz/` and `tools/stonecrab-codegen/` follow), a `TlsFactory` over the TCP connect path with the handshake inside the same deadline, and `modbus-tcp:tls://host[:802]` with upstream's keys `tls.trust-store` (required) and `tls.keystore` (mutual TLS; PEM, at most 1 MiB, read once). Trust is only the given anchors (no web PKI, platform store or verify-off); the server name is always verified; TLS 1.2 and 1.3. Certificate failures are `Trust`, a refused client certificate `Authentication`; the keystore path never reaches `Display`, `Debug` or `redacted_display`, and errors name the option, not the path. `tls-psk` is `InvalidConfig` with the reason; `modbus-rtu` and `modbus-ascii` refuse every `tls.` key on every carrier (a review caught a silent plaintext fallback there). Tests run on a PKI generated in code (Ed25519 through ring; `rcgen` needs the banned `time`); the new `interop-tls` job and `mise run interop-tls` (also in `mise run interop`) run pymodbus 3.8.6 over mutual TLS with a PKI made at run time. The first hosted run of `interop-tls` goes with this push | check, coverage (modbus 100%, transport 98.7%), lint-attrs, parity, examples, semver (against master as a minor), dependencies, machete, features, regen, package list, fuzz-smoke, interop for every gateway peer and interop-tls (3 of 3 against pymodbus 3.8.6 over mutual TLS) |
 | S72 | 2026-10-29 | Object PLC Mapping, the third PLC4X tool (decisions E6 and E11, ADR-0033): no proc-macro crate and no feature or dependency. A type implements `PlcEntity` (its `EntityField` list of name, address or `${alias}` and optional cache duration, and a by-name conversion through `FieldValue` for `bool`, the integers, `f32`, `f64`, `char`, `String`, `Duration`, the calendar types, `Vec<T>` and `PlcValue`), or `stonecrab::plc_entity!`, a `macro_rules!` macro, writes the struct and the implementation (`field: Type => "address" (cache = <const Duration>)`; a field type without `FieldValue`, a non-literal address, a non-constant duration or a generic struct do not compile, shown by `compile_fail` doctests). `EntityManager` over the S68 `ConnectionCache`: `read` (one request), `write` (one request, the `WriteResponse` returned), `connect` and `merge` give a `ConnectedEntity` whose `refresh` re-reads in one request only the fields whose duration passed on the injected clock (no duration means every refresh, upstream's -1), and `disconnect` returns the value; aliases (`with_alias`) and a request timeout (default 1 s) as upstream. Each request takes a lease and gives it back; nothing is spawned. Writes send the field type's own value, so a written field must have its tag's type (ADR-0033). The runtime proxy stays deferred (`TOOL-OPM-PROXY`). 24 cases on the fake clock against the simulator and Modbus TCP over the fake transport | check, coverage (core 100%), lint-attrs, parity, examples, semver (against master as a minor), dependencies, machete, features, regen, package list, fuzz-smoke, interop for every peer |
 | S66/S67, S71 (evidence) | 2026-10-29 | The first hosted runs of the new jobs: `regen` passed in run 40869309931 (commit 30b0b83) and in every completed run since; `interop-tls` passed 3 of 3 in run 40880582023 (commit bef0d25), so the TLS cells name that run. That push failed two jobs: `cross`, because `ring` (feature `tls`) compiles C in its build script and the runner had no aarch64 or armv7 C compiler, and the Windows legs of `test`, because the redaction test looked for a raw path in a display that shows paths in their Debug form; 764294b installs the cross compilers in `cross` and makes the test compare the Debug form and the keystore file name. Before that, run 40869309931 failed `fuzz-smoke` because `fuzz/Cargo.lock` still named 0.2.0 (fixed in c1238e9) | parity |
+| Release 0.3.0 | 2026-10-29 | `stonecrab` 0.3.0 published to crates.io at 13:51 UTC under decision E12, from the release commit `66ae100` (the CHANGELOG section with the four release-note items of SPEC and the gates not run, the "Migration from 0.2" entry, and every document that names the current version), and tagged `v0.3.0` (annotated, tag object `7a2439f`, not signed). Before the release commit, an independent three-lens review (release claims, changelog completeness, package and metadata) corrected stale claims in the shipped crate README and Modbus page and completed the migration entry; three CI fixes landed first (`fuzz/Cargo.lock` at 0.3.0, the C cross compilers and target headers that `ring` needs in `cross`, and a portable TLS redaction test). The 24-hour soak and the 8-hour fuzz run were waived (E9) and the release notes say so; an ADR-0017 addendum records the steps. SECURITY.md now supports the 0.3 line only | check, coverage (every module at its threshold), package (fresh CARGO_HOME), interop (every peer), sbom and regen on the clean release commit; cargo package and cargo publish --dry-run; hosted run 40884031994 green |
 
 ## Verified evidence and reproduction
 
@@ -763,10 +766,11 @@ Deferred features, each a deferred row in `docs/parity/modbus.md` or an item of 
   against the published `stonecrab` 0.2.0. An unchanged `version` is checked as a minor
   release (run 40787826005: 202 checks pass, "no semver update required"), so a breaking
   change fails CI until the version bump that announces it, with its migration note. Since
-  S74 the version is 0.3.0, a major step from 0.2.0, so the job checks nothing until 0.3.0
-  is published; slices meanwhile compare with master (`cargo semver-checks -p stonecrab
-  --baseline-rev <master> --release-type minor`). cargo-semver-checks has no lint for the
-  type of a public struct field, so it never reported G06; the version bump announces it.
+  0.3.0 was published (2026-10-29) the baseline is 0.3.0 and an unchanged version is again
+  checked as a minor release; between S74 and the publish the job checked nothing, and the
+  slices compared with master (`cargo semver-checks -p stonecrab --baseline-rev <master>
+  --release-type minor`). cargo-semver-checks has no lint for the type of a public struct
+  field, so it never reported G06; the 0.3.0 version announced it.
 - **A plain `cargo test` runs the reduced suite** (no `testkit` feature, so the test files
   that need the kit are skipped without a notice) and the kit's own tests need a checkout;
   see "Important implementation and tooling details".
@@ -880,7 +884,8 @@ whether to file the six drafted upstream issues under `docs/evidence/upstream-is
   (upstream always sends FC15); profile schema version 2 with value-matched quality rules;
   the Linux I2C backend stays deferred until hardware.
 - **E12** release 0.3.0 after this run, with G06 (E7) in it. This is the separate approval
-  the line below asks for, for 0.3.0 only.
+  the line below asks for, for 0.3.0 only. Used: 0.3.0 was published and tagged on
+  2026-10-29, so another version needs a new approval.
 
 Keep changes reviewable, commit tested slices one signed-off commit per green slice, and
 maintain the per-module coverage gates. No first-party unsafe, panics on input, unbounded
