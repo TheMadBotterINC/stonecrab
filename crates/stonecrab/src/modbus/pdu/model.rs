@@ -69,6 +69,27 @@ pub enum ModbusPdu {
         /// Number of registers, 1 to 125.
         quantity: u16,
     },
+    /// The normal response to function 0x01 or 0x02.
+    ReadBitsResponse {
+        /// `ReadCoils` or `ReadDiscreteInputs`.
+        function: FunctionCode,
+        /// The bits packed least significant bit first, 1 to 250 bytes, as on the wire.
+        bytes: Vec<u8>,
+    },
+    /// The normal response to function 0x03 or 0x04.
+    ReadRegistersResponse {
+        /// `ReadHoldingRegisters` or `ReadInputRegisters`.
+        function: FunctionCode,
+        /// The register values in wire order, 1 to 125 of them.
+        registers: Vec<u16>,
+    },
+    /// An exception response: the function with its high bit set, then a code.
+    Exception {
+        /// The function the device refused (without the high bit).
+        function: FunctionCode,
+        /// Why it refused.
+        code: ExceptionCode,
+    },
     /// Function 0x0F: write `quantity` coils from `start`, the first of them the least
     /// significant bit of the first byte.
     WriteMultipleCoils {
@@ -94,20 +115,6 @@ pub enum ModbusPdu {
         /// The values in wire order, 1 to 123 of them.
         registers: Vec<u16>,
     },
-    /// The normal response to function 0x01 or 0x02.
-    ReadBitsResponse {
-        /// `ReadCoils` or `ReadDiscreteInputs`.
-        function: FunctionCode,
-        /// The bits packed least significant bit first, 1 to 250 bytes, as on the wire.
-        bytes: Vec<u8>,
-    },
-    /// The normal response to function 0x03 or 0x04.
-    ReadRegistersResponse {
-        /// `ReadHoldingRegisters` or `ReadInputRegisters`.
-        function: FunctionCode,
-        /// The register values in wire order, 1 to 125 of them.
-        registers: Vec<u16>,
-    },
     /// The normal response to function 0x06: the request's address and value, echoed.
     WriteSingleRegisterResponse {
         /// The address of the request.
@@ -124,13 +131,6 @@ pub enum ModbusPdu {
         start: u16,
         /// The quantity of the request.
         quantity: u16,
-    },
-    /// An exception response: the function with its high bit set, then a code.
-    Exception {
-        /// The function the device refused (without the high bit).
-        function: FunctionCode,
-        /// Why it refused.
-        code: ExceptionCode,
     },
 }
 

@@ -15,6 +15,8 @@
 #   mise run dependencies  = CI "dependencies" job
 #   mise run package       = CI "package" job
 #   mise run dco -- RANGE  = CI "dco" job (RANGE defaults to origin/master..HEAD)
+#   mise run semver        = CI "semver" job (cargo-semver-checks against the published
+#                            stonecrab; blocking since S35)
 #   mise run mutants       = the "scheduled" job's mutation step once it is enabled (it is a
 #                            no-op there today; scripts/mutants.sh, mutants.toml, evidence
 #                            under docs/evidence/mutants/, ADR-0017)
@@ -23,7 +25,7 @@
 #
 # CI selects the nextest `ci` profile, which only adds a JUnit file; `mise run check` uses
 # the default profile. These CI jobs have no task: the 1.97.1 and OS cells of "test",
-# "cross" (needs the foreign targets), "beta", "semver", "geiger" and "scheduled".
+# "cross" (needs the foreign targets), "beta", "geiger" and "scheduled".
 # ADR-0005 records the coverage and waiver decisions; ADR-0017 records the release
 # process, and the pins of cargo-mutants, cargo-cyclonedx and cargo-release below.
 # scripts/fuzz-evidence.sh (the recorded 30-minute run of all fuzz targets) has no task.
@@ -39,6 +41,7 @@ rust = "1.99.1"
 "cargo:cargo-mutants" = "27.1.0"
 "cargo:cargo-cyclonedx" = "0.5.9"
 "cargo:cargo-release" = "1.1.7"
+"github:obi1kenobi/cargo-semver-checks" = "0.51.0"
 
 [tasks.check]
 description = "Run local formatting, strict lint, tests and documentation gates"
@@ -89,6 +92,10 @@ run = "scripts/sbom.sh"
 [tasks.dco]
 description = "Require Signed-off-by on every commit in a range (default origin/master..HEAD)"
 run = "scripts/dco-check.sh"
+
+[tasks.semver]
+description = "Check the public API against the published stonecrab with cargo-semver-checks (the blocking CI semver job; ADR-0005, addendum S35)"
+run = "cargo semver-checks -p stonecrab"
 
 [tasks.dependencies]
 description = "Check dependency advisories, licenses, bans and sources"

@@ -121,12 +121,6 @@ pub enum ProfileError {
         /// Index of the step in the measurement's scaling pipeline.
         step: usize,
     },
-    /// A measurement's `range` has a bound that is NaN or infinite, or `min` above `max`
-    /// (equal bounds are valid).
-    InvalidRange {
-        /// Index of the measurement.
-        measurement: usize,
-    },
     /// A quality mapping names a status field the measurement does not declare.
     UnknownQualityReference {
         /// Index of the measurement.
@@ -171,6 +165,12 @@ pub enum ProfileError {
         measurement: usize,
         /// Index of the later status field, the one that repeats the name.
         status_field: usize,
+    },
+    /// A measurement's `range` has a bound that is NaN or infinite, or `min` above `max`
+    /// (equal bounds are valid).
+    InvalidRange {
+        /// Index of the measurement.
+        measurement: usize,
     },
 }
 

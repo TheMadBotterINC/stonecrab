@@ -321,7 +321,7 @@ pub struct PlcError { inner: Box<ErrorInner> }
 
 9.9. **Feature flags are additive.** Enabling a feature never removes an item, changes a default, opens a socket or probes hardware. Feature-gated code is gated at the module boundary (`#[cfg(feature = "serial")] pub mod serial;`), not sprinkled across a module. A type that exists under two features has one definition. `cargo hack --feature-powerset` verifies every combination compiles. — **CI**
 
-9.10. **Semver.** Pre-1.0: breaking changes bump the minor version and come with a migration note in `CHANGELOG.md`. `cargo semver-checks` runs on every PR against the last published version and its report is attached to the PR; a flagged break without a version bump blocks merge. — **CI**
+9.10. **Semver.** Pre-1.0: breaking changes bump the minor version and come with a migration note in `CHANGELOG.md`. A new variant of a published enum goes after the existing variants, even in a `#[non_exhaustive]` enum: cargo-semver-checks reports a shifted implicit discriminant as a major change (`enum_no_repr_variant_discriminant_changed`), and `mise run semver` runs the CI check locally. `cargo semver-checks` runs on every PR against the last published version and its report is attached to the PR; a flagged break without a version bump blocks merge. — **CI**
 
 9.11. **`Send + Sync + 'static`.** Every public type that can end up in a `dyn` object or a spawned task is `Send + Sync + 'static`, and there is a compile-time assertion for each in that crate's tests:
 
