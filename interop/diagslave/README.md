@@ -1,8 +1,9 @@
-# Stonecrab diagslave interoperability peer (Modbus UDP and Modbus RTU over TCP)
+# Stonecrab diagslave interoperability peer (Modbus UDP, RTU over TCP, ASCII and RTU on a serial device)
 
 The independent peer of `modbus-tcp:udp` (slice S61, ADR-0027) and of `modbus-rtu:tcp` (slice
-S59b, ADR-0024): diagslave 3.6, the free Modbus slave simulator of proconX, in one image run
-in two modes. `serve.sh` takes the mode as its argument.
+S59b, ADR-0024), and of `modbus-ascii:tcp` and `modbus-rtu:tcp` as diagslave frames them on a
+serial line (slice S60b, ADR-0024): diagslave 3.6, the free Modbus slave simulator of
+proconX, in one image run in four modes. `serve.sh` takes the mode as its argument.
 
 - `udp` (the default): a Modbus UDP slave (`diagslave -m udp -p 1502`), with `tc netem` inside
   the container to lose, delay, duplicate and reorder its replies, which Toxiproxy cannot do
@@ -17,6 +18,18 @@ in two modes. `serve.sh` takes the mode as its argument.
   for the RTU run; the task and the job set it). The two modes use different container
   names, host ports (UDP 1502, TCP 1503), test files and evidence directories, so the two
   jobs never collide.
+- `ascii`: a Modbus ASCII slave on a serial device (`diagslave -m ascii -a 1 -b 19200 -d 7
+  -s 1 -p even /tmp/ttyA`), and `rtu-pty`: a Modbus RTU slave on a serial device
+  (`diagslave -m rtu -a 1 -b 19200 -d 8 -s 1 -p none -f 20 /tmp/ttyA`). Inside the container
+  `socat -d -d pty,raw,echo=0,link=/tmp/ttyA pty,raw,echo=0,link=/tmp/ttyB` makes a
+  pseudo-terminal pair, diagslave opens `/tmp/ttyA`, and `socat -d -d
+  TCP-LISTEN:1504,reuseaddr,fork,max-children=1 FILE:/tmp/ttyB,raw,echo=0` bridges the other
+  end to TCP port 1504 (published on host port 1504 for `ascii` and 1505 for `rtu-pty`), so
+  `modbus-ascii:tcp://host:port` and `modbus-rtu:tcp://host:port` reach diagslave's serial
+  framing. The `interop-ascii` and `interop-rtu-pty` jobs and `mise run interop-ascii` and
+  `mise run interop-rtu-pty` (both in `mise run interop`) run them. Containers
+  `stonecrab-interop-diagslave-ascii` and `stonecrab-interop-diagslave-rtu-pty`, evidence in
+  `diagslave-ascii/` and `diagslave-rtu-pty/`.
 
 ## First-party statement, license and provenance
 
@@ -30,7 +43,9 @@ neither the archive nor an image holding it is committed or pushed. `PROVENANCE.
 the terms in more detail.
 
 What is pinned: the base image `debian:trixie-slim` by index digest (the one of
-`interop/libmodbus/`), `iproute2` 6.15.0-1 by exact version, and the diagslave archive by
+`interop/libmodbus/`), `iproute2` 6.15.0-1 and `socat` 1.8.0.3-1+deb13u1 by exact version
+(socat's version read from the trixie archive on 2026-10-29; a trixie that no longer has
+either fails the build step), and the diagslave archive by
 SHA-256 (`01c87fe4...f2fe97e`, the archive whose README is revision 3.6 of 2026-10-10). The
 download URL, `https://www.modbusdriver.com/downloads/diagslave.tgz`, carries no version, so
 the vendor can replace the archive under the same name. When that happens the build fails
@@ -96,6 +111,62 @@ own, over `modbus-rtu:tcp://127.0.0.1:1503`:
 | `interop_rtu_a_unit_the_slave_does_not_serve_is_a_closed_connection_not_a_reply` | unit 2: `Disconnected`, and unit 1 on another connection is untouched |
 | `interop_rtu_ping_reads_the_ping_address` | ping |
 
+### The `ascii` and `rtu-pty` modes
+
+Observed on this image on 2026-10-29 (colima, an aarch64 binary whose banner reads
+"diagslave 3.5"); none of it is documented by proconX beyond the options:
+
+- The start-up banner reads "Protocol configuration: Modbus ASCII" or "Modbus RTU, frame
+  tolerance = 20ms", "Slave configuration: address = 1" and "Serial port configuration:
+  /tmp/ttyA, 19200, 7, 1, even" (ASCII) or "19200, 8, 1, none" (RTU). The baud rate does not
+  throttle a pseudo-terminal, and parity is not checked on one; the settings are recorded
+  because a real line would use them. Parity even and 7 data bits are diagslave's ASCII
+  defaults; the unit is 1 (`-a 1`).
+- Serial framing: one request written as one frame is answered. In RTU, diagslave cuts a
+  frame by the gap between characters: with its default tolerance (`-f 0`) a request
+  written in pieces of 1 or 4 bytes 10 ms apart gets no reply, with `-f 20` (the largest
+  value it takes) it does. Stonecrab writes a frame in one write, so the tests would pass
+  with either; `-f 20` guards against a slow runner splitting a frame.
+- A frame for a unit it does not serve (unit 2 was tried) gets no reply and no log line, and
+  the connection is not closed: the driver's answer is `Timeout`. A request after it is
+  answered. This differs from `-m enc`, where diagslave closes the connection.
+- ASCII: a frame with a wrong LRC, a frame in lower-case hex and a line with no colon get no
+  reply; a frame ended by LF alone, and one with leading noise before the colon, are
+  answered (seen in a probe by hand, not asserted by a test). The replies are upper-case hex
+  ended by CR LF. A request of 123 registers (FC16) and a read of 125 (FC03) are 511
+  characters each way and are served.
+- RTU: a request with a wrong CRC gets no reply and the connection stays open (`-m enc`
+  closes it).
+- Function codes 20 and 21 get exception 02 as in `-m enc`; function code 0x41 (unknown) gets
+  exception 01 in `-m ascii` (a probe by hand). Areas, aliases (input registers are the
+  holding registers, discrete inputs are the coils) and the log are as in the `enc` mode.
+- One master: the bridge's `max-children=1` keeps a second TCP connection waiting in the
+  listen backlog until the first is closed. socat takes about 0.5 s (its default `-t`) after
+  the client closes to end the child that held the device, so each test costs about that
+  much. `serve.sh` stays PID 1, runs the pair, diagslave and the bridge as children and exits
+  (the container stops) as soon as one of them ends.
+- Readiness: `interop.sh wait` sends an FC03 read of register 0 as an ASCII frame (colon, LRC)
+  or an RTU frame (CRC) through the bridge until a valid reply with a right LRC or CRC
+  returns.
+- The evidence (`image-digest.txt`) lists the `socat` and `diagslave` command lines read from
+  `/proc`, the `iproute2` and `socat` package versions, the image id and the pins; the
+  `server.log` holds socat's `-d -d` notices, the banner and diagslave's request log.
+
+The nine tests of `modbus_interop_diagslave_ascii` are those of the RTU file with the ASCII
+driver: `interop_ascii_holding_registers_are_written_and_read_back`,
+`interop_ascii_input_registers_read_what_diagslave_aliases_to_the_holding_registers`,
+`interop_ascii_coils_are_written_and_read_back`,
+`interop_ascii_discrete_inputs_read_what_diagslave_aliases_to_the_coils`,
+`interop_ascii_a_range_selection_is_one_request_and_one_list_of_what_was_written`,
+`interop_ascii_the_longest_frames_are_framed_and_checked_each_way` (511 characters),
+`interop_ascii_exception_02_is_a_typed_device_exception_and_the_session_goes_on`,
+`interop_ascii_a_unit_the_slave_does_not_serve_is_silence` (`Timeout`, then unit 1 still
+answers on a new connection) and `interop_ascii_ping_reads_the_ping_address`. The `rtu-pty`
+run is the nine tests of `modbus_interop_diagslave_rtu` without
+`interop_rtu_a_unit_the_slave_does_not_serve_is_a_closed_connection_not_a_reply` and with
+`interop_rtu_a_unit_the_slave_does_not_serve_is_silence`; the `enc` run leaves that one out.
+Every value read is compared with the one written.
+
 ## The faults
 
 The tests run `docker exec -u 0 stonecrab-interop-diagslave tc qdisc replace dev eth0 root
@@ -157,3 +228,29 @@ nine tests, and writes the evidence to `target/interop-evidence/diagslave-rtu/`:
 output, the image id with its base and the archive checksum, the command line (`mode: enc`,
 `command: /usr/local/bin/diagslave -m enc -p 1503 -a 1`) and the server log. The run needs
 no `NET_ADMIN` capability and no kernel module.
+
+## Build and run (ascii and rtu-pty)
+
+```sh
+docker build -f interop/diagslave/Dockerfile -t stonecrab-interop-diagslave:local .
+docker run -d --name stonecrab-interop-diagslave-ascii \
+  -p 127.0.0.1:1504:1504/tcp stonecrab-interop-diagslave:local ascii
+STONECRAB_INTEROP_DIAGSLAVE_ASCII=modbus-ascii:tcp://127.0.0.1:1504 \
+  cargo nextest run -p stonecrab --all-features --run-ignored ignored-only --test-threads 1 \
+  -E 'binary(modbus_interop_diagslave_ascii) & test(/^tests::interop_/)'
+docker rm -f stonecrab-interop-diagslave-ascii
+# RTU on a serial device
+docker run -d --name stonecrab-interop-diagslave-rtu-pty \
+  -p 127.0.0.1:1505:1504/tcp stonecrab-interop-diagslave:local rtu-pty
+STONECRAB_INTEROP_DIAGSLAVE_RTU=modbus-rtu:tcp://127.0.0.1:1505 \
+  cargo nextest run -p stonecrab --all-features --run-ignored ignored-only --test-threads 1 \
+  -E 'binary(modbus_interop_diagslave_rtu) & test(/^tests::interop_/) & not test(/_closed_connection_not_a_reply$/)'
+docker rm -f stonecrab-interop-diagslave-rtu-pty
+```
+
+`mise run interop-ascii` and `mise run interop-rtu-pty` do all of it, including the check that
+the filter selects exactly nine tests, and write the evidence to
+`target/interop-evidence/diagslave-ascii/` and `diagslave-rtu-pty/`. The enc run of
+`modbus_interop_diagslave_rtu` has to leave out `/_a_unit_the_slave_does_not_serve_is_silence$/`
+the same way (`interop.sh` does). No `NET_ADMIN` capability and no kernel module are needed:
+the container makes its own pseudo-terminals.

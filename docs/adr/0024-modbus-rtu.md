@@ -422,3 +422,44 @@ image in its encapsulated mode (`-m enc -p 1503 -a 1`) and all nine `interop_rtu
 passed. The `automated-verified` statuses of the S59b addendum and the
 `interoperability-tested` level of RTU over a TCP gateway now rest on that run as well as
 on the first local one.
+
+## Addendum (S60b, 2026-10-29): ASCII, and RTU on a serial device, against an independent peer
+### Status
+Accepted (2026-10-29), as slice S60b of docs/POST_ALPHA_PLAN.md. It amends the evidence level
+of the ASCII driver (addendum S60, "simulator-tested only") and extends addendum S59b; it
+changes no other decision. No code under `crates/stonecrab/src` changes.
+
+### Decision
+1. **The peer, on a serial device.** The diagslave 3.6 image of S61 and S59b gets two more
+   modes, `ascii` (`diagslave -m ascii -a 1 -b 19200 -d 7 -s 1 -p even`) and `rtu-pty`
+   (`diagslave -m rtu -a 1 -b 19200 -d 8 -s 1 -p none -f 20`). In both, socat (Debian
+   package 1.8.0.3-1+deb13u1, by exact version, like iproute2) makes a pseudo-terminal pair
+   inside the container, diagslave opens one end as its serial port and socat bridges the
+   other end to TCP port 1504. The drivers' `tcp` carrier (decision 10 of the base decision)
+   therefore reaches the framing diagslave uses on a line: the colon, hex and LRC of ASCII,
+   and RTU frames cut by the gap between characters (`-f 20`, the largest tolerance diagslave
+   takes; with its default of 0 a request written in pieces 10 ms apart gets no reply, a
+   request written as one frame is answered). `-m enc` stays the peer of S59b.
+2. **One master.** The bridge serves one TCP connection at a time (`max-children=1`): a
+   serial line has one master, and two connections would share one reply stream. The tests
+   that need two clients in sequence close the first before opening the next.
+3. **The unserved unit is silence on a line.** With `-a 1` diagslave closes the connection
+   on a frame for another unit in `-m enc` (addendum S59b), and answers nothing at all on a
+   serial device, in `-m ascii` and `-m rtu` alike: the driver reports `Timeout` at the
+   deadline, which is what decision 7 says of silence. Each of the two RTU runs has its own
+   test of the case and `interop.sh` leaves the other out.
+4. **Evidence level.** Over the `tcp` carrier, reads of every area, writes read back, a range
+   selection, requests and replies of 511 characters in ASCII (255 bytes in RTU), ping,
+   exception 02 and an unserved unit are `interoperability-tested` for ASCII (job
+   `interop-ascii`) and for RTU on a serial device (job `interop-rtu-pty`), as they are for
+   RTU on `-m enc`. The driver's own serial port, the line settings, the silence before an
+   RTU request, the reopen of a lost port and a device stay `simulator-tested` (a pseudo-terminal
+   is also not a serial port of the driver: the carrier is `tcp`). The first runs were local
+   (colima, 9 of 9 each, 2026-10-29); the first hosted runs are the next evidence.
+
+### Compliance
+- `crates/stonecrab/tests/modbus_interop_diagslave_ascii.rs`,
+  `crates/stonecrab/tests/modbus_interop_diagslave_rtu.rs`, `interop/diagslave/`,
+  `docs/parity/modbus-serial.md` (rows `MBS-ASCII-SEND`, `MBS-ASCII-LRC` and
+  `MBS-ASCII-WIRE-MODEL` carry `automated-verified`; `MBS-OP-READ`, `MBS-OP-WRITE`,
+  `MBS-OP-PING` and `MBS-TRANS-TCP` carry it for the ASCII half too).

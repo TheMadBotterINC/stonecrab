@@ -13,6 +13,15 @@
 //! of `.github/workflows/ci.yml`. Without the variable the tests stay ignored and nothing
 //! here touches the network.
 //!
+//! Since slice S60b the same tests run a second time against `diagslave -m rtu -a 1 -b 19200
+//! -d 8 -s 1 -p none -f 20` on a serial device: one end of a pseudo-terminal pair that socat
+//! makes, the other end bridged to a TCP port (`mise run interop-rtu-pty`, the `interop-rtu-pty`
+//! job), which is RTU framing as diagslave does it on a line (it cuts frames by the gap
+//! between characters) and not the stream of `-m enc`. The two runs differ in one answer: a
+//! frame for a unit the slave does not serve is a closed connection with `-m enc` and
+//! silence on the device, so each run has its own test of it, and `interop.sh` leaves the
+//! other one out (a run of this file without that filter runs both, and one of them fails).
+//!
 //! # What the server is
 //! diagslave 3.6 keeps its areas in memory, zero until written, and never forgets a write
 //! between connections. Its input registers are its holding registers and its discrete
@@ -67,7 +76,7 @@ mod tests {
         Peer::connect_with(
             Box::new(ModbusRtuDriver::new()),
             &format!("{base}?access=read-write&request-timeout-ms=2000{extra}"),
-            "Start it with `mise run interop-rtu` or point the variable at a diagslave -m enc -a 1",
+            "Start it with `mise run interop-rtu` (or interop-rtu-pty) or point the variable at a diagslave -m enc -a 1 or a diagslave -m rtu -a 1 behind a socat pty bridge",
         )
         .await
     }
@@ -377,6 +386,47 @@ mod tests {
             "unit 1 on its own connection"
         );
         served.close().await;
+    }
+
+    // covers: S60b / MBS-ADDR-UNIT-ID, MBS-BUS-CORRELATION a unit on a serial device (rtu-pty run)
+    #[tokio::test]
+    #[ignore = "interop: set STONECRAB_INTEROP_DIAGSLAVE_RTU"]
+    async fn interop_rtu_a_unit_the_slave_does_not_serve_is_silence() {
+        let served = connect("").await;
+        let seeded = served
+            .write(vec![(
+                served.tag("x", "holding-register:101:UINT"),
+                PlcValue::U16(0x4321),
+            )])
+            .await;
+        assert!(all_confirmed(&seeded), "{seeded:?}");
+        // One master on the line: the first connection is closed before the next is opened.
+        served.close().await;
+        let other = connect("&default-unit-identifier=2").await;
+        let outcome = other
+            .try_read(
+                vec![other.tag("x", "holding-register:101:UINT")],
+                std::time::Duration::from_secs(2),
+            )
+            .await;
+        // On a serial device diagslave answers a frame for another unit with nothing at all.
+        assert_eq!(
+            outcome.map(|_| ()).map_err(|error| error.kind()),
+            Err(ErrorKind::Timeout),
+            "unit 2"
+        );
+        other.close().await;
+        // The slave is still there for unit 1.
+        let again = connect("").await;
+        let response = again
+            .read(vec![again.tag("x", "holding-register:101:UINT")])
+            .await;
+        assert_eq!(
+            value_of(&response, "x"),
+            Some(PlcValue::U16(0x4321)),
+            "unit 1 after the silence"
+        );
+        again.close().await;
     }
 
     // covers: S59b / MBS-OP-PING

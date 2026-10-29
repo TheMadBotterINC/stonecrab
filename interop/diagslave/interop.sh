@@ -8,6 +8,11 @@
 #   enc            Modbus RTU encapsulated in TCP, the stream of a serial-to-IP gateway (slice
 #                  S59b, ADR-0024); the CI job "interop-rtu" and `mise run interop-rtu` (and
 #                  `mise run interop`)
+#   ascii          Modbus ASCII on a serial device, a pseudo-terminal that socat bridges to a TCP
+#                  port (slice S60b, ADR-0024); the CI job "interop-ascii" and `mise run
+#                  interop-ascii` (and `mise run interop`)
+#   rtu-pty        Modbus RTU on the same kind of device (slice S60b); the CI job
+#                  "interop-rtu-pty" and `mise run interop-rtu-pty` (and `mise run interop`)
 # The CI jobs call the steps one by one and the mise tasks call `run`, so the two do the same
 # thing.
 #
@@ -16,13 +21,18 @@
 #   start     run it detached (udp: container stonecrab-interop-diagslave on 127.0.0.1:1502/udp,
 #             with the NET_ADMIN capability that tc needs, then check that a netem discipline
 #             can be put on the container's eth0 and removed (the kernel needs sch_netem);
-#             enc: container stonecrab-interop-diagslave-rtu on 127.0.0.1:1503/tcp)
+#             enc: container stonecrab-interop-diagslave-rtu on 127.0.0.1:1503/tcp;
+#             ascii: container stonecrab-interop-diagslave-ascii on 127.0.0.1:1504/tcp;
+#             rtu-pty: container stonecrab-interop-diagslave-rtu-pty on 127.0.0.1:1505/tcp)
 #   wait      probe until 60 s have elapsed (about 1 s apart) with a real Modbus FC03 read (python3):
-#             over UDP, or an RTU frame with its CRC over TCP
-#   tests     cargo nextest run the interop_ tests of modbus_interop_diagslave (6, udp) or
-#             modbus_interop_diagslave_rtu (9, enc), one at a time
-#   evidence  write the image id, the base, the archive checksum, the iproute2 version, the
-#             command line diagslave runs with and the server log to the evidence dir
+#             over UDP, an RTU frame with its CRC over TCP (enc and rtu-pty) or an ASCII frame
+#             with its LRC over TCP (ascii)
+#   tests     cargo nextest run the interop_ tests of modbus_interop_diagslave (6, udp),
+#             modbus_interop_diagslave_rtu (9, enc; 9 again, one of them another, in rtu-pty) or
+#             modbus_interop_diagslave_ascii (9, ascii), one at a time
+#   evidence  write the image id, the base, the archive checksum, the iproute2 and socat
+#             versions, the command lines diagslave and socat run with and the server log to
+#             the evidence dir
 #   stop      remove the container (no error when it is not there)
 #   run       build, start, wait, tests, evidence, stop; the exit status is the first failure (the
 #             container is always stopped; the evidence is written whenever it started)
@@ -30,18 +40,25 @@
 # The udp mode needs a Docker that forwards a published UDP port to the host. Docker Engine on
 # Linux and Docker Desktop do; colima with its default ssh port forwarder forwards TCP only, so
 # `wait` fails there (its grpc port forwarder, `--port-forwarder grpc`, is documented to forward
-# UDP too). The enc mode is TCP and works everywhere.
+# UDP too). The enc, ascii and rtu-pty modes are TCP and work everywhere. The ascii and rtu-pty
+# modes have one master, like a serial line: the container's TCP bridge serves one connection at a
+# time and the next one waits until the first is closed.
 #
 # Environment (all optional):
-#   INTEROP_DIAGSLAVE_MODE      udp (default) or enc
-#   INTEROP_DIAGSLAVE_PORT      host UDP port of the udp mode, default 1502
-#   INTEROP_DIAGSLAVE_RTU_PORT  host TCP port of the enc mode, default 1503
-#   INTEROP_EVIDENCE_DIR        evidence directory of every peer, default
-#                               <repo>/target/interop-evidence; the udp mode writes to its
-#                               diagslave/ subdirectory, the enc mode to diagslave-rtu/
+#   INTEROP_DIAGSLAVE_MODE          udp (default), enc, ascii or rtu-pty
+#   INTEROP_DIAGSLAVE_PORT          host UDP port of the udp mode, default 1502
+#   INTEROP_DIAGSLAVE_RTU_PORT      host TCP port of the enc mode, default 1503
+#   INTEROP_DIAGSLAVE_ASCII_PORT    host TCP port of the ascii mode, default 1504
+#   INTEROP_DIAGSLAVE_RTU_PTY_PORT  host TCP port of the rtu-pty mode, default 1505
+#   INTEROP_EVIDENCE_DIR            evidence directory of every peer, default
+#                                   <repo>/target/interop-evidence; the udp mode writes to its
+#                                   diagslave/ subdirectory, the enc mode to diagslave-rtu/, the
+#                                   ascii mode to diagslave-ascii/ and the rtu-pty mode to
+#                                   diagslave-rtu-pty/
 #
-# The udp tests read STONECRAB_INTEROP_DIAGSLAVE and the enc tests
-# STONECRAB_INTEROP_DIAGSLAVE_RTU; this script sets them.
+# The udp tests read STONECRAB_INTEROP_DIAGSLAVE, the enc and rtu-pty tests
+# STONECRAB_INTEROP_DIAGSLAVE_RTU and the ascii tests STONECRAB_INTEROP_DIAGSLAVE_ASCII; this
+# script sets them.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -63,6 +80,7 @@ case "$MODE" in
     EVIDENCE="${INTEROP_EVIDENCE_DIR:-$ROOT/target/interop-evidence}/diagslave"
     VARIABLE="STONECRAB_INTEROP_DIAGSLAVE"
     URL="modbus-tcp:udp://127.0.0.1:${PORT}"
+    PROBE=probe_udp
     BINARY="modbus_interop_diagslave"
     EXPECTED_TESTS=6
     ;;
@@ -73,12 +91,40 @@ case "$MODE" in
     EVIDENCE="${INTEROP_EVIDENCE_DIR:-$ROOT/target/interop-evidence}/diagslave-rtu"
     VARIABLE="STONECRAB_INTEROP_DIAGSLAVE_RTU"
     URL="modbus-rtu:tcp://127.0.0.1:${PORT}"
+    PROBE=probe_enc
     BINARY="modbus_interop_diagslave_rtu"
     EXPECTED_TESTS=9
+    # A closed connection is what "-m enc -a 1" answers a unit it does not serve with; on a
+    # serial device diagslave is silent, which the other test of the pair shows.
+    EXCLUDED="test(/_a_unit_the_slave_does_not_serve_is_silence$/)"
     ;;
-  *) die "INTEROP_DIAGSLAVE_MODE is '$MODE'; it must be udp or enc" ;;
+  ascii)
+    NAME="stonecrab-interop-diagslave-ascii"
+    PORT="${INTEROP_DIAGSLAVE_ASCII_PORT:-1504}"
+    PUBLISH="127.0.0.1:${PORT}:1504/tcp"
+    EVIDENCE="${INTEROP_EVIDENCE_DIR:-$ROOT/target/interop-evidence}/diagslave-ascii"
+    VARIABLE="STONECRAB_INTEROP_DIAGSLAVE_ASCII"
+    URL="modbus-ascii:tcp://127.0.0.1:${PORT}"
+    PROBE=probe_ascii
+    BINARY="modbus_interop_diagslave_ascii"
+    EXPECTED_TESTS=9
+    ;;
+  rtu-pty)
+    NAME="stonecrab-interop-diagslave-rtu-pty"
+    PORT="${INTEROP_DIAGSLAVE_RTU_PTY_PORT:-1505}"
+    PUBLISH="127.0.0.1:${PORT}:1504/tcp"
+    EVIDENCE="${INTEROP_EVIDENCE_DIR:-$ROOT/target/interop-evidence}/diagslave-rtu-pty"
+    VARIABLE="STONECRAB_INTEROP_DIAGSLAVE_RTU"
+    URL="modbus-rtu:tcp://127.0.0.1:${PORT}"
+    PROBE=probe_enc
+    BINARY="modbus_interop_diagslave_rtu"
+    EXPECTED_TESTS=9
+    EXCLUDED="test(/_a_unit_the_slave_does_not_serve_is_a_closed_connection_not_a_reply$/)"
+    ;;
+  *) die "INTEROP_DIAGSLAVE_MODE is '$MODE'; it must be udp, enc, ascii or rtu-pty" ;;
 esac
 FILTER="binary(${BINARY}) & test(/^tests::interop_/)"
+[ -z "${EXCLUDED:-}" ] || FILTER="${FILTER} & not ${EXCLUDED}"
 
 need_docker() {
   command -v docker >/dev/null 2>&1 ||
@@ -158,6 +204,30 @@ except OSError:
 ' "$PORT"
 }
 
+probe_ascii() {
+  # Unit 1 reads holding register 0 as an ASCII frame (:010300000001FB, LRC FB) on a TCP stream
+  # that socat bridges to diagslave's serial device: an answer is a colon, the hex of unit 1,
+  # function 03, a byte count of 2, two data bytes and the LRC, then CR LF.
+  python3 -I -c '
+import socket, sys
+try:
+    with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=1) as s:
+        s.settimeout(1)
+        s.sendall(b":010300000001FB\r\n")
+        data = b""
+        while not data.endswith(b"\r\n"):
+            more = s.recv(64)
+            if not more:
+                break
+            data += more
+    body = bytes.fromhex(data[1:-2].decode()) if data.startswith(b":") and data.endswith(b"\r\n") else b""
+    ok = len(body) == 6 and body[:3] == bytes([1, 3, 2]) and sum(body) & 0xFF == 0
+    sys.exit(0 if ok else 1)
+except (OSError, ValueError):
+    sys.exit(1)
+' "$PORT"
+}
+
 wait_ready() {
   need_docker
   local i=0 deadline=$((SECONDS + 60))
@@ -168,7 +238,7 @@ wait_ready() {
       die "the diagslave container is not running"
     fi
     # Ready means a real FC03 read is answered through the published port.
-    if "probe_${MODE}"; then
+    if "$PROBE"; then
       echo "interop: diagslave ($MODE) ready on 127.0.0.1:${PORT} after ${i} probe(s)"
       return 0
     fi
@@ -196,20 +266,21 @@ run_tests() {
 evidence() {
   need_docker
   mkdir -p "$EVIDENCE"
-  local package command
-  package="$(docker exec "$NAME" dpkg-query -W iproute2)" || return 1
-  # PID 1 is diagslave itself (serve.sh execs it): its command line is what ran.
-  command="$(docker exec "$NAME" cat /proc/1/cmdline | tr '\0' ' ')" || return 1
+  local packages commands
+  packages="$(docker exec "$NAME" dpkg-query -W iproute2 socat)" || return 1
+  # The command lines diagslave and socat run with (serve.sh is PID 1 in the serial modes and
+  # execs diagslave itself in the others): what ran, read from /proc.
+  commands="$(docker exec "$NAME" sh -c 'for p in /proc/[0-9]*; do c="$(tr "\0" " " <"$p/cmdline" 2>/dev/null)"; case "$c" in /usr/local/bin/diagslave*|socat*) echo "command: $c";; esac; done' | awk '!seen[$0]++')" || return 1
   {
     echo "mode: $MODE"
-    echo "command: $command"
+    echo "$commands"
     echo "image: $IMAGE"
     docker image inspect "$IMAGE" --format 'image id: {{.Id}}' || return 1
     docker image inspect "$IMAGE" --format 'created: {{.Created}}' || return 1
     docker image inspect "$IMAGE" --format 'architecture: {{.Os}}/{{.Architecture}}' || return 1
     grep -E '^FROM ' "$ROOT/interop/diagslave/Dockerfile" | sed 's/^/base: /'
     grep -Eo 'sha256:[0-9a-f]{64}' "$ROOT/interop/diagslave/Dockerfile" | tail -1 | sed 's/^/diagslave archive: /'
-    echo "package: $package"
+    echo "$packages" | sed 's/^/package: /'
   } >"$EVIDENCE/image-digest.txt" || return 1
   docker logs "$NAME" >"$EVIDENCE/server.log" 2>&1 || true
   echo "interop: evidence in $EVIDENCE"

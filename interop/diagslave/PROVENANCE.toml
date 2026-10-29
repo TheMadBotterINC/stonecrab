@@ -11,6 +11,11 @@
 #                sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4,
 #                pulled on 2026-10-28 (Debian 13.7), the base of interop/libmodbus as well
 #   package      iproute2 6.15.0-1 from the trixie archive, by exact version, for tc netem
+#   package      socat 1.8.0.3-1+deb13u1 from the trixie archive, by exact version, read on
+#                2026-10-29 (Gerhard Rieger; "GPL-2 with OpenSSL exception" in the package's
+#                copyright file): it makes the pseudo-terminal pair of the ascii and rtu-pty
+#                modes (slice S60b) and bridges one end to TCP. It is installed in the image
+#                only; neither its source nor its binary is in this repository
 #   archive      https://www.modbusdriver.com/downloads/diagslave.tgz, fetched on 2026-10-29:
 #                SHA-256 01c87fe49d86848d61ddfdd703c0f9f76f5e80e46f233d5ee16998811f2fe97e,
 #                1 503 303 bytes, gzip member name diagslave-3.6.tgz; its README.txt is
@@ -36,7 +41,9 @@
 # interoperability evidence (interoperability-tested at most) and nothing of it is copied
 # into the repository. The register values the tests expect are written by the tests first.
 # Slice S59b runs the same image and the same archive as a Modbus RTU over TCP slave
-# ("-m enc -a 1"); the pins and the terms above are unchanged.
+# ("-m enc -a 1"); the pins and the terms above are unchanged. Slice S60b runs them as a
+# Modbus ASCII and a Modbus RTU slave on a pseudo-terminal bridged to TCP by socat ("-m ascii"
+# and "-m rtu"), adding the socat package above and nothing else.
 
 [[file]]
 path = "Dockerfile"
@@ -52,15 +59,15 @@ note = "First-party. Keeps the build context to the file the Dockerfile copies."
 
 [[file]]
 path = "serve.sh"
-origin = "Authored for S61 from the usage text of diagslave 3.6 (README.txt: -m udp, -p); the enc mode added for S59b from the same text (-m enc, -a, -p)"
+origin = "Authored for S61 from the usage text of diagslave 3.6 (README.txt: -m udp, -p); the enc mode added for S59b from the same text (-m enc, -a, -p); the ascii and rtu-pty modes added for S60b from the same text (-m ascii, -m rtu, -b, -d, -s, -p, -f) and the socat manual page"
 license = "Apache-2.0"
-note = "First-party. Runs diagslave as a Modbus UDP slave on port 1502 (the default) or, with the argument enc, as a Modbus RTU over TCP slave for unit 1 on port 1503."
+note = "First-party. Runs diagslave as a Modbus UDP slave on port 1502 (the default) or, with the argument enc, as a Modbus RTU over TCP slave for unit 1 on port 1503, or, with ascii or rtu-pty, as a serial Modbus ASCII or RTU slave for unit 1 on a pseudo-terminal that socat bridges to TCP port 1504."
 
 [[file]]
 path = "interop.sh"
 origin = "Authored for S61, in the shape of interop/libmodbus/interop.sh"
 license = "Apache-2.0"
-note = "First-party. Build, run, probe, test and collect evidence in both modes (INTEROP_DIAGSLAVE_MODE udp or enc); shared by the CI jobs interop-udp and interop-rtu and by mise run interop-udp, interop-rtu and interop."
+note = "First-party. Build, run, probe, test and collect evidence in four modes (INTEROP_DIAGSLAVE_MODE udp, enc, ascii or rtu-pty); shared by the CI jobs interop-udp, interop-rtu, interop-ascii and interop-rtu-pty and by mise run interop-udp, interop-rtu, interop-ascii, interop-rtu-pty and interop."
 
 [[file]]
 path = "README.md"

@@ -5,6 +5,26 @@ as `stonecrab` 0.2.0 (2026-10-27); `stonecrab` 0.1.0 is the specification-stage
 placeholder.
 
 ## Unreleased
+- Modbus ASCII, and Modbus RTU on a serial device, against an independent peer (ADR-0024,
+  slice S60b; no crate API change): the diagslave 3.6 image now has two more modes, `ascii`
+  (`diagslave -m ascii -a 1 -b 19200 -d 7 -s 1 -p even`) and `rtu-pty` (`diagslave -m rtu -a 1
+  -b 19200 -d 8 -s 1 -p none -f 20`), each on a serial device that is one end of a
+  pseudo-terminal pair socat makes inside the container; the other end is bridged to a TCP
+  port (1504 and 1505), one connection at a time, so the drivers' gateway carrier
+  (`modbus-ascii:tcp://host:port`, `modbus-rtu:tcp://host:port`) reaches the framing diagslave
+  uses on a line, which its `-m enc` mode does not. The image adds the Debian package `socat`
+  1.8.0.3-1+deb13u1 by exact version. Nine ignored tests (`modbus_interop_diagslave_ascii`)
+  write and read back every area through `ModbusAsciiDriver`, a range selection, a write of
+  123 and a read of 125 registers (frames of 511 characters), exception 02 for the
+  file-record functions, a unit the slave does not serve (diagslave is silent: `Timeout`) and
+  ping; the nine RTU tests run again against `-m rtu`, with the silence test in place of the
+  closed-connection one. New CI jobs `interop-ascii` and `interop-rtu-pty` (one matrix job)
+  and tasks `mise run interop-ascii` and `mise run interop-rtu-pty`, which `mise run interop`
+  includes. Passed locally, 9 of 9 each, on 2026-10-29; the first hosted runs are the next
+  evidence. Parity rows `MBS-ASCII-SEND`, `MBS-ASCII-LRC` and `MBS-ASCII-WIRE-MODEL` are
+  automated-verified, `MBS-OP-READ`, `MBS-OP-WRITE`, `MBS-OP-PING` and `MBS-TRANS-TCP` for
+  the ASCII half too; Modbus ASCII over a gateway is interoperability-tested, over a serial
+  port of the driver still simulator-tested.
 - Modbus RTU against an independent peer (ADR-0024, slice S59b; no crate API change): the
   diagslave 3.6 image of the UDP run now also serves Modbus RTU over TCP (`diagslave -m enc
   -p 1503 -a 1`, one unit), the stream a serial-to-IP gateway carries, which
