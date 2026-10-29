@@ -1,6 +1,7 @@
 # Sensor profiles
 Declarative sensor profiles for Stonecrab, as repository data. Each file is a TOML document
-in schema version 1 that `stonecrab::sensors::SensorProfile::from_toml` loads, `validate`
+in schema version 1 (the SOLO SLM1-C file is in version 2, which adds value-matched quality)
+that `stonecrab::sensors::SensorProfile::from_toml` loads, `validate`
 checks and `tags` turns into the tags a driver reads (see the
 [sensors component document](../crates/stonecrab/docs/components/sensors.md) for the format and
 [ADR-0016](../docs/adr/0016-sensor-profile-schema-and-loader.md) for the decisions).
@@ -47,7 +48,7 @@ settle is listed in `docs/hardware/hw1-sio-mb04thms.md` and
 | `synthetic/modbus-tcp/` | `modbus-tcp` | PLC4X grammar, `address_convention = "plc4x"` declared in every file | interoperability-tested: the `interop` job runs each file against pymodbus 3.8.6 with `--expect-good` |
 | `synthetic/sim/` | `sim` | `STATE/<name>:<type>`, no convention | simulator-tested: the `examples` job runs each file against `sim://bench` with `--expect-good` |
 | `documented/modbus-tcp/` | `modbus-tcp` | PLC4X grammar, `address_convention = "zero-based"` | documented map, replayed: `modbus_device_replays` reads it against the first-party responder serving the vendor's map; not hardware-verified |
-| `documented/modbus-rtu/` | `modbus-rtu` | PLC4X grammar, `address_convention = "zero-based"` | documented map, replayed: `modbus_device_replays` reads it through `ModbusRtuDriver` with RTU framing against the first-party responder; not hardware-verified |
+| `documented/modbus-rtu/` | `modbus-rtu` | PLC4X grammar, `address_convention = "zero-based"`, schema version 2 | documented map, replayed: `modbus_device_replays` reads it through `ModbusRtuDriver` with RTU framing against the first-party responder; not hardware-verified |
 
 A profile belongs to one scheme (decision D17), so each synthetic device has two files with the
 same file name, one per directory. A documented device has one file, under its own scheme:
@@ -186,19 +187,23 @@ Id `solo_slm1_c`, label documented map, not hardware-verified. Fixture
 `MBS-DEVICE-SLM1C-SENTINEL`. The scheme `modbus-rtu` is the one of `ModbusRtuDriver`, so
 `SensorProfile::tags` accepts the file; the replay reads it through that driver with RTU
 framing. The serial line the unit has once it speaks RTU (9600 baud, 8 data bits, even
-parity, one stop bit) is in the file's `[connection.options]`.
+parity, one stop bit) is in the file's `[connection.options]`, with `single-coil-write = "fc05"`:
+the manual lists only function 05 for writing a bit register, and Stonecrab sends function 15
+unless asked (`MB-CFG-SINGLE-COIL`). The options are informational, like the others.
 
 | Measurement | Address (manual number) | Type | Scaling | Unit | Range | Quality mapping |
 | --- | --- | --- | --- | --- | --- | --- |
-| `process_value` | `holding-register:4096:INT` (1000H) | INT | divide 10 (unit 0.1 degree) | `Cel` | -200 to 1300 (thermocouple K) | `celsius` (bit 2 of 102AH, inverted: Bad when the display is not in degrees C) |
+| `process_value` | `holding-register:4096:INT` (1000H) | INT | divide 10 (unit 0.1 degree) | `Cel` | -200 to 1300 (thermocouple K) | `celsius` (bit 2 of 102AH, inverted: Bad when the display is not in degrees C); `value_rules` for the error codes |
 
 Sentinel handling: 8002H, 8003H, 8004H, 8006H and 8007H are error codes the register reads
-as instead of a temperature (8005H is not listed). As signed integers they are about
--3276 degrees after the divide, outside the range, so the measurement is `Uncertain` with
-the code in `raw`, never `Good`. Schema version 1 cannot match a status field against a
-value, so it cannot make the code `Bad`; whether a negative PV is a signed 16 bit integer is
-not stated and is an item for HW2. The unit is 0.1 degree for temperature inputs only (a
-linear input reads in 1 EU), so linear inputs are out of scope for this profile.
+as instead of a temperature (8005H is not listed). The file is written against schema
+version 2 and lists them as `value_rules` on the unscaled value, as the signed 16 bit
+integers -32766, -32765, -32764, -32762 and -32761, each `bad` with the manual's meaning as
+its reason (`Measurement::quality_reason`); the code stays in `raw`. A code the manual does
+not list, 8005H included, has no rule: after the divide it is about -3276 degrees, outside
+the range, so it is `Uncertain`, never `Good`. Whether a negative PV is a signed 16 bit
+integer is not stated and is an item for HW2. The unit is 0.1 degree for temperature inputs
+only (a linear input reads in 1 EU), so linear inputs are out of scope for this profile.
 
 ## Connection options
 The connection comes from `STONECRAB_URL`, not from the profile. The `[connection.options]`

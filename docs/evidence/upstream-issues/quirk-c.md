@@ -31,8 +31,11 @@ chosen.
 ## How Stonecrab handles it
 
 Not ported. Since S46 (2026-10-28) `modbus-tcp` writes (`Capabilities.write = true`), and
-a single coil goes out as function 15, as upstream does: Stonecrab never sends function 05
-and does not decode it (`write_functions_that_upstream_does_not_send_are_not_decoded`).
+by default a single coil goes out as function 15, as upstream does. Since S73 (2026-10-29)
+the opt-in connection-string parameter `single-coil-write=fc05` sends a write of exactly one
+coil as function 05, for devices that accept nothing else, and then its echo is checked
+(`write_single_coil_is_encoded_and_its_echo_is_decoded_and_proved`); `decode_request` still
+refuses function 05 (`write_functions_that_upstream_does_not_send_are_not_decoded`).
 The choice is the `MB-QUIRK-C` divergence row of `docs/parity/modbus.md`; the write path
 is covered by `crates/stonecrab/tests/modbus_write.rs`.
 

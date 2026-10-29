@@ -1,5 +1,6 @@
 //! The Modbus protocol data unit (PDU) codec for the read function codes 01 to 04, the
-//! write function codes 06, 15 and 16 and the file record function codes 20 and 21.
+//! write function codes 06, 15 and 16, the file record function codes 20 and 21 and, for a
+//! client only, Write Single Coil (05).
 //!
 //! A PDU is the function code and its data, without the MBAP header or any serial
 //! framing (decision D5). The codec transcribes the four read requests, their normal
@@ -9,8 +10,10 @@
 //! and Write File Record (21) carry the extended registers: a request holds up to 35 read
 //! sub-requests or up to 251 bytes of write sub-requests, each naming a file, a record
 //! (0 to 9999) and a length, and a write is answered by an echo of the whole request. Write
-//! Single Coil (05) is not emitted by upstream and stays [`FunctionCode::Unknown`]: every
-//! decode function rejects it with a precise error. The types are
+//! Single Coil (05) is not emitted by upstream; a connection sends it only when
+//! `single-coil-write=fc05` asks for it (`MB-CFG-SINGLE-COIL`), so [`encode_request`] writes
+//! it and [`decode_response`] reads its echo, while [`decode_request`] refuses it with a
+//! precise error, as it refuses every function a client does not serve. The types are
 //! written by hand from the Modbus Application Protocol Specification V1.1b and the
 //! pinned `modbus.mspec` (decision D6); the golden vectors in `fixtures/modbus/tcp/` are
 //! the contract a future generator would have to meet.
@@ -101,6 +104,9 @@ const MAX_FILE_WRITE_BYTES: usize = 251;
 
 /// Smallest data length of a Write File Record request: one sub-request of one register.
 const MIN_FILE_WRITE_BYTES: usize = FILE_WRITE_HEADER_BYTES + 2;
+
+/// The word that function 05 sends for a coil that is on (V1.1b section 6.5); off is 0.
+const COIL_ON: u16 = 0xFF00;
 
 /// Number of distinct wire addresses, 0 to 65535: a request's `start + quantity` may not
 /// pass it.

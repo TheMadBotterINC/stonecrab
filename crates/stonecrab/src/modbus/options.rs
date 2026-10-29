@@ -30,13 +30,19 @@ const ACCESS: &str = "access";
 /// The access value that grants writes; `read-only` is the other and the default.
 const READ_WRITE: &str = "read-write";
 const READ_ONLY: &str = "read-only";
+/// `single-coil-write`, the Stonecrab key that picks the function of a one-coil write
+/// (`MB-CFG-SINGLE-COIL`): `fc15`, upstream's and the default, or `fc05`.
+const SINGLE_COIL: &str = "single-coil-write";
+const FC05: &str = "fc05";
+const FC15: &str = "fc15";
 /// The convention the ping address is always read under.
 const PLC4X: &str = "plc4x";
 
 /// The most key characters an error message repeats.
 pub(super) const KEY_ECHO_LIMIT: usize = 32;
 
-/// The six upstream connection parameters of the `modbus-tcp` driver, parsed and validated.
+/// The connection parameters of the `modbus-tcp` driver, parsed and validated: the six upstream
+/// ones and the Stonecrab parameter `single-coil-write`.
 ///
 /// [`ModbusTcpDriver::parse_config`](crate::Driver::parse_config) reads them from
 /// the query of a connection string and stores them in the [`ConnectionConfig`] through
@@ -58,6 +64,11 @@ pub(super) const KEY_ECHO_LIMIT: usize = 32;
 /// | `byte_order`, `word_order` | `default-payload-byte-order` | `BIG_ENDIAN` | the four upstream names |
 /// | `max_coils` | `max-coils-per-request` | 2000 | 1 to 2000 |
 /// | `max_registers` | `max-registers-per-request` | 125 | 1 to 125 |
+/// | `single_coil_fc05` | `single-coil-write` | `fc15` | `fc15` or `fc05` |
+///
+/// `single-coil-write=fc05` is a Stonecrab extension: a write of exactly one coil goes out as
+/// function 05 where upstream sends function 15, for a device that lists only function 05 for
+/// a bit (`MB-CFG-SINGLE-COIL`). The `modbus-rtu` and `modbus-ascii` drivers take it too.
 ///
 /// The byte-order names map to ([`ByteOrder`], [`WordOrder`]) pairs as ADR-0006 and the
 /// parity record say: `BIG_ENDIAN` is (big, high word first), `LITTLE_ENDIAN` is (little,
@@ -76,8 +87,10 @@ pub(super) const KEY_ECHO_LIMIT: usize = 32;
 /// The six rows `MB-CFG-REQUEST-TIMEOUT`, `MB-CFG-UNIT-ID`, `MB-CFG-PING-ADDRESS`,
 /// `MB-CFG-BYTE-ORDER` (docs/parity/modbus.md#MB-CFG-BYTE-ORDER), `MB-CFG-MAX-COILS`
 /// (docs/parity/modbus.md#MB-CFG-MAX-COILS) and `MB-CFG-MAX-REGISTERS`
-/// (docs/parity/modbus.md#MB-CFG-MAX-REGISTERS) cover the fields. The unit range and the
-/// two request-size bounds are Stonecrab limits (docs/parity/modbus.md#MB-CFG-UNIT-ID).
+/// (docs/parity/modbus.md#MB-CFG-MAX-REGISTERS) cover the upstream fields, and
+/// `MB-CFG-SINGLE-COIL` (docs/parity/modbus.md#MB-CFG-SINGLE-COIL) covers
+/// `single_coil_fc05`. The unit range and the two request-size bounds are Stonecrab limits
+/// (docs/parity/modbus.md#MB-CFG-UNIT-ID).
 ///
 /// # Examples
 /// ```
@@ -125,6 +138,8 @@ pub struct ModbusOptions {
     pub max_coils: NonZeroU16,
     /// The most registers one wire request carries (`max-registers-per-request`).
     pub max_registers: NonZeroU16,
+    /// Write a single coil with function 05 instead of function 15 (`single-coil-write`).
+    pub single_coil_fc05: bool,
 }
 
 impl Default for ModbusOptions {
@@ -165,11 +180,13 @@ impl ModbusOptions {
             word_order: defaults.word_order,
             max_coils: defaults.max_coils,
             max_registers: defaults.max_registers,
+            single_coil_fc05: defaults.single_coil_fc05,
         }
     }
 
     /// The connection-wide defaults these options stand for: the unit, the byte and word
-    /// order and the two request-size limits, the part of the options a connection uses.
+    /// order, the two request-size limits and the function of a one-coil write, the part of
+    /// the options a connection uses.
     ///
     /// # Examples
     /// ```
@@ -187,6 +204,7 @@ impl ModbusOptions {
             word_order: self.word_order,
             max_coils: self.max_coils,
             max_registers: self.max_registers,
+            single_coil_fc05: self.single_coil_fc05,
         }
     }
 
@@ -196,8 +214,9 @@ impl ModbusOptions {
     /// ([`AccessPolicy::ReadOnly`] when it is absent).
     ///
     /// The core grammar has already refused duplicate and empty keys, so each key appears
-    /// once. Every key outside the six, `address-convention` and `access` is refused, which
-    /// includes the misspelt `unit-identifier` of the upstream test suite.
+    /// once. Every key outside the six, `address-convention`, `access` and
+    /// `single-coil-write` is refused, which includes the misspelt `unit-identifier` of the
+    /// upstream test suite.
     ///
     /// The parameters override `seed`; a key the string does not name keeps the seed's value.
     pub(crate) fn from_parameters(
@@ -254,6 +273,15 @@ impl ModbusOptions {
                             return Err(invalid(format!(
                                 "{ACCESS} must be {READ_ONLY} or {READ_WRITE}"
                             )));
+                        }
+                    };
+                }
+                SINGLE_COIL => {
+                    options.single_coil_fc05 = match value.as_str() {
+                        FC05 => true,
+                        FC15 => false,
+                        _ => {
+                            return Err(invalid(format!("{SINGLE_COIL} must be {FC15} or {FC05}")));
                         }
                     };
                 }
@@ -323,8 +351,8 @@ fn unknown_key(key: &str) -> PlcError {
     };
     invalid(format!(
         "unknown connection parameter '{shown}'{hint}; the parameters are {REQUEST_TIMEOUT}, \
-         {UNIT_ID}, {PING_ADDRESS}, {BYTE_ORDER}, {MAX_COILS}, {MAX_REGISTERS}, {CONVENTION} \
-         and {ACCESS}"
+         {UNIT_ID}, {PING_ADDRESS}, {BYTE_ORDER}, {MAX_COILS}, {MAX_REGISTERS}, {CONVENTION}, \
+         {ACCESS} and {SINGLE_COIL}"
     ))
 }
 
@@ -379,6 +407,7 @@ mod tests {
         );
         assert_eq!(defaults.max_coils.get(), 2000);
         assert_eq!(defaults.max_registers.get(), 125);
+        assert!(!defaults.single_coil_fc05, "a single coil is function 15");
         assert_eq!(
             parse(&[]).expect("none"),
             (defaults, None, AccessPolicy::ReadOnly)
@@ -467,6 +496,31 @@ mod tests {
             let error = refusal(&[(ACCESS, value)]);
             assert_eq!(error.kind(), ErrorKind::InvalidConfig, "{value:?}");
             assert!(error.to_string().contains(ACCESS), "names the key: {error}");
+        }
+    }
+
+    // covers: MB-CFG-SINGLE-COIL / FC05 for a single coil is opt-in and only fc05 or fc15 are values
+    #[test]
+    fn single_coil_write_picks_function_05_only_when_it_says_fc05() {
+        assert!(!options(&[]).single_coil_fc05, "the default");
+        assert!(!options(&[(SINGLE_COIL, "fc15")]).single_coil_fc05);
+        let chosen = options(&[(SINGLE_COIL, "fc05")]);
+        assert!(chosen.single_coil_fc05);
+        assert!(
+            chosen.connection_defaults().single_coil_fc05,
+            "the connection reads it from its defaults"
+        );
+        assert!(
+            ModbusOptions::from_defaults(chosen.connection_defaults()).single_coil_fc05,
+            "and a driver seeded from them keeps it"
+        );
+        for value in ["", "FC05", "5", "05", "true", "fc5", "fc05 ", "fc16"] {
+            let error = refusal(&[(SINGLE_COIL, value)]);
+            assert_eq!(error.kind(), ErrorKind::InvalidConfig, "{value:?}");
+            assert!(
+                error.to_string().contains(SINGLE_COIL),
+                "names the key: {error}"
+            );
         }
     }
 

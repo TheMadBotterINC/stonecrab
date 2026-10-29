@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use crate::Driver;
 use crate::sensors::{
-    ConnectionRequirements, MeasurementDef, ProfileError, ScaleStep, SensorProfile, StatusField,
-    Unit,
+    ConnectionRequirements, MeasurementDef, ProfileError, ScaleStep, SchemaVersion, SensorProfile,
+    StatusField, Unit,
 };
 use crate::{AddressOptions, PlcValueType};
 
@@ -27,8 +27,8 @@ impl SensorProfile {
     /// a fixed order, so an author fixes a profile in one pass. The order is the
     /// connection first, then each measurement in document order, and within a
     /// measurement the fields in the order of [`MeasurementDef`]: name, `count`, scaling
-    /// steps, unit, status fields, quality mapping. A measurement is named in an error by
-    /// its 0-based index; errors never contain any text of the profile.
+    /// steps, unit, status fields, quality mapping, value rules. A measurement is named in an
+    /// error by its 0-based index; errors never contain any text of the profile.
     ///
     /// Rules:
     /// - the address convention, when set, is `plc4x`, `one-based-40001` or `zero-based`,
@@ -49,7 +49,10 @@ impl SensorProfile {
     ///   (`OverlappingStatusBits`; two measurements may share a status word), and no
     ///   status bit is 64 or more (`StatusBitOutOfRange`);
     /// - every name in the quality mapping is a status field of the same measurement
-    ///   (`UnknownQualityReference`).
+    ///   (`UnknownQualityReference`);
+    /// - `value_rules` appear only in a profile of schema version 2 (`ValueRuleNeedsSchema2`,
+    ///   reported once per measurement) and each rule lists at least one value
+    ///   (`EmptyValueRule`).
     ///
     /// Uniqueness of status-field names within one measurement is not enforced: a quality
     /// reference resolves to any status field of that name, so duplicates are ambiguous
@@ -68,9 +71,9 @@ impl SensorProfile {
     /// Returns every [`ProfileError`] found, never an empty list: the validation variants
     /// are `DuplicateMeasurementName`, `UnknownUnit`, `EmptyUnit`,
     /// `OverlappingStatusBits`, `StatusBitOutOfRange`, `UnsupportedCount`,
-    /// `InvalidScaleStep`, `InvalidRange`, `UnknownQualityReference`,
-    /// `UnknownAddressConvention` and `MissingAddressConvention`. Each converts into a
-    /// [`PlcError`](crate::PlcError) of kind `InvalidConfig`.
+    /// `InvalidScaleStep`, `InvalidRange`, `UnknownQualityReference`, `ValueRuleNeedsSchema2`,
+    /// `EmptyValueRule`, `UnknownAddressConvention` and `MissingAddressConvention`. Each
+    /// converts into a [`PlcError`](crate::PlcError) of kind `InvalidConfig`.
     ///
     /// # Examples
     /// ```
@@ -124,7 +127,7 @@ impl SensorProfile {
                     first,
                 });
             }
-            check_measurement(index, measurement, &mut errors);
+            check_measurement(index, measurement, self.schema_version, &mut errors);
         }
         if errors.is_empty() {
             Ok(())
@@ -261,7 +264,12 @@ fn check_connection(connection: &ConnectionRequirements, errors: &mut Vec<Profil
     }
 }
 
-fn check_measurement(index: usize, measurement: &MeasurementDef, errors: &mut Vec<ProfileError>) {
+fn check_measurement(
+    index: usize,
+    measurement: &MeasurementDef,
+    schema: SchemaVersion,
+    errors: &mut Vec<ProfileError>,
+) {
     if measurement.count != 1 {
         errors.push(ProfileError::UnsupportedCount {
             measurement: index,
@@ -315,6 +323,17 @@ fn check_measurement(index: usize, measurement: &MeasurementDef, errors: &mut Ve
                     entry,
                 });
             }
+        }
+    }
+    if schema < SchemaVersion::V2 && !measurement.value_rules.is_empty() {
+        errors.push(ProfileError::ValueRuleNeedsSchema2 { measurement: index });
+    }
+    for (rule, value_rule) in measurement.value_rules.iter().enumerate() {
+        if value_rule.values.is_empty() {
+            errors.push(ProfileError::EmptyValueRule {
+                measurement: index,
+                rule,
+            });
         }
     }
 }
@@ -527,6 +546,7 @@ mod tests {
                     min_interval: None,
                     stale_after: None,
                     keep_raw: false,
+                    value_rules: Vec::new(),
                 }
             },
         )
@@ -678,6 +698,7 @@ mod tests {
                     min_interval: None,
                     stale_after: None,
                     keep_raw: false,
+                    value_rules: Vec::new(),
                 });
             }
             profile

@@ -6,7 +6,7 @@ use std::time::{Instant, SystemTime};
 use crate::{PlcValue, ProtocolStatus, ReadResponse, TagId};
 
 use super::scale::{as_f64, scale, status_bit};
-use crate::sensors::{MeasurementDef, SensorProfile, StatusField, ValidationStatus};
+use crate::sensors::{MeasurementDef, SensorProfile, StatusField, ValidationStatus, ValueRule};
 
 /// How far a measurement can be trusted.
 ///
@@ -35,11 +35,11 @@ use crate::sensors::{MeasurementDef, SensorProfile, StatusField, ValidationStatu
 pub enum Quality {
     /// The value was read, scaled and passed every rule.
     Good,
-    /// The value is usable with care: outside its plausible range, or a status field in
-    /// `uncertain_when` is set.
+    /// The value is usable with care: outside its plausible range, a status field in
+    /// `uncertain_when` is set, or a value rule gives `Uncertain`.
     Uncertain,
-    /// The value must not be used: the read failed, scaling failed, or a status field in
-    /// `bad_when` is set.
+    /// The value must not be used: the read failed, scaling failed, a status field in
+    /// `bad_when` is set, or a value rule gives `Bad`.
     Bad,
     /// The value is older than its `stale_after`. Produced only by
     /// [`StaleTracker`](crate::sensors::StaleTracker), never by
@@ -125,6 +125,11 @@ pub struct Measurement {
     pub unit: Option<String>,
     /// How far the value can be trusted.
     pub quality: Quality,
+    /// Why the quality is what it is, when a value rule of the profile (schema version 2)
+    /// gave that quality and states a reason; `None` otherwise. It is the text of the
+    /// profile, kept as it is when [`StaleTracker`](crate::sensors::StaleTracker) marks the
+    /// measurement stale.
+    pub quality_reason: Option<String>,
     /// How far the profile that produced this measurement was checked.
     pub origin: ValidationStatus,
     /// The wall-clock time the caller passed as `wall_now`: when this response was turned
@@ -189,7 +194,13 @@ impl SensorProfile {
     /// `Bad` over `Uncertain` over `Unknown` over `Good`:
     /// - an item error, or a value that cannot be scaled: `Bad`;
     /// - the scaled value outside `range` (`min..=max`, inclusive, compared as `f64`):
-    ///   `Uncertain`. Schema version 1 has no way to say a range violation is `Bad`;
+    ///   `Uncertain`. A range violation cannot be `Bad` by itself; a value rule can make the
+    ///   values a device reports for a fault `Bad`;
+    /// - the unscaled value listed by a value rule of the definition (schema version 2): the
+    ///   rule's quality, `Bad` or `Uncertain`. The first rule that lists the value applies,
+    ///   and only an integer value that fits `i64` can match. When the rule's quality is the
+    ///   one the measurement ends up with, its `reason` is [`Measurement::quality_reason`];
+    ///   a rule that is outranked by a worse quality gives no reason;
     /// - for each status field named in the quality mapping: its bit is read from the
     ///   status item (a `Bool` is the bit itself; an integer's bit `bit`, bit 0 the least
     ///   significant), flipped when `invert` is set, and when set it gives `Bad` for a
@@ -281,6 +292,7 @@ fn measure(
         raw: None,
         unit: definition.unit.clone(),
         quality: Quality::Bad,
+        quality_reason: None,
         origin,
         received_at: wall_now,
         received_mono: item.sampled_at(),
@@ -291,11 +303,26 @@ fn measure(
     if let Ok(unscaled) = item.outcome() {
         measurement.raw = definition.keep_raw.then(|| unscaled.clone());
         measurement.value = scale(unscaled, &definition.scaling);
+        let rule = value_rule(definition, unscaled);
         measurement.quality = measurement.value.as_ref().map_or(Quality::Bad, |scaled| {
-            range_quality(definition, scaled).worse(status_quality(definition, response))
+            range_quality(definition, scaled)
+                .worse(status_quality(definition, response))
+                .worse(rule.map_or(Quality::Good, |rule| rule.quality))
         });
+        measurement.quality_reason = rule
+            .filter(|rule| rule.quality == measurement.quality)
+            .and_then(|rule| rule.reason.clone());
     }
     Some(measurement)
+}
+
+/// The first value rule that lists the unscaled value, if any.
+fn value_rule<'a>(definition: &'a MeasurementDef, unscaled: &PlcValue) -> Option<&'a ValueRule> {
+    let raw = unscaled.as_i64()?;
+    definition
+        .value_rules
+        .iter()
+        .find(|rule| rule.values.contains(&raw))
 }
 
 /// `Uncertain` when the scaled value is outside the definition's range, else `Good`.

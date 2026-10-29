@@ -9,7 +9,7 @@ mod tests {
     use std::time::Duration;
 
     use stonecrab::sensors::{
-        ByteOrderName, MeasurementDef, ProfileError, ProfileId, QualityMapping, ScaleStep,
+        ByteOrderName, MeasurementDef, ProfileError, ProfileId, Quality, QualityMapping, ScaleStep,
         SchemaVersion, SensorProfile, StatusField, ValidationStatus, ValueRange, WordOrderName,
     };
     use stonecrab::{ByteOrder, ErrorKind, PlcError, WordOrder};
@@ -17,7 +17,7 @@ mod tests {
     const MINIMAL: &str = include_str!("profiles/minimal.toml");
     const FULL: &str = include_str!("profiles/full.toml");
     const UNKNOWN_FIELD: &str = include_str!("profiles/unknown_field.toml");
-    const SCHEMA_V2: &str = include_str!("profiles/schema_v2.toml");
+    const SCHEMA_V3: &str = include_str!("profiles/schema_v3.toml");
     const WRONG_TYPE: &str = include_str!("profiles/wrong_type.toml");
     const MISSING_NAME: &str = include_str!("profiles/missing_name.toml");
 
@@ -103,7 +103,7 @@ mod tests {
     fn the_minimal_profile_loads_with_defaults() {
         let profile = load(MINIMAL);
         assert_eq!(profile.id, ProfileId::new("minimal").expect("valid"));
-        assert_eq!(profile.schema_version, SchemaVersion::CURRENT);
+        assert_eq!(profile.schema_version, SchemaVersion::V1);
         assert_eq!(profile.validation, ValidationStatus::Synthetic);
         assert_eq!(profile.device.manufacturer, None);
         assert_eq!(profile.device.model, None);
@@ -162,13 +162,13 @@ mod tests {
 
     // covers: SPEC mandatory-failure-cases / F7 incompatible profile version
     #[test]
-    fn schema_version_2_is_rejected_as_incompatible() {
+    fn schema_version_3_is_rejected_as_incompatible() {
         assert_eq!(
-            SensorProfile::from_toml(SCHEMA_V2),
-            Err(ProfileError::IncompatibleSchema { found: 2 }),
-            "reported even though the document has a key version 1 does not know"
+            SensorProfile::from_toml(SCHEMA_V3),
+            Err(ProfileError::IncompatibleSchema { found: 3 }),
+            "reported even though the document has a key version 2 does not know"
         );
-        for found in [0_u32, 3, 100, u32::MAX] {
+        for found in [0_u32, 4, 100, u32::MAX] {
             let text = MINIMAL.replace("schema_version = 1", &format!("schema_version = {found}"));
             assert_eq!(
                 SensorProfile::from_toml(&text),
@@ -176,8 +176,95 @@ mod tests {
                 "version {found}"
             );
         }
-        let error = PlcError::from(ProfileError::IncompatibleSchema { found: 2 });
+        let error = PlcError::from(ProfileError::IncompatibleSchema { found: 3 });
         assert_eq!(error.kind(), ErrorKind::InvalidConfig, "conversion kind");
+    }
+
+    // covers: SENSORS-SCHEMA-V2 / version 2 loads, and a version 1 document loads unchanged
+    #[test]
+    fn schema_version_2_loads_and_version_1_documents_load_as_they_did() {
+        let v2 = MINIMAL.replace("schema_version = 1", "schema_version = 2");
+        let profile = load(&v2);
+        assert_eq!(profile.schema_version, SchemaVersion::V2);
+        assert_eq!(profile.schema_version, SchemaVersion::CURRENT);
+        assert_eq!(
+            profile.validate(),
+            Ok(()),
+            "version 2 adds a key, not a rule"
+        );
+        for text in [MINIMAL, FULL] {
+            let profile = load(text);
+            assert_eq!(
+                profile.schema_version,
+                SchemaVersion::V1,
+                "version 1 stays 1"
+            );
+            assert_eq!(profile.validate(), Ok(()));
+            assert!(
+                profile
+                    .measurements
+                    .iter()
+                    .all(|m| m.value_rules.is_empty()),
+                "a version 1 document has no value rules"
+            );
+        }
+        // The same measurement, read under either version, differs by nothing the key adds.
+        let one = |version: u32| {
+            only_measurement(
+                &one_measurement("")
+                    .replace("schema_version = 1", &format!("schema_version = {version}")),
+            )
+        };
+        assert_eq!(one(1), one(2), "the version alone changes no measurement");
+    }
+
+    // covers: SENSORS-VALUE-RULES / the value_rules key loads in full, defaults and refusals
+    #[test]
+    fn value_rules_load_with_values_quality_and_an_optional_reason() {
+        let text = one_measurement(
+            "value_rules = [\n  { values = [-32766, -32765], quality = \"bad\", reason = \"not acquired\" },\n  { values = [7], quality = \"uncertain\" },\n]",
+        )
+        .replace("schema_version = 1", "schema_version = 2");
+        let measurement = only_measurement(&text);
+        let rules: Vec<(&[i64], Quality, Option<&str>)> = measurement
+            .value_rules
+            .iter()
+            .map(|rule| (rule.values.as_slice(), rule.quality, rule.reason.as_deref()))
+            .collect();
+        assert_eq!(
+            rules,
+            [
+                (&[-32766, -32765][..], Quality::Bad, Some("not acquired")),
+                (&[7][..], Quality::Uncertain, None),
+            ]
+        );
+        assert!(
+            only_measurement(&one_measurement(""))
+                .value_rules
+                .is_empty(),
+            "no key, no rules"
+        );
+        for bad in [
+            "value_rules = [{ values = [1], quality = \"good\" }]",
+            "value_rules = [{ values = [1], quality = \"stale\" }]",
+            "value_rules = [{ values = [1], quality = \"Bad\" }]",
+            "value_rules = [{ values = [1] }]",
+            "value_rules = [{ quality = \"bad\" }]",
+            "value_rules = [{ values = [1.5], quality = \"bad\" }]",
+            "value_rules = [{ values = [\"1\"], quality = \"bad\" }]",
+            "value_rules = [{ values = [1], quality = \"bad\", range = [1, 2] }]",
+            "value_rules = [{ values = [18446744073709551615], quality = \"bad\" }]",
+            "value_rules = { values = [1], quality = \"bad\" }",
+        ] {
+            let text = one_measurement(bad).replace("schema_version = 1", "schema_version = 2");
+            assert!(
+                matches!(
+                    SensorProfile::from_toml(&text),
+                    Err(ProfileError::Syntax { .. })
+                ),
+                "{bad}"
+            );
+        }
     }
 
     #[test]
@@ -754,13 +841,21 @@ mod tests {
 
     #[test]
     fn schema_version_validates_directly() {
-        assert_eq!(SchemaVersion::new(1), Ok(SchemaVersion::CURRENT));
-        assert_eq!(SchemaVersion::try_from(1), Ok(SchemaVersion::CURRENT));
+        assert_eq!(SchemaVersion::new(1), Ok(SchemaVersion::V1));
+        assert_eq!(SchemaVersion::new(2), Ok(SchemaVersion::V2));
+        assert_eq!(SchemaVersion::try_from(1), Ok(SchemaVersion::V1));
+        assert_eq!(SchemaVersion::try_from(2), Ok(SchemaVersion::CURRENT));
         assert_eq!(
             SchemaVersion::try_from(7),
             Err(ProfileError::IncompatibleSchema { found: 7 })
         );
-        assert_eq!(SchemaVersion::CURRENT.to_string(), "1");
+        assert_eq!(
+            SchemaVersion::new(3),
+            Err(ProfileError::IncompatibleSchema { found: 3 })
+        );
+        assert!(SchemaVersion::V1 < SchemaVersion::V2, "ordered by number");
+        assert_eq!(SchemaVersion::V1.to_string(), "1");
+        assert_eq!(SchemaVersion::CURRENT.to_string(), "2");
     }
 
     #[test]
@@ -785,7 +880,7 @@ mod tests {
         let cases = [
             ProfileError::Oversized { len: 2, max: 1 },
             ProfileError::Syntax { line: 1, column: 1 },
-            ProfileError::IncompatibleSchema { found: 2 },
+            ProfileError::IncompatibleSchema { found: 3 },
             ProfileError::InvalidIdentifier {
                 field: "profile id",
             },

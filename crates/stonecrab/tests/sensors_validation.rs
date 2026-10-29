@@ -14,8 +14,13 @@ mod tests {
     /// A profile whose connection is `connection` (TOML lines under `[connection]`) and
     /// whose measurements are the given `[[measurements]]` bodies.
     fn profile(connection: &str, measurements: &[&str]) -> SensorProfile {
+        profile_at(1, connection, measurements)
+    }
+
+    /// Like [`profile`], written against schema version `version`.
+    fn profile_at(version: u32, connection: &str, measurements: &[&str]) -> SensorProfile {
         let mut text = format!(
-            "id = \"synthetic_validation\"\nschema_version = 1\nvalidation = \"synthetic\"\n\
+            "id = \"synthetic_validation\"\nschema_version = {version}\nvalidation = \"synthetic\"\n\
              [connection]\n{connection}\n[provenance]\nsource = \"Synthetic test profile\"\n"
         );
         for body in measurements {
@@ -400,6 +405,86 @@ mod tests {
                 "{name} reaches the options"
             );
         }
+    }
+
+    // covers: SENSORS-SCHEMA-V2 / value rules need schema version 2
+    #[test]
+    fn value_rules_need_schema_version_2() {
+        let rules = "value_rules = [\n\
+             { values = [1], quality = \"bad\" },\n\
+             { values = [2], quality = \"uncertain\", reason = \"r\" },\n]";
+        let body = int_cel("level", rules);
+        let other = int_cel("plain", "");
+        let v1 = profile_at(
+            1,
+            "scheme = \"sim\"",
+            &[&body, &other, &body.replace("level", "again")],
+        );
+        assert_eq!(
+            v1.validate(),
+            Err(vec![
+                ProfileError::ValueRuleNeedsSchema2 { measurement: 0 },
+                ProfileError::ValueRuleNeedsSchema2 { measurement: 2 },
+            ]),
+            "once per measurement that has rules, whatever their number"
+        );
+        let v2 = profile_at(2, "scheme = \"sim\"", &[&body, &other]);
+        assert_eq!(
+            v2.validate(),
+            Ok(()),
+            "the same measurements under version 2"
+        );
+        assert_eq!(
+            v2.measurements.first().map(|m| m.value_rules.len()),
+            Some(2)
+        );
+        let plain_v1 = profile_at(1, "scheme = \"sim\"", &[&other]);
+        assert_eq!(
+            plain_v1.validate(),
+            Ok(()),
+            "a version 1 profile without rules"
+        );
+    }
+
+    // covers: SENSORS-VALUE-RULES / a rule that lists no value is reported
+    #[test]
+    fn a_value_rule_without_a_value_is_reported() {
+        let body = int_cel(
+            "level",
+            "value_rules = [\n\
+             { values = [3], quality = \"bad\" },\n\
+             { values = [], quality = \"bad\" },\n\
+             { values = [], quality = \"uncertain\" },\n]",
+        );
+        assert_eq!(
+            profile_at(2, "scheme = \"sim\"", &[&body]).validate(),
+            Err(vec![
+                ProfileError::EmptyValueRule {
+                    measurement: 0,
+                    rule: 1
+                },
+                ProfileError::EmptyValueRule {
+                    measurement: 0,
+                    rule: 2
+                },
+            ])
+        );
+        let both = profile_at(1, "scheme = \"sim\"", &[&body]).validate();
+        assert_eq!(
+            both,
+            Err(vec![
+                ProfileError::ValueRuleNeedsSchema2 { measurement: 0 },
+                ProfileError::EmptyValueRule {
+                    measurement: 0,
+                    rule: 1
+                },
+                ProfileError::EmptyValueRule {
+                    measurement: 0,
+                    rule: 2
+                },
+            ]),
+            "the version first, then each empty rule"
+        );
     }
 
     // covers: SENSORS-VALIDATION / every error is returned, in document order

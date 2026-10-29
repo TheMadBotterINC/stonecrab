@@ -814,6 +814,237 @@ mod tests {
         }
     }
 
+    /// The defaults of a connection opened with `single-coil-write=fc05`.
+    fn fc05_defaults() -> ConnectionDefaults {
+        let mut defaults = ConnectionDefaults::default();
+        defaults.single_coil_fc05 = true;
+        defaults
+    }
+
+    // covers: MB-CFG-SINGLE-COIL, MB-TCP-WRITE / function 05 for exactly one coil, and nothing else
+    // changes
+    #[test]
+    fn single_coil_write_fc05_sends_function_05_for_one_coil_and_the_upstream_function_otherwise() {
+        let list =
+            |bits: &[bool]| PlcValue::List(bits.iter().map(|bit| PlcValue::Bool(*bit)).collect());
+        // (address, value, request PDU, reply PDU). V1.1b section 6.5: ON is FF00, OFF is 0000.
+        let cases: Vec<(&str, PlcValue, Vec<u8>, Vec<u8>)> = vec![
+            (
+                "coil:20",
+                PlcValue::Bool(true),
+                vec![0x05, 0x00, 0x13, 0xFF, 0x00],
+                vec![0x05, 0x00, 0x13, 0xFF, 0x00],
+            ),
+            (
+                "coil:20",
+                PlcValue::Bool(false),
+                vec![0x05, 0x00, 0x13, 0x00, 0x00],
+                vec![0x05, 0x00, 0x13, 0x00, 0x00],
+            ),
+            // A selection of one element is one coil too.
+            (
+                "coil:20[0..0]",
+                list(&[true]),
+                vec![0x05, 0x00, 0x13, 0xFF, 0x00],
+                vec![0x05, 0x00, 0x13, 0xFF, 0x00],
+            ),
+            // Two coils are function 15, as upstream sends them.
+            (
+                "coil:20[0..1]",
+                list(&[true, false]),
+                vec![0x0F, 0x00, 0x13, 0x00, 0x02, 0x01, 0x01],
+                vec![0x0F, 0x00, 0x13, 0x00, 0x02],
+            ),
+            // Registers are not coils.
+            (
+                "holding-register:2:UINT",
+                PlcValue::U16(3),
+                vec![0x06, 0x00, 0x01, 0x00, 0x03],
+                vec![0x06, 0x00, 0x01, 0x00, 0x03],
+            ),
+            (
+                "holding-register:2:BOOL",
+                PlcValue::Bool(true),
+                vec![0x06, 0x00, 0x01, 0x00, 0x01],
+                vec![0x06, 0x00, 0x01, 0x00, 0x01],
+            ),
+        ];
+        let mut steps = Vec::new();
+        for (index, (_, _, request, reply)) in cases.iter().enumerate() {
+            let txn = u16::try_from(index + 1).expect("a few frames");
+            steps.push(Step::Expect(adu(txn, request)));
+            steps.push(Step::Reply(adu(txn, reply)));
+        }
+        let rig = Rig::with(
+            config(AccessPolicy::ReadWrite),
+            fc05_defaults(),
+            vec![Script::strict(steps)],
+        );
+        for (index, (address, value, _, _)) in cases.iter().enumerate() {
+            let response = rig
+                .write(vec![(tag("w", address), value.clone())])
+                .unwrap_or_else(|error| panic!("{address}: {error}"));
+            assert!(
+                matches!(outcome(&response, "w"), WriteOutcome::Confirmed),
+                "case {index} {address}: {response:?}"
+            );
+        }
+        assert_eq!(rig.sent().len(), cases.len(), "one frame a write");
+    }
+
+    // covers: MB-CFG-SINGLE-COIL, MB-WRITE-ECHO / the echo of function 05 is checked and the
+    // outcomes are those of every other write
+    #[test]
+    fn a_function_05_write_is_confirmed_by_its_echo_and_every_other_end_keeps_the_s46_outcome() {
+        let sent = [0x05, 0x00, 0x13, 0xFF, 0x00];
+        let write = || (tag("w", "coil:20"), PlcValue::Bool(true));
+        // Exceptions reject the item, as for the other functions.
+        for (reply, kind, code) in [
+            ([0x85, 0x01], ErrorKind::Unsupported(Operation::Write), 1),
+            ([0x85, 0x02], ErrorKind::InvalidAddress, 2),
+            ([0x85, 0x03], ErrorKind::DeviceException, 3),
+            ([0x85, 0x04], ErrorKind::DeviceException, 4),
+        ] {
+            let rig = Rig::with(
+                config(AccessPolicy::ReadWrite),
+                fc05_defaults(),
+                vec![Script::strict(vec![
+                    Step::Expect(adu(1, &sent)),
+                    Step::Reply(adu(1, &reply)),
+                ])],
+            );
+            let response = rig.write(vec![write()]).expect("an outcome");
+            let error = rejection(&response, "w");
+            assert_eq!(error.kind(), kind, "exception {code}");
+            assert_eq!(
+                error.status().map(ProtocolStatus::code),
+                Some(code),
+                "the device's own code"
+            );
+            assert_eq!(rig.sent().len(), 1, "exception {code}: sent once");
+        }
+        // A reply that does not echo the request is not a confirmation: Unknown, sent once.
+        let cases: [(&str, &[u8]); 6] = [
+            ("another address", &[0x05, 0x00, 0x14, 0xFF, 0x00]),
+            ("the other state", &[0x05, 0x00, 0x13, 0x00, 0x00]),
+            ("a state that is neither", &[0x05, 0x00, 0x13, 0x12, 0x34]),
+            (
+                "function 15 for function 05",
+                &[0x0F, 0x00, 0x13, 0x00, 0x01],
+            ),
+            (
+                "function 06 for function 05",
+                &[0x06, 0x00, 0x13, 0xFF, 0x00],
+            ),
+            ("a truncated echo", &[0x05, 0x00, 0x13]),
+        ];
+        for (name, reply) in cases {
+            let rig = Rig::with(
+                config(AccessPolicy::ReadWrite),
+                fc05_defaults(),
+                vec![Script::strict(vec![
+                    Step::Expect(adu(1, &sent)),
+                    Step::Reply(adu(1, reply)),
+                ])],
+            );
+            let response = rig.write(vec![write()]).expect("an outcome");
+            assert!(
+                matches!(outcome(&response, "w"), WriteOutcome::Unknown(_)),
+                "{name}: {response:?}"
+            );
+            assert_eq!(rig.sent().len(), 1, "{name}: sent once, never replayed");
+        }
+        // No answer: Unknown after the transmit, after one request timeout, never replayed.
+        let rig = Rig::with(
+            config(AccessPolicy::ReadWrite),
+            fc05_defaults(),
+            vec![Script::strict(vec![Step::Expect(adu(1, &sent))])],
+        );
+        let response = rig.write(vec![write()]).expect("an outcome");
+        assert!(
+            is_unknown(&response, "w", UnknownReason::TimeoutAfterTransmit),
+            "{response:?}"
+        );
+        assert_eq!(rig.elapsed(), Timeouts::default().request);
+        assert_eq!(rig.sent().len(), 1, "the frame went out once");
+        // The first Unknown halts the batch, as before.
+        let rig = Rig::with(
+            config(AccessPolicy::ReadWrite),
+            fc05_defaults(),
+            vec![Script::strict(vec![Step::Expect(adu(1, &sent))])],
+        );
+        let response = rig
+            .write(vec![
+                write(),
+                (tag("later", "coil:21"), PlcValue::Bool(false)),
+            ])
+            .expect("an outcome");
+        assert!(matches!(
+            rejection(&response, "later").kind(),
+            ErrorKind::Cancelled
+        ));
+        assert_eq!(rig.sent().len(), 1, "nothing after the unknown outcome");
+    }
+
+    // covers: MB-CFG-SINGLE-COIL / the connection string selects function 05, and the default
+    // stays function 15
+    #[test]
+    fn the_connection_string_selects_function_05_for_a_single_coil() {
+        for (query, request, reply) in [
+            (
+                "",
+                vec![0x0F, 0x00, 0x13, 0x00, 0x01, 0x01, 0x01],
+                vec![0x0F, 0x00, 0x13, 0x00, 0x01],
+            ),
+            (
+                "&single-coil-write=fc15",
+                vec![0x0F, 0x00, 0x13, 0x00, 0x01, 0x01, 0x01],
+                vec![0x0F, 0x00, 0x13, 0x00, 0x01],
+            ),
+            (
+                "&single-coil-write=fc05",
+                vec![0x05, 0x00, 0x13, 0xFF, 0x00],
+                vec![0x05, 0x00, 0x13, 0xFF, 0x00],
+            ),
+        ] {
+            let clock = FakeClock::default();
+            let factory = FakeTransportFactory::new(clock.clone());
+            factory.push_script(Script::strict(vec![
+                Step::Expect(adu(1, &request)),
+                Step::Reply(adu(1, &reply)),
+            ]));
+            let driver = ModbusTcpDriver::new()
+                .with_clock(Arc::new(clock.clone()))
+                .with_transport_factory(Arc::new(factory.clone()));
+            let config = driver
+                .parse_config(&format!("modbus-tcp://192.0.2.10?access=read-write{query}"))
+                .expect("config");
+            let address = driver
+                .parse_address("coil:20", &config.address_options())
+                .expect("address");
+            let connection = block_on_with(&clock, driver.connect(config)).expect("connect");
+            let request = WriteRequest::builder(connection.limits())
+                .item(
+                    Tag::new(TagId::new("w").expect("id"), address),
+                    PlcValue::Bool(true),
+                )
+                .build()
+                .expect("request");
+            let response =
+                block_on_with(&clock, connection.write(request)).expect("a write resolves");
+            assert_eq!(response.confirmed_count(), 1, "{query:?}");
+        }
+        let driver = ModbusTcpDriver::new();
+        for refused in ["fc5", "FC05", "05", "true", ""] {
+            let error = driver
+                .parse_config(&format!(
+                    "modbus-tcp://192.0.2.10?single-coil-write={refused}"
+                ))
+                .expect_err("refused");
+            assert_eq!(error.kind(), ErrorKind::InvalidConfig, "{refused:?}");
+        }
+    }
+
     // covers: SPEC mandatory-failure-cases / F4 one operation in flight
     #[test]
     fn a_write_and_a_read_exclude_each_other_before_any_io() {

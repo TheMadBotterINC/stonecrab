@@ -19,6 +19,7 @@ mod tests {
     const INPUT_REGISTERS: FunctionCode = FunctionCode::ReadInputRegisters;
     const READS: [FunctionCode; 4] = [COILS, INPUTS, HOLDING, INPUT_REGISTERS];
     const WRITE_ONE: FunctionCode = FunctionCode::WriteSingleRegister;
+    const WRITE_COIL: FunctionCode = FunctionCode::WriteSingleCoil;
     const WRITE_COILS: FunctionCode = FunctionCode::WriteMultipleCoils;
     const WRITE_REGISTERS: FunctionCode = FunctionCode::WriteMultipleRegisters;
     const WRITES: [FunctionCode; 3] = [WRITE_ONE, WRITE_COILS, WRITE_REGISTERS];
@@ -91,7 +92,7 @@ mod tests {
                 value | 0x80,
                 "exception byte of {value:#04x}"
             );
-            let named = matches!(value, 1..=4 | 6 | 15 | 16 | 20 | 21);
+            let named = matches!(value, 1..=6 | 15 | 16 | 20 | 21);
             assert_eq!(
                 !matches!(code, FunctionCode::Unknown(_)),
                 named,
@@ -102,6 +103,7 @@ mod tests {
         assert_eq!(FunctionCode::from_u8(2), INPUTS, "0x02");
         assert_eq!(FunctionCode::from_u8(3), HOLDING, "0x03");
         assert_eq!(FunctionCode::from_u8(4), INPUT_REGISTERS, "0x04");
+        assert_eq!(FunctionCode::from_u8(5), WRITE_COIL, "0x05");
         assert_eq!(FunctionCode::from_u8(6), WRITE_ONE, "0x06");
         assert_eq!(FunctionCode::from_u8(15), WRITE_COILS, "0x0F");
         assert_eq!(FunctionCode::from_u8(16), WRITE_REGISTERS, "0x10");
@@ -109,11 +111,7 @@ mod tests {
         assert_eq!(FunctionCode::from_u8(21), WRITE_FILE, "0x15");
         assert_eq!(READ_FILE.exception_code(), 0x94, "exception byte of FC20");
         assert_eq!(WRITE_FILE.exception_code(), 0x95, "exception byte of FC21");
-        assert_eq!(
-            FunctionCode::from_u8(5),
-            FunctionCode::Unknown(5),
-            "write single coil is not emitted by upstream"
-        );
+        assert_eq!(WRITE_COIL.exception_code(), 0x85, "exception byte of FC05");
         assert_eq!(COILS.exception_code(), 0x81, "exception byte of FC01");
         assert_eq!(WRITE_COILS.exception_code(), 0x8F, "exception byte of FC15");
     }
@@ -475,9 +473,7 @@ mod tests {
     // covers: SPEC mandatory-failure-cases / F1 malformed discriminators, unexpected function codes
     #[test]
     fn response_for_an_unsupported_function_is_refused_precisely() {
-        for number in
-            (0..=0x7F_u8).filter(|number| !matches!(number, 1..=4 | 6 | 15 | 16 | 20 | 21))
-        {
+        for number in (0..=0x7F_u8).filter(|number| !matches!(number, 1..=6 | 15 | 16 | 20 | 21)) {
             let expected = FunctionCode::from_u8(number);
             for first in [number, number | 0x80] {
                 assert_eq!(
@@ -487,12 +483,6 @@ mod tests {
                 );
             }
         }
-        // Write Single Coil, which upstream never sends: refused even when it is expected.
-        assert_eq!(
-            response(&[0x05, 0x00, 0xAC, 0xFF, 0x00], FunctionCode::from_u8(0x05)),
-            Err(invalid("unsupported function code", 0x05)),
-            "write single coil"
-        );
         assert_eq!(
             response(&[0x10, 0x00, 0x01, 0x00, 0x02], HOLDING),
             Err(invalid("function code", 0x10)),
@@ -1437,18 +1427,135 @@ mod tests {
         }
     }
 
-    // covers: MB-TCP-WRITE
+    // covers: MB-TCP-WRITE, MB-QUIRK-C
     #[test]
     fn write_functions_that_upstream_does_not_send_are_not_decoded() {
         assert_eq!(
             request(&[0x05, 0x00, 0xAC, 0xFF, 0x00]),
             Err(invalid("function code", 5)),
-            "write single coil request"
+            "write single coil request: a client sends it and never parses it"
         );
         assert_eq!(
             request(&[0x0F, 0x00, 0xAC, 0x00, 0x01, 0x01, 0x01]).map(|pdu| pdu.function()),
             Ok(WRITE_COILS),
             "a single coil is function 15"
+        );
+    }
+
+    // covers: MB-CFG-SINGLE-COIL / function 05 is written, its echo is read and checked
+    #[test]
+    fn write_single_coil_is_encoded_and_its_echo_is_decoded_and_proved() {
+        let coil = |address, value| ModbusPdu::WriteSingleCoil { address, value };
+        let echo = |address, value| ModbusPdu::WriteSingleCoilResponse { address, value };
+        // V1.1b section 6.5: coil 173 (wire address 172) on; off is the word 0x0000.
+        let on = [0x05, 0x00, 0xAC, 0xFF, 0x00];
+        let off = [0x05, 0x00, 0xAC, 0x00, 0x00];
+        assert_eq!(encoded_request(&coil(172, true)), Ok(on.to_vec()), "on");
+        assert_eq!(encoded_request(&coil(172, false)), Ok(off.to_vec()), "off");
+        assert_eq!(
+            encoded_response(&echo(172, true)),
+            Ok(on.to_vec()),
+            "echo on"
+        );
+        assert_eq!(
+            encoded_response(&echo(172, false)),
+            Ok(off.to_vec()),
+            "echo off"
+        );
+        assert_eq!(response(&on, WRITE_COIL), Ok(echo(172, true)), "on");
+        assert_eq!(response(&off, WRITE_COIL), Ok(echo(172, false)), "off");
+        for word in [0x0001_u16, 0x00FF, 0xFF01, 0x8000, 0xFFFF] {
+            let [high, low] = word.to_be_bytes();
+            assert_eq!(
+                response(&[0x05, 0x00, 0xAC, high, low], WRITE_COIL),
+                Err(invalid("coil value", u64::from(word))),
+                "{word:#06x} is neither on nor off"
+            );
+        }
+        assert_eq!(
+            response(&on[..4], WRITE_COIL),
+            Err(ParseError::Truncated {
+                needed: 2,
+                available: 1
+            }),
+            "a cut echo"
+        );
+        let mut long = on.to_vec();
+        long.push(0);
+        assert_eq!(
+            response(&long, WRITE_COIL),
+            Err(ParseError::TrailingBytes { remaining: 1 }),
+            "a long echo"
+        );
+        assert_eq!(
+            response(&on, WRITE_ONE),
+            Err(invalid("function code", 5)),
+            "an echo of function 05 where function 06 is expected"
+        );
+        let refusal = ModbusPdu::Exception {
+            function: WRITE_COIL,
+            code: ExceptionCode::IllegalFunction,
+        };
+        assert_eq!(
+            response(&[0x85, 0x01], WRITE_COIL),
+            Ok(refusal.clone()),
+            "an exception names function 05"
+        );
+        assert_eq!(encoded_response(&refusal), Ok(vec![0x85, 0x01]));
+        assert_eq!(
+            coil(172, true).function(),
+            WRITE_COIL,
+            "the request and its echo are function 05"
+        );
+        assert_eq!(echo(172, true).function(), WRITE_COIL);
+        // The echo must repeat the address and the state.
+        assert_eq!(echo(172, true).check_reply_to(&coil(172, true)), Ok(()));
+        assert_eq!(echo(172, false).check_reply_to(&coil(172, false)), Ok(()));
+        assert_eq!(
+            echo(173, true).check_reply_to(&coil(172, true)),
+            Err(invalid("echoed start address", 173)),
+            "the address"
+        );
+        assert_eq!(
+            echo(172, false).check_reply_to(&coil(172, true)),
+            Err(invalid("echoed value", 0)),
+            "off echoed for on"
+        );
+        assert_eq!(
+            echo(172, true).check_reply_to(&coil(172, false)),
+            Err(invalid("echoed value", 0xFF00)),
+            "on echoed for off"
+        );
+        assert_eq!(
+            refusal.check_reply_to(&coil(172, true)),
+            Ok(()),
+            "an exception only has to name the function"
+        );
+        assert_eq!(
+            echo(172, true).check_reply_to(&ModbusPdu::WriteSingleRegister {
+                address: 172,
+                value: 1
+            }),
+            Err(invalid("function code", 5)),
+            "an echo of another function"
+        );
+        // Direction: a request is not a response and a response is not a request.
+        assert_eq!(
+            encoded_response(&coil(172, true)),
+            Err(invalid("response function code", 5))
+        );
+        assert_eq!(
+            encoded_request(&echo(172, true)),
+            Err(invalid("request function code", 5))
+        );
+        assert_eq!(
+            ModbusPdu::write_request(ModbusArea::Coil, 172, 1, &[0x01]),
+            Ok(ModbusPdu::WriteMultipleCoils {
+                start: 172,
+                quantity: 1,
+                bytes: vec![0x01]
+            }),
+            "write_request still picks function 15 for one coil: function 05 is the connection's opt-in"
         );
     }
 

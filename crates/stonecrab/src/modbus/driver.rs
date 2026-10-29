@@ -300,7 +300,9 @@ impl Driver for ModbusTcpDriver {
     /// defaults to port 502 where upstream's default never applies
     /// (docs/parity/modbus.md#MB-QUIRK-A). The `udp.` options are refused like every other
     /// transport option (docs/parity/modbus.md#MB-CFG-TRANSPORT-OPTIONS). `access` is a
-    /// Stonecrab parameter with no upstream counterpart (docs/parity/modbus.md#MB-CFG-ACCESS).
+    /// Stonecrab parameter with no upstream counterpart (docs/parity/modbus.md#MB-CFG-ACCESS),
+    /// and so is `single-coil-write`, which picks function 05 for a one-coil write
+    /// (docs/parity/modbus.md#MB-CFG-SINGLE-COIL).
     fn parse_config(&self, uri: &str) -> Result<ConnectionConfig> {
         let parsed = ConnectionUri::parse(uri)?;
         if parsed.scheme() != SCHEME {

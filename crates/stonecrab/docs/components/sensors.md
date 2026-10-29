@@ -9,10 +9,10 @@ This module currently offers the schema types, a bounded loader, semantic valida
 measurement pipeline, a stale tracker and an acquisition loop: `SensorProfile::from_toml`,
 `SensorProfile::validate`, `SensorProfile::validate_for`, `SensorProfile::tags`,
 `SensorProfile::measurements`, `StaleTracker`, `Acquisition`, `Measurement`, `Quality`,
-`Unit`, `ProfileId`, `SchemaVersion` (version 1 is the only schema version; any other
+`Unit`, `ProfileId`, `SchemaVersion` (versions 1 and 2; any other
 value is `ProfileError::IncompatibleSchema`), `DeviceApplicability`,
 `ConnectionRequirements`, `MeasurementDef`, `ScaleStep`, `ValueRange`, `StatusField`,
-`QualityMapping`, `Provenance`, `ValidationStatus` and `ProfileError`. The loader checks
+`QualityMapping`, `ValueRule`, `Provenance`, `ValidationStatus` and `ProfileError`. The loader checks
 the shape of a document, `validate` checks its meaning, `tags` asks a driver to parse its
 addresses and `measurements` turns a read response into qualified engineering values;
 `StaleTracker` marks retained values stale and `Acquisition` reads a profile through a
@@ -34,7 +34,7 @@ register map and its own fixtures.
 
 | Capability | Support level |
 | --- | --- |
-| Schema types and `SensorProfile::from_toml` (schema version 1) | build-tested; fuzzed |
+| Schema types and `SensorProfile::from_toml` (schema versions 1 and 2) | build-tested; fuzzed |
 | Semantic validation (`SensorProfile::validate`) and the fixed unit table | build-tested |
 | Scaling and quality evaluation (`SensorProfile::measurements`) | build-tested; property-tested |
 | Driver integration (`SensorProfile::tags` through `Driver::parse_address`) | simulator-tested |
@@ -101,9 +101,38 @@ Optional measurement keys are `count` (default 1), `byte_order` (`big_endian` or
 (`multiply`, `divide`, `offset`, `clamp` and `bit_field` steps, applied in order),
 `range`, `status_fields` (`name`, `address`, `bit`, `invert`), `quality_map`
 (`bad_when` and `uncertain_when`, lists of status field names), `min_interval_ms`,
-`stale_after_ms` and `keep_raw`. Byte and word order are never inferred: an absent key
-stays absent. `unit` is optional too: an absent unit means the unit is unknown and loads as
-`None` (an empty or blank `unit = ""` is not the same thing; the validator refuses it).
+`stale_after_ms`, `keep_raw` and, in a schema version 2 document, `value_rules`. Byte and
+word order are never inferred: an absent key stays absent. `unit` is optional too: an absent
+unit means the unit is unknown and loads as `None` (an empty or blank `unit = ""` is not the
+same thing; the validator refuses it).
+
+### Schema version 2: value-matched quality
+Version 2 is version 1 plus the `value_rules` key (ADR-0016 addendum of 2026-10-29). A
+device that reports a fault as a reserved value of the measurement itself, such as a
+controller whose process value reads `0x8003` when the probe is not connected, can say so:
+
+```toml
+schema_version = 2
+# ...
+[[measurements]]
+name = "process_value"
+address = "holding-register:4096:INT"
+data_type = "INT"
+scaling = [{ divide = 10.0 }]
+range = { min = -200.0, max = 1300.0 }
+value_rules = [
+    { values = [-32766, -32765], quality = "bad", reason = "temperature not available" },
+    { values = [-32764], quality = "uncertain" },
+]
+```
+
+`values` are integers compared with the *unscaled* value the driver delivered (the signed
+16 bit `INT` of `0x8003` is -32765); a float, a Boolean or an unsigned value above `i64::MAX`
+never matches. `quality` is `"bad"` or `"uncertain"`, nothing else; `reason` is optional.
+The first rule that lists a value applies, and its quality is ranked with the range and
+status qualities as below. A version 1 document loads as it always did; `value_rules` in a
+version 1 document is refused by `validate` (`ValueRuleNeedsSchema2`), and a rule with no
+value is `EmptyValueRule`. Ranges of values are not offered.
 
 ## Validation and units
 `SensorProfile::validate` returns `Ok(())` or every `ProfileError` it finds, never just the
@@ -122,7 +151,9 @@ checks:
 - a range, when present, with finite bounds and `min <= max` (equal bounds are valid);
 - no two status fields of one measurement on the same address text and bit, and no
   status bit of 64 or more;
-- quality mappings that name only the measurement's own status fields.
+- quality mappings that name only the measurement's own status fields;
+- value rules only in a schema version 2 profile (`ValueRuleNeedsSchema2`), each listing at
+  least one value (`EmptyValueRule`).
 
 Validation is independent of any driver: address text is compared for equality only, and
 the driver's `parse_address` validates it in `validate_for` and when `SensorProfile::tags`
@@ -207,7 +238,9 @@ unevaluable step, or a failed read gives quality `Bad` and no value.
 Quality is the worst of the rules that apply, in the order `Bad`, `Uncertain`, `Unknown`,
 `Good`: a value outside `range` is `Uncertain`; a status field in `bad_when` that is set
 (after `invert`) is `Bad`, one in `uncertain_when` is `Uncertain`; a status item that is
-missing or unreadable is `Unknown`. `Quality::Stale` is never produced here: only the
+missing or unreadable is `Unknown`; a value rule that lists the unscaled value is its `Bad`
+or `Uncertain`, and when that is the quality the measurement ends up with, its `reason` is
+`Measurement::quality_reason`. `Quality::Stale` is never produced here: only the
 stale tracker, which knows a value's age, sets it (see below).
 
 ```rust
@@ -254,9 +287,10 @@ use stonecrab::sensors::{ProfileError, ProfileId, SchemaVersion};
 assert!(ProfileId::new("synthetic_level").is_ok());
 assert!(ProfileId::new("Synthetic Level").is_err());
 
-// Schema version 1 is the only one; a document written for another version is refused.
-assert_eq!(SchemaVersion::new(1)?, SchemaVersion::CURRENT);
-assert_eq!(SchemaVersion::new(2), Err(ProfileError::IncompatibleSchema { found: 2 }));
+// Schema versions 1 and 2 exist; a document written for another version is refused.
+assert_eq!(SchemaVersion::new(1)?, SchemaVersion::V1);
+assert_eq!(SchemaVersion::new(2)?, SchemaVersion::CURRENT);
+assert_eq!(SchemaVersion::new(3), Err(ProfileError::IncompatibleSchema { found: 3 }));
 # Ok::<(), ProfileError>(())
 ```
 

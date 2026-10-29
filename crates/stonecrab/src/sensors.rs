@@ -38,7 +38,7 @@ pub use error::ProfileError;
 pub use ident::{ProfileId, SchemaVersion};
 pub use measurement::{
     ByteOrderName, Measurement, MeasurementDef, Quality, QualityMapping, ScaleStep, StatusField,
-    ValueRange, WordOrderName,
+    ValueRange, ValueRule, WordOrderName,
 };
 pub use profile::{
     ConnectionRequirements, DeviceApplicability, Provenance, SensorProfile, ValidationStatus,

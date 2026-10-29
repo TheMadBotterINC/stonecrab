@@ -29,7 +29,7 @@ not establish calibration accuracy.
 | --- | --- |
 | Vendor document | SOLO Modular Temperature Controller User Manual, 1st Edition 07/2023, <https://cdn.automationdirect.com/static/manuals/soloslm/soloslmman.pdf>, sha256 `830b99162dfbab23ed87c1778428747e65ce658dbce48e76899d4b948295d7cc`, retrieved 2026-10-28. Vendor documentation, all rights reserved: pinned, never copied |
 | Documented map | `fixtures/modbus/devices/slm1-c.toml`; provenance in `fixtures/modbus/devices/PROVENANCE.toml` |
-| Device profile | `profiles/documented/modbus-rtu/solo_slm1_c.toml` (`validation = "documented"`, scheme `modbus-rtu`, the serial line in its `[connection.options]`) |
+| Device profile | `profiles/documented/modbus-rtu/solo_slm1_c.toml` (`validation = "documented"`, scheme `modbus-rtu`, schema version 2 for the value rules of the error codes, the serial line and `single-coil-write=fc05` in its `[connection.options]`) |
 | Replay suite | `crates/stonecrab/tests/modbus_device_replays.rs`, module `slm1_c`; parity rows `MBS-DEVICE-SLM1C-*` in `docs/parity/modbus-serial.md` |
 | Plan | `docs/POST_ALPHA_PLAN.md`, section "Test hardware" (the SLM1-C and the Waveshare adapter) and the row `MBS-HW-RS485` |
 
@@ -65,7 +65,9 @@ another means, that text.
    with `serial.data-bits=7`). The profile's addresses are `zero-based`: the manual's
    hexadecimal numbers are wire addresses, and its appendix prints the one-based Modbus
    decimal beside them (1040H is 44161). Add `access=read-write` only for steps marked
-   "write".
+   "write", and `single-coil-write=fc05` to those that write a bit register: the manual
+   lists only function 05 for a bit, and without the parameter Stonecrab writes a coil with
+   function 15, which the replay assumes the unit refuses (exception 01).
 6. **Approval.** Obtain the maintainer's approval for the run in writing before step B1, and
    note its date in the record.
 
@@ -84,11 +86,11 @@ passing or not.
 | B4 input type | `the_documented_write_targets_take_a_write_and_read_back`, write: 1004H to 0, read back, then PV | The read-back is 0; PV settles to a plausible temperature within a few scans (the manual states 400 ms a scan for a thermocouple). Leave type K for the next steps |
 | B5 negative numbers | Read 1003H (default -200) and 1001H; write 1001H to -500 and read back; restore 0 | The raw word of -200 (0xFF38 if signed, open item 4) and of -500 (0xFE0C). The profile's PV is signed 16 bit by this assumption |
 | B6 PV against a reference | Read 1000H with the probe at an ice point and at room temperature, with an independent thermometer on the same junction | 0.1 degree steps; agreement within a few degrees (the manual states +-0.3 percent of full scale); no calibration claim |
-| B7 error codes | `a_process_variable_error_code_is_never_a_good_reading`: unplug the probe (8003H expected); read within the first scan after power-on (8002H expected); set a mismatched input type with the probe fitted (8004H expected); never force 8006H or 8007H | The raw word each time, signed as the register is, and the profile's quality (`Uncertain`, never `Good`). Record whether 8005H ever appears (open item 4) |
+| B7 error codes | `a_process_variable_error_code_is_never_a_good_reading`: unplug the probe (8003H expected); read within the first scan after power-on (8002H expected); set a mismatched input type with the probe fitted (8004H expected); never force 8006H or 8007H | The raw word each time, signed as the register is, and the profile's quality and reason (`Bad` with the manual's meaning for 8002H, 8003H, 8004H, 8006H and 8007H, as schema version 2 value rules on the signed 16 bit codes; never `Good`). Record whether 8005H ever appears (open item 4); the profile has no rule for it and would show it `Uncertain` by the range |
 | B8 units | `a_fahrenheit_display_makes_the_process_value_bad`, write: status bits 102AH read bit 2 for degrees C; set the display to degrees F (bit register 0811H, or the controller's own menu) and read | PV and the status bits agree; the profile marks PV `Bad` while the display is not degrees C. Restore degrees C |
 | B9 read limit | `the_documented_request_limit_cuts_reads_and_refuses_larger_requests`, read half: eight registers in one request, then nine | Eight served; nine refused, ignored, truncated or answered. Record which (open item 2) and the code (open item 1) |
 | B10 write limit | The write half: function 16 with eight then nine registers. **Run only with the maintainer's agreement on the target.** The ramp/soak SV registers 2000H to 2008H hold data only and default to 0; confirm the control method is not ramp/soak first, and restore them | Eight accepted, nine refused or not. If the nine land anywhere, say where |
-| B11 unlisted functions | `functions_04_and_15_are_refused_because_the_manual_does_not_list_them`: function 04 on 1000H; function 15 on a bit register; function 05 by a raw frame | The manual lists 01, 02, 03, 05, 06 and 16 only. Record the reply to 04 and 15 (open item 1) and whether 05 works. A Stonecrab coil write uses function 15, so it cannot reach this device until function 05 is supported (a recorded divergence of S45). For 05, write the value the bit already holds (FF00H to a bit that reads 1): none of the bits in 0811H to 0816H is harmless to toggle |
+| B11 unlisted functions and bit writes | `functions_04_and_15_are_refused_because_the_manual_does_not_list_them`, `single_coil_write_fc05_writes_the_bit_registers_the_manual_lists`, `every_documented_bit_register_takes_a_function_05_write_and_reads_back`: function 04 on 1000H; function 15 on a bit register (a coil write without `single-coil-write`); function 05 with `single-coil-write=fc05` | The manual lists 01, 02, 03, 05, 06 and 16 only. Record the reply to 04 and 15 (open item 1) and whether 05 works: the write is confirmed when the unit echoes the address and the state, and the replay assumes it does. For 05, write the value the bit already holds (a bit that reads 1 gets `true`): none of the bits in 0811H to 0816H is harmless to toggle. Writing and restoring every bit is for the maintainer to approve per bit |
 | B12 bit registers | Read 0811H to 0816H with function 01 and with 02 | Both answer the same; the five addresses are bit registers at all (open item 6) |
 | B13 serial line | RTU timing on the real line: a request to a wrong network address, a request cut short, a second request before the first answered, the line after a timeout, the adapter's turnaround | No answer for a wrong address; a typed timeout inside the deadline; no late reply taken for a later request. Record the baud rate, the inter-frame gap and the reply time |
 | B14 ASCII | The same PV read in ASCII at 7E1 (S60) | The same value in both framings |
@@ -104,9 +106,9 @@ settles each, and the fixture, the profile and the parity rows change to match.
 | 1 | The exception codes for an oversize read or write, an unlisted function (04, 15), an unmapped address and a write to a read-only register | 03 for an oversize request, 01 for an unlisted function; the rest not modeled | B3, B9, B10, B11 |
 | 2 | What a request over eight registers does (refusal, truncation, silence) | A refusal with exception 03 | B9, B10 |
 | 3 | How an SLM2 extension unit is reached, and whether its registers share the main unit's map | Not modeled: one map | B15 |
-| 4 | Whether a negative PV and a negative set point are signed 16 bit integers, and whether 8005H exists | Signed, and 8005H absent (the manual lists 8002H to 8004H, 8006H and 8007H) | B5, B7 |
+| 4 | Whether a negative PV and a negative set point are signed 16 bit integers, and whether 8005H exists | Signed (the profile's value rules are the signed 16 bit codes -32766 to -32764, -32762 and -32761), and 8005H absent (the manual lists 8002H to 8004H, 8006H and 8007H) | B5, B7 |
 | 5 | The exact bytes of the firmware word and of the defaults after a factory reset | The manual's example 0x100 | B1 |
-| 6 | Whether 0811H to 0816H are bit registers, and what function 05 answers | Coils; function 05 not served | B11, B12 |
+| 6 | Whether 0811H to 0816H are bit registers, and what function 05 answers | Coils; function 05 is served and echoes the request (FF00H for on, 0000H for off); another state is refused with exception 03 | B11, B12 |
 | 7 | When a change of 1072H to 1076H takes effect (at once, after the answer, after a power cycle), and in which framing the answer travels | After the answer | B2 |
 | 8 | What a read of an address the manual does not list returns (for example 1017H and 1018H) | Zero | B3 |
 | 9 | Whether the hexadecimal numbers are wire addresses | Yes; the appendix's decimals are 40001 plus the hex | B3 |
@@ -125,7 +127,7 @@ settles each, and the fixture, the profile and the parity rows change to match.
 | Wiring / interface configuration | |
 | Host OS / architecture | |
 | Library commit | |
-| Operation set | read (function 01 to 03), write (06, 16), RTU and ASCII, per the steps above |
+| Operation set | read (function 01 to 03), write (05 with `single-coil-write=fc05`, 06, 16), RTU and ASCII, per the steps above |
 | Load | |
 | Result | |
 

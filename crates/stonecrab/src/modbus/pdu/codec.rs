@@ -3,9 +3,9 @@
 use crate::ByteOrder;
 use crate::codec::{BoundedReader, BoundedWriter, ParseError, coil_byte_count};
 
-use super::model::{check_length, discriminator};
+use super::model::{check_length, coil_word, discriminator};
 use super::{
-    ADDRESS_SPACE, ExceptionCode, FILE_READ_ITEM_BYTES, FILE_RECORDS, FILE_REFERENCE_TYPE,
+    ADDRESS_SPACE, COIL_ON, ExceptionCode, FILE_READ_ITEM_BYTES, FILE_RECORDS, FILE_REFERENCE_TYPE,
     FILE_WRITE_HEADER_BYTES, FileRecord, FileRecordRead, FunctionCode, MAX_FILE_READ_BYTES,
     MAX_FILE_WRITE_BYTES, MAX_PDU_BYTES, MAX_READ_BITS, MAX_READ_REGISTERS, MAX_RECORD_NUMBER,
     MAX_RESPONSE_DATA_BYTES, MAX_WRITE_COILS, MAX_WRITE_REGISTERS, MIN_FILE_WRITE_BYTES, ModbusPdu,
@@ -234,7 +234,8 @@ fn check_byte_count(len: usize, whole_registers: bool) -> Result<u8, ParseError>
 /// Encodes a request: the function code and its fields, big-endian.
 ///
 /// A read request is the wire address and the quantity; Write Single Register is the
-/// address and the value; Write Multiple Coils and Write Multiple Registers are the start
+/// address and the value; Write Single Coil is the address and `0xFF00` for on or `0x0000`
+/// for off; Write Multiple Coils and Write Multiple Registers are the start
 /// address, the quantity, the byte count and the data; Read File Record is the byte count
 /// and a reference type, file, record and length per sub-request; Write File Record is
 /// the byte count and a reference type, file, record, length and registers per
@@ -243,8 +244,9 @@ fn check_byte_count(len: usize, whole_registers: bool) -> Result<u8, ParseError>
 /// write, `start + quantity` at most 65536, a coil write holding exactly `ceil(quantity /
 /// 8)` bytes, a file record run of at least one register inside records 0 to 9999, a
 /// read of at most 35 sub-requests whose answer fits 245 bytes, a write of at most 251
-/// data bytes), so a request this function accepts is one [`decode_request`] accepts.
-/// Nothing is written when it fails.
+/// data bytes), so a request this function accepts is one [`decode_request`] accepts, except
+/// Write Single Coil, which only a client sends and [`decode_request`] refuses. Nothing is
+/// written when it fails.
 ///
 /// # Errors
 /// [`ParseError::InvalidDiscriminator`] when `pdu` is not a request, the quantity is 0, or a
@@ -300,6 +302,9 @@ pub fn encode_request(pdu: &ModbusPdu, writer: &mut BoundedWriter) -> Result<(),
         ModbusPdu::WriteSingleRegister { address, value } => {
             out.extend_from_slice(&function_and_words(function, *address, *value));
         }
+        ModbusPdu::WriteSingleCoil { address, value } => {
+            out.extend_from_slice(&function_and_words(function, *address, coil_word(*value)));
+        }
         ModbusPdu::WriteMultipleCoils {
             start,
             quantity,
@@ -344,6 +349,7 @@ pub fn encode_request(pdu: &ModbusPdu, writer: &mut BoundedWriter) -> Result<(),
         ModbusPdu::ReadBitsResponse { .. }
         | ModbusPdu::ReadRegistersResponse { .. }
         | ModbusPdu::WriteSingleRegisterResponse { .. }
+        | ModbusPdu::WriteSingleCoilResponse { .. }
         | ModbusPdu::WriteMultipleResponse { .. }
         | ModbusPdu::ReadFileRecordResponse { .. }
         | ModbusPdu::WriteFileRecordResponse { .. }
@@ -421,10 +427,10 @@ pub fn encode_request(pdu: &ModbusPdu, writer: &mut BoundedWriter) -> Result<(),
 /// The layouts are upstream's four read request PDUs (`MB-TCP-READ-COIL`,
 /// `MB-TCP-READ-DI`, `MB-TCP-READ-HR`, `MB-TCP-READ-IR`) and its three write request PDUs
 /// (`MB-TCP-WRITE`), with the bounds `MB-LIMIT-COILS`, `MB-LIMIT-REGISTERS`,
-/// `MB-LIMIT-SPAN` and `MB-LIMIT-PDU`. Function 05 is not decoded (`MB-QUIRK-C`). The
-/// file record layouts are upstream's `ModbusPDUReadFileRecordRequest` and
-/// `ModbusPDUWriteFileRecordRequest` (`MB-ADDR-EXTENDED`); the bounds on top of upstream's
-/// are V1.1b sections 6.14 and 6.15.
+/// `MB-LIMIT-SPAN` and `MB-LIMIT-PDU`. Function 05 is not decoded as a request
+/// (`MB-QUIRK-C`, `MB-CFG-SINGLE-COIL`). The file record layouts are upstream's
+/// `ModbusPDUReadFileRecordRequest` and `ModbusPDUWriteFileRecordRequest`
+/// (`MB-ADDR-EXTENDED`); the bounds on top of upstream's are V1.1b sections 6.14 and 6.15.
 pub fn decode_request(reader: &mut BoundedReader<'_>) -> Result<ModbusPdu, ParseError> {
     check_pdu_size(reader)?;
     let function = FunctionCode::from_u8(reader.read_u8()?);
@@ -458,7 +464,10 @@ pub fn decode_request(reader: &mut BoundedReader<'_>) -> Result<ModbusPdu, Parse
             return decode_file_records(reader)
                 .map(|records| ModbusPdu::WriteFileRecord { records });
         }
-        FunctionCode::Unknown(_) => return Err(discriminator(FUNCTION_FIELD, function)),
+        // A client sends function 05 and never parses it as a request.
+        FunctionCode::WriteSingleCoil | FunctionCode::Unknown(_) => {
+            return Err(discriminator(FUNCTION_FIELD, function));
+        }
     };
     let start = reader.read_u16(ByteOrder::BigEndian)?;
     let quantity = reader.read_u16(ByteOrder::BigEndian)?;
@@ -676,9 +685,10 @@ const fn check_pdu_size(reader: &BoundedReader<'_>) -> Result<(), ParseError> {
 /// A normal read response is the function code, a byte count and that many data bytes: 1
 /// to 250 bytes of packed bits for function codes 01 and 02, or a whole number of registers
 /// (an even byte count of 2 to 250) for 03 and 04. A write response echoes the request: the
-/// address and value for function code 06, the start address and quantity (1..=1968 coils
-/// or 1..=123 registers, within the address space) for 15 and 16, and the whole request
-/// for function code 21. A Read File Record response (20) is the data length (1 to 245)
+/// address and value for function code 06, the address and `0xFF00` or `0x0000` for function
+/// code 05, the start address and quantity (1..=1968 coils or 1..=123 registers, within the
+/// address space) for 15 and 16, and the whole request for function code 21. A Read File
+/// Record response (20) is the data length (1 to 245)
 /// and per sub-response a length byte (odd, 3 or more), the reference type 6 and whole
 /// registers. An exception response is
 /// the function code with the high bit set and one of the ten exception codes of V1.1b
@@ -700,7 +710,8 @@ const fn check_pdu_size(reader: &BoundedReader<'_>) -> Result<(), ParseError> {
 ///   echoed quantity over its maximum or a span past the address space.
 /// - [`ParseError::InvalidDiscriminator`]: field `function code` when the function (with or
 ///   without the high bit) is not `expected`, `unsupported function code` when it is
-///   `expected` but not a supported code (05), `byte count` for a count of 0 or a Write File
+///   `expected` but not a supported code, `coil value` for an echoed coil state other than
+///   `0xFF00` or `0x0000`, `byte count` for a count of 0 or a Write File
 ///   Record count below 9, `register byte count` for an odd count, `quantity` for an echoed
 ///   quantity of 0, `file response length` for a Read File Record sub-response that is
 ///   even or below 3, `reference type` for a type other than 6, `record length` for a
@@ -793,6 +804,22 @@ pub fn decode_response(
             reader.expect_eof()?;
             Ok(ModbusPdu::WriteSingleRegisterResponse { address, value })
         }
+        FunctionCode::WriteSingleCoil if !exception => {
+            let address = reader.read_u16(ByteOrder::BigEndian)?;
+            let word = reader.read_u16(ByteOrder::BigEndian)?;
+            reader.expect_eof()?;
+            let value = match word {
+                COIL_ON => true,
+                0 => false,
+                other => {
+                    return Err(ParseError::InvalidDiscriminator {
+                        field: "coil value",
+                        value: u64::from(other),
+                    });
+                }
+            };
+            Ok(ModbusPdu::WriteSingleCoilResponse { address, value })
+        }
         FunctionCode::WriteMultipleCoils | FunctionCode::WriteMultipleRegisters if !exception => {
             let start = reader.read_u16(ByteOrder::BigEndian)?;
             let quantity = reader.read_u16(ByteOrder::BigEndian)?;
@@ -817,6 +844,7 @@ pub fn decode_response(
         | FunctionCode::ReadHoldingRegisters
         | FunctionCode::ReadInputRegisters
         | FunctionCode::WriteSingleRegister
+        | FunctionCode::WriteSingleCoil
         | FunctionCode::WriteMultipleCoils
         | FunctionCode::WriteMultipleRegisters
         | FunctionCode::ReadFileRecord
@@ -924,6 +952,13 @@ pub fn encode_response(pdu: &ModbusPdu, writer: &mut BoundedWriter) -> Result<()
                 *value,
             ));
         }
+        ModbusPdu::WriteSingleCoilResponse { address, value } => {
+            out.extend_from_slice(&function_and_words(
+                FunctionCode::WriteSingleCoil,
+                *address,
+                coil_word(*value),
+            ));
+        }
         ModbusPdu::WriteMultipleResponse {
             function,
             start,
@@ -937,6 +972,7 @@ pub fn encode_response(pdu: &ModbusPdu, writer: &mut BoundedWriter) -> Result<()
                 | FunctionCode::ReadHoldingRegisters
                 | FunctionCode::ReadInputRegisters
                 | FunctionCode::WriteSingleRegister
+                | FunctionCode::WriteSingleCoil
                 | FunctionCode::ReadFileRecord
                 | FunctionCode::WriteFileRecord
                 | FunctionCode::Unknown(_) => {
@@ -1005,6 +1041,7 @@ pub fn encode_response(pdu: &ModbusPdu, writer: &mut BoundedWriter) -> Result<()
         | ModbusPdu::ReadInputRegisters { .. }
         | ModbusPdu::WriteMultipleCoils { .. }
         | ModbusPdu::WriteSingleRegister { .. }
+        | ModbusPdu::WriteSingleCoil { .. }
         | ModbusPdu::WriteMultipleRegisters { .. }
         | ModbusPdu::ReadFileRecord { .. }
         | ModbusPdu::WriteFileRecord { .. } => {

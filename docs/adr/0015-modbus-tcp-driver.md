@@ -1265,3 +1265,72 @@ Compliance: `a_short_reply_fails_every_member_of_its_chunk_and_keeps_the_reply_b
 `rtu_open_returns_a_connection_that_counts_the_replies_it_discarded`,
 `ascii_open_returns_a_connection_that_counts_the_replies_it_discarded`, and
 `interop_a_short_reply_to_a_two_register_read_is_malformed_data` against libmodbus.
+
+## Addendum: opt-in function 05 for a single coil (slice S73, 2026-10-29)
+This addendum records the S73 decision (maintainer decision E11 of
+`docs/POST_ALPHA_PLAN.md`; finding of S52d). The SOLO SLM1-C lists only function 05 for
+writing a bit register, and Stonecrab sends function 15 for every coil write, as upstream
+does (S45, quirk c, `MB-QUIRK-C`), so the SOLO's bits could not be written. It adds one
+connection parameter and one request function, and changes nothing by default.
+
+1. **A Stonecrab extension.** `single-coil-write` takes `fc15`, the default and upstream's
+   frame, or `fc05`; any other value, the empty one and a different case included, is
+   `InvalidConfig` naming the key. Upstream has no such parameter (`MB-CFG-SINGLE-COIL` is
+   the parity row, in the table of configuration parameters). It is a property of the device,
+   so it is a connection parameter and not an option of a tag or an address: one value for the
+   connection, no change to the address grammar. It is named by the function it selects, as
+   `access` is named by the policy it sets.
+2. **One option for the three drivers.** The `modbus-rtu` and `modbus-ascii` drivers read
+   their shared keys through `ModbusOptions::from_parameters` (ADR-0024), so the parameter
+   is parsed once and all three take it. It is the field `single_coil_fc05` (a `bool`) of
+   `ModbusOptions` and of `ConnectionDefaults`, the structure a connection already receives
+   from its options; both are `#[non_exhaustive]`, so the fields are additive. A `bool`
+   and not an enum, because there are two values and one caller.
+3. **Exactly one coil.** With the parameter set, a write of one coil (a `BOOL` tag, or a
+   selection of one element) is function 05: the address, then `FF00` for on or `0000` for
+   off (V1.1b section 6.5). A selection of two or more coils stays function 15, and every
+   register write keeps its function (06 for one register, 16 for more). The choice is made
+   in `ModbusConnection` after `ModbusPdu::write_request` has picked upstream's request, so
+   `write_request` is unchanged and still never picks function 05.
+4. **The echo check and the outcomes of S46 are unchanged.** The reply must repeat the
+   address and the state (`ModbusPdu::check_reply_to`); anything else, a state that is
+   neither `FF00` nor `0000` included, is not a confirmation, and the write is `Unknown`
+   and never replayed. A device exception is `Rejected` with the usual kinds, silence is
+   `Unknown(TimeoutAfterTransmit)`, and an `Unknown` halts the batch. This is the echo check
+   that upstream wrote for function 05 and never runs (`MB-QUIRK-C`); here it runs when
+   the parameter is set.
+5. **The PDU codec.** `FunctionCode::WriteSingleCoil` (0x05) is added after the existing
+   variants (CODING_STANDARDS 9.10), so `FunctionCode::from_u8(5)` is now that variant where
+   it was `Unknown(5)`; `ModbusPdu::WriteSingleCoil` and `ModbusPdu::WriteSingleCoilResponse`
+   are added the same way. `encode_request` writes the request, `encode_response` writes the
+   echo and `decode_response` reads it, with the exception response of function 5. `decode_request` still
+   refuses function 05 with `InvalidDiscriminator { field: "function code" }`: Stonecrab is
+   a client and serves nothing, and the golden vector `request-write-single-coil` says so.
+   This supersedes the S45 addendum where it says function 05 decodes as `Unknown`, for the
+   response direction and for the function code only. The test responder
+   (`tests/support/responder.rs`) reads the five bytes of a function 05 request itself.
+6. **The generated codec is untouched.** `crate::modbus::generated` (ADR-0019) disables the
+   write cases, function 05 among them, so the equivalence proof counts an input of function 05
+   as a disabled case whatever the hand codec does; no row of its closed list changes.
+7. **Compatibility.** Additive against 0.3.0 on master: two public fields and three enum
+   variants added after the existing ones. The parity records are `MB-CFG-SINGLE-COIL`
+   (new), `MB-TCP-WRITE`, `MB-QUIRK-C` and, for the SOLO, `MBS-DEVICE-SLM1C-LIMITS` and
+   `MBS-DEVICE-SLM1C-WRITE`. The drafted upstream issue for quirk c is not changed and not
+   filed.
+
+Alternatives considered. A per-device default of function 05 for a device profile would put
+a Modbus function in the sensors module, which knows no driver. A third value for the
+parameter that sends function 05 for every coil write, two or more included, has no meaning:
+function 05 writes one coil. Letting `decode_request` accept function 05 would be the
+symmetric codec, and needs the golden vector, which is not ours to change in this slice, to
+become an accepted one; the server side has no caller.
+
+Compliance: `single_coil_write_picks_function_05_only_when_it_says_fc05` (options),
+`the_connection_string_selects_function_05_for_a_single_coil`,
+`single_coil_write_fc05_sends_function_05_for_one_coil_and_the_upstream_function_otherwise`,
+`a_function_05_write_is_confirmed_by_its_echo_and_every_other_end_keeps_the_s46_outcome`,
+`write_single_coil_is_encoded_and_its_echo_is_decoded_and_proved`,
+`rtu_single_coil_write_fc05_uses_function_5_and_the_default_stays_function_15`,
+`ascii_single_coil_write_fc05_uses_function_5_and_the_default_stays_function_15`, and for
+the SOLO over RTU `single_coil_write_fc05_writes_the_bit_registers_the_manual_lists` and
+`every_documented_bit_register_takes_a_function_05_write_and_reads_back`.

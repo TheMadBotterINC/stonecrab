@@ -70,7 +70,12 @@ pub(crate) fn driver_capabilities() -> Capabilities {
 /// here. The limits feed [`BatchLimits`] (the chunk bounds of the batcher); a value above
 /// the protocol maximum of 125 registers or 2000 coils is refused when the connection
 /// opens. The `Default` is the upstream default: unit 1, `BIG_ENDIAN` (big-endian bytes,
-/// high word first), 125 registers and 2000 coils.
+/// high word first), 125 registers and 2000 coils, and a single coil written with function
+/// 15.
+///
+/// `single_coil_fc05` is a Stonecrab extension with no upstream counterpart, the connection
+/// parameter `single-coil-write` (`MB-CFG-SINGLE-COIL`): when true, a write of exactly one
+/// coil goes out as function 05 where upstream sends function 15. It is off by default.
 ///
 /// The struct is `#[non_exhaustive]`; start from [`Default`] and assign the fields. The
 /// `modbus-tcp` driver fills it from the connection string through
@@ -90,6 +95,7 @@ pub(crate) fn driver_capabilities() -> Capabilities {
 ///
 /// let mut defaults = ConnectionDefaults::default();
 /// assert_eq!(defaults.unit_id, UnitId::DEFAULT);
+/// assert!(!defaults.single_coil_fc05, "a single coil is function 15, as upstream sends it");
 /// assert_eq!(
 ///     (defaults.byte_order, defaults.word_order),
 ///     (ByteOrder::BigEndian, WordOrder::HighWordFirst)
@@ -113,6 +119,8 @@ pub struct ConnectionDefaults {
     pub max_coils: NonZeroU16,
     /// The most registers one wire request carries (at most 125).
     pub max_registers: NonZeroU16,
+    /// Write a single coil with function 05 instead of function 15 (`single-coil-write`).
+    pub single_coil_fc05: bool,
 }
 
 impl Default for ConnectionDefaults {
@@ -124,6 +132,7 @@ impl Default for ConnectionDefaults {
             word_order: WordOrder::HighWordFirst,
             max_coils: wire.max_coils(),
             max_registers: wire.max_registers(),
+            single_coil_fc05: false,
         }
     }
 }
@@ -823,9 +832,26 @@ impl Link {
             ModbusPdu::write_request(area, address.offset(), address.width(), &payload)
         };
         built
-            .map(|pdu| Planned {
-                unit_id: address.unit_id().unwrap_or(self.defaults.unit_id),
-                pdu,
+            .map(|pdu| {
+                // The opt-in `single-coil-write=fc05`: one coil goes out as function 05.
+                let pdu = if self.defaults.single_coil_fc05
+                    && let ModbusPdu::WriteMultipleCoils {
+                        start,
+                        quantity: 1,
+                        bytes,
+                    } = &pdu
+                {
+                    ModbusPdu::WriteSingleCoil {
+                        address: *start,
+                        value: bytes.first().is_some_and(|byte| byte & 1 == 1),
+                    }
+                } else {
+                    pdu
+                };
+                Planned {
+                    unit_id: address.unit_id().unwrap_or(self.defaults.unit_id),
+                    pdu,
+                }
             })
             .map_err(PlcError::from)
             .map_err(refuse)
@@ -918,6 +944,7 @@ impl Link {
                 WriteOutcome::Rejected(self.stamp_item(op, refusal, answer))
             }
             ModbusPdu::WriteSingleRegisterResponse { .. }
+            | ModbusPdu::WriteSingleCoilResponse { .. }
             | ModbusPdu::WriteMultipleResponse { .. }
             | ModbusPdu::WriteFileRecordResponse { .. } => WriteOutcome::Confirmed,
             // The session proves every reply against its request, so a read reply to a
@@ -929,6 +956,7 @@ impl Link {
             | ModbusPdu::ReadHoldingRegisters { .. }
             | ModbusPdu::ReadInputRegisters { .. }
             | ModbusPdu::WriteMultipleCoils { .. }
+            | ModbusPdu::WriteSingleCoil { .. }
             | ModbusPdu::WriteSingleRegister { .. }
             | ModbusPdu::WriteMultipleRegisters { .. }
             | ModbusPdu::ReadFileRecordResponse { .. }
@@ -1303,8 +1331,10 @@ fn decode_member(
         | ModbusPdu::ReadHoldingRegisters { .. }
         | ModbusPdu::ReadInputRegisters { .. }
         | ModbusPdu::WriteMultipleCoils { .. }
+        | ModbusPdu::WriteSingleCoil { .. }
         | ModbusPdu::WriteSingleRegister { .. }
         | ModbusPdu::WriteMultipleRegisters { .. }
+        | ModbusPdu::WriteSingleCoilResponse { .. }
         | ModbusPdu::WriteSingleRegisterResponse { .. }
         | ModbusPdu::WriteMultipleResponse { .. } => Err(mismatch()),
     };

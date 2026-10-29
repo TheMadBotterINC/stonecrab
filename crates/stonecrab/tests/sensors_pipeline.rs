@@ -26,6 +26,11 @@ mod tests {
         validation = \"synthetic\"\n[connection]\nscheme = \"sim\"\n\
         [provenance]\nsource = \"Synthetic test profile\"\n";
 
+    /// The head of a profile written against schema version 2, which value rules need.
+    const HEAD_V2: &str = "id = \"synthetic_pipeline_v2\"\nschema_version = 2\n\
+        validation = \"synthetic\"\n[connection]\nscheme = \"sim\"\n\
+        [provenance]\nsource = \"Synthetic test profile\"\n";
+
     /// A scaled temperature with range, raw retention and four status fields.
     const BOILER: &str = r#"
         [[measurements]]
@@ -125,9 +130,23 @@ mod tests {
         profile.measurements(&response, wall())
     }
 
+    fn profile_v2(measurements: &str) -> SensorProfile {
+        let profile = SensorProfile::from_toml(&format!("{HEAD_V2}{measurements}"))
+            .expect("test document loads");
+        assert_eq!(profile.validate(), Ok(()), "the test profile is valid");
+        profile
+    }
+
     /// The only measurement of a profile with one definition.
     fn only(measurements: &str, id: &str, value: PlcValue) -> Measurement {
         let mut all = measure(&profile(measurements), vec![ok(id, value)]);
+        assert_eq!(all.len(), 1, "one definition, one measurement");
+        all.remove(0)
+    }
+
+    /// Like [`only`], for a profile written against schema version 2.
+    fn only_v2(measurements: &str, id: &str, value: PlcValue) -> Measurement {
+        let mut all = measure(&profile_v2(measurements), vec![ok(id, value)]);
         assert_eq!(all.len(), 1, "one definition, one measurement");
         all.remove(0)
     }
@@ -417,6 +436,232 @@ mod tests {
             "value unaffected"
         );
         assert_eq!(measurement.quality, Quality::Good);
+    }
+
+    // ---- value rules, schema version 2 --------------------------------------------------
+
+    /// A controller process value in 0.1 degree whose reserved codes are faults: 8002H and
+    /// 8003H (-32766 and -32765 as `INT`) are `Bad`, 8004H (-32764) is `Uncertain`; the
+    /// plausible range is -200 to 1300 degrees.
+    const CONTROLLER: &str = r#"
+        [[measurements]]
+        name = "process_value"
+        address = "STATE/pv:i16"
+        data_type = "INT"
+        unit = "Cel"
+        scaling = [{ divide = 10.0 }]
+        range = { min = -200.0, max = 1300.0 }
+        keep_raw = true
+        value_rules = [
+            { values = [-32766, -32765], quality = "bad", reason = "temperature not available" },
+            { values = [-32764], quality = "uncertain", reason = "input type to check" },
+            { values = [-1234], quality = "bad" },
+        ]
+    "#;
+
+    fn controller(value: PlcValue) -> Measurement {
+        let all = measure(&profile_v2(CONTROLLER), vec![ok("process_value", value)]);
+        assert_eq!(all.len(), 1, "one definition, one measurement");
+        all.into_iter().next().expect("one")
+    }
+
+    // covers: SENSORS-VALUE-RULES / a listed raw value sets the quality and its reason
+    #[test]
+    fn a_listed_value_sets_the_quality_and_gives_its_reason() {
+        for raw in [-32766_i16, -32765] {
+            let bad = controller(PlcValue::I16(raw));
+            assert_eq!(bad.quality, Quality::Bad, "{raw}");
+            assert_eq!(
+                bad.quality_reason.as_deref(),
+                Some("temperature not available"),
+                "{raw}"
+            );
+            assert_eq!(bad.raw, Some(PlcValue::I16(raw)), "the raw code is kept");
+            assert!(
+                bad.value.is_some(),
+                "a value rule keeps the scaled value, as a status does"
+            );
+        }
+        let uncertain = controller(PlcValue::I16(-32764));
+        assert_eq!(uncertain.quality, Quality::Uncertain);
+        assert_eq!(
+            uncertain.quality_reason.as_deref(),
+            Some("input type to check")
+        );
+        let silent = controller(PlcValue::I16(-1234));
+        assert_eq!(
+            (silent.quality, silent.quality_reason),
+            (Quality::Bad, None),
+            "a rule needs no reason"
+        );
+    }
+
+    // covers: SENSORS-VALUE-RULES / an unlisted value is judged as before
+    #[test]
+    fn an_unlisted_value_keeps_the_range_and_status_rules_and_has_no_reason() {
+        let good = controller(PlcValue::I16(250));
+        assert_eq!((good.quality, good.quality_reason), (Quality::Good, None));
+        // 8005H is not listed, so it is only an out-of-range reading: -32763 / 10.
+        let unlisted = controller(PlcValue::I16(-32763));
+        assert_eq!(
+            (unlisted.quality, unlisted.quality_reason),
+            (Quality::Uncertain, None),
+            "the range rule, with no reason"
+        );
+        let plain = only_v2(
+            "[[measurements]]\nname = \"level\"\naddress = \"STATE/level:i16\"\ndata_type = \"INT\"\n",
+            "level",
+            PlcValue::I16(-32766),
+        );
+        assert_eq!(plain.quality_reason, None, "a definition without rules");
+    }
+
+    // covers: SENSORS-VALUE-RULES / the rule is matched on the unscaled value
+    #[test]
+    fn rules_match_the_unscaled_integer_of_any_integer_type() {
+        let text = r#"
+            [[measurements]]
+            name = "level"
+            address = "STATE/level:u16"
+            data_type = "UINT"
+            scaling = [{ divide = 10.0 }]
+            value_rules = [{ values = [5, 40000], quality = "uncertain", reason = "code" }]
+        "#;
+        let run = |value: PlcValue| only_v2(text, "level", value);
+        for value in [
+            PlcValue::U16(5),
+            PlcValue::U16(40_000),
+            PlcValue::I32(5),
+            PlcValue::U64(5),
+        ] {
+            let measurement = run(value.clone());
+            assert_eq!(measurement.quality, Quality::Uncertain, "{value:?}");
+            assert_eq!(
+                measurement.quality_reason.as_deref(),
+                Some("code"),
+                "{value:?}"
+            );
+        }
+        // 50 divided by 10 is 5, which the rule does not see.
+        assert_eq!(run(PlcValue::U16(50)).quality, Quality::Good, "scaled 5.0");
+        // A float, a Boolean and an unsigned value above i64::MAX never match.
+        for value in [
+            PlcValue::F32(5.0),
+            PlcValue::F64(5.0),
+            PlcValue::U64(u64::MAX),
+        ] {
+            assert_eq!(run(value.clone()).quality_reason, None, "{value:?}");
+        }
+        let flag = only_v2(
+            "[[measurements]]\nname = \"level\"\naddress = \"STATE/level:bool\"\ndata_type = \"BOOL\"\n\
+             value_rules = [{ values = [1], quality = \"bad\" }]\n",
+            "level",
+            PlcValue::Bool(true),
+        );
+        assert_eq!(
+            flag.quality,
+            Quality::Good,
+            "a Boolean is not the integer 1"
+        );
+    }
+
+    // covers: SENSORS-VALUE-RULES / the first rule that lists the value applies
+    #[test]
+    fn the_first_rule_that_lists_a_value_applies() {
+        let text = r#"
+            [[measurements]]
+            name = "level"
+            address = "STATE/level:i16"
+            data_type = "INT"
+            value_rules = [
+                { values = [1, 2], quality = "uncertain", reason = "first" },
+                { values = [2, 3], quality = "bad", reason = "second" },
+            ]
+        "#;
+        let at = |value: i16| {
+            let measurement = only_v2(text, "level", PlcValue::I16(value));
+            (measurement.quality, measurement.quality_reason)
+        };
+        assert_eq!(at(1), (Quality::Uncertain, Some("first".to_owned())));
+        assert_eq!(
+            at(2),
+            (Quality::Uncertain, Some("first".to_owned())),
+            "the first wins, not the worst"
+        );
+        assert_eq!(at(3), (Quality::Bad, Some("second".to_owned())));
+        assert_eq!(at(4), (Quality::Good, None));
+    }
+
+    // covers: SENSORS-VALUE-RULES / the worst quality wins and the reason belongs to the winner
+    #[test]
+    fn a_rule_ranks_with_the_range_and_status_rules_and_gives_a_reason_only_when_it_decides() {
+        let text = r#"
+            [[measurements]]
+            name = "level"
+            address = "STATE/level:i16"
+            data_type = "INT"
+            range = { min = 0.0, max = 100.0 }
+            status_fields = [{ name = "fault", address = "STATE/fault:bool", bit = 0 }]
+            quality_map = { bad_when = ["fault"] }
+            value_rules = [
+                { values = [-1], quality = "uncertain", reason = "rule" },
+                { values = [50], quality = "uncertain", reason = "in range" },
+                { values = [51], quality = "bad", reason = "bad rule" },
+            ]
+        "#;
+        let profile = profile_v2(text);
+        let run = |value: i16, fault: bool| {
+            let items = vec![
+                ok("level", PlcValue::I16(value)),
+                ok("level.fault", PlcValue::Bool(fault)),
+            ];
+            let measurement = measure(&profile, items).remove(0);
+            (measurement.quality, measurement.quality_reason)
+        };
+        let rule = |reason: &str| Some(reason.to_owned());
+        assert_eq!(
+            run(50, false),
+            (Quality::Uncertain, rule("in range")),
+            "a rule alone"
+        );
+        assert_eq!(
+            run(-1, false),
+            (Quality::Uncertain, rule("rule")),
+            "range and rule agree"
+        );
+        assert_eq!(
+            run(51, false),
+            (Quality::Bad, rule("bad rule")),
+            "a rule over the range"
+        );
+        assert_eq!(
+            run(50, true),
+            (Quality::Bad, None),
+            "a bad status outranks the rule"
+        );
+        assert_eq!(
+            run(51, true),
+            (Quality::Bad, rule("bad rule")),
+            "both bad: the rule explains"
+        );
+        assert_eq!(run(7, true), (Quality::Bad, None), "no rule, a status");
+        let unknown = measure(&profile, vec![ok("level", PlcValue::I16(50))]).remove(0);
+        assert_eq!(
+            (unknown.quality, unknown.quality_reason),
+            (Quality::Uncertain, rule("in range")),
+            "an unreadable status is unknown, which a rule outranks"
+        );
+    }
+
+    // covers: SENSORS-VALUE-RULES / a failed read has no reason of a rule
+    #[test]
+    fn a_failed_read_is_bad_with_no_reason() {
+        let profile = profile_v2(CONTROLLER);
+        let measurement = measure(&profile, vec![failed("process_value", None)]).remove(0);
+        assert_eq!(
+            (measurement.quality, measurement.quality_reason),
+            (Quality::Bad, None)
+        );
     }
 
     // ---- scaling, F7 --------------------------------------------------------------------

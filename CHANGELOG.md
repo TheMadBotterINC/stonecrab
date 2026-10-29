@@ -5,6 +5,30 @@ as `stonecrab` 0.2.0 (2026-10-27); `stonecrab` 0.1.0 is the specification-stage
 placeholder.
 
 ## Unreleased
+- The SOLO follow-ups (slice S73, decision E11; ADR-0015 and ADR-0016 addenda of 2026-10-29).
+  Both are additive on master (0.3.0, unpublished) and change no default.
+  - Modbus: the opt-in connection parameter `single-coil-write=fc05` writes a single coil with
+    function 05 where upstream always sends function 15 (`fc15` is the default). The three
+    drivers take it (`modbus-tcp`, `modbus-rtu`, `modbus-ascii`); it is
+    `ModbusOptions::single_coil_fc05` and `ConnectionDefaults::single_coil_fc05`. Two or more
+    coils and every register write keep their function. The echo check and the write outcomes
+    are those of every other write: the echo must repeat the address and the state, a
+    mismatch is `Unknown`, an exception is `Rejected`. `FunctionCode::WriteSingleCoil`,
+    `ModbusPdu::WriteSingleCoil` and `ModbusPdu::WriteSingleCoilResponse` are new (after the
+    existing variants); `FunctionCode::from_u8(5)` is `WriteSingleCoil`, where it was
+    `Unknown(5)`. `encode_request` writes function 05 and `decode_response` reads its echo;
+    `decode_request` still refuses it. The test responder serves it.
+  - Sensors: profile schema version 2 adds the `value_rules` key of a measurement: a list of
+    `{ values = [..], quality = "bad" | "uncertain", reason = ".." }`, matched against the
+    unscaled integer the driver delivered, so a device's reserved error codes can make a value
+    `Bad`, which a plausibility range cannot. Version 1 documents load unchanged; the key in a
+    version 1 document is `ProfileError::ValueRuleNeedsSchema2` from `validate`, and a rule
+    with no value is `EmptyValueRule`. New: `ValueRule`, `SchemaVersion::V1`, `V2`
+    (`CURRENT` is now 2, the newest; it was 1), `MeasurementDef::value_rules` and
+    `Measurement::quality_reason`. The documented SOLO SLM1-C profile moves to version 2: its
+    error codes 8002H, 8003H, 8004H, 8006H and 8007H are `Bad` with their reasons, and its
+    options record `single-coil-write=fc05`. A 0.2.0 reader refuses a version 2 document with
+    `IncompatibleSchema { found: 2 }`.
 - Release 0.3.0: the sensor `unit` is optional (ADR-0016 addendum, slice S74, finding G06,
   decisions E7 and E12; a breaking change, so the crate version moves from 0.2.0 to 0.3.0,
   nothing is published or tagged yet). `MeasurementDef::unit` and `Measurement::unit` are
@@ -48,6 +72,10 @@ placeholder.
   - Behavior, a Modbus read reply that decodes but does not fit its request used to fail the
     whole read; it now fails only the items of its chunk with `MalformedData` and the reply
     PDU in the item's raw bytes, and the other chunks are read (S70, E10).
+  - Behavior, `SchemaVersion::CURRENT` is 2 and `FunctionCode::from_u8(5)` is
+    `WriteSingleCoil` (S73). Code that compares a profile's `schema_version` with `CURRENT`
+    to mean version 1 should use `SchemaVersion::V1`; a `match` over `FunctionCode` that
+    relied on `Unknown(5)` needs the named arm.
   - Build, the `modbus` feature enables `serial` (S59, E10), so a build with Modbus TCP only
     also compiles the `serial2` dependency. A build with `default-features = false` and
     without `modbus` is unchanged.

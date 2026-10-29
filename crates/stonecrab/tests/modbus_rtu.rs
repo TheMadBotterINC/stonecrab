@@ -905,6 +905,85 @@ mod tests {
         }
     }
 
+    // covers: MB-CFG-SINGLE-COIL, MBS-OP-WRITE / rtu_single_coil_write_fc05_uses_function_5
+    #[test]
+    fn rtu_single_coil_write_fc05_uses_function_5_and_the_default_stays_function_15() {
+        // Coil 20 (wire address 19, 0x13): function 05 with FF00 or 0000 when asked, else the
+        // function 15 upstream sends.
+        let bench = Bench::new(vec![
+            Script::strict(vec![
+                Step::Expect(frame(1, &[0x05, 0x00, 0x13, 0xFF, 0x00])),
+                Step::Reply(frame(1, &[0x05, 0x00, 0x13, 0xFF, 0x00])),
+                Step::Expect(frame(1, &[0x05, 0x00, 0x13, 0x00, 0x00])),
+                Step::Reply(frame(1, &[0x05, 0x00, 0x13, 0x00, 0x00])),
+                // Two coils stay function 15 under the parameter.
+                Step::Expect(frame(1, &[0x0F, 0x00, 0x13, 0x00, 0x02, 0x01, 0x03])),
+                Step::Reply(frame(1, &[0x0F, 0x00, 0x13, 0x00, 0x02])),
+                // A device that only lists function 05 refuses another with exception 01.
+                Step::Expect(frame(1, &[0x05, 0x00, 0x14, 0xFF, 0x00])),
+                Step::Reply(frame(1, &[0x85, 0x01])),
+                // An echo of the other state is no confirmation.
+                Step::Expect(frame(1, &[0x05, 0x00, 0x15, 0xFF, 0x00])),
+                Step::Reply(frame(1, &[0x05, 0x00, 0x15, 0x00, 0x00])),
+            ]),
+            Script::strict(vec![
+                Step::Expect(frame(1, &[0x0F, 0x00, 0x13, 0x00, 0x01, 0x01, 0x01])),
+                Step::Reply(frame(1, &[0x0F, 0x00, 0x13, 0x00, 0x01])),
+            ]),
+        ]);
+        let on = bench.connect(&format!("{PORT}?access=read-write&single-coil-write=fc05"));
+        let list =
+            |bits: &[bool]| PlcValue::List(bits.iter().map(|bit| PlcValue::Bool(*bit)).collect());
+        let confirmed = |response: &WriteResponse| {
+            response
+                .results()
+                .iter()
+                .all(|result| matches!(result.outcome(), WriteOutcome::Confirmed))
+        };
+        assert!(confirmed(&bench.write(
+            &*on,
+            tag("a", "coil:20"),
+            PlcValue::Bool(true)
+        )));
+        assert!(confirmed(&bench.write(
+            &*on,
+            tag("b", "coil:20"),
+            PlcValue::Bool(false)
+        )));
+        assert!(confirmed(&bench.write(
+            &*on,
+            tag("c", "coil:20[0..1]"),
+            list(&[true, true])
+        )));
+        let refused = bench.write(&*on, tag("d", "coil:21"), PlcValue::Bool(true));
+        assert!(
+            matches!(
+                refused.results().first().map(stonecrab::WriteResult::outcome),
+                Some(WriteOutcome::Rejected(error))
+                    if error.status().map(stonecrab::ProtocolStatus::code) == Some(1)
+            ),
+            "{refused:?}"
+        );
+        let mismatched = bench.write(&*on, tag("e", "coil:22"), PlcValue::Bool(true));
+        assert!(
+            matches!(
+                mismatched
+                    .results()
+                    .first()
+                    .map(stonecrab::WriteResult::outcome),
+                Some(WriteOutcome::Unknown(_))
+            ),
+            "{mismatched:?}"
+        );
+        // The parameter off, or absent, is function 15.
+        let off = bench.connect(&format!("{PORT}?access=read-write"));
+        assert!(confirmed(&bench.write(
+            &*off,
+            tag("f", "coil:20"),
+            PlcValue::Bool(true)
+        )));
+    }
+
     // covers: MBS-OP-WRITE-EXT / the RTU driver writes extended registers with FC21, cut at
     // the file end as the TCP driver cuts them (MB-ADDR-EXTENDED)
     // covers: MBS-BACKLOG-GO-EXT-SPLIT / an RTU read across a file end joins both

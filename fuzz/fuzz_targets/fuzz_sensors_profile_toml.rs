@@ -4,7 +4,7 @@
 //! never converts bytes lossily. The target asserts the invariants: loading never
 //! panics, an oversized document is refused as `Oversized` before parsing, every
 //! rejection converts into an `InvalidConfig` error with a short fixed message, and a
-//! profile that loads satisfies the schema's postconditions: version 1, snake_case
+//! profile that loads satisfies the schema's postconditions: version 1 or 2, snake_case
 //! identifiers within their bound, and a document inside the size bound.
 //! (No `forbid(unsafe_code)` here: `fuzz_target!` expands to an `extern` fn.)
 #![no_main]
@@ -29,7 +29,10 @@ fn check(text: &str) {
     match SensorProfile::from_toml(text) {
         Ok(profile) => {
             assert!(text.len() <= SensorProfile::MAX_TOML_BYTES, "bound enforced");
-            assert_eq!(profile.schema_version.get(), 1, "only version 1 loads");
+            assert!(
+                matches!(profile.schema_version.get(), 1 | 2),
+                "only versions 1 and 2 load"
+            );
             assert!(snake_case(profile.id.as_str()), "profile id is snake_case");
             assert!(ProfileId::new(profile.id.as_str()).is_ok(), "id re-validates");
             for measurement in &profile.measurements {

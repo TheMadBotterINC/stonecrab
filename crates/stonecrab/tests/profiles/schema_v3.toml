@@ -1,0 +1,11 @@
+# Written for a schema this library does not know: the version is reported even though "flavour" is unknown.
+id = "from_the_future"
+schema_version = 3
+validation = "synthetic"
+flavour = "new"
+
+[connection]
+scheme = "sim"
+
+[provenance]
+source = "Synthetic test fixture; no real device"

@@ -584,3 +584,81 @@ else:
    (pipeline); the existing board tests now assert `Some("Cel")`, `Some("1")` and
    `Some("[g]")`, and the validation property test's oracle and generator include an
    absent unit.
+
+## Addendum: schema version 2 and value-matched quality (slice S73, 2026-10-29)
+This addendum records the S73 decision (maintainer decision E11 of
+`docs/POST_ALPHA_PLAN.md`; finding of S52d). The decision above lets a quality come from a
+status bit and from a plausibility range, and a range violation is only `Uncertain`. A device
+that reports a fault as a reserved value of the measurement itself, such as the SOLO SLM1-C
+whose process value reads 8002H to 8007H (except 8005H, which the manual does not list) when
+it has no temperature, could therefore be reported no worse than `Uncertain`. Version 2 of
+the schema adds the one key that fixes this.
+
+1. **Version 2 is version 1 plus one key.** `SchemaVersion` accepts 1 and 2 and refuses every
+   other value with `IncompatibleSchema`; `SchemaVersion::V1` and `V2` name them and
+   `CURRENT` is the newest, 2 (it was the only version, 1; code that means version 1 uses
+   `V1`). A version 1 document loads exactly as before, with no value rules. The key needs a
+   version of its own, although a reader that does not know it already refuses the document
+   (`deny_unknown_fields`): the key changes what a document says about a value, the version
+   is what tells an author and a reader which meaning applies, and a 0.2.0 reader refuses a
+   version 2 document with `IncompatibleSchema { found: 2 }`, not with a position in a file.
+   The S74 addendum above kept the unit at version 1 for the opposite reason: it only widened
+   what version 1 accepts and gave no value a new meaning.
+2. **The key.** `MeasurementDef::value_rules` (TOML `value_rules`, default empty) is a list of
+   `ValueRule { values: Vec<i64>, quality, reason: Option<String> }`:
+
+   ```toml
+   value_rules = [
+       { values = [-32765], quality = "bad", reason = "temperature sensor not connected" },
+   ]
+   ```
+
+   `quality` is `"bad"` or `"uncertain"`; a rule never raises a quality, so `"good"`,
+   `"stale"`, `"unknown"` and any other text are a `Syntax` error of the loader.
+3. **Raw values, not ranges.** A rule lists values, and the value is compared with the
+   unscaled integer the driver delivered, before the scaling steps: a device documents its
+   reserved codes as numbers of its register, and a rule written on the scaled value would
+   change with every scaling step. The comparison reads the value as `i64` (`PlcValue::as_i64`),
+   so every signed type and every unsigned type up to `u32` match, an unsigned value above
+   `i64::MAX` does not, and a float, a Boolean and text never do. Ranges of values are not
+   added: the one device that needs the key lists exact codes, 8005H sits among them and is
+   unlisted, and a range would have swallowed it; a key for ranges can be added in a later
+   version when a profile needs one, and a second shape with no caller is the cost avoided.
+   The first rule of a measurement that lists a value applies, which needs no check for a
+   value listed twice.
+4. **How a rule ranks.** The rule's quality joins the range quality and the status quality by
+   the precedence of the pipeline, `Bad` over `Uncertain` over `Unknown` over `Good`. The
+   scaled value and the raw value are kept, as for a status. The new field
+   `Measurement::quality_reason` (`Option<String>`, additive: `Measurement` is
+   `#[non_exhaustive]`) holds the rule's reason when the rule's quality is the one the
+   measurement ends up with; a worse status, or a failed read, gives none. It is the profile's
+   own text, kept as it is when a `StaleTracker` marks the measurement stale (the reason of
+   the quality it was read with, which is in `quality_before_stale`). The board adapters set
+   `None`.
+5. **Validation.** The loader checks shape only, so a version 1 document with the key loads;
+   `SensorProfile::validate` reports `ValueRuleNeedsSchema2` once for each measurement that
+   has rules in a version 1 profile and `EmptyValueRule` for a rule that lists no value (it
+   could never apply). Both are new `ProfileError` variants after the existing ones, are
+   reported after the quality-mapping errors of their measurement, and convert to
+   `InvalidConfig` like the others. The text of `IncompatibleSchema` now says "versions 1 and 2".
+6. **The documented SOLO profile moves to version 2.** `profiles/documented/modbus-rtu/solo_slm1_c.toml`
+   lists the five codes as signed 16 bit integers (-32766, -32765, -32764, -32762 and -32761),
+   each `Bad` with the manual's meaning as its reason; the replay compares the rules with the
+   fixture's `[[sentinels]]` and the reasons with their meanings, and reads 8005H as `Uncertain`
+   by the range with no reason. The synthetic profiles and the STRIDE profile stay at version 1.
+7. **Tests and fixtures.** `tests/profiles/schema_v2.toml`, which stood for a document of a
+   later schema, is `schema_v3.toml` and the test that used it is
+   `schema_version_3_is_rejected_as_incompatible` (it was
+   `schema_version_2_is_rejected_as_incompatible`, named in the compliance list above).
+
+Compliance: `schema_version_2_loads_and_version_1_documents_load_as_they_did`,
+`schema_version_3_is_rejected_as_incompatible`, `schema_version_validates_directly`,
+`value_rules_load_with_values_quality_and_an_optional_reason`,
+`a_listed_value_sets_the_quality_and_gives_its_reason`,
+`an_unlisted_value_keeps_the_range_and_status_rules_and_has_no_reason`,
+`rules_match_the_unscaled_integer_of_any_integer_type`,
+`the_first_rule_that_lists_a_value_applies`,
+`a_rule_ranks_with_the_range_and_status_rules_and_gives_a_reason_only_when_it_decides`,
+`a_failed_read_is_bad_with_no_reason`, `value_rules_need_schema_version_2`,
+`a_value_rule_without_a_value_is_reported`, and for the SOLO
+`a_process_variable_error_code_is_never_a_good_reading`.

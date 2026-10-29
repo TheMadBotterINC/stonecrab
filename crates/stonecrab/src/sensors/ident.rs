@@ -98,9 +98,13 @@ impl TryFrom<String> for ProfileId {
 
 /// Version of the profile schema a document is written against.
 ///
-/// Only version 1 exists. A document that declares any other version is rejected with
-/// [`ProfileError::IncompatibleSchema`] rather than read on a best-effort basis, because a
-/// profile decides how raw register values become engineering units.
+/// Versions 1 and 2 exist. Version 2 adds the per-measurement `value_rules` key (value-matched
+/// quality, ADR-0016 addendum of 2026-10-29) and nothing else: a version 1 document loads
+/// unchanged, and the new key is refused in a version 1 document by
+/// [`SensorProfile::validate`](crate::sensors::SensorProfile::validate). A document that
+/// declares any other version is rejected with [`ProfileError::IncompatibleSchema`] rather
+/// than read on a best-effort basis, because a profile decides how raw register values
+/// become engineering units.
 ///
 /// # Compatibility: docs/parity/sensors.md#SENSORS-SCHEMA-V1
 /// Upstream PLC4X has no sensor profile concept; this is a Stonecrab type with no
@@ -110,9 +114,10 @@ impl TryFrom<String> for ProfileId {
 /// ```
 /// use stonecrab::sensors::{ProfileError, SchemaVersion};
 ///
-/// assert_eq!(SchemaVersion::new(1)?, SchemaVersion::CURRENT);
-/// assert_eq!(SchemaVersion::CURRENT.get(), 1);
-/// assert_eq!(SchemaVersion::new(2), Err(ProfileError::IncompatibleSchema { found: 2 }));
+/// assert_eq!(SchemaVersion::new(1)?, SchemaVersion::V1);
+/// assert_eq!(SchemaVersion::new(2)?, SchemaVersion::CURRENT);
+/// assert_eq!(SchemaVersion::CURRENT.get(), 2);
+/// assert_eq!(SchemaVersion::new(3), Err(ProfileError::IncompatibleSchema { found: 3 }));
 /// # Ok::<(), ProfileError>(())
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize)]
@@ -121,19 +126,25 @@ impl TryFrom<String> for ProfileId {
 pub struct SchemaVersion(u32);
 
 impl SchemaVersion {
-    /// The only schema version this library reads.
-    pub const CURRENT: Self = Self(1);
+    /// Version 1, the schema of every profile written before value-matched quality.
+    pub const V1: Self = Self(1);
 
-    /// Accept version 1 and refuse every other value.
+    /// Version 2: version 1 plus the `value_rules` key of a measurement.
+    pub const V2: Self = Self(2);
+
+    /// The newest schema version this library reads.
+    pub const CURRENT: Self = Self::V2;
+
+    /// Accept version 1 or 2 and refuse every other value.
     ///
     /// # Errors
     /// Returns [`ProfileError::IncompatibleSchema`] carrying the rejected version.
     #[must_use = "version validation must be checked"]
     pub const fn new(version: u32) -> Result<Self, ProfileError> {
-        if version == Self::CURRENT.0 {
-            Ok(Self::CURRENT)
-        } else {
-            Err(ProfileError::IncompatibleSchema { found: version })
+        match version {
+            1 => Ok(Self::V1),
+            2 => Ok(Self::V2),
+            _ => Err(ProfileError::IncompatibleSchema { found: version }),
         }
     }
 

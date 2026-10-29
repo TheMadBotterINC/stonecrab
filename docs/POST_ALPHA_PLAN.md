@@ -221,7 +221,7 @@ out until the maintainer decides how it should ship.
 | S70 | Raw bytes of a short Modbus reply; Modbus connection statistics | S | S52a, S57b | The two Known-gaps items closed (landed 2026-10-29) |
 | S71 | TLS transport and `modbus-tcp:tls` (E11) | M | S19, S61 | `MB-TCP-TRANSPORTS-TLS` implemented; an interop job over TLS |
 | S72 | Object PLC Mapping through a declarative macro and a trait (E6, E11) | M | S68 | `TOOL-OPM-*` rows implemented or deferred with reasons |
-| S73 | SOLO follow-ups: opt-in FC05 and profile schema version 2 with value-matched quality (E11) | S | S52e | The SOLO bits writable and its PV sentinels `Bad` in the replay |
+| S73 | SOLO follow-ups: opt-in FC05 and profile schema version 2 with value-matched quality (E11) | S | S52e | The SOLO bits writable and its PV sentinels `Bad` in the replay (landed 2026-10-29) |
 | S74 | G06: `unit` becomes `Option<String>`, and the version moves to 0.3.0 (E7, E12) | S | none | The semver job passes against 0.2.0 with a 0.3.0 version (landed 2026-10-29) |
 
 ## Test hardware

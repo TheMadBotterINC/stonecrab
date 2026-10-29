@@ -1,5 +1,5 @@
-//! A first-party Modbus TCP device for the contract run: it answers function codes 01 to 04,
-//! 06, 15 and 16 from the interop register map, and the file record codes 20 and 21 from a
+//! A first-party Modbus TCP device for the contract run: it answers function codes 01 to 06,
+//! 15 and 16 from the interop register map, and the file record codes 20 and 21 from a
 //! sparse store of extended registers, byte for byte over the MBAP layout. A write changes
 //! the block it names, so a later read sees it.
 //!
@@ -289,10 +289,16 @@ impl Device {
     )]
     fn serve(&self, pdu: &[u8]) -> Option<Vec<u8>> {
         let first = pdu.first().copied()?;
-        let Ok(request) = decode_request(&mut BoundedReader::new(pdu)) else {
+        // The codec writes function 05 and never parses it as a request: read it here.
+        let decoded = if first == 5 {
+            single_coil(pdu)
+        } else {
+            decode_request(&mut BoundedReader::new(pdu)).ok()
+        };
+        let Some(request) = decoded else {
             // A function this device does not serve is ILLEGAL FUNCTION; a known function
             // with a quantity outside its bounds is ILLEGAL DATA VALUE.
-            let known = matches!(first, 1..=4 | 6 | 15 | 16 | 20 | 21);
+            let known = matches!(first, 1..=6 | 15 | 16 | 20 | 21);
             let code = if known {
                 ExceptionCode::IllegalDataValue
             } else {
@@ -318,6 +324,17 @@ impl Device {
                 if store(&mut blocks.holding, *address, &[*value]) {
                     self.shared.applied.fetch_add(1, Ordering::Relaxed);
                     ModbusPdu::WriteSingleRegisterResponse {
+                        address: *address,
+                        value: *value,
+                    }
+                } else {
+                    unaddressable(function)
+                }
+            }
+            ModbusPdu::WriteSingleCoil { address, value } => {
+                if store(&mut blocks.coils, *address, &[*value]) {
+                    self.shared.applied.fetch_add(1, Ordering::Relaxed);
+                    ModbusPdu::WriteSingleCoilResponse {
                         address: *address,
                         value: *value,
                     }
@@ -390,6 +407,21 @@ impl Device {
         encode_response(&response, &mut writer).ok()?;
         Some(writer.into_bytes())
     }
+}
+
+/// The Write Single Coil request of five PDU bytes: the address, then `0xFF00` for on or
+/// `0x0000` for off; any other state is not a request.
+fn single_coil(pdu: &[u8]) -> Option<ModbusPdu> {
+    let [_, address_high, address_low, state_high, state_low] = *<&[u8; 5]>::try_from(pdu).ok()?;
+    let value = match u16::from_be_bytes([state_high, state_low]) {
+        0xFF00 => true,
+        0 => false,
+        _ => return None,
+    };
+    Some(ModbusPdu::WriteSingleCoil {
+        address: u16::from_be_bytes([address_high, address_low]),
+        value,
+    })
 }
 
 /// Put the sub-requests of a Write File Record into the extended registers; false, with

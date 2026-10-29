@@ -5,7 +5,7 @@ use crate::modbus::ModbusArea;
 
 use super::codec::{check_read_records, check_request, check_write_records, split_span};
 use super::{
-    ExceptionCode, FILE_WRITE_HEADER_BYTES, FunctionCode, MAX_FILE_WRITE_BYTES,
+    COIL_ON, ExceptionCode, FILE_WRITE_HEADER_BYTES, FunctionCode, MAX_FILE_WRITE_BYTES,
     MAX_READ_EXTENDED_REGISTERS, MAX_WRITE_COILS, MAX_WRITE_REGISTERS,
 };
 
@@ -80,7 +80,11 @@ pub struct FileRecord {
 /// A write request holds its data, so its quantity and byte count are facts of the value,
 /// not separate fields: a register write has as many registers as its quantity, and a coil
 /// write keeps the quantity (the bits do not say how many of them count) with exactly
-/// `ceil(quantity / 8)` bytes. Function code 05 has no variant (`MB-QUIRK-C`).
+/// `ceil(quantity / 8)` bytes. Function code 05, which upstream never sends (`MB-QUIRK-C`),
+/// has the two variants at the end of the enum, for the opt-in `single-coil-write=fc05`
+/// (`MB-CFG-SINGLE-COIL`): the codec encodes the request and decodes the echo, and
+/// [`decode_request`](crate::modbus::decode_request) still refuses the request, since
+/// Stonecrab is a client and serves nothing.
 ///
 /// # Examples
 /// ```
@@ -219,6 +223,20 @@ pub enum ModbusPdu {
         /// The sub-requests of the request, as the device repeated them.
         records: Vec<FileRecord>,
     },
+    /// Function 0x05: write one coil, `0xFF00` on the wire for on and `0x0000` for off.
+    WriteSingleCoil {
+        /// Wire address of the coil.
+        address: u16,
+        /// The state to write.
+        value: bool,
+    },
+    /// The normal response to function 0x05: the request's address and state, echoed.
+    WriteSingleCoilResponse {
+        /// The address of the request.
+        address: u16,
+        /// The state of the request.
+        value: bool,
+    },
 }
 
 impl ModbusPdu {
@@ -245,6 +263,9 @@ impl ModbusPdu {
             Self::WriteMultipleCoils { .. } => FunctionCode::WriteMultipleCoils,
             Self::WriteSingleRegister { .. } | Self::WriteSingleRegisterResponse { .. } => {
                 FunctionCode::WriteSingleRegister
+            }
+            Self::WriteSingleCoil { .. } | Self::WriteSingleCoilResponse { .. } => {
+                FunctionCode::WriteSingleCoil
             }
             Self::WriteMultipleRegisters { .. } => FunctionCode::WriteMultipleRegisters,
             Self::ReadFileRecord { .. } | Self::ReadFileRecordResponse { .. } => {
@@ -273,11 +294,13 @@ impl ModbusPdu {
                 | Self::WriteMultipleRegisters { .. }
                 | Self::ReadFileRecord { .. }
                 | Self::WriteFileRecord { .. }
+                | Self::WriteSingleCoil { .. }
         )
     }
 
     /// Picks the write request for `payload`, the way upstream does: coils always go in
-    /// Write Multiple Coils (function 15, even a single coil), and a holding-register
+    /// Write Multiple Coils (function 15, even a single coil; function 05 is the connection's
+    /// opt-in, `single-coil-write=fc05`, and is built by the caller), and a holding-register
     /// payload of exactly 2 bytes goes in Write Single Register (function 06) while any
     /// other goes in Write Multiple Registers (function 16).
     ///
@@ -335,7 +358,7 @@ impl ModbusPdu {
     /// 06 whenever the payload is 2 bytes whatever the tag's register count and checks the
     /// lengths afterwards; this function requires the payload to fit the quantity first,
     /// so a 2-byte payload for 2 registers is a length error, not a single write. Function
-    /// 05 is never chosen (`MB-QUIRK-C`).
+    /// 05 is never chosen here (`MB-QUIRK-C`).
     pub fn write_request(
         area: ModbusArea,
         start: u16,
@@ -524,10 +547,10 @@ impl ModbusPdu {
     /// prove: the function must be the request's, and the data must be exactly as long as
     /// the request's quantity (ceil(quantity / 8) bytes for bits, `quantity` registers)
     /// for a read, or echo the request's address and quantity (address and value for
-    /// function 06) for a write. A file record read must answer every sub-request, in order,
-    /// with as many registers as it asked for; a file record write must echo every
-    /// sub-request whole, registers included. An exception only has to name the request's
-    /// function.
+    /// function 06 and function 05) for a write. A file record read must answer every
+    /// sub-request, in order, with as many registers as it asked for; a file record write
+    /// must echo every sub-request whole, registers included. An exception only has to name
+    /// the request's function.
     ///
     /// # Errors
     /// [`ParseError::InvalidDiscriminator`] when `request` is not a request, when `self`
@@ -606,6 +629,24 @@ impl ModbusPdu {
             )
             .and_then(|()| check_echo("echoed value", usize::from(*value), *echoed_value)),
             (
+                Self::WriteSingleCoil { address, value },
+                Self::WriteSingleCoilResponse {
+                    address: echoed_address,
+                    value: echoed_value,
+                },
+            ) => check_echo(
+                "echoed start address",
+                usize::from(*address),
+                *echoed_address,
+            )
+            .and_then(|()| {
+                check_echo(
+                    "echoed value",
+                    usize::from(coil_word(*value)),
+                    coil_word(*echoed_value),
+                )
+            }),
+            (
                 Self::WriteMultipleCoils {
                     start, quantity, ..
                 },
@@ -648,6 +689,11 @@ impl ModbusPdu {
             _ => Err(discriminator("response function code", self.function())),
         }
     }
+}
+
+/// The word that stands for a coil state in function 05: `0xFF00` on, `0x0000` off.
+pub(super) const fn coil_word(on: bool) -> u16 {
+    if on { COIL_ON } else { 0 }
 }
 
 /// The error for a function code that is not acceptable where it was found.

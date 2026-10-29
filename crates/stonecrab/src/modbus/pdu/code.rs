@@ -3,11 +3,12 @@
 /// The function code of a PDU.
 ///
 /// The codec speaks the read function codes 01 to 04, the three write codes upstream
-/// emits (06, 15 (0x0F) and 16 (0x10)) and the file record codes 20 and 21 (0x14, 0x15)
-/// that carry the extended registers. Every other value, including Write Single Coil (05,
-/// which upstream never sends), is [`Unknown`](Self::Unknown): the codec carries the
-/// number and refuses to decode a PDU that uses it. Use [`from_u8`](Self::from_u8) to build a value so that a number with a
-/// named variant never ends up as `Unknown`.
+/// emits (06, 15 (0x0F) and 16 (0x10)), the file record codes 20 and 21 (0x14, 0x15)
+/// that carry the extended registers and, as an opt-in Stonecrab extension, Write Single
+/// Coil (05), which upstream never sends. Every other value is [`Unknown`](Self::Unknown):
+/// the codec carries the number and refuses to decode a PDU that uses it. Use
+/// [`from_u8`](Self::from_u8) to build a value so that a number with a named variant never
+/// ends up as `Unknown`.
 ///
 /// # Examples
 /// ```
@@ -17,16 +18,19 @@
 /// assert_eq!(FunctionCode::ReadHoldingRegisters.as_u8(), 0x03);
 /// assert_eq!(FunctionCode::ReadHoldingRegisters.exception_code(), 0x83);
 /// assert_eq!(FunctionCode::from_u8(0x10), FunctionCode::WriteMultipleRegisters);
-/// assert_eq!(FunctionCode::from_u8(0x05), FunctionCode::Unknown(0x05));
+/// assert_eq!(FunctionCode::from_u8(0x05), FunctionCode::WriteSingleCoil);
+/// assert_eq!(FunctionCode::from_u8(0x2B), FunctionCode::Unknown(0x2B));
 /// ```
 ///
 /// # Compatibility: docs/parity/modbus.md#MB-TCP-READ-HR
 /// The four read variants are the upstream read PDUs: FC01 `MB-TCP-READ-COIL`, FC02
 /// `MB-TCP-READ-DI`, FC03 `MB-TCP-READ-HR` and FC04 `MB-TCP-READ-IR`. The three write
-/// variants are the PDUs upstream builds for `MB-TCP-WRITE`; FC05 stays `Unknown`
-/// (`MB-QUIRK-C`). The two file record variants are the PDUs upstream builds for
-/// `MB-ADDR-EXTENDED`; they come after `Unknown` because a new variant of a published enum
-/// goes after the existing ones (coding standards, section 9.10).
+/// variants are the PDUs upstream builds for `MB-TCP-WRITE`. The two file record variants
+/// are the PDUs upstream builds for `MB-ADDR-EXTENDED`; they come after `Unknown` because a
+/// new variant of a published enum goes after the existing ones (coding standards, section
+/// 9.10), and so does `WriteSingleCoil`, the function upstream never sends
+/// (`MB-QUIRK-C`) and a connection sends only when `single-coil-write=fc05` asks for it
+/// (`MB-CFG-SINGLE-COIL`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum FunctionCode {
@@ -50,11 +54,13 @@ pub enum FunctionCode {
     ReadFileRecord,
     /// 0x15 (21), write file record: the write of the extended registers.
     WriteFileRecord,
+    /// 0x05, write single coil: sent only when `single-coil-write=fc05` is set.
+    WriteSingleCoil,
 }
 
 impl FunctionCode {
-    /// The function code for `value`, `Unknown` when it is not 0x01 to 0x04, 0x06, 0x0F,
-    /// 0x10, 0x14 or 0x15.
+    /// The function code for `value`, `Unknown` when it is not 0x01 to 0x04, 0x05, 0x06,
+    /// 0x0F, 0x10, 0x14 or 0x15.
     ///
     /// # Examples
     /// ```
@@ -70,6 +76,7 @@ impl FunctionCode {
             0x02 => Self::ReadDiscreteInputs,
             0x03 => Self::ReadHoldingRegisters,
             0x04 => Self::ReadInputRegisters,
+            0x05 => Self::WriteSingleCoil,
             0x06 => Self::WriteSingleRegister,
             0x0F => Self::WriteMultipleCoils,
             0x10 => Self::WriteMultipleRegisters,
@@ -87,6 +94,7 @@ impl FunctionCode {
     /// assert_eq!(FunctionCode::ReadInputRegisters.as_u8(), 4);
     /// assert_eq!(FunctionCode::Unknown(0x2B).as_u8(), 0x2B);
     /// assert_eq!(FunctionCode::WriteFileRecord.as_u8(), 0x15);
+    /// assert_eq!(FunctionCode::WriteSingleCoil.as_u8(), 0x05);
     /// ```
     #[must_use]
     pub const fn as_u8(self) -> u8 {
@@ -95,6 +103,7 @@ impl FunctionCode {
             Self::ReadDiscreteInputs => 0x02,
             Self::ReadHoldingRegisters => 0x03,
             Self::ReadInputRegisters => 0x04,
+            Self::WriteSingleCoil => 0x05,
             Self::WriteSingleRegister => 0x06,
             Self::WriteMultipleCoils => 0x0F,
             Self::WriteMultipleRegisters => 0x10,

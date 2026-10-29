@@ -9,14 +9,17 @@ mod tests {
 
     const FULL: &str = include_str!("profiles/full.toml");
 
-    /// Loading never panics, and whatever loads has a valid id and the one schema version.
+    /// Loading never panics, and whatever loads has a valid id and a schema version that loads (1 or 2).
     fn check(text: &str) {
         if let Ok(profile) = SensorProfile::from_toml(text) {
             assert!(
                 ProfileId::new(profile.id.as_str()).is_ok(),
                 "loaded ids are valid"
             );
-            assert_eq!(profile.schema_version.get(), 1, "only version 1 loads");
+            assert!(
+                matches!(profile.schema_version.get(), 1 | 2),
+                "only versions 1 and 2 load"
+            );
         }
     }
 

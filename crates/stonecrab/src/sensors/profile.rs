@@ -139,7 +139,8 @@ pub enum ValidationStatus {
 /// names, status-bit overlap and the rule that `modbus-tcp` profiles declare an address
 /// convention.
 ///
-/// The TOML top level holds `id`, `schema_version` (which must be 1), `validation`, the
+/// The TOML top level holds `id`, `schema_version` (which must be 1 or 2; the
+/// `value_rules` key of a measurement needs 2), `validation`, the
 /// tables `[device]`, `[connection]` and `[provenance]`, and an array of
 /// `[[measurements]]`. `id`, `schema_version`, `connection`, `provenance` and
 /// `validation` are required; `device` and `measurements` default to empty. Unknown keys
@@ -177,7 +178,8 @@ pub enum ValidationStatus {
 pub struct SensorProfile {
     /// Stable identifier of the profile.
     pub id: ProfileId,
-    /// Schema version the document is written against; always version 1.
+    /// Schema version the document is written against: 1, or 2 for a profile that uses
+    /// value-matched quality rules.
     pub schema_version: SchemaVersion,
     /// The device the profile applies to, where known.
     #[serde(default)]
@@ -210,7 +212,7 @@ impl SensorProfile {
     /// # Errors
     /// Returns [`ProfileError::Oversized`] for a document over
     /// [`SensorProfile::MAX_TOML_BYTES`], [`ProfileError::IncompatibleSchema`] when
-    /// `schema_version` is present as an integer in the `u32` range and is not 1, and
+    /// `schema_version` is present as an integer in the `u32` range and is not 1 or 2, and
     /// [`ProfileError::Syntax`] for invalid TOML, an unknown or missing key, a value of
     /// the wrong type (including a `schema_version` that is not an integer in the `u32`
     /// range) or an invalid identifier. Identifier failures raised while deserialising

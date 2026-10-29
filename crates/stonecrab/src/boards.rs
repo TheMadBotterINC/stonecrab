@@ -53,6 +53,7 @@ fn measurement(
         raw: Some(raw),
         unit: Some(unit.to_owned()),
         quality,
+        quality_reason: None,
         origin: ValidationStatus::Documented,
         received_at,
         received_mono,

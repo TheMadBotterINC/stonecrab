@@ -16,7 +16,9 @@ use crate::{ErrorKind, PlcError};
 /// (slice S28b), and those three come from
 /// [`SensorProfile::validate_for`](crate::sensors::SensorProfile::validate_for), which asks a
 /// driver which addresses span several words and what the addresses are
-/// (`OverlappingStatusBits` and `StatusBitOutOfRange` come from both). The last four come from
+/// (`OverlappingStatusBits` and `StatusBitOutOfRange` come from both). `ValueRuleNeedsSchema2`
+/// and `EmptyValueRule` come from `validate` too (schema version 2, ADR-0016 addendum of
+/// 2026-10-29). Four others come from
 /// [`SensorProfile::tags`](crate::sensors::SensorProfile::tags) (slice S29), which asks a driver
 /// to parse the profile's addresses; `AddressRejected` and `StatusAddressRejected` also come
 /// from `validate_for`. Validation errors name
@@ -34,8 +36,8 @@ use crate::{ErrorKind, PlcError};
 /// use stonecrab::{ErrorKind, PlcError};
 /// use stonecrab::sensors::{ProfileError, SchemaVersion};
 ///
-/// let error = SchemaVersion::new(2).expect_err("only version 1 exists");
-/// assert_eq!(error, ProfileError::IncompatibleSchema { found: 2 });
+/// let error = SchemaVersion::new(3).expect_err("only versions 1 and 2 exist");
+/// assert_eq!(error, ProfileError::IncompatibleSchema { found: 3 });
 /// assert_eq!(PlcError::from(error).kind(), ErrorKind::InvalidConfig);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -209,6 +211,19 @@ pub enum ProfileError {
         /// Index of the status field in the measurement's `status_fields`.
         status_field: usize,
     },
+    /// A measurement has `value_rules` in a profile of schema version 1; the key needs
+    /// version 2 (validation).
+    ValueRuleNeedsSchema2 {
+        /// Index of the measurement.
+        measurement: usize,
+    },
+    /// A value rule lists no value, so it could never apply (validation).
+    EmptyValueRule {
+        /// Index of the measurement.
+        measurement: usize,
+        /// Index of the rule in the measurement's `value_rules`.
+        rule: usize,
+    },
 }
 
 impl fmt::Display for ProfileError {
@@ -228,7 +243,7 @@ impl fmt::Display for ProfileError {
             }
             Self::IncompatibleSchema { found } => write!(
                 f,
-                "sensor profile schema version {found} is not supported; this library reads version 1"
+                "sensor profile schema version {found} is not supported; this library reads versions 1 and 2"
             ),
             Self::InvalidIdentifier { field } => write!(
                 f,
@@ -326,6 +341,14 @@ impl fmt::Display for ProfileError {
                 f,
                 "status field {status_field} of measurement {measurement} repeats the name of an earlier status field"
             ),
+            Self::ValueRuleNeedsSchema2 { measurement } => write!(
+                f,
+                "measurement {measurement} has value_rules, which need schema_version 2"
+            ),
+            Self::EmptyValueRule { measurement, rule } => write!(
+                f,
+                "value rule {rule} of measurement {measurement} lists no value"
+            ),
         }
     }
 }
@@ -359,8 +382,8 @@ mod tests {
                 "sensor profile is invalid at line 3, column 9",
             ),
             (
-                ProfileError::IncompatibleSchema { found: 2 },
-                "sensor profile schema version 2 is not supported; this library reads version 1",
+                ProfileError::IncompatibleSchema { found: 3 },
+                "sensor profile schema version 3 is not supported; this library reads versions 1 and 2",
             ),
             (
                 ProfileError::InvalidIdentifier {
@@ -467,6 +490,17 @@ mod tests {
                     status_field: 1,
                 },
                 "status field 1 of measurement 0 repeats the name of an earlier status field",
+            ),
+            (
+                ProfileError::ValueRuleNeedsSchema2 { measurement: 2 },
+                "measurement 2 has value_rules, which need schema_version 2",
+            ),
+            (
+                ProfileError::EmptyValueRule {
+                    measurement: 1,
+                    rule: 0,
+                },
+                "value rule 0 of measurement 1 lists no value",
             ),
         ];
         for (error, text) in cases {

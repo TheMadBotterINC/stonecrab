@@ -1,5 +1,5 @@
 //! Decodes arbitrary bytes as a Modbus PDU: as a request, and as the response to each of the
-//! four read functions, the three write functions (06, 15, 16), the two file record
+//! four read functions, the four write functions (05, 06, 15, 16), the two file record
 //! functions (20, 21) plus an unsupported one.
 //!
 //! The target must never panic. Every accepted PDU must stay inside the protocol bounds, must
@@ -7,7 +7,8 @@
 //! padding bits, byte counts and exception codes are all preserved); an accepted read
 //! response must also survive the reply check (without a panic) against a request of its
 //! function, and an accepted write request (a file record write included) and the echo built
-//! from its fields must pass it.
+//! from its fields must pass it. Function 05 is only ever sent, never served: its echo is
+//! decoded, and its request must be refused by `decode_request`.
 //! (No `forbid(unsafe_code)` here: `fuzz_target!` expands to an `extern` fn.)
 #![no_main]
 
@@ -33,18 +34,26 @@ fuzz_target!(|data: &[u8]| {
         );
         check_write_request(&request);
     }
+    // Nothing decodes a function 05 request, whatever follows the code.
+    if data.first() == Some(&0x05) {
+        assert!(
+            decode_request(&mut BoundedReader::new(data)).is_err(),
+            "a function 05 request is refused"
+        );
+    }
     let first = data.first().copied().unwrap_or(0);
     let expected_functions = [
         FunctionCode::ReadCoils,
         FunctionCode::ReadDiscreteInputs,
         FunctionCode::ReadHoldingRegisters,
         FunctionCode::ReadInputRegisters,
+        FunctionCode::WriteSingleCoil,
         FunctionCode::WriteSingleRegister,
         FunctionCode::WriteMultipleCoils,
         FunctionCode::WriteMultipleRegisters,
         FunctionCode::ReadFileRecord,
         FunctionCode::WriteFileRecord,
-        FunctionCode::Unknown(0x05),
+        FunctionCode::Unknown(0x2B),
         FunctionCode::from_u8(first & 0x7F),
     ];
     for expected in expected_functions {
@@ -71,7 +80,8 @@ fuzz_target!(|data: &[u8]| {
                     registers.len()
                 );
             }
-            ModbusPdu::WriteSingleRegisterResponse { .. } => {}
+            ModbusPdu::WriteSingleRegisterResponse { .. }
+            | ModbusPdu::WriteSingleCoilResponse { .. } => {}
             ModbusPdu::WriteMultipleResponse {
                 function, quantity, ..
             } => {
@@ -185,6 +195,10 @@ fn request_for_echo(response: &ModbusPdu) -> Option<ModbusPdu> {
                 value: *value,
             })
         }
+        ModbusPdu::WriteSingleCoilResponse { address, value } => Some(ModbusPdu::WriteSingleCoil {
+            address: *address,
+            value: *value,
+        }),
         ModbusPdu::WriteMultipleResponse {
             function: FunctionCode::WriteMultipleCoils,
             start,

@@ -1,0 +1,90 @@
+# Documented-map profile of the AutomationDirect SOLO Modular SLM1-C temperature controller
+# (hardware record HW2, slice S52d). LABEL: documented map, not hardware-verified.
+#
+# The map is transcribed from the vendor's manual, which is pinned by URL and sha256 in the
+# provenance below and in fixtures/modbus/devices/slm1-c.toml and is not retained here.
+# Nothing was read from a device. The process variable (PV) is register 1000H in units of
+# 0.1 degree, so divide by 10; the unit is Cel because the status bits of 102AH say the
+# display is in degrees C (bit 2) and the measurement is Bad when that bit is clear.
+#
+# The device speaks Modbus RTU and ASCII only. The scheme below is `modbus-rtu`
+# (`ModbusRtuDriver`, ADR-0024), and the replay suite (slice S52e) reads this file through that
+# driver with RTU framing and CRC, as written, on the line of [connection.options]. The
+# options are informational (the connection comes from `STONECRAB_URL`) and record the line
+# the unit has once it speaks RTU: `serial.baud-rate` 9600 (register 1073H, default 2),
+# `serial.parity` even (1075H, default 1) and `serial.stop-bits` 1 (1076H, default 1) are the
+# manual's factory defaults, and `serial.data-bits` 8 is what RTU needs, reached by writing 1072H
+# to 1 (protocol RTU) and 1074H to 0 (8 bits; the default 1 is 7 bits, for ASCII), the writes of
+# step B2 of docs/hardware/hw2-slm1-c.md. The network address 1 is register 1071H (default 1).
+# The bit registers (0811H, 0813H to 0816H) are written with function 05 only, so a user who
+# writes them adds `single-coil-write=fc05` to the connection string (MB-CFG-SINGLE-COIL).
+# The run on hardware decides whether the unit answers on this line (HW2 open item 7).
+#
+# Sentinel handling. A PV that cannot be measured reads as one of the error codes 8002H (not
+# acquired yet), 8003H (sensor not connected), 8004H (incorrect sensor type), 8006H (ADC
+# input error) and 8007H (memory error); 8005H is not listed. Read as a signed 16 bit
+# integer they are -32766 to -32762 and -32761 (8005H would be -32763). This profile is
+# written against schema version 2 so that each listed code is Bad, with the manual's meaning
+# as its reason (`value_rules`, matched on the unscaled integer, ADR-0016 addendum of
+# 2026-10-29); the raw code is kept (`keep_raw`). A code the manual does not list, 8005H
+# included, is not a rule: after the divide it is about -3276 degrees, far below the range,
+# and the range check makes it Uncertain, never Good. Whether the manual's PV is a signed 16
+# bit integer for a negative temperature is not stated; HW2 settles it (open item 4).
+#
+# The range is the one of the thermocouple K input (input type 1004H = 0): -200 to 1300 degrees
+# C. The unit ships set to Pt100 (12), so a thermocouple needs 1004H written first. The unit
+# of 0.1 degree holds for temperature inputs only: the manual gives 1 EU for a linear
+# (analog) input, so linear inputs are out of scope for this profile, which does not read
+# 1004H and would show them as Cel.
+#
+# Addresses: the hexadecimal numbers of the manual are wire addresses ("zero-based"), so 1000H
+# is holding register 4096 and 102AH is 4138; the manual's appendix prints the one-based
+# Modbus decimal beside the hex for the ramp/soak registers (1040H is 44161). The device is
+# reached at its default network address 1.
+id = "solo_slm1_c"
+schema_version = 2
+validation = "documented"
+
+[device]
+manufacturer = "AutomationDirect"
+model = "SOLO Modular SLM1-C"
+
+[connection]
+scheme = "modbus-rtu"
+address_convention = "zero-based"
+
+[connection.options]
+default-unit-identifier = "1"
+# The manual's limit: at most eight registers a read (FC03) and a write (FC16).
+max-registers-per-request = "8"
+# The manual lists only function 05 for writing a bit register, and Stonecrab sends function 15
+# for a coil unless asked (docs/parity/modbus.md, MB-CFG-SINGLE-COIL).
+single-coil-write = "fc05"
+"serial.baud-rate" = "9600"
+"serial.data-bits" = "8"
+"serial.parity" = "even"
+"serial.stop-bits" = "1"
+
+[provenance]
+source = "Label: documented map, not hardware-verified. AutomationDirect SOLO Modular Temperature Controller User Manual, 1st Edition 07/2023, https://cdn.automationdirect.com/static/manuals/soloslm/soloslmman.pdf, sha256 830b99162dfbab23ed87c1778428747e65ce658dbce48e76899d4b948295d7cc (vendor documentation, not copied)"
+fixtures = ["fixtures/modbus/devices/slm1-c.toml"]
+
+[[measurements]]
+name = "process_value"
+address = "holding-register:4096:INT"      # 1000H
+data_type = "INT"
+unit = "Cel"
+scaling = [{ divide = 10.0 }]
+range = { min = -200.0, max = 1300.0 }
+keep_raw = true
+status_fields = [{ name = "celsius", address = "holding-register:4138:WORD", bit = 2, invert = true }]
+quality_map = { bad_when = ["celsius"] }
+# The meanings are the ones of the fixture's [[sentinels]] (fixtures/modbus/devices/slm1-c.toml);
+# a test compares them. The values are the codes as signed 16 bit integers.
+value_rules = [
+  { values = [-32766], quality = "bad", reason = "Temperature not acquired yet" },  # 8002H
+  { values = [-32765], quality = "bad", reason = "Temperature sensor not connected" },  # 8003H
+  { values = [-32764], quality = "bad", reason = "Incorrect sensor type" },  # 8004H
+  { values = [-32762], quality = "bad", reason = "Unable to acquire temperature, ADC input error" },  # 8006H
+  { values = [-32761], quality = "bad", reason = "Unable to read/write the memory" },  # 8007H
+]

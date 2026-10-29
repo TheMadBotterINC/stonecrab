@@ -685,10 +685,10 @@ impl ModbusSession {
     /// [`ModbusPdu::check_reply_to`] (byte count against quantity for a read, the echo of
     /// address and quantity or value for a write). The result is a
     /// [`ModbusPdu::ReadBitsResponse`], a [`ModbusPdu::ReadRegistersResponse`] or the echo
-    /// of a write ([`ModbusPdu::WriteSingleRegisterResponse`] or
-    /// [`ModbusPdu::WriteMultipleResponse`]), or `Ok(ModbusPdu::Exception { .. })` when the
-    /// device refused the request: the connection stays `Connected` and
-    /// [`exception_item_error`] gives the per-member error.
+    /// of a write ([`ModbusPdu::WriteSingleRegisterResponse`],
+    /// [`ModbusPdu::WriteSingleCoilResponse`] or [`ModbusPdu::WriteMultipleResponse`]), or
+    /// `Ok(ModbusPdu::Exception { .. })` when the device refused the request: the connection
+    /// stays `Connected` and [`exception_item_error`] gives the per-member error.
     ///
     /// The deadline source is the `deadline` argument and nothing else: queueing, the
     /// backoff, the open, the send, the resync and every wait for a reply (the first and
@@ -999,6 +999,7 @@ impl ModbusSession {
 const fn operation_name(function: FunctionCode) -> &'static str {
     match function {
         FunctionCode::WriteSingleRegister
+        | FunctionCode::WriteSingleCoil
         | FunctionCode::WriteMultipleCoils
         | FunctionCode::WriteMultipleRegisters
         | FunctionCode::WriteFileRecord => "write",
@@ -1097,6 +1098,7 @@ mod tests {
     fn the_request_span_names_a_write_function_a_write() {
         for function in [
             FunctionCode::WriteSingleRegister,
+            FunctionCode::WriteSingleCoil,
             FunctionCode::WriteMultipleCoils,
             FunctionCode::WriteMultipleRegisters,
             FunctionCode::WriteFileRecord,

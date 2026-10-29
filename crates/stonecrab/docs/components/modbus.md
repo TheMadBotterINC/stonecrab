@@ -83,7 +83,7 @@ not contain whitespace, control characters or `%`, nor a `user:password@` part, 
 most 4096 bytes.
 
 The six upstream parameters, the shared `address-convention` key and Stonecrab's `access`
-key are the only keys. A
+and `single-coil-write` keys are the only keys. A
 key may appear once, a value may not be empty, and every other key is `InvalidConfig`
 (upstream warns and ignores it; `MB-CFG-UNKNOWN`). That includes the misspelt
 `unit-identifier` that the upstream manual test passes. An error about a parameter value
@@ -99,6 +99,7 @@ or an unknown key names the key, and no error repeats the connection string.
 | `max-registers-per-request` | 125 | 1 to 125 | `MB-CFG-MAX-REGISTERS` |
 | `address-convention` | none | `plc4x`, `one-based-40001` or `zero-based` | `MB-ADDR-BARE-40001`, `MB-ADDR-CONVENTIONS` |
 | `access` | `read-only` | `read-only` or `read-write`; `read-write` is what lets `write` reach the wire (a Stonecrab parameter, upstream has no access policy) | `MB-CFG-ACCESS` |
+| `single-coil-write` | `fc15` | `fc15` or `fc05`; `fc05` writes exactly one coil with function 05, for a device that lists only function 05 for a bit; two or more coils stay function 15 (a Stonecrab parameter, upstream always sends function 15; `modbus-rtu` and `modbus-ascii` take it too) | `MB-CFG-SINGLE-COIL` |
 
 Numbers are decimal digits only: no sign, no space, no `0x`. `address-convention` is the
 explicit-convention rule of the address grammar below: the bare short forms such as
@@ -338,8 +339,10 @@ Each item is a deferred row of the
 with its owner. Where the parser or driver can see the request it rejects it with a typed
 error rather than ignoring it; operations that have no API at all do not exist:
 
-- a write of a coil with function code 05 (upstream never sends it, `MB-QUIRK-C`); the
-  other writes, extended registers included, are in the driver (see "Connection");
+- a write of a coil with function code 05 unless `single-coil-write=fc05` asks for it
+  (`MB-CFG-SINGLE-COIL`; upstream never sends it, `MB-QUIRK-C`), and `decode_request`
+  refuses function 05; the other writes, extended registers included, are in the driver
+  (see "Connection");
 - browse and discovery (`MB-TCP-BROWSE`, `MB-TCP-DISCOVER`): these operations do not
   exist in the API; subscriptions poll since S55 (`MB-TCP-SUBSCRIBE`, see "Connection");
 - the `TIME` and `DATE` family, a selection of more than one dimension and the legacy
@@ -684,15 +687,18 @@ normal read responses (`ReadBitsResponse` holding the packed bytes exactly as re
 (`WriteMultipleCoils`, function 15; `WriteSingleRegister`, function 06;
 `WriteMultipleRegisters`, function 16) with their responses (`WriteSingleRegisterResponse`
 and `WriteMultipleResponse`, which echo the request) and `Exception { function, code }`.
-Write Single Coil (05) is not a variant, because upstream never sends it
-(`MB-QUIRK-C`): function codes 05, 20 and 21 are `FunctionCode::Unknown` and every decoder
-refuses them. The codec only builds and reads PDUs; the connection puts the write requests
+Write Single Coil (05), which upstream never sends (`MB-QUIRK-C`), has the variants
+`WriteSingleCoil` and `WriteSingleCoilResponse` for the opt-in `single-coil-write=fc05`
+(`MB-CFG-SINGLE-COIL`): `encode_request` writes it (`FF00` for on, `0000` for off) and
+`decode_response` reads its echo, while `decode_request` refuses it like any function a client
+does not serve. The codec only builds and reads PDUs; the connection puts the write requests
 on the wire (see "Connection").
 
 `ModbusPdu::write_request(area, start, quantity, payload)` picks the request for an
 encoded payload the way upstream does: a coil is always function 15 (even one coil), a
 holding-register payload of exactly 2 bytes is function 06 and any other is function 16;
-discrete inputs and input registers cannot be written.
+discrete inputs and input registers cannot be written. The connection turns the request of
+one coil into function 05 when `single-coil-write=fc05` says so.
 
 A read request is the function code, the start address and the quantity (5 bytes), with a
 quantity of 1 to 2000 bits or 1 to 125 registers and `start + quantity` at most 65536
@@ -988,7 +994,8 @@ outcome:
 
 - the value is encoded for the data type of its address in the byte and word order of the
   tag, else of the address block, else of `ConnectionDefaults`; a coil takes a `BOOL`; the
-  request is function 15 for a coil (even one), 06 for a holding-register payload of
+  request is function 15 for a coil (even one; function 05 for a single coil under
+  `single-coil-write=fc05`), 06 for a holding-register payload of
   exactly 2 bytes and 16 for any other, and function 21 for an extended register, cut at
   the end of each file into one sub-request per file of the same request;
 - a range selection takes a `PlcValue::List` of exactly its element count, each element

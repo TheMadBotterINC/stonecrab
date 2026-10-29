@@ -239,11 +239,69 @@ pub struct QualityMapping {
     pub uncertain_when: Vec<String>,
 }
 
+/// A value-matched quality rule of a measurement (schema version 2): when the unscaled
+/// integer the driver delivered is one of `values`, the measurement has the rule's
+/// `quality`, and `reason`, when there is one, says why.
+///
+/// A device that reports a fault as a reserved value instead of through a status bit, such
+/// as a thermocouple controller whose process value reads `0x8003` when the probe is not
+/// connected, needs this: a plausibility `range` can only make such a value `Uncertain`.
+/// The TOML keys are `values` (a list of integers, at least one), `quality` (`"bad"` or
+/// `"uncertain"`; a rule never raises a quality to `"good"`) and the optional `reason`:
+///
+/// ```toml
+/// value_rules = [
+///     { values = [-32765], quality = "bad", reason = "sensor not connected" },
+/// ]
+/// ```
+///
+/// The values are compared with the *unscaled* typed value, before the scaling steps run,
+/// so they are the numbers the device documents, read as the type the measurement's address
+/// gives (the signed 16 bit `INT` of `0x8003` is -32765). A value that is not an integer, or
+/// an unsigned one above `i64::MAX`, never matches. Of the rules of one measurement the first
+/// that lists the value applies; its quality is combined with the range and status rules as
+/// [`SensorProfile::measurements`](crate::sensors::SensorProfile::measurements) says.
+/// Ranges of values are not part of the schema.
+///
+/// # Compatibility: docs/parity/sensors.md#SENSORS-VALUE-RULES
+/// Upstream PLC4X has no quality model; this is a Stonecrab type with no upstream parity
+/// claim.
+///
+/// # Examples
+/// ```
+/// # fn main() -> Result<(), toml::de::Error> {
+/// use stonecrab::sensors::{Quality, ValueRule};
+///
+/// let rule: ValueRule = toml::from_str(
+///     "values = [-32765, -32764]\nquality = \"bad\"\nreason = \"sensor fault\"",
+/// )?;
+/// assert_eq!(rule.values, [-32765, -32764]);
+/// assert_eq!(rule.quality, Quality::Bad);
+/// assert_eq!(rule.reason.as_deref(), Some("sensor fault"));
+/// assert!(toml::from_str::<ValueRule>("values = [1]\nquality = \"good\"").is_err());
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[non_exhaustive]
+#[serde(deny_unknown_fields)]
+pub struct ValueRule {
+    /// The raw values the rule matches.
+    pub values: Vec<i64>,
+    /// The quality a match gives: `Quality::Bad` or `Quality::Uncertain`.
+    #[serde(deserialize_with = "deserialize_rule_quality")]
+    pub quality: Quality,
+    /// Why a match has that quality, for a person reading the measurement.
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
 /// One named measurement of a sensor profile: where to read it and how to interpret it.
 ///
-/// The TOML keys are the field names, with two exceptions: `min_interval` is written
-/// `min_interval_ms` and `stale_after` is written `stale_after_ms`, both as whole
-/// milliseconds. Fields without a stated default are required.
+/// The TOML keys are the field names (`value_rules` needs schema version 2), with two
+/// exceptions: `min_interval` is written `min_interval_ms` and `stale_after` is written
+/// `stale_after_ms`, both as whole milliseconds. Fields without a stated default are
+/// required.
 ///
 /// `data_type` is the driver's own type name (for the Modbus driver, one of the upper-case
 /// names such as `INT` or `REAL`); the loader passes it through and does not interpret
@@ -314,6 +372,9 @@ pub struct MeasurementDef {
     /// How the status fields map to quality; `None` when quality is not derived.
     #[serde(default)]
     pub quality_map: Option<QualityMapping>,
+    /// Value-matched quality rules, in order (schema version 2; empty in version 1).
+    #[serde(default)]
+    pub value_rules: Vec<ValueRule>,
     /// Shortest recommended interval between acquisitions (TOML key `min_interval_ms`).
     #[serde(
         default,
@@ -364,6 +425,19 @@ fn deserialize_snake_case<'de, D: Deserializer<'de>>(deserializer: D) -> Result<
 fn deserialize_tag_name<'de, D: Deserializer<'de>>(deserializer: D) -> Result<TagId, D::Error> {
     let text = identifier(deserializer, "measurement name")?;
     TagId::new(&text).map_err(D::Error::custom)
+}
+
+/// A rule's quality: `"bad"` or `"uncertain"`, nothing else.
+fn deserialize_rule_quality<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Quality, D::Error> {
+    match String::deserialize(deserializer)?.as_str() {
+        "bad" => Ok(Quality::Bad),
+        "uncertain" => Ok(Quality::Uncertain),
+        _ => Err(D::Error::custom(
+            "a value rule's quality is bad or uncertain",
+        )),
+    }
 }
 
 fn deserialize_millis<'de, D: Deserializer<'de>>(

@@ -35,7 +35,9 @@ mod tests {
     use std::time::{Duration, SystemTime};
 
     use stonecrab::modbus::{ExceptionCode, ModbusRtuDriver, ModbusTcpDriver};
-    use stonecrab::sensors::{Measurement, Quality, SensorProfile, ValidationStatus};
+    use stonecrab::sensors::{
+        Measurement, Quality, SchemaVersion, SensorProfile, ValidationStatus,
+    };
     use stonecrab::testkit::load_provenance;
     use stonecrab::{
         Clock, Driver, ErrorKind, PlcValue, ProtocolStatus, TagId, UnknownReason, WriteOutcome,
@@ -468,12 +470,14 @@ mod tests {
 
     /// Write each `(address, value, restore, word)` through a read-write connection, read it back
     /// from the wire and from the device (`word` is the register word the device must hold, none
-    /// for a coil), then write the documented default back.
+    /// for a coil), then write the documented default back. `options` is added to the connection
+    /// string after `access=read-write`.
     fn assert_write_targets(
         map: &DocumentedMap,
+        options: &str,
         targets: &[(&str, PlcValue, PlcValue, Option<u16>)],
     ) {
-        let rig = Rig::new(map, &[], "access=read-write");
+        let rig = Rig::new(map, &[], &format!("access=read-write&{options}"));
         let connection = rig.connect();
         for (index, (address, value, restore, word)) in targets.iter().enumerate() {
             let id = format!("target_{index}");
@@ -820,6 +824,7 @@ mod tests {
             // and coils 161 to 163, each restored to the documented default after.
             assert_write_targets(
                 &map(),
+                "",
                 &[
                     (
                         "holding-register:31:UINT",
@@ -1159,9 +1164,93 @@ mod tests {
             let mut peer = rig.peer();
             assert_eq!(
                 peer(&[0x05, 0x08, 0x14, 0xFF, 0x00]),
-                Some(refusal(5, 1)),
-                "function 05 is listed by the manual but the responder serves no function 05 (S45)"
+                Some(vec![0x05, 0x08, 0x14, 0xFF, 0x00]),
+                "function 05 is listed by the manual: the device echoes it (S73)"
             );
+            assert_eq!(
+                peer(&[0x05, 0x08, 0x14, 0x12, 0x34]),
+                Some(refusal(5, 3)),
+                "a coil state other than FF00H or 0000H is refused with exception 03"
+            );
+        }
+
+        // covers: MB-CFG-SINGLE-COIL, MBS-DEVICE-SLM1C-WRITE / a bit is written with function 05
+        // over RTU
+        #[test]
+        fn single_coil_write_fc05_writes_the_bit_registers_the_manual_lists() {
+            let rig = Rig::new(
+                &map(),
+                &[],
+                "access=read-write&single-coil-write=fc05&max-registers-per-request=8",
+            );
+            let connection = rig.connect();
+            let run_stop = || rig.tag("run_stop", "coil:2068");
+            let write = |state: bool| {
+                let response = rig
+                    .write(&*connection, vec![(run_stop(), PlcValue::Bool(state))])
+                    .expect("the write resolves");
+                response
+                    .get(&TagId::new("run_stop").expect("id"))
+                    .map(|result| matches!(result.outcome(), WriteOutcome::Confirmed))
+            };
+            assert_eq!(write(false), Some(true), "stop is confirmed by the echo");
+            assert_eq!(
+                rig.device.coil(0x0814 + 1),
+                Some(false),
+                "the device stopped"
+            );
+            assert_eq!(write(true), Some(true), "run is confirmed by the echo");
+            assert_eq!(
+                rig.device.coil(0x0814 + 1),
+                Some(true),
+                "the device runs again"
+            );
+            let sent: Vec<Vec<u8>> = rig
+                .factory
+                .probes()
+                .iter()
+                .flat_map(stonecrab::testkit::FakeTransportProbe::sent)
+                .map(|bytes| bytes.to_vec())
+                .collect();
+            assert_eq!(
+                sent,
+                [
+                    rtu_frame(1, &[0x05, 0x08, 0x14, 0x00, 0x00]),
+                    rtu_frame(1, &[0x05, 0x08, 0x14, 0xFF, 0x00]),
+                ],
+                "network address 1, function 05, bit 0814H, 0000H or FF00H, CRC; no function 15"
+            );
+            assert_eq!(rig.device.applied(), 2, "each write was applied once");
+        }
+
+        // covers: MB-CFG-SINGLE-COIL, MBS-DEVICE-SLM1C-WRITE / every documented bit register
+        // takes a write with function 05 and reads back
+        #[test]
+        fn every_documented_bit_register_takes_a_function_05_write_and_reads_back() {
+            // 0811H temperature unit display (default 1), 0813H auto-tuning (0), 0814H run/stop
+            // (1), 0815H program stop (0) and 0816H program hold (0); each restored.
+            let bit = |address: &str, default: bool| {
+                (
+                    address.to_owned(),
+                    PlcValue::Bool(!default),
+                    PlcValue::Bool(default),
+                    None,
+                )
+            };
+            let owned = [
+                bit("coil:2065", true),
+                bit("coil:2067", false),
+                bit("coil:2068", true),
+                bit("coil:2069", false),
+                bit("coil:2070", false),
+            ];
+            let targets: Vec<(&str, PlcValue, PlcValue, Option<u16>)> = owned
+                .iter()
+                .map(|(address, value, restore, word)| {
+                    (address.as_str(), value.clone(), restore.clone(), *word)
+                })
+                .collect();
+            assert_write_targets(&map(), "single-coil-write=fc05", &targets);
         }
 
         // covers: MBS-DEVICE-SLM1C-MAP / the profile is the map's profile
@@ -1182,6 +1271,7 @@ mod tests {
                     map.device.unit_id.to_string(),
                 ),
                 ("max-registers-per-request".to_owned(), "8".to_owned()),
+                ("single-coil-write".to_owned(), "fc05".to_owned()),
             ]);
             options.extend(serial.options().iter().filter_map(|option| {
                 option
@@ -1190,7 +1280,7 @@ mod tests {
             }));
             assert_eq!(
                 profile.connection.options, options,
-                "the profile records the unit, the request limit and the line the replay uses"
+                "the profile records the unit, the request limit, the function of a bit write and the line the replay uses"
             );
         }
 
@@ -1265,6 +1355,26 @@ mod tests {
                 ),
                 "250 is 25.0 degrees C"
             );
+            assert_eq!(
+                profile.schema_version,
+                SchemaVersion::V2,
+                "value-matched quality needs schema version 2"
+            );
+            let ruled: Vec<i64> = profile
+                .measurements
+                .iter()
+                .flat_map(|measurement| &measurement.value_rules)
+                .flat_map(|rule| rule.values.iter().copied())
+                .collect();
+            let documented: Vec<i64> = map
+                .sentinels
+                .iter()
+                .map(|sentinel| i64::from(i16::from_be_bytes(sentinel.word.to_be_bytes())))
+                .collect();
+            assert_eq!(
+                ruled, documented,
+                "the profile's rules list exactly the error codes of the map, as signed 16 bit integers"
+            );
             for sentinel in &map.sentinels {
                 let measurements = measure(&profile, &map, &[(0x1000, sentinel.word)]);
                 let pv = named(&measurements, "process_value");
@@ -1279,11 +1389,25 @@ mod tests {
                 );
                 assert_eq!(
                     pv.quality,
-                    Quality::Uncertain,
-                    "{:#06x}: far outside -200 to 1300 degrees C, so never Good (schema 1 cannot make it Bad)",
+                    Quality::Bad,
+                    "{:#06x}: an error code is Bad",
+                    sentinel.word
+                );
+                assert_eq!(
+                    pv.quality_reason.as_deref(),
+                    Some(sentinel.meaning.as_str()),
+                    "{:#06x}: the reason is the manual's meaning",
                     sentinel.word
                 );
             }
+            // 8005H is not listed: no rule, so only the range makes it Uncertain, never Good.
+            let unlisted = measure(&profile, &map, &[(0x1000, 0x8005)]);
+            let pv = named(&unlisted, "process_value");
+            assert_eq!(
+                (pv.quality, pv.quality_reason.clone()),
+                (Quality::Uncertain, None),
+                "8005H: outside -200 to 1300 degrees C"
+            );
             // An assumption the manual leaves open: a negative PV is a signed 16 bit integer.
             let cold = measure(&profile, &map, &[(0x1000, 0xFF38)]);
             assert_eq!(
@@ -1322,6 +1446,7 @@ mod tests {
             // (0 is 8 bits): the two the unit needs for RTU. Each is restored to its default.
             assert_write_targets(
                 &map(),
+                OPTIONS,
                 &[
                     (
                         "holding-register:4100:UINT",
