@@ -4,7 +4,8 @@ Status: alpha, reconciled with the code in slices S31 and S33 of
 [`ALPHA_PLAN.md`](ALPHA_PLAN.md). Everything below is true of the code at that slice;
 nothing is promised that is not shipped, and deferred items say what owns them.
 
-Stonecrab is one crate, `stonecrab` 0.2.0 (ADR-0018). The Feature column of the table
+Stonecrab is one crate (ADR-0018): `stonecrab` 0.3.0 on `master`, not yet published, over the
+published 0.2.0 alpha. The Feature column of the table
 below names the Cargo feature that switches a capability on. `sim`, `modbus` and
 `sensors` are on by default; `default-features = false` leaves the core and the codec.
 The `testkit` feature is test tooling, not a capability, and carries no support level.

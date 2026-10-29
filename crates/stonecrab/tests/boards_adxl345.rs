@@ -571,7 +571,7 @@ mod tests {
         for (measurement, (name, g, count)) in measurements.iter().zip(expected) {
             assert_eq!(measurement.name, name);
             assert_eq!(measurement.tag.as_str(), name);
-            assert_eq!(measurement.unit, "[g]");
+            assert_eq!(measurement.unit.as_deref(), Some("[g]"));
             assert_eq!(measurement.value, Some(PlcValue::F64(g)), "{name}");
             assert_eq!(measurement.raw, Some(PlcValue::I16(count)), "{name}");
             assert_eq!(measurement.quality, Quality::Good);

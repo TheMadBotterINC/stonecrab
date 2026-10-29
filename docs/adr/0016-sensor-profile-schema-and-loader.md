@@ -546,3 +546,41 @@ document and convert to `InvalidConfig`.
    no echo, and a property test against an independent restatement of the overlap rule;
    the `validate` property test's oracle gains the bit bound. The runtime guard in the
    pipeline stays for profiles that were never validated.
+
+## Addendum: the unit is optional (slice S74, 2026-10-29)
+This addendum records the S74 decision (finding G06; maintainer decisions E7 and E12 of
+`docs/POST_ALPHA_PLAN.md`). The decision above made `unit` a required key, so a profile
+could not say that the unit of a value is unknown, and the envelope (`SPEC.md`: "unit when
+known") had no way to carry that. It changes the two types that hold a unit and nothing
+else:
+
+1. **Types.** `MeasurementDef::unit` and `Measurement::unit` are `Option<String>`.
+   `MeasurementDef::unit` is `#[serde(default)]`, so an absent `unit` key loads as `None`
+   and means "unit unknown". `Measurement::unit` copies it. Every producer that knows its
+   unit sets `Some`: the MAX31855 and ADXL345 board adapters (`boards::measurement`) always
+   do. No unit is guessed, defaulted or inferred from the data type or the address.
+2. **Validation.** An absent unit is valid. A stated unit is checked as before: the empty
+   string and now also a blank one (only whitespace) are `EmptyUnit`, and anything else
+   outside the table is `UnknownUnit`. `EmptyUnit` is not an absent unit: a profile that
+   writes `unit = ""` is still refused, so a typing slip is not read as "unknown". The
+   message of `EmptyUnit` tells the author to omit the key when the unit is unknown. No
+   variant is added to `ProfileError`.
+3. **Schema version.** The schema stays at version 1. Version 2 is for a document that a
+   version 1 reader would misread; here the change only widens version 1: every version 1
+   document that 0.2.0 loads loads the same way now, and the only new documents are those
+   without a unit. A 0.2.0 reader refuses such a document with `Syntax` (a missing field)
+   instead of `IncompatibleSchema`; that is the cost of not spending version 2 on this, and
+   it is accepted because profiles are repository data that travel with the crate version
+   that reads them. The synthetic and documented profiles all state their units and do not
+   change.
+4. **Release.** Changing the type of a public field is a breaking change of a 0.x crate
+   (CODING_STANDARDS 9.10): `stonecrab` moves from 0.2.0 to 0.3.0 (E12), with a "Migration
+   from 0.2" note in `CHANGELOG.md`. cargo-semver-checks 0.51.0 has no lint for the type
+   of a public field, so `mise run semver` does not report this change; the note and this
+   addendum are the record of it.
+5. **Tests.** `a_measurement_without_a_unit_loads_with_no_unit` (loader),
+   `an_absent_unit_means_unknown_and_is_valid` and `a_blank_unit_is_reported_as_empty`
+   (validation), `a_definition_without_a_unit_yields_a_measurement_without_one`
+   (pipeline); the existing board tests now assert `Some("Cel")`, `Some("1")` and
+   `Some("[g]")`, and the validation property test's oracle and generator include an
+   absent unit.

@@ -5,7 +5,8 @@ driver. Two adapters ship: the MAX31855 thermocouple converter on SPI (the therm
 temperature, the internal cold-junction temperature and the converter's open and short
 fault flags; ADR-0026) and the ADXL345 three-axis accelerometer on I2C (single samples and
 FIFO drains into sample blocks; ADR-0029). A single reading converts to the measurements of
-`stonecrab::sensors` (the same envelope, units and quality model as a sensor profile), so a
+`stonecrab::sensors` (the same envelope, units and quality model as a sensor profile; a board
+always knows its unit, so `unit` is `Some`), so a
 board and a Modbus device look alike to the application; a block of accelerometer samples
 stays a block. Board adapters are Stonecrab extensions, not upstream PLC4X parity items, and
 they change no industrial parity status.

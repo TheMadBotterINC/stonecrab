@@ -102,7 +102,8 @@ Optional measurement keys are `count` (default 1), `byte_order` (`big_endian` or
 `range`, `status_fields` (`name`, `address`, `bit`, `invert`), `quality_map`
 (`bad_when` and `uncertain_when`, lists of status field names), `min_interval_ms`,
 `stale_after_ms` and `keep_raw`. Byte and word order are never inferred: an absent key
-stays absent.
+stays absent. `unit` is optional too: an absent unit means the unit is unknown and loads as
+`None` (an empty or blank `unit = ""` is not the same thing; the validator refuses it).
 
 ## Validation and units
 `SensorProfile::validate` returns `Ok(())` or every `ProfileError` it finds, never just the
@@ -116,7 +117,8 @@ checks:
 - `count` is 1 (arrays are not supported at alpha);
 - scaling steps that can run: finite constants, a non-zero divisor, a clamp with
   `min <= max`, and a bit field of width 1 or more that ends at or before bit 64;
-- a unit that is not empty and is in the fixed unit table;
+- a unit, when one is stated, that is not empty or blank and is in the fixed unit table (an
+  absent unit means unknown and is valid);
 - a range, when present, with finite bounds and `min <= max` (equal bounds are valid);
 - no two status fields of one measurement on the same address text and bit, and no
   status bit of 64 or more;
@@ -188,7 +190,8 @@ After the read, `profile.measurements(&response, wall_now)` returns one `Measure
 definition that the response covers:
 
 - `value` is the scaled value, `raw` the unscaled typed value when the definition sets
-  `keep_raw` (and `None` otherwise), `unit` and `origin` come from the profile.
+  `keep_raw` (and `None` otherwise), `unit` (`None` when the definition states none) and
+  `origin` come from the profile.
 - `received_at` is the `wall_now` you pass, `received_mono` is the driver's sampling
   instant and `source_time` is the device's own timestamp. It is `None` when the driver
   reports none and is never filled in from another clock.

@@ -442,7 +442,7 @@ impl AccelReading {
     /// assert_eq!(measurements[0].name, "acceleration_x");
     /// assert_eq!(measurements[0].value, Some(PlcValue::F64(-0.5)));
     /// assert_eq!(measurements[2].value, Some(PlcValue::F64(1.0)));
-    /// assert_eq!(measurements[2].unit, "[g]");
+    /// assert_eq!(measurements[2].unit.as_deref(), Some("[g]"));
     /// # Ok::<(), stonecrab::PlcError>(())
     /// ```
     pub fn measurements(&self) -> Result<Vec<Measurement>> {

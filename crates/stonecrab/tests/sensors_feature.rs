@@ -24,7 +24,10 @@ mod tests {
             "the profile defines measurements"
         );
         assert!(
-            profile.measurements.iter().all(|m| Unit::is_known(&m.unit)),
+            profile
+                .measurements
+                .iter()
+                .all(|m| m.unit.as_deref().is_some_and(Unit::is_known)),
             "every unit is in the fixed table"
         );
         assert_eq!(profile.validate(), Ok(()));

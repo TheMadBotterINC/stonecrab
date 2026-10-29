@@ -398,6 +398,27 @@ mod tests {
         assert_ne!(id, definition.name, "never the measurement's own tag");
     }
 
+    #[test]
+    fn a_definition_without_a_unit_yields_a_measurement_without_one() {
+        let measurement = only(
+            r#"
+            [[measurements]]
+            name = "level"
+            address = "STATE/level:i16"
+            data_type = "INT"
+            "#,
+            "level",
+            PlcValue::I16(7),
+        );
+        assert_eq!(measurement.unit, None, "unit unknown");
+        assert_eq!(
+            measurement.value,
+            Some(PlcValue::I16(7)),
+            "value unaffected"
+        );
+        assert_eq!(measurement.quality, Quality::Good);
+    }
+
     // ---- scaling, F7 --------------------------------------------------------------------
 
     const NEG: &str = r#"
@@ -425,7 +446,7 @@ mod tests {
             "raw is the unscaled typed value"
         );
         assert_eq!(measurement.quality, Quality::Good, "no range, no status");
-        assert_eq!(measurement.unit, "Cel", "unit");
+        assert_eq!(measurement.unit.as_deref(), Some("Cel"), "unit");
         assert_eq!(measurement.name, "cold_room", "name");
         assert_eq!(measurement.tag.as_str(), "cold_room", "tag");
     }

@@ -746,7 +746,11 @@ mod tests {
                     Some(PlcValue::I16(raw)),
                     "channel {channel}: raw"
                 );
-                assert_eq!(measurement.unit, "Cel", "channel {channel}: unit");
+                assert_eq!(
+                    measurement.unit.as_deref(),
+                    Some("Cel"),
+                    "channel {channel}: unit"
+                );
                 assert_eq!(
                     measurement.origin,
                     ValidationStatus::Documented,

@@ -177,7 +177,7 @@ async fn run(url: &str, profile_path: &str) -> Result<Outcome, PlcError> {
         tracing::info!(
             name = %measurement.name,
             value = measurement.value.as_ref().map(tracing::field::debug),
-            unit = %measurement.unit,
+            unit = measurement.unit.as_deref(),
             quality = %measurement.quality,
             origin = ?measurement.origin,
             sampled_at,

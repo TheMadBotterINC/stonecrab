@@ -341,16 +341,22 @@ mod tests {
         );
         assert_eq!(thermocouple.raw, Some(PlcValue::I16(-1000)), "quarters");
         assert_eq!(
-            (thermocouple.unit.as_str(), thermocouple.quality),
-            ("Cel", Quality::Good)
+            (thermocouple.unit.as_deref(), thermocouple.quality),
+            (Some("Cel"), Quality::Good)
         );
 
         assert_eq!(cold.value, Some(PlcValue::F64(-25.0)), "negative preserved");
         assert_eq!(cold.raw, Some(PlcValue::I16(-400)), "sixteenths");
-        assert_eq!((cold.unit.as_str(), cold.quality), ("Cel", Quality::Good));
+        assert_eq!(
+            (cold.unit.as_deref(), cold.quality),
+            (Some("Cel"), Quality::Good)
+        );
 
         assert_eq!(fault.value, Some(PlcValue::U8(0)), "no fault is explicit");
-        assert_eq!((fault.unit.as_str(), fault.quality), ("1", Quality::Good));
+        assert_eq!(
+            (fault.unit.as_deref(), fault.quality),
+            (Some("1"), Quality::Good)
+        );
 
         for measurement in &measurements {
             assert_eq!(

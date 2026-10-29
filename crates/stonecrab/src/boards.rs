@@ -51,7 +51,7 @@ fn measurement(
         name: name.to_owned(),
         value,
         raw: Some(raw),
-        unit: unit.to_owned(),
+        unit: Some(unit.to_owned()),
         quality,
         origin: ValidationStatus::Documented,
         received_at,

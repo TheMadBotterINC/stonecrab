@@ -133,6 +133,30 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_blank_unit_is_reported_as_empty() {
+        for blank in [" ", "\t", "  \t "] {
+            let body = measurement("level", &format!("data_type = \"INT\"\nunit = \"{blank}\""));
+            assert_eq!(
+                errors_of("scheme = \"sim\"", &[body]),
+                [ProfileError::EmptyUnit { measurement: 0 }],
+                "{blank:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_absent_unit_means_unknown_and_is_valid() {
+        let body = measurement("level", "data_type = \"INT\"");
+        let profile = profile("scheme = \"sim\"", &[&body]);
+        assert_eq!(
+            profile.measurements.first().map(|m| m.unit.as_deref()),
+            Some(None),
+            "the loader leaves the unit unset"
+        );
+        assert_eq!(profile.validate(), Ok(()), "unknown is not an error");
+    }
+
     // covers: SENSORS-VALIDATION / the word-order rule needs a driver and lives in validate_for
     #[test]
     fn validate_alone_does_not_report_missing_orders() {

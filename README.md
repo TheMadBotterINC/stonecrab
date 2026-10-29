@@ -160,8 +160,10 @@ See [`STATUS.md`](STATUS.md) for the current engineering handoff, verification
 evidence, known gaps and continuation steps, and
 [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) for what is supported, at which level and
 against which peers. The 0.1.0 package on crates.io is specification-stage only; 0.2.0
-is the alpha. This README describes `master`: Modbus writes landed after 0.2.0 (see
-"Unreleased" in [`CHANGELOG.md`](CHANGELOG.md)), so the published 0.2.0 reads only.
+is the alpha. This README describes `master`, which is version 0.3.0 and not yet
+published: Modbus writes landed after 0.2.0, and the sensor `unit` became optional (see
+"Unreleased" and its "Migration from 0.2" in [`CHANGELOG.md`](CHANGELOG.md)), so the
+published 0.2.0 reads only.
 Upstream compatibility is claimed only for the rows of
 [`docs/parity/modbus.md`](docs/parity/modbus.md) that say so, at the support levels above.
 

@@ -299,8 +299,12 @@ pub struct MeasurementDef {
     /// Scaling pipeline, applied in the order written; empty keeps the typed value.
     #[serde(default)]
     pub scaling: Vec<ScaleStep>,
-    /// Engineering unit of the scaled value, for example `"Cel"`.
-    pub unit: String,
+    /// Engineering unit of the scaled value, for example `"Cel"`; `None` when the unit is
+    /// unknown (the TOML key is absent). An empty or blank unit is not the same as an
+    /// absent one: [`SensorProfile::validate`](crate::sensors::SensorProfile::validate)
+    /// refuses it.
+    #[serde(default)]
+    pub unit: Option<String>,
     /// Optional plausibility range of the scaled value.
     #[serde(default)]
     pub range: Option<ValueRange>,

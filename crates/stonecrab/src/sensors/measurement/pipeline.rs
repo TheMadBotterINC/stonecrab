@@ -120,8 +120,9 @@ pub struct Measurement {
     /// `keep_raw` and the read succeeded; `None` otherwise. It is a typed value, not wire
     /// bytes.
     pub raw: Option<PlcValue>,
-    /// The engineering unit from the definition, for example `"Cel"`.
-    pub unit: String,
+    /// The engineering unit from the definition, for example `"Cel"`; `None` when the
+    /// definition does not state one (unit unknown).
+    pub unit: Option<String>,
     /// How far the value can be trusted.
     pub quality: Quality,
     /// How far the profile that produced this measurement was checked.
@@ -248,7 +249,7 @@ impl SensorProfile {
     /// let measurements = profile.measurements(&response, SystemTime::UNIX_EPOCH);
     /// assert_eq!(measurements.len(), 1);
     /// assert_eq!(measurements[0].quality, Quality::Good);
-    /// assert_eq!(measurements[0].unit, "Cel");
+    /// assert_eq!(measurements[0].unit.as_deref(), Some("Cel"));
     /// assert!(measurements[0].source_time.is_none());
     /// assert!(matches!(&measurements[0].value, Some(PlcValue::F64(v)) if (v + 242.4).abs() < 1e-9));
     /// # Ok(())

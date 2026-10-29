@@ -263,7 +263,7 @@ mod tests {
                 "{key}"
             );
         }
-        for drop in ["address = ", "data_type = ", "unit = "] {
+        for drop in ["address = ", "data_type = "] {
             let text: String = one_measurement("")
                 .lines()
                 .filter(|line| !line.starts_with(drop))
@@ -277,6 +277,30 @@ mod tests {
                 "{drop}"
             );
         }
+    }
+
+    // covers: SPEC sensors / unit when known (G06: an absent unit is unknown, not an error)
+    #[test]
+    fn a_measurement_without_a_unit_loads_with_no_unit() {
+        let text: String = one_measurement("")
+            .lines()
+            .filter(|line| !line.starts_with("unit = "))
+            .flat_map(|line| [line, "\n"])
+            .collect();
+        let measurement = only_measurement(&text);
+        assert_eq!(measurement.unit, None, "unknown, not empty");
+        assert_eq!(
+            only_measurement(&one_measurement("")).unit.as_deref(),
+            Some("m"),
+            "a stated unit is kept"
+        );
+        assert_eq!(
+            only_measurement(&one_measurement("").replace("unit = \"m\"", "unit = \"\""))
+                .unit
+                .as_deref(),
+            Some(""),
+            "the loader checks shape only; an empty unit is the validator's to refuse"
+        );
     }
 
     // covers: CODING_STANDARDS 13.7 / hostile nesting stays inside the size bound
@@ -381,7 +405,7 @@ mod tests {
         assert_eq!(temperature.count, 1);
         assert_eq!(temperature.byte_order, Some(ByteOrderName::BigEndian));
         assert_eq!(temperature.word_order, None);
-        assert_eq!(temperature.unit, "Cel");
+        assert_eq!(temperature.unit.as_deref(), Some("Cel"));
         assert_eq!(
             temperature.scaling,
             [

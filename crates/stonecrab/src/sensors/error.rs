@@ -87,7 +87,8 @@ pub enum ProfileError {
         /// Index of the measurement.
         measurement: usize,
     },
-    /// A measurement's unit is the empty string; the dimensionless unit is `"1"`.
+    /// A measurement's unit is stated but empty or blank. Leave the key out when the unit is
+    /// unknown; the dimensionless unit is `"1"`.
     EmptyUnit {
         /// Index of the measurement.
         measurement: usize,
@@ -246,7 +247,7 @@ impl fmt::Display for ProfileError {
             Self::EmptyUnit { measurement } => {
                 write!(
                     f,
-                    "measurement {measurement} has an empty unit; use \"1\" for none"
+                    "measurement {measurement} has an empty unit; omit it when unknown, or use \"1\" for none"
                 )
             }
             Self::MissingByteOrder { measurement } => write!(
@@ -380,7 +381,7 @@ mod tests {
             ),
             (
                 ProfileError::EmptyUnit { measurement: 2 },
-                "measurement 2 has an empty unit; use \"1\" for none",
+                "measurement 2 has an empty unit; omit it when unknown, or use \"1\" for none",
             ),
             (
                 ProfileError::MissingByteOrder { measurement: 4 },

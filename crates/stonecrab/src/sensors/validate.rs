@@ -41,7 +41,8 @@ impl SensorProfile {
     /// - every scaling step can be evaluated: constants are finite, a divisor is not
     ///   zero, a clamp has `min <= max`, a bit field has a width of at least 1 and
     ///   `shift + width <= 64` (`InvalidScaleStep`);
-    /// - the unit is not empty and is in the [`Unit`] table (`EmptyUnit`, `UnknownUnit`);
+    /// - the unit, when stated, is not empty or blank and is in the [`Unit`] table
+    ///   (`EmptyUnit`, `UnknownUnit`); an absent unit means unknown and is valid;
     /// - a range, when present, has finite bounds and `min <= max`; equal bounds are valid
     ///   (`InvalidRange`);
     /// - no two status fields of one measurement name the same address text and bit
@@ -275,10 +276,12 @@ fn check_measurement(index: usize, measurement: &MeasurementDef, errors: &mut Ve
             });
         }
     }
-    if measurement.unit.is_empty() {
-        errors.push(ProfileError::EmptyUnit { measurement: index });
-    } else if !Unit::is_known(&measurement.unit) {
-        errors.push(ProfileError::UnknownUnit { measurement: index });
+    if let Some(unit) = measurement.unit.as_deref() {
+        if unit.trim().is_empty() {
+            errors.push(ProfileError::EmptyUnit { measurement: index });
+        } else if !Unit::is_known(unit) {
+            errors.push(ProfileError::UnknownUnit { measurement: index });
+        }
     }
     if let Some(range) = &measurement.range
         && !(range.min.is_finite() && range.max.is_finite() && range.min <= range.max)
@@ -492,7 +495,14 @@ mod tests {
         };
         let tail = (
             prop::collection::vec(arb_step(), 0..4),
-            prop::sample::select(vec!["Cel", "kPa", "1", "", "furlong"]),
+            prop::sample::select(vec![
+                None,
+                Some("Cel"),
+                Some("kPa"),
+                Some("1"),
+                Some(""),
+                Some("furlong"),
+            ]),
             prop::option::of((bound(), bound())),
             prop::collection::vec(arb_status_field(), 0..4),
             arb_quality(),
@@ -510,7 +520,7 @@ mod tests {
                     byte_order,
                     word_order,
                     scaling,
-                    unit: unit.to_owned(),
+                    unit: unit.map(str::to_owned),
                     range: bounds.map(|(min, max)| ValueRange { min, max }),
                     status_fields: status,
                     quality_map: map,
@@ -597,7 +607,9 @@ mod tests {
         let clauses = [
             m.count == 1,
             steps_ok,
-            ["Cel", "kPa", "1"].contains(&m.unit.as_str()),
+            m.unit
+                .as_deref()
+                .is_none_or(|unit| ["Cel", "kPa", "1"].contains(&unit)),
             range_ok,
             pairs.len() == m.status_fields.len(),
             bits_exist,
@@ -659,7 +671,7 @@ mod tests {
                     byte_order: Some(ByteOrderName::BigEndian),
                     word_order: Some(WordOrderName::HighWordFirst),
                     scaling,
-                    unit: "kPa".to_owned(),
+                    unit: Some("kPa".to_owned()),
                     range: None,
                     status_fields,
                     quality_map,

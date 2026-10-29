@@ -5,6 +5,52 @@ as `stonecrab` 0.2.0 (2026-10-27); `stonecrab` 0.1.0 is the specification-stage
 placeholder.
 
 ## Unreleased
+- Release 0.3.0: the sensor `unit` is optional (ADR-0016 addendum, slice S74, finding G06,
+  decisions E7 and E12; a breaking change, so the crate version moves from 0.2.0 to 0.3.0,
+  nothing is published or tagged yet). `MeasurementDef::unit` and `Measurement::unit` are
+  `Option<String>`. A profile may leave `unit` out: it loads as `None`, which means the
+  unit is unknown, and it validates. A stated unit is checked as before, except that a blank
+  one (only whitespace) is now `EmptyUnit` like the empty string, not `UnknownUnit`; the
+  `EmptyUnit` message says to omit the key when the unit is unknown. The MAX31855 and ADXL345
+  adapters always set `Some`. The profile schema stays at version 1: every document that
+  0.2.0 loads loads the same way (a 0.2.0 reader refuses a document without a unit with
+  `Syntax`, not `IncompatibleSchema`). The `profile_read` example logs an absent unit as
+  nothing. Tests: an absent unit loads and gives `None`, validates, and gives a measurement
+  with `unit` `None`; a blank unit is refused; the boards still produce their units.
+- Migration from 0.2 (0.2.0 to 0.3.0). `cargo semver-checks` 0.51.0 against the published
+  0.2.0, which is what `mise run semver` and the CI `semver` job run, reports no finding for
+  this release: it has no lint for the type of a public struct field, so the one source
+  break below is not listed by it, and the 0.3.0 version number is what announces it. The
+  changes since 0.2.0 that a caller can notice are these:
+  - Source break, `unit` is `Option<String>` (S74). Code that reads `measurement.unit` or
+    `definition.unit` as a `String` stops compiling. Before:
+    `println!("{} {}", measurement.value, measurement.unit)` and
+    `if measurement.unit == "Cel" { .. }`. After:
+    `println!("{} {}", measurement.value, measurement.unit.as_deref().unwrap_or("?"))` and
+    `if measurement.unit.as_deref() == Some("Cel") { .. }`. Code that builds a `MeasurementDef`
+    from a struct literal is not possible outside the crate (the type is `#[non_exhaustive]`);
+    a profile TOML needs no change.
+  - Behavior, `SensorProfile::validate` no longer reports `MissingByteOrder` or
+    `MissingWordOrder` (S39, G05). Call `SensorProfile::validate_for(&driver)` for them;
+    `SensorProfile::tags` already does.
+  - Behavior, `SensorProfile::validate` refuses a measurement `range` with a NaN or infinite
+    bound or `min > max` (`ProfileError::InvalidRange`, S36). A profile that passed before and
+    has such a range now fails.
+  - Behavior, `Capabilities::subscribe` of the simulator and the Modbus drivers is
+    `SubscriptionMode::Polling`, not `Unsupported` (S55). Code that tests it for `Unsupported`
+    to skip `subscribe` now takes the polling path.
+  - Behavior, Modbus function codes 06, 15, 16, 20 and 21 decode: `FunctionCode::from_u8`
+    returns the named variant where it returned `Unknown(n)`, and the address texts
+    `extended-register`, `6x` and a bare `6` prefix, and the type names `CHAR`, `WCHAR`,
+    `STRING` and `WSTRING`, are accepted where they were refused. A `match` over
+    `FunctionCode` that relied on `Unknown` for these codes needs the named arms (the enum is
+    `#[non_exhaustive]`, so a wildcard arm keeps compiling).
+  - Behavior, a Modbus read reply that decodes but does not fit its request used to fail the
+    whole read; it now fails only the items of its chunk with `MalformedData` and the reply
+    PDU in the item's raw bytes, and the other chunks are read (S70, E10).
+  - Build, the `modbus` feature enables `serial` (S59, E10), so a build with Modbus TCP only
+    also compiles the `serial2` dependency. A build with `default-features = false` and
+    without `modbus` is unchanged.
 - The MSpec code generator, proven on Modbus (ADR-0019 and its addendum of 2026-10-29,
   slices S66 and S67; no crate API change). Apache PLC4X's `modbus.mspec` is vendored verbatim,
   ASF header kept, at `upstream/mspec/modbus/modbus.mspec` (maintainer decision E8; upstream
