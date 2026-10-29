@@ -460,3 +460,12 @@ contracts of S28a to S29.
    `SENSORS-SYNTHETIC-PROFILES` in `docs/parity/sensors.md` moves from `planned` to
    `implemented`; the sensors README support table still lists the profiles as planned and
    is brought to final support levels by S31.
+
+## Addendum: the measurement range rule (slice S36, 2026-10-28)
+This addendum records the S36 decision (G01). `ProfileError` gains a twelfth validation
+variant, `InvalidRange { measurement }`, which supersedes the S28b sentence that
+`ValueRange` is not checked: when a measurement carries a range, both bounds must be
+finite and `min` must not exceed `max`. The rule sits after the unit check and before the
+status fields, following the `MeasurementDef` field order, and the variant converts to
+`InvalidConfig` like the others. It names the measurement by index and never echoes the
+document. Status-field bit positions stay unchecked until S37.

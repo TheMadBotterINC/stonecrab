@@ -49,6 +49,8 @@ impl SensorProfile {
     ///   zero, a clamp has `min <= max`, a bit field has a width of at least 1 and
     ///   `shift + width <= 64` (`InvalidScaleStep`);
     /// - the unit is not empty and is in the [`Unit`] table (`EmptyUnit`, `UnknownUnit`);
+    /// - a range, when present, has finite bounds and `min <= max`; equal bounds are valid
+    ///   (`InvalidRange`);
     /// - no two status fields of one measurement name the same address text and bit
     ///   (`OverlappingStatusBits`; two measurements may share a status word);
     /// - every name in the quality mapping is a status field of the same measurement
@@ -67,8 +69,8 @@ impl SensorProfile {
     /// Returns every [`ProfileError`] found, never an empty list: the validation variants
     /// are `DuplicateMeasurementName`, `UnknownUnit`, `EmptyUnit`, `MissingByteOrder`,
     /// `MissingWordOrder`, `OverlappingStatusBits`, `UnsupportedCount`,
-    /// `InvalidScaleStep`, `UnknownQualityReference`, `UnknownAddressConvention` and
-    /// `MissingAddressConvention`. Each converts into a [`PlcError`](crate::PlcError)
+    /// `InvalidScaleStep`, `InvalidRange`, `UnknownQualityReference`,
+    /// `UnknownAddressConvention` and `MissingAddressConvention`. Each converts into a [`PlcError`](crate::PlcError)
     /// of kind `InvalidConfig`.
     ///
     /// # Examples
@@ -172,6 +174,11 @@ fn check_measurement(index: usize, measurement: &MeasurementDef, errors: &mut Ve
     } else if !Unit::is_known(&measurement.unit) {
         errors.push(ProfileError::UnknownUnit { measurement: index });
     }
+    if let Some(range) = &measurement.range
+        && !(range.min.is_finite() && range.max.is_finite() && range.min <= range.max)
+    {
+        errors.push(ProfileError::InvalidRange { measurement: index });
+    }
     for (position, field) in measurement.status_fields.iter().enumerate() {
         let repeats = measurement
             .status_fields
@@ -225,7 +232,7 @@ mod tests {
     use super::*;
     use crate::sensors::{
         ByteOrderName, DeviceApplicability, ProfileId, Provenance, QualityMapping, SchemaVersion,
-        StatusField, ValidationStatus, WordOrderName,
+        StatusField, ValidationStatus, ValueRange, WordOrderName,
     };
 
     fn arb_step() -> impl Strategy<Value = ScaleStep> {
@@ -281,14 +288,26 @@ mod tests {
             prop::option::of(Just(ByteOrderName::BigEndian)),
             prop::option::of(Just(WordOrderName::LowWordFirst)),
         );
+        let bound = || {
+            prop_oneof![
+                -10.0..10.0f64,
+                Just(f64::NAN),
+                Just(f64::INFINITY),
+                Just(f64::NEG_INFINITY),
+            ]
+        };
         let tail = (
             prop::collection::vec(arb_step(), 0..4),
             prop::sample::select(vec!["Cel", "kPa", "1", "", "furlong"]),
+            prop::option::of((bound(), bound())),
             prop::collection::vec(arb_status_field(), 0..4),
             arb_quality(),
         );
         (head, tail).prop_map(
-            |((name, data_type, count, byte_order, word_order), (scaling, unit, status, map))| {
+            |(
+                (name, data_type, count, byte_order, word_order),
+                (scaling, unit, bounds, status, map),
+            )| {
                 MeasurementDef {
                     name: TagId::new(name).expect("valid tag id"),
                     address: "a".to_owned(),
@@ -298,7 +317,7 @@ mod tests {
                     word_order,
                     scaling,
                     unit: unit.to_owned(),
-                    range: None,
+                    range: bounds.map(|(min, max)| ValueRange { min, max }),
                     status_fields: status,
                     quality_map: map,
                     min_interval: None,
@@ -369,6 +388,9 @@ mod tests {
                 (1..=64).contains(&width) && u32::from(shift).saturating_add(u32::from(width)) <= 64
             }
         });
+        let range_ok = m
+            .range
+            .is_none_or(|r| r.min.is_finite() && r.max.is_finite() && r.min <= r.max);
         let quality_ok = m.quality_map.as_ref().is_none_or(|map| {
             map.bad_when
                 .iter()
@@ -380,6 +402,7 @@ mod tests {
             !wide || (m.byte_order.is_some() && m.word_order.is_some()),
             steps_ok,
             ["Cel", "kPa", "1"].contains(&m.unit.as_str()),
+            range_ok,
             pairs.len() == m.status_fields.len(),
             quality_ok,
         ];

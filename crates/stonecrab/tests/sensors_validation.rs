@@ -277,6 +277,45 @@ mod tests {
         assert_eq!(valid.validate(), Ok(()));
     }
 
+    // covers: SENSORS-VALIDATION / G01 inverted range
+    #[test]
+    fn an_inverted_range_is_reported() {
+        let found = one("range = { min = 5.0, max = 1.0 }");
+        assert_eq!(found, [ProfileError::InvalidRange { measurement: 0 }]);
+    }
+
+    // covers: SENSORS-VALIDATION / G01 NaN bound
+    #[test]
+    fn a_nan_range_bound_is_reported() {
+        for range in ["{ min = nan, max = 1.0 }", "{ min = 0.0, max = nan }"] {
+            assert_eq!(
+                one(&format!("range = {range}")),
+                [ProfileError::InvalidRange { measurement: 0 }],
+                "{range}"
+            );
+        }
+    }
+
+    // covers: SENSORS-VALIDATION / G01 infinite bound
+    #[test]
+    fn an_infinite_range_bound_is_reported() {
+        for range in ["{ min = -inf, max = 1.0 }", "{ min = 0.0, max = inf }"] {
+            assert_eq!(
+                one(&format!("range = {range}")),
+                [ProfileError::InvalidRange { measurement: 0 }],
+                "{range}"
+            );
+        }
+    }
+
+    // covers: SENSORS-VALIDATION / G01 equal bounds are valid
+    #[test]
+    fn equal_range_bounds_are_valid() {
+        let body = int_cel("level", "range = { min = 2.0, max = 2.0 }");
+        let valid = profile("scheme = \"sim\"", &[&body]);
+        assert_eq!(valid.validate(), Ok(()));
+    }
+
     #[test]
     fn quality_references_must_name_declared_status_fields() {
         let extra = "status_fields = [{ name = \"fault\", address = \"w:1\", bit = 0 }]\n\
@@ -353,7 +392,10 @@ mod tests {
                 "data_type = \"LREAL\"\ncount = 4\nunit = \"furlong\"\n\
                  scaling = [{ divide = 0.0 }, { offset = 1.0 }, { clamp = { min = 2.0, max = 1.0 } }]",
             ),
-            measurement("second", "data_type = \"INT\"\nunit = \"\""),
+            measurement(
+                "second",
+                "data_type = \"INT\"\nunit = \"\"\nrange = { min = 1.0, max = 0.0 }",
+            ),
             measurement(
                 "first",
                 "data_type = \"DINT\"\nbyte_order = \"big_endian\"\nunit = \"Cel\"\n\
@@ -384,6 +426,7 @@ mod tests {
                 },
                 ProfileError::UnknownUnit { measurement: 0 },
                 ProfileError::EmptyUnit { measurement: 1 },
+                ProfileError::InvalidRange { measurement: 1 },
                 ProfileError::DuplicateMeasurementName {
                     measurement: 2,
                     first: 0

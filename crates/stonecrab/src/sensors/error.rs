@@ -118,6 +118,12 @@ pub enum ProfileError {
         /// Index of the step in the measurement's scaling pipeline.
         step: usize,
     },
+    /// A measurement's `range` has a bound that is NaN or infinite, or `min` above `max`
+    /// (equal bounds are valid).
+    InvalidRange {
+        /// Index of the measurement.
+        measurement: usize,
+    },
     /// A quality mapping names a status field the measurement does not declare.
     UnknownQualityReference {
         /// Index of the measurement.
@@ -226,6 +232,10 @@ impl fmt::Display for ProfileError {
             Self::InvalidScaleStep { measurement, step } => write!(
                 f,
                 "scaling step {step} of measurement {measurement} cannot be evaluated"
+            ),
+            Self::InvalidRange { measurement } => write!(
+                f,
+                "measurement {measurement} has a range with a non-finite bound or min above max"
             ),
             Self::UnknownQualityReference { measurement, entry } => write!(
                 f,
@@ -346,6 +356,10 @@ mod tests {
                     step: 2,
                 },
                 "scaling step 2 of measurement 1 cannot be evaluated",
+            ),
+            (
+                ProfileError::InvalidRange { measurement: 2 },
+                "measurement 2 has a range with a non-finite bound or min above max",
             ),
             (
                 ProfileError::UnknownQualityReference {

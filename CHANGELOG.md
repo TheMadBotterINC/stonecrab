@@ -7,6 +7,9 @@ placeholder.
 ## Unreleased
 - CI (no crate changes): the `semver` job is blocking against the published 0.2.0, with
   cargo-semver-checks pinned to 0.51.0.
+- `SensorProfile::validate` rejects a measurement range with a NaN or infinite bound or
+  `min > max` (new `ProfileError::InvalidRange`); before, such a range left values
+  Uncertain or Good by accident.
 - `stonecrab::sensors` now denies `clippy::indexing_slicing` (checked by `lint-attrs`), like
   the other modules that parse untrusted input; no code in the module needed to change.
 - Release process and evidence (no crate changes): ADR-0017, `release.toml`,

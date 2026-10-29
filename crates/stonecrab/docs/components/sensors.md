@@ -115,6 +115,7 @@ checks:
 - scaling steps that can run: finite constants, a non-zero divisor, a clamp with
   `min <= max`, and a bit field of width 1 or more that ends at or before bit 64;
 - a unit that is not empty and is in the fixed unit table;
+- a range, when present, with finite bounds and `min <= max` (equal bounds are valid);
 - no two status fields of one measurement on the same address text and bit;
 - quality mappings that name only the measurement's own status fields.
 

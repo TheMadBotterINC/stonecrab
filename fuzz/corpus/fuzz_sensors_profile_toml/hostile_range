@@ -1,0 +1,19 @@
+id = "hostile_range"
+schema_version = 1
+validation = "synthetic"
+[connection]
+scheme = "sim"
+[provenance]
+source = "x"
+[[measurements]]
+name = "inverted"
+address = "a"
+data_type = "INT"
+unit = "m"
+range = { min = 5.0, max = -5.0 }
+[[measurements]]
+name = "not_a_number"
+address = "a"
+data_type = "INT"
+unit = "m"
+range = { min = nan, max = inf }
