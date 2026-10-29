@@ -27,6 +27,20 @@ placeholder.
   (none for a range wider than one read or past wire address 65535). The two
   upstream array exchanges of `DriverTestsuite.xml` replay byte for byte. Parity rows
   `MB-ADDR-SELECTION` (implemented) and `CORE-VALUE-LIST` (new).
+- Stale tracking and an acquisition loop for sensor profiles (ADR-0023, finding G09;
+  additive): `stonecrab::sensors::StaleTracker` retains the last measurement of each name
+  and, given the monotonic `now`, marks it `Quality::Stale` once its age exceeds the
+  profile's `stale_after` (strictly: still fresh at exactly `stale_after`), reporting each
+  transition once and keeping the value, receipt times, source time and protocol status of
+  the original reading. A failed read erases nothing, so the earlier value keeps aging.
+  `Measurement` gains the field `quality_before_stale` (the quality the value was read
+  with, once it is stale; `None` otherwise). `stonecrab::sensors::Acquisition` reads a
+  profile through a `Connection` on an injected `Clock`: each measurement every `interval`
+  or its longer `min_interval` (a faster rate is raised, not refused), measurements due at
+  the same instant in one read request, fresh measurements and stale transitions from
+  `recv`, a whole-read failure as `recv`'s error, and `None` once the connection closes or
+  fails. No task is spawned and the queue holds at most one event per measurement. No new
+  dependency. New parity rows `SENSORS-STALE` and `SENSORS-ACQUISITION`.
 - Calendar values (ADR-0021; additive): `PlcValue` and `PlcValueType` gain
   `SignedDuration`, `Date`, `TimeOfDay` and `DateTime` after `Duration`, holding the new
   root types `PlcSignedDuration` (an `i64` nanosecond count; IEC `TIME` and `LTIME`),

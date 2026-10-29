@@ -12,9 +12,9 @@ use crate::sensors::{MeasurementDef, SensorProfile, StatusField, ValidationStatu
 ///
 /// [`SensorProfile::measurements`] produces `Good`, `Uncertain`, `Bad` and `Unknown`.
 /// [`Quality::Stale`] is never produced by the pipeline: staleness depends on how long ago
-/// a value was read, which one response cannot say, so it is set only by the tracker that
-/// compares a measurement's age with `stale_after` (milestone M2). The enum is
-/// `#[non_exhaustive]`.
+/// a value was read, which one response cannot say, so it is set only by
+/// [`StaleTracker`](crate::sensors::StaleTracker), which compares a retained measurement's
+/// age with its `stale_after` (ADR-0023). The enum is `#[non_exhaustive]`.
 ///
 /// Precedence when several rules apply to one measurement is `Bad` over `Uncertain` over
 /// `Unknown` over `Good`; see [`SensorProfile::measurements`].
@@ -41,8 +41,10 @@ pub enum Quality {
     /// The value must not be used: the read failed, scaling failed, or a status field in
     /// `bad_when` is set.
     Bad,
-    /// The value is older than its `stale_after`. Produced only by the M2 tracker, never by
-    /// [`SensorProfile::measurements`].
+    /// The value is older than its `stale_after`. Produced only by
+    /// [`StaleTracker`](crate::sensors::StaleTracker), never by
+    /// [`SensorProfile::measurements`]; the quality the value had before is kept in
+    /// [`Measurement::quality_before_stale`].
     Stale,
     /// A status field the quality mapping depends on could not be read, so quality cannot
     /// be judged.
@@ -134,6 +136,11 @@ pub struct Measurement {
     pub source_time: Option<SystemTime>,
     /// The protocol status the driver attached to the item, on success or failure.
     pub protocol_status: Option<ProtocolStatus>,
+    /// The quality the measurement had when it was read, once
+    /// [`StaleTracker`](crate::sensors::StaleTracker) has marked it [`Quality::Stale`];
+    /// `None` while it is not stale. [`SensorProfile::measurements`] always leaves it
+    /// `None`.
+    pub quality_before_stale: Option<Quality>,
 }
 
 impl SensorProfile {
@@ -278,6 +285,7 @@ fn measure(
         received_mono: item.sampled_at(),
         source_time: item.source_time(),
         protocol_status: item.status().cloned(),
+        quality_before_stale: None,
     };
     if let Ok(unscaled) = item.outcome() {
         measurement.raw = definition.keep_raw.then(|| unscaled.clone());

@@ -23,14 +23,17 @@
 //! # Ok::<(), stonecrab::sensors::ProfileError>(())
 //! ```
 
+mod acquisition;
 mod error;
 mod ident;
 mod measurement;
 mod profile;
+mod stale;
 mod tags;
 mod units;
 mod validate;
 
+pub use acquisition::Acquisition;
 pub use error::ProfileError;
 pub use ident::{ProfileId, SchemaVersion};
 pub use measurement::{
@@ -40,4 +43,5 @@ pub use measurement::{
 pub use profile::{
     ConnectionRequirements, DeviceApplicability, Provenance, SensorProfile, ValidationStatus,
 };
+pub use stale::StaleTracker;
 pub use units::Unit;

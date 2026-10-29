@@ -899,8 +899,11 @@ classDiagram
   `StateWatch` has `current()` and `changed() -> OpFuture<'_, ConnectionState>` with
   latest-value semantics (intermediate states coalesce; the machine records every
   transition in tracing events).
-- **Deferred:** `StaleTracker` and the `Quality::Stale` it would produce (M2, with the
-  polling loop). The diagram's `SystemClock ..|> Clock` edge holds, in the transport module.
+- **Shipped in S56 (ADR-0023), not as drawn:** the stale tracker lives in
+  `stonecrab::sensors`, one per profile, and reads no clock: `record` retains measurements,
+  `expire(now)` returns the stale transitions and `next_expiry()` the next instant one is
+  due. The drawn `observe_good`, `observe_missed` and `quality` do not exist. The diagram's
+  `SystemClock ..|> Clock` edge holds, in the transport module.
 
 The diagram is not redrawn.
 
@@ -1411,16 +1414,14 @@ never inferred.
 
 **Deferred, with their owners:**
 
-- writes: `WriteSingleCoil`, `WriteSingleRegister`, `WriteMultipleCoils`,
-  `WriteMultipleRegisters` and their responses, the upstream FC06-versus-FC16 selection
-  and `WriteOutcome::Unknown` on the wire (first post-alpha slices, M1 completion, D3);
-- browse and discovery (M3 or the parity backlog); polling subscriptions shipped in S55
-  and ping in S47;
-- extended registers (FC20 and FC21), `STRING`, `WSTRING`, `CHAR`, `WCHAR` and the `TIME`
-  and `DATE` family: the parser rejects each with a typed error (M2; the calendar types
-  wait for an ADR); array selections shipped in S48 (ADR-0022);
-- `ModbusRtuDriver`, `RtuFramer`, `Crc16Modbus`, the `Framing` enum and the serial
-  transport (M2); UDP, TLS and TLS-PSK transports (M3 or the parity backlog);
+- browse and discovery (M3 or the parity backlog); writes shipped in S45 and S46,
+  polling subscriptions in S55 and ping in S47;
+- extended registers (FC20 and FC21, S50), `STRING`, `WSTRING`, `CHAR`, `WCHAR` (S49) and
+  the `TIME` and `DATE` family: the parser rejects each with a typed error (calendar values
+  exist since S53, ADR-0021, but upstream has no Modbus encoding for them); array
+  selections shipped in S48 (ADR-0022);
+- `ModbusRtuDriver`, `RtuFramer`, `Crc16Modbus` and the `Framing` enum (M2; the serial
+  transport shipped in S58); UDP, TLS and TLS-PSK transports (M3 or the parity backlog);
 - the upstream gap-filling read optimizer (the batcher never reads a gap, divergence
   `MB-READ-GAP`) and, before S57, a background reconnect task (now shipped, ADR-0014 addendum);
 - the upstream write exchanges: the driver-suite and all-datatypes read exchanges are
@@ -1678,8 +1679,8 @@ classDiagram
 ```
 
 **Shipped at alpha (ADR-0016).** The `stonecrab::sensors` module (feature `sensors`) ships the schema (version 1), the
-loader, validation, the tag builder and the measurement pipeline; board adapters and the
-acquisition loop are deferred.
+loader, validation, the tag builder and the measurement pipeline, and since S56 the stale
+tracker and the acquisition loop (ADR-0023); board adapters are deferred.
 
 - `SensorProfile::from_toml(&str) -> Result<SensorProfile, ProfileError>` (64 KiB
   bound checked before parsing, unknown keys denied), `validate(&self)
@@ -1698,11 +1699,19 @@ acquisition loop are deferred.
   bytes), `unit`, `quality`, `origin`, `received_at`, `received_mono`, `source_time` (never
   substituted) and `protocol_status`. `Quality` is `Good`, `Uncertain`, `Bad`, `Stale`,
   `Unknown` with precedence `Bad`, `Stale`, `Uncertain`, `Unknown`, `Good`; `Stale` is
-  produced only by the M2 tracker. Scaling is checked and ordered (`multiply`, `divide`,
+  produced only by the stale tracker (S56), and `quality_before_stale` keeps the quality a
+  stale measurement had. Scaling is checked and ordered (`multiply`, `divide`,
   `offset`, `clamp`, `bit_field`); integers stay integers while every step is integral.
-- **Deferred:** `Acquisition`, queues and the polling loop (M2), `StaleTracker` (M2),
-  `Lookup` scale steps and named device profiles (M2), the `max31855` and
-  `adxl345` board adapters (M2S). Section 6.1 is entirely deferred to M2S.
+- **Shipped in S56 (ADR-0023), not as drawn:** `Acquisition::new(&profile, &dyn Driver,
+  &dyn Connection, &dyn Clock, interval)` borrows its inputs; `recv()` reads each
+  measurement no more often than its `min_interval` (a faster interval is raised to it),
+  puts the measurements due together into one read, and hands out fresh measurements and
+  stale transitions, with no spawned task. The drawn `Arc` and `Box` handles, `plan()`,
+  `run()`, `BoundedReceiver` and per-tag `trackers` map do not exist, and the loop reads
+  through `Connection::read`, not through a subscription.
+- **Deferred:** `Lookup` scale steps (M2) and the `max31855` and `adxl345` board adapters
+  (M2S). Section 6.1 is entirely deferred to M2S. Named device profiles exist since S52d
+  as documented maps under `profiles/documented/`, none hardware-verified.
 
 Section 9.7 shows the target pipeline with `Acquisition`; at the alpha an application calls
 `tags`, reads through a `Connection`, then calls `measurements` itself, as the
@@ -2070,9 +2079,9 @@ times out is retried per `RetryPolicy` (default one attempt), a write never.
 | 9.2 Batched read with split and partial failure | shipped | the exception is mapped per D18 (`0x02` is `InvalidAddress`, not `DeviceException`); the Modbus connection runs the chunks one after another |
 | 9.3 Timeout, late reply, resynchronization | shipped for TCP | the guard resyncs before the next send; the RTU variant is deferred (M2); write `Unknown` outcomes are shipped (S46) |
 | 9.4 Reconnect with backoff | shipped; eager with a supervisor (S57), else request-driven | the supervisor reopens after the backoff, or the next request waits it out; no `StateChanged` or `Ended` event reaches a `Subscription`: a Modbus polling tick that meets the link down is skipped and counted, and the supervisor or the next tick's read reconnects (S55, S57) |
-| 9.5 Polling subscription | shipped (S55) as polling driven from `recv`; `StaleTracker` still S56 | no `PollTask` is spawned: the `Subscription` owns the producer future and polls it while `recv` waits on an empty queue (ADR-0020 addendum S55); ticks lie on a grid of the interval and the missed ones count in `LossCounters::skipped`; each tick's read takes the connection's default deadline, not `tick + interval`; events are `ReadItem`s (no `Value` or `Stale` event, no `stale_after`); `CoalesceLatest` never engages for a polling subscription, whose slow consumer sees `skipped` instead |
+| 9.5 Polling subscription | shipped (S55) as polling driven from `recv`; stale marking shipped in S56 in the sensors acquisition loop, not in subscriptions | no `PollTask` is spawned: the `Subscription` owns the producer future and polls it while `recv` waits on an empty queue (ADR-0020 addendum S55); ticks lie on a grid of the interval and the missed ones count in `LossCounters::skipped`; each tick's read takes the connection's default deadline, not `tick + interval`; events are `ReadItem`s (no `Value` or `Stale` event, no `stale_after`); `CoalesceLatest` never engages for a polling subscription, whose slow consumer sees `skipped` instead |
 | 9.6 Write with an ambiguous outcome | shipped (S46) | the Modbus driver sends one request per item, reports `Unknown` for a request that went out without a usable answer and stops after the first one; the simulator's `UnknownAfterTransmit` step exercises the same |
-| 9.7 Sensor profile to measurement | partly shipped | `tags` and `measurements` exist; `Acquisition` and the polling loop are deferred (M2); a profile declares `plc4x`, `one-based-40001` or `zero-based` (S51) |
+| 9.7 Sensor profile to measurement | shipped (S56) | `tags` and `measurements`, and `Acquisition`, which reads at the profile's intervals and marks stale values (ADR-0023); a profile declares `plc4x`, `one-based-40001` or `zero-based` (S51) |
 
 ### 9.1 Connect through the registry
 

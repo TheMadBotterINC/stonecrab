@@ -5,9 +5,10 @@
 #[cfg(test)]
 mod tests {
     use stonecrab::sensors::{
-        ByteOrderName, ConnectionRequirements, DeviceApplicability, Measurement, MeasurementDef,
-        ProfileError, ProfileId, Provenance, Quality, QualityMapping, ScaleStep, SchemaVersion,
-        SensorProfile, StatusField, Unit, ValidationStatus, ValueRange, WordOrderName,
+        Acquisition, ByteOrderName, ConnectionRequirements, DeviceApplicability, Measurement,
+        MeasurementDef, ProfileError, ProfileId, Provenance, Quality, QualityMapping, ScaleStep,
+        SchemaVersion, SensorProfile, StaleTracker, StatusField, Unit, ValidationStatus,
+        ValueRange, WordOrderName,
     };
 
     #[test]
@@ -31,5 +32,7 @@ mod tests {
         assert_send_sync::<ValidationStatus>();
         assert_send_sync::<ProfileError>();
         assert_send_sync::<Unit>();
+        assert_send_sync::<StaleTracker>();
+        assert_send_sync::<Acquisition<'static>>();
     }
 }

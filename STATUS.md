@@ -397,6 +397,7 @@ commit; gates named were run locally before that commit.
 | S57b | 2026-10-28 | The flaky `under_a_zero_idle_bound_a_read_keeps_the_reply_behind_a_mismatched_one` (about 3.5% alone, 10% under `cargo test`): on a multi-thread runtime a `close` that overtook the supervisor's idle close cut the shutdown of a transport already taken out of the slot, and the transport was dropped without a shutdown. The idle close now shuts the transport down where it is (`FramedTransport::shutdown`, crate-private) and empties the slot only afterwards, so `close` shuts down what it finds; a deterministic in-crate test reproduces the interleaving. The rustdoc of `ConnectionGuard` gains a Shutdown section (a transport lost to a failure is dropped without one). `GuardStats::discarded_frames` (additive) counts every frame the guard reads and drops between exchanges, closing the S57 gap "frames dropped between exchanges are uncounted"; `ModbusConnection` still exposes no stats | check, coverage (transport 98.97%), lint-attrs, parity, examples, semver; the formerly flaky test 300 of 300 alone and 200 of 200 under load, the full suite 10 of 10 |
 | fuzz-smoke (fix) | 2026-10-29 | The hosted `fuzz-smoke` job failed on run 40814857692: `fuzz_modbus_connection_string` asserts that a rejection never repeats a non-ASCII authority or value, and a 33-character unknown key, echoed as its first 32 characters and `...`, ended in `oӨ` while a value was `oӨ.`. The library repeated nothing; the oracle was too coarse. It now requires the quoted text to begin a key and looks for the authority and values only outside the quotes (the templates hold no other quote), which also drops the old exception for values found inside a key; the input is kept as the seed `regression_value_after_shortened_key` | the target over its corpus for 180 s on the pinned nightly (4.76 million runs, no finding) |
 | S48 | 2026-10-29 | Lists and Modbus array selections (finding G08, the list part), ADR-0022: `PlcValue::List(Vec<PlcValue>)` and `PlcValueType::List` appended (a range address carries the List hint, so the existing write builder refuses a scalar to a range and a list to an index before any I/O); the grammar `[i]`, inclusive `[lo..hi]` and `;base` on the long, Nx and bare forms (one dimension; numbers checked into u32; an index below the base or hi below lo refused); `[i]` resolves to the element's own address, a range sets `ModbusAddress::elements()` and is one tag and one read item whose whole span must end by wire 65535 and fit one read (2000 bits, 125 registers); byte and word order per element; a write takes a List of exactly the element count (FC15, FC16, FC06 for one register) and a list wider than one PDU is refused with `ResourceLimit`; the legacy-form hint is offered only when it parses; `ping-address` may be a range, read whole as upstream does. Divergences recorded: a sub-register element takes one register, `[4..4]` reads a list of one, an over-wide write is refused. The odd-byte-offset rule waits for CHAR and STRING (S49); whether a profile's `count` maps to a selection is open | check, coverage (core and modbus 100%), lint-attrs, parity, examples, semver; package steps with --allow-dirty (the task itself refuses an uncommitted tree) |
+| S56 | 2026-10-29 | Staleness and the acquisition loop (finding G09 resolved), ADR-0023: `StaleTracker` in `stonecrab::sensors`, pure logic per profile with no clock of its own (`record`, `expire(now)`, `next_expiry()`); a retained measurement is `Stale` once its age (now minus `received_mono`) exceeds `stale_after`, exclusive at the threshold, reported once, value and timestamps kept, the earlier quality in the new field `Measurement::quality_before_stale`; a measurement without a value erases nothing. `Acquisition::new(&profile, &dyn Driver, &dyn Connection, &dyn Clock, interval)` reads through `Connection::read` (not S55 subscriptions: one interval per subscription, item-by-item delivery and grid catch-up would break `min_interval`), raises a faster interval to `min_interval`, reads everything due together in one request, hands fresh measurements and stale transitions out of `recv()` with no spawned task, ends when the connection closes, and refuses a clock that cannot pace it. 17 tests on FakeClock against the simulator and Modbus over the fake transport, including wall-clock jumps and dropped `recv` calls. Also reconciles the deferred list of this file and ARCHITECTURE notes left stale by S45 to S58 | check, coverage (sensors 100%), lint-attrs, parity, examples, semver; package steps with --allow-dirty |
 
 ## Verified evidence and reproduction
 
@@ -652,24 +653,25 @@ not native subscriptions.
 Deferred features, each a deferred row in `docs/parity/modbus.md` or an item of the plan's
 "Out of scope for alpha" table with its owner:
 
-- **Modbus writes** (first post-alpha slices, M1 completion): write PDUs, the upstream
-  FC06-versus-FC16 selection, `WriteOutcome::Unknown` on the wire. The simulator
-  implements write so the contract has a real exerciser.
-- **Subscriptions** (M2): polling emulation, `StaleTracker`, the acquisition loop, eager
-  background reconnect, `Timeouts.idle` enforcement. Browse, discovery and ping (M3 or the
-  parity backlog).
-- **Extended registers** (FC20 and FC21), **strings** (`STRING`, `WSTRING`, `CHAR`,
-  `WCHAR`) and **calendar types** (the `TIME` and `DATE` family) and `ZeroBased` /
-  `OneBased40001` conventions (M2; calendar values need an ADR first). The parser rejects
-  each with a typed error. Array selections shipped in S48 (ADR-0022).
-- **Modbus RTU and ASCII**, serial transport, checksums (M2); UDP, TLS and TLS-PSK (M3 or
-  the parity backlog); board adapters (M2S); OPC UA (M3); EtherNet/IP and S7 (M4);
-  code generation and the remaining baseline protocols (M5).
+- **Browse and discovery** (M3 or the parity backlog) and native, non-polling
+  subscriptions (with OPC UA, M3). Writes (S45, S46), ping (S47), polling subscriptions
+  (S55), the stale tracker and acquisition loop (S56), and eager reconnect with
+  `Timeouts.idle` (S57) have shipped.
+- **Extended registers** (FC20 and FC21, S50) and **strings** (`STRING`, `WSTRING`,
+  `CHAR`, `WCHAR`, S49): the parser rejects each with a typed error. The Modbus `TIME` and
+  `DATE` names stay rejected because upstream has no Modbus encoding for them (S44); the
+  calendar values shipped in S53 (ADR-0021), array selections in S48 (ADR-0022) and the
+  `zero-based` and `one-based-40001` conventions in S51.
+- **Modbus RTU and ASCII** (S59, S60; the serial transport shipped in S58); UDP (S61), TLS
+  and TLS-PSK (M3 or the parity backlog); board adapters (M2S); OPC UA (M3, after the
+  generator); EtherNet/IP and S7 (M4); code generation (S66, S67: vendoring
+  `modbus.mspec` waits for the maintainer's approval) and the remaining baseline protocols
+  (M5).
 - **Hardware**: no physical device has been tried and no hardware record exists.
-- **Gates not run**: the 8-hour release fuzz run and 24-hour soak (the recorded runs are
-  30 minutes per target, made before S33), benchmarks, differential tests against PLC4J,
-  branch coverage (region coverage is reported) and `cargo publish --dry-run` against the
-  registry.
+- **Gates not run**: the 8-hour release fuzz run and 24-hour soak (S62; the recorded runs
+  are 30 minutes per target, made before S33), differential tests against PLC4J, branch
+  coverage (region coverage is reported) and `cargo publish --dry-run` against the
+  registry. Benchmarks exist since S52; their 10% gate runs in the weekly `scheduled` job.
 - **The `semver` job is blocking** since S35, with cargo-semver-checks pinned to 0.51.0,
   against the published `stonecrab` 0.2.0. An unchanged `version` is checked as a minor
   release (run 40787826005: 202 checks pass, "no semver update required"), so a breaking

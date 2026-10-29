@@ -5,17 +5,19 @@ pipeline, a unit, quality rules and the evidence behind it. A profile contains n
 executable code and is never written by this library. The module is `stonecrab::sensors`,
 behind the `sensors` feature (on by default).
 
-This module currently offers the schema types, a bounded loader, semantic validation and
-the measurement pipeline: `SensorProfile::from_toml`, `SensorProfile::validate`,
-`SensorProfile::validate_for`, `SensorProfile::tags`, `SensorProfile::measurements`,
-`Measurement`, `Quality`, `Unit`, `ProfileId`, `SchemaVersion` (version 1 is the only schema version; any other value is
-`ProfileError::IncompatibleSchema`), `DeviceApplicability`, `ConnectionRequirements`,
-`MeasurementDef`, `ScaleStep`, `ValueRange`, `StatusField`, `QualityMapping`,
-`Provenance`, `ValidationStatus` and `ProfileError`. The loader checks the shape of a
-document, `validate` checks its meaning, `tags` asks a driver to parse its addresses and
-`measurements` turns a read response into qualified engineering values. The `sensors`
-feature adds `serde` and `toml` and nothing else; the module depends on the core and on no
-driver.
+This module currently offers the schema types, a bounded loader, semantic validation, the
+measurement pipeline, a stale tracker and an acquisition loop: `SensorProfile::from_toml`,
+`SensorProfile::validate`, `SensorProfile::validate_for`, `SensorProfile::tags`,
+`SensorProfile::measurements`, `StaleTracker`, `Acquisition`, `Measurement`, `Quality`,
+`Unit`, `ProfileId`, `SchemaVersion` (version 1 is the only schema version; any other
+value is `ProfileError::IncompatibleSchema`), `DeviceApplicability`,
+`ConnectionRequirements`, `MeasurementDef`, `ScaleStep`, `ValueRange`, `StatusField`,
+`QualityMapping`, `Provenance`, `ValidationStatus` and `ProfileError`. The loader checks
+the shape of a document, `validate` checks its meaning, `tags` asks a driver to parse its
+addresses and `measurements` turns a read response into qualified engineering values;
+`StaleTracker` marks retained values stale and `Acquisition` reads a profile through a
+connection at its intervals (ADR-0023). The `sensors` feature adds `serde` and `toml` and
+nothing else; the module depends on the core and on no driver.
 
 Profiles declare their address convention. A bare Modbus number such as `40001` is
 ambiguous (holding register 1 under the PLC4X convention, wire address 1 or 40001
@@ -36,6 +38,8 @@ register map and its own fixtures.
 | Semantic validation (`SensorProfile::validate`) and the fixed unit table | build-tested |
 | Scaling and quality evaluation (`SensorProfile::measurements`) | build-tested; property-tested |
 | Driver integration (`SensorProfile::tags` through `Driver::parse_address`) | simulator-tested |
+| Stale tracking (`StaleTracker`) | build-tested |
+| Acquisition loop (`Acquisition`), simulator and `modbus-tcp` over the fake transport | simulator-tested |
 | Synthetic reference profiles, `sim` variants | simulator-tested |
 | Synthetic reference profiles, `modbus-tcp` variants | interoperability-tested |
 | Interoperability against an independent server | interoperability-tested |
@@ -201,13 +205,40 @@ Quality is the worst of the rules that apply, in the order `Bad`, `Uncertain`, `
 `Good`: a value outside `range` is `Uncertain`; a status field in `bad_when` that is set
 (after `invert`) is `Bad`, one in `uncertain_when` is `Uncertain`; a status item that is
 missing or unreadable is `Unknown`. `Quality::Stale` is never produced here: only the
-milestone M2 tracker, which knows a value's age, sets it.
+stale tracker, which knows a value's age, sets it (see below).
 
 ```rust
 use stonecrab::sensors::Quality;
 
 assert_eq!(Quality::Uncertain.to_string(), "uncertain");
 ```
+
+## Acquisition and staleness
+`StaleTracker::new(&profile)` retains the last measurement of each name and marks it stale
+once its age, the monotonic `now` you pass minus its `received_mono`, is strictly greater
+than its `stale_after`: at exactly `stale_after` it is still fresh, and it is stale from
+one nanosecond later (`next_expiry` returns that instant). A measurement without
+`stale_after` never goes stale. The tracker has no clock and performs no I/O. `record`
+retains a measurement that carries a value; a `Bad` measurement without one (a failed
+read) erases nothing, so the value read before keeps aging. `expire(now)` returns each
+measurement that went stale, once: its `quality` is `Stale`, the quality it was read with is
+in `quality_before_stale`, and the value, receipt times, source time and protocol status
+are those of the original reading, never a new one. The next reading with a value replaces
+it and is fresh.
+
+`Acquisition::new(&profile, &driver, &*connection, &clock, interval)` reads the profile
+through a connection. Each measurement is read every `interval`, or every `min_interval`
+when the profile sets a longer one: a faster rate is raised, not refused. The first `recv`
+reads everything; afterwards the measurements due at the same instant share one read
+request, and a measurement is next due one interval after its read started, so a missed
+read is never made up in a burst. `recv` returns fresh measurements and stale transitions
+(the ones of quality `Stale`), returns a read that failed as a whole as its error and
+carries on at the next call, and resolves to `None` once the connection closes or fails.
+Nothing is spawned: the loop runs while you await `recv`, and its queue holds at most one
+event per measurement. Pass the clock the connection samples with, and one that sleeps
+(the testkit's `FakeClock` or the transport's `SystemClock`): on the simulator's
+`RealtimeClock` `recv` refuses to wait. Every case is tested on the `FakeClock`, against the
+simulator and against the Modbus TCP driver over the fake transport; no device was read.
 
 The parity record is
 [docs/parity/sensors.md](https://github.com/TheMadBotterINC/stonecrab/blob/master/docs/parity/sensors.md);

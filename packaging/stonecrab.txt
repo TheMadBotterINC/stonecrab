@@ -50,12 +50,14 @@ src/registry.rs
 src/request.rs
 src/response.rs
 src/secret.rs
+src/sensors/acquisition.rs
 src/sensors/error.rs
 src/sensors/ident.rs
 src/sensors/measurement/pipeline.rs
 src/sensors/measurement/scale.rs
 src/sensors/measurement.rs
 src/sensors/profile.rs
+src/sensors/stale.rs
 src/sensors/tags.rs
 src/sensors/units.rs
 src/sensors/validate.rs
