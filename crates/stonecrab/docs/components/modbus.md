@@ -139,7 +139,9 @@ The labels are those of the project's hardware-evidence policy: `build-tested`,
 scripted peer. The `interop` CI job (slice S27) runs the driver against an independent
 server, pymodbus 3.8.6, on every push, and the `interop-libmodbus` job (slice S52a) against a
 second one, libmodbus 3.1.11's `unit-test-server` (see "Interoperability" below); the rows
-they exercise read `interoperability-tested`. No physical device has been tried.
+they exercise read `interoperability-tested`. The `interop-toxiproxy` job (slice S52b) adds
+fault injection (Toxiproxy, `docker pause` and `kill`) against both peers. No physical
+device has been tried.
 
 | Capability | Support level |
 | --- | --- |

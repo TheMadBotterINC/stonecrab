@@ -282,6 +282,51 @@ jobs:
           path: target/interop-evidence/modbus-tk/
       - run: interop/modbus-tk/interop.sh stop
         if: ${{ always() }}
+  interop-toxiproxy:
+    # The failure paths on a real clock (slice S52b): both peers behind Toxiproxy 2.13.0
+    # (pinned by digest, API published on the loopback of the runner only), the tests adding
+    # resets, black holes, latency, sliced frames and closed links, and pausing and killing the
+    # pymodbus container, then tshark deciding whether the capture holds a malformed packet.
+    # Its own job so that a failure here does not hide the result of the peers' plain runs. The
+    # steps are the subcommands of interop/toxiproxy/interop.sh, which
+    # `mise run interop-toxiproxy` also runs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
+        with:
+          toolchain: "1.99.1"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.148
+      # Builds the pymodbus and libmodbus images (their own interop.sh build), pulls
+      # ghcr.io/shopify/toxiproxy:2.13.0 by digest and builds interop/toxiproxy/tshark/.
+      - run: interop/toxiproxy/interop.sh build
+      # A Docker network with the two peers and Toxiproxy; API and proxies on 127.0.0.1.
+      - run: interop/toxiproxy/interop.sh start
+      # Probe until 60 s have elapsed (a real Modbus read through each proxy, see interop.sh).
+      - run: interop/toxiproxy/interop.sh wait
+      # tshark in the network namespace of the Toxiproxy container, writing a pcap.
+      - run: interop/toxiproxy/interop.sh capture
+      # cargo nextest run --locked -p stonecrab --all-features --run-ignored ignored-only
+      #   -E 'binary(modbus_interop_toxiproxy) & test(/^tests::interop_/)' --test-threads 1
+      # The step fails when the filter does not select exactly EXPECTED_TESTS (in interop.sh)
+      # tests.
+      - run: interop/toxiproxy/interop.sh tests
+      # Stops the capture and decodes it with tshark: fails on a malformed packet, a driver
+      # request that is not one well-formed Modbus/TCP frame, or a leg without frames.
+      - run: interop/toxiproxy/interop.sh check
+        if: ${{ always() }}
+      # Image digests, tshark and Toxiproxy versions, the capture counts and the container logs.
+      - run: interop/toxiproxy/interop.sh evidence
+        if: ${{ always() }}
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: interop-toxiproxy-evidence
+          path: target/interop-evidence/toxiproxy/
+      - run: interop/toxiproxy/interop.sh stop
+        if: ${{ always() }}
   machete:
     runs-on: ubuntu-latest
     steps:

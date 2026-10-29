@@ -1,0 +1,47 @@
+# Provenance of the first-party files under interop/toxiproxy (CODING_STANDARDS 13.6).
+#
+# A separate file for the reason given in interop/pymodbus/PROVENANCE.toml: the loader
+# (stonecrab::testkit::load_provenance) reads only files below the directory of the provenance
+# file, and these files are outside fixtures/modbus. Same schema, no [[vector]].
+#
+# The tools are not in this repository. They are pulled or installed by the recipes here:
+#
+#   Toxiproxy    ghcr.io/shopify/toxiproxy:2.13.0, the multi-architecture index digest
+#                sha256:5d3dae09bc185dcc5ff6cf43abf6062a4a720aff0c4306a471e773acdcd107aa,
+#                pulled on 2026-10-28. Toxiproxy is MIT, Copyright Shopify Inc. The image holds
+#                the toxiproxy-server binary; it is run, not modified, and no file of it is
+#                copied here. docs/POST_ALPHA_PLAN.md (Until hardware arrives) names it.
+#   tshark       Debian trixie package tshark 4.4.19-0+deb13u1 when this recipe was written,
+#                on debian:trixie-slim, the multi-architecture index digest
+#                sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4
+#                (the base of interop/libmodbus/Dockerfile). Wireshark is GPL-2.0-or-later and
+#                is used as a program in a container; the package is not pinned by version
+#                (Debian removes a superseded security release from the archive), and every
+#                run records the version it installed in image-digest.txt.
+#   peers        the images of interop/pymodbus and interop/libmodbus, unchanged.
+#
+# toxiproxy.json names the two proxies: nothing in it is copied from Toxiproxy.
+
+[[file]]
+path = "interop.sh"
+origin = "Authored for S52b, in the shape of interop/pymodbus/interop.sh and interop/libmodbus/interop.sh"
+license = "Apache-2.0"
+note = "First-party. Build, run, probe, capture, test, decode and collect evidence; shared by the CI job and mise run interop-toxiproxy."
+
+[[file]]
+path = "toxiproxy.json"
+origin = "Authored for S52b; the field names (name, listen, upstream, enabled) are those of the Toxiproxy configuration file documented in its README, a fact, not content"
+license = "Apache-2.0"
+note = "First-party. Two proxies, one in front of each peer, on fixed container ports 15020 and 15021."
+
+[[file]]
+path = "tshark/Dockerfile"
+origin = "Authored for S52b from the pinned base image debian:trixie-slim and the Debian package tshark"
+license = "Apache-2.0"
+note = "First-party recipe. The base image is pinned by digest; the package is installed unpinned and its version recorded per run."
+
+[[file]]
+path = "README.md"
+origin = "Authored for S52b"
+license = "Apache-2.0"
+note = "First-party."

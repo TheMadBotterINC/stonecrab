@@ -125,6 +125,21 @@ placeholder.
   at the deadline with the connection still good, a batch with an unknown unit, the unit in
   the address block over `default-unit-identifier`, and a write to one unit. The server is
   first-party code, so the evidence is `interoperability-tested` at most.
+- Interop (no crate API change): failure paths on a real clock. The new `interop-toxiproxy`
+  CI job and `mise run interop-toxiproxy` put Toxiproxy 2.13.0 (MIT, pinned by digest, API on
+  the loopback of the host) between the driver and the pymodbus and libmodbus peers. Ten
+  tests in `tests/modbus_interop_toxiproxy.rs` add and remove toxics over the Toxiproxy HTTP
+  API from the test process (a small client on `std::net`, no new dependency): a reset in
+  each direction, a black hole in each direction (`Timeout` at the deadline, twice, then the
+  link recovers), latency below and above a deadline with jitter, slicer toxics that cut
+  requests and replies into pieces of a few bytes, `limit_data` after one whole reply and
+  inside a header, a disabled proxy with open connections, and `docker pause`, `docker kill`
+  and `docker start` on the pymodbus container (a hung peer is `Timeout` and its late reply
+  is discarded on the same connection; a dead peer is `Disconnected` until it is back). Each
+  failure ends in `Timeout` or `Disconnected` within its deadline and the next request reads.
+  tshark 4.4 (Debian trixie) captures the run in the proxy's network namespace and decodes
+  it independently: no malformed packet, every driver request one well-formed Modbus/TCP
+  frame. Evidence under `target/interop-evidence/toxiproxy/`.
 - Subscription types and a bounded event queue (ADR-0020; additive): `SubscribeRequest`
   and its builder, `SubscriptionKind` (cyclic, change-of-state, event), `QueuePolicy`
   (backpressure, latest-value coalescing, drop-oldest), `LossCounters`, `Subscription`

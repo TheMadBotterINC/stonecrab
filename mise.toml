@@ -8,13 +8,14 @@
 #   mise run parity        = CI "parity" job (scripts/parity-check.sh and its --self-test)
 #   mise run features      = CI "features" job
 #   mise run examples      = CI "examples" job
-#   mise run interop       = CI "interop", "interop-libmodbus" and "interop-modbus-tk" jobs
-#                            (needs Docker; interop/pymodbus/interop.sh, then
-#                            interop/libmodbus/interop.sh, then interop/modbus-tk/interop.sh,
-#                            evidence under target/interop-evidence/ and its libmodbus/ and
-#                            modbus-tk/)
+#   mise run interop       = CI "interop", "interop-libmodbus", "interop-modbus-tk" and
+#                            "interop-toxiproxy" jobs (needs Docker; interop/pymodbus/interop.sh,
+#                            then interop/libmodbus/interop.sh, interop/modbus-tk/interop.sh and
+#                            interop/toxiproxy/interop.sh, evidence under target/interop-evidence/
+#                            and its libmodbus/, modbus-tk/ and toxiproxy/)
 #   mise run interop-libmodbus = CI "interop-libmodbus" job alone (slice S52a)
 #   mise run interop-modbus-tk = CI "interop-modbus-tk" job alone (slice S52c)
+#   mise run interop-toxiproxy = CI "interop-toxiproxy" job alone (slice S52b)
 #   mise run fuzz          = CI "fuzz-smoke" job (scripts/fuzz-smoke.sh; optional seconds argument)
 #   mise run machete       = CI "machete" job
 #   mise run dependencies  = CI "dependencies" job
@@ -140,11 +141,12 @@ run = [
 ]
 
 [tasks.interop]
-description = "The three interop peers in Docker, one after the other: pymodbus (the interop tests, the modbus_tcp_read example and profile_read for each modbus-tcp profile), libmodbus (its tests) and the modbus-tk multi-unit server (its unit-ID tests), keeping the evidence of each (ADR-0015 decision 16, slices S52a and S52c)"
+description = "The interop peers in Docker, one after the other: pymodbus (the interop tests, the modbus_tcp_read example and profile_read for each modbus-tcp profile), libmodbus (its tests), the modbus-tk multi-unit server (its unit-ID tests), then the failure paths of pymodbus and libmodbus behind Toxiproxy with a tshark decode, keeping the evidence of each (ADR-0015 decision 16, slices S52a, S52c and S52b)"
 run = [
   "interop/pymodbus/interop.sh run",
   "interop/libmodbus/interop.sh run",
   "interop/modbus-tk/interop.sh run",
+  "interop/toxiproxy/interop.sh run",
 ]
 
 [tasks.interop-libmodbus]
@@ -154,6 +156,10 @@ run = "interop/libmodbus/interop.sh run"
 [tasks.interop-modbus-tk]
 description = "Build and run the first-party multi-unit modbus-tk 1.1.5 server in Docker, run the unit-ID interop tests against it, keep the evidence in target/interop-evidence/modbus-tk/ (slice S52c)"
 run = "interop/modbus-tk/interop.sh run"
+
+[tasks.interop-toxiproxy]
+description = "Run pymodbus and libmodbus behind Toxiproxy 2.13.0 in Docker, run the failure-path interop tests (resets, black holes, latency, sliced frames, closed links, a paused and a killed peer) on a real clock, decode the capture with tshark, keep the evidence in target/interop-evidence/toxiproxy/ (slice S52b)"
+run = "interop/toxiproxy/interop.sh run"
 
 [tasks.fuzz]
 description = "cargo deny on the fuzz workspace, then every fuzz target for 60 s (ADR-0009)"

@@ -1,0 +1,14 @@
+[
+  {
+    "name": "pymodbus",
+    "listen": "0.0.0.0:15020",
+    "upstream": "stonecrab-toxi-pymodbus:5020",
+    "enabled": true
+  },
+  {
+    "name": "libmodbus",
+    "listen": "0.0.0.0:15021",
+    "upstream": "stonecrab-toxi-libmodbus:1502",
+    "enabled": true
+  }
+]

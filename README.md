@@ -58,7 +58,8 @@ Support levels use only the labels of the project's hardware-evidence policy
 `interoperability-tested` and `hardware-verified`, plus `planned` and `not supported`.
 `interoperability-tested` means a run against an independent implementation (here
 pymodbus 3.8.6 in the `interop` CI job, and libmodbus 3.1.11 in `interop-libmodbus` for
-the rows that say so). Nothing is `hardware-verified`.
+the rows that say so; the `interop-toxiproxy` job adds fault injection against both and
+changes no level). Nothing is `hardware-verified`.
 
 | Protocol | Operation | Support level | Evidence |
 | --- | --- | --- | --- |
