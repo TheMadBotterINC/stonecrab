@@ -1,3 +1,6 @@
 * text=auto eol=lf
 *.hex text
 *.png binary
+# Fuzz seeds are raw inputs: the Modbus ASCII seeds end in CR LF, which text=auto would
+# turn into LF.
+fuzz/corpus/** binary

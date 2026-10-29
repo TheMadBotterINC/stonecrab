@@ -160,6 +160,21 @@ placeholder.
   `modbus` feature now enables `serial`, so the default build contains `serial2`. New fuzz
   target `fuzz_modbus_rtu`. Simulator-tested only: no independent RTU server and no
   hardware yet. The RTU rows of `docs/parity/modbus-serial.md` are implemented or decided.
+- Modbus ASCII (ADR-0024 addendum S60; additive): `ModbusAsciiDriver`, scheme `modbus-ascii`,
+  with the operations of `modbus-tcp` over ASCII framing: a colon, the address, the PDU and
+  an LRC as upper-case hex, CR LF. The carriers and the `serial.` parameters are those of
+  `modbus-rtu` (`modbus-ascii:///dev/ttyUSB0`, `modbus-ascii:tcp://host[:port]`), with
+  `serial.data-bits` 8 or 7 (7 with even parity is the usual ASCII line); unit 0 is refused.
+  New public types `AsciiAdu` and `AsciiFramer` (the LRC checked on receive and appended on
+  send; hex read in either case; noise or a broken frame in front of a colon is skipped to
+  the next colon; 513 bytes without CR LF is `Oversized`). A reply with a wrong LRC or a bad
+  digit fails its request with `MalformedData` and is dropped before the next request; there
+  is no character timeout and no t3.5; after an unanswered request the line is watched for
+  the time of a 513-character frame, so a late reply cannot answer the next one. The session,
+  the connection and the PDU codec are shared with Modbus TCP and RTU, whose behavior does
+  not change. New fuzz target `fuzz_modbus_ascii`. Simulator-tested only: no independent
+  ASCII server and no hardware yet. The ASCII rows of `docs/parity/modbus-serial.md` are
+  implemented or decided.
 - Calendar values (ADR-0021; additive): `PlcValue` and `PlcValueType` gain
   `SignedDuration`, `Date`, `TimeOfDay` and `DateTime` after `Duration`, holding the new
   root types `PlcSignedDuration` (an `i64` nanosecond count; IEC `TIME` and `LTIME`),

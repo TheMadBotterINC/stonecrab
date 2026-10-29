@@ -1,5 +1,5 @@
 # Stonecrab Modbus
-Native Modbus TCP and Modbus RTU drivers for Stonecrab (alpha), `stonecrab::modbus`, behind
+Native Modbus TCP, Modbus RTU and Modbus ASCII drivers for Stonecrab (alpha), `stonecrab::modbus`, behind
 the `modbus` feature (on by default). The alpha scope is the function codes 01 (read coils),
 02 (read discrete inputs), 03 (read holding registers) and 04 (read input registers) over
 TCP with MBAP framing, writes of coils and holding registers (function codes 15, 06 and 16,
@@ -7,14 +7,16 @@ refused unless the connection says `access=read-write`), the extended registers 
 file record function codes 20 (read) and 21 (write) since S50, a ping that reads one
 address, and polling subscriptions (cyclic and change-of-state, since S55). Since S59 the
 same operations run over Modbus RTU on a serial line or a serial-to-IP gateway (see "Modbus
-RTU" below), since S49 the text types `CHAR`, `WCHAR`, `STRING(n)` and `WSTRING(n)` are
-read and written (see "Text" below), and since S61 Modbus TCP also runs over UDP
-(`modbus-tcp:udp`, ADR-0027). ASCII, TLS, browse and discovery are out of scope for the
-alpha and are listed under "Not in the alpha" below.
+RTU" below) and, since S60, over Modbus ASCII (see "Modbus ASCII" below); since S49
+the text types `CHAR`, `WCHAR`, `STRING(n)` and `WSTRING(n)` are read and written (see
+"Text" below), and since S61 Modbus TCP also runs over UDP (`modbus-tcp:udp`, ADR-0027).
+TLS, browse and discovery are out of scope for the alpha and are listed under "Not in the
+alpha" below.
 The TCP driver has been checked against an independent server, pymodbus 3.8.6, and no
 physical device; over UDP it runs on loopback sockets, and its `interop-udp` job against
-diagslave 3.6 with `tc netem` faults passed its first hosted run (2026-10-29, run 40830080420, 6 of 6); the
-RTU driver on the in-memory transport and over a loopback socket only.
+diagslave 3.6 with `tc netem` faults passed its first hosted run (2026-10-29, run
+40830080420, 6 of 6); the RTU and ASCII drivers run on the in-memory transport and over
+a loopback socket only.
 No independent server serves the file record function codes, so the extended registers are
 checked against the specification examples, the upstream PLC4X frames and a first-party
 device on the in-memory transport only.
@@ -30,11 +32,12 @@ underneath: `UnitId`, `ModbusArea`, `ModbusDataType`, `AddressConvention` and
 `ExceptionCode`, `ModbusPdu`, `FileRecordRead` and `FileRecord` with `encode_request`,
 `decode_request`, `decode_response` and `encode_response`, the framing types `MbapHeader`,
 `TransactionId`, `ModbusAdu` and `MbapFramer`, the RTU framing types `RtuAdu` and
-`RtuFramer`, `ModbusRtuDriver`, the `Driver` of the `modbus-rtu` scheme, and `TypedDecoder`,
-which turns registers or coil bits into `PlcValue`s. `SystemClock`, the Tokio-backed clock
+`RtuFramer`, `ModbusRtuDriver`, the `Driver` of the `modbus-rtu` scheme, the ASCII framing
+types `AsciiAdu` and `AsciiFramer`, `ModbusAsciiDriver`, the `Driver` of the `modbus-ascii`
+scheme, and `TypedDecoder`, which turns registers or coil bits into `PlcValue`s. `SystemClock`, the Tokio-backed clock
 the drivers use by default, is re-exported from `stonecrab::transport`. The `modbus` feature
 turns on the `transport` feature (and with it Tokio), the `serial` feature (the serial
-transport, for RTU) and `tracing`; the codec module is always built.
+transport, for RTU and ASCII) and `tracing`; the codec module is always built.
 
 ## Driver
 
@@ -215,6 +218,61 @@ The RTU rows of the
 [serial parity record](https://github.com/TheMadBotterINC/stonecrab/blob/master/docs/parity/modbus-serial.md)
 record every behavior and divergence with its test ids.
 
+## Modbus ASCII
+`ModbusAsciiDriver`, scheme `modbus-ascii` (ADR-0024, addendum S60), is the RTU driver with
+another frame: a colon, the address, the PDU and an LRC as upper-case hex characters, then
+CR LF. Everything above the framing is that of `modbus-tcp`, as for RTU. What differs from
+RTU:
+
+- **Carriers and parameters.** `modbus-ascii://<port>`, `modbus-ascii:serial://<port>` and
+  `modbus-ascii:tcp://host[:port]` (default port 502), the `serial.` parameters of RTU, and
+  `default-unit-identifier` from 1 to 255. `serial.data-bits` is 8 (the default) or 7, which
+  most ASCII devices use with even parity: `serial.data-bits=7&serial.parity=even`.
+- **Framing.** A frame ends at its first CR LF; the LRC is the two's complement of the sum of
+  the address and the PDU. Hex digits are read in either case and written in upper case. A
+  wrong LRC, a character that is no hex digit or a run of more than 513 bytes with no CR LF
+  fails the request with `MalformedData` (`ResourceLimit` for the run) at once, and the
+  bytes are dropped before the next request. Noise in front of a colon, or a broken frame in
+  front of a good one, is skipped: the next frame starts at the next colon.
+- **Timing.** No inter-character timeout and no 3.5 character silence: slow characters are
+  accepted until the request's deadline, and the line is watched before a request only when
+  `serial.interframe-delay` asks for a gap (what arrives while the line is watched is
+  dropped; a frame that arrives while it is idle is dropped only by the connection's
+  background reader inside a Tokio runtime). After a request nothing answered, the line is
+  watched for the time of the largest frame, 513 characters (534 ms at 9600 8N1), and what
+  arrives is dropped, so a late reply does not answer the next request.
+- **Correlation, one connection per port, no broadcast.** As RTU.
+
+```
+use stonecrab::modbus::ModbusAsciiDriver;
+use stonecrab::{Driver, Endpoint};
+
+let driver = ModbusAsciiDriver::new();
+let serial = driver.parse_config(
+    "modbus-ascii:///dev/ttyUSB0?serial.data-bits=7&serial.parity=even",
+)?;
+assert_eq!(serial.endpoint(), &Endpoint::Custom("/dev/ttyUSB0".to_owned()));
+
+let gateway = driver.parse_config("modbus-ascii:tcp://192.0.2.20")?;
+assert_eq!(
+    gateway.endpoint(),
+    &Endpoint::Tcp { host: "192.0.2.20".to_owned(), port: 502 }
+);
+assert!(driver.parse_config("modbus-ascii://COM3?serial.data-bits=6").is_err());
+# Ok::<(), stonecrab::PlcError>(())
+```
+
+| ASCII capability | Support level |
+| --- | --- |
+| Read, write, ping and subscribe by polling over ASCII framing, with the operations and limits of `modbus-tcp` | simulator-tested |
+| LRC errors, bad digits, a missing CR or LF, noise before a colon, a frame split across reads, the drain of a late reply, a lost serial link and its reopen, replies from another unit | simulator-tested |
+| ASCII over a serial-to-IP gateway (`modbus-ascii:tcp://`) | simulator-tested (a loopback socket) |
+| Interoperability against an independent ASCII server | planned (a virtual serial pair with libmodbus or modbus-tk) |
+| Hardware verification on RS-485 | planned (HW2) |
+
+The ASCII rows of the serial parity record record every behavior and divergence with its test
+ids.
+
 ## Support levels
 The labels are those of the project's hardware-evidence policy: `build-tested`,
 `simulator-tested`, `interoperability-tested` and `hardware-verified`, plus `planned` and
@@ -253,6 +311,7 @@ The layers underneath, with their evidence:
 | PDU codec for function codes 01 to 04, 06, 15, 16, 20 and 21 and the exception PDU | unit-tested; vector-tested; property-tested; fuzzed |
 | MBAP framing (`MbapFramer`, `MbapHeader`, `ModbusAdu`, `TransactionId`) | unit-tested; vector-tested; fuzzed |
 | RTU framing and CRC-16 (`RtuFramer`, `RtuAdu`) | unit-tested; vector-tested (the upstream RTU parser vectors and the specification's CRC examples); property-tested; fuzzed |
+| ASCII framing and LRC (`AsciiFramer`, `AsciiAdu`) | unit-tested; vector-tested (the upstream ASCII parser suite, codec test and Go codec test frames); property-tested; fuzzed |
 | Session: transaction ids, reply correlation by transaction id, unit id and function code, exception mapping (`ModbusSession`, `exception_item_error`) | unit-tested on the in-memory transport |
 | Typed register decoding and byte order (`TypedDecoder`) | unit-tested; vector-tested; property-tested; `BIG_ENDIAN` and `LITTLE_ENDIAN` confirmed by the retained upstream PLC4X vectors; the two byte-swap modes are derived from the documented layouts |
 | Read batching (`Batcher`) | unit-tested; property-tested |
@@ -275,9 +334,9 @@ error rather than ignoring it; operations that have no API at all do not exist:
   3.1.11 and modbus-tk serves function codes 20 and 21 (`MB-ADDR-EXTENDED` is
   `implemented`, not `automated-verified`);
 - TLS and TLS-PSK transports (`MB-TCP-TRANSPORTS-TLS`, `MB-TCP-TRANSPORTS-TLS-PSK`) and the
-  `udp.` transport options (`MB-CFG-TRANSPORT-OPTIONS`); Modbus ASCII is slice S60, and
-  the RTU items that are deferred (broadcast, shared ports, the serial read and write
-  timeouts, DTR and RTS) are listed in the serial parity record;
+  `udp.` transport options (`MB-CFG-TRANSPORT-OPTIONS`); the RTU and ASCII items that are
+  deferred (broadcast, shared ports, the serial read and write timeouts, DTR and RTS) are
+  listed in the serial parity record;
 - the upstream gap-filling read optimizer, by decision (S51, ADR-0015 addendum): Stonecrab
   merges adjacent or overlapping tags only (`MB-READ-GAP`), because reading through a hole
   in a device's map is refused with exception 02 for every tag of the request; and

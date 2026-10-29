@@ -218,3 +218,162 @@ decodes, and fails `Disconnected` when none does by the deadline). S58 added
   `fuzz_modbus_rtu`.
 - `docs/parity/modbus-serial.md` records the RTU rows as implemented, deferred or
   divergent with their test ids; ASCII stays planned for S60.
+
+## Addendum (S60, 2026-10-29): Modbus ASCII
+### Status
+Accepted (2026-10-29), as slice S60 of docs/POST_ALPHA_PLAN.md ("Modbus ASCII: framing and
+LRC"; exit "Upstream ASCII vectors pass"). The decisions above stand and are not reopened;
+this addendum adds a second serial framing to the same session, connection and PDU codec.
+Every change to the public API is additive to the published `stonecrab` 0.2.0. No ADR of its
+own is needed: nothing here changes a decision of another ADR.
+
+### Context
+Upstream's `ModbusAsciiDriver` (protocol code `modbus-ascii`) is the RTU driver with another
+frame: the same carriers (`serial` by default, also `tcp`, `tls`, `tls-psk`, `udp`, `test`),
+the same parameters, the same connection logic, a diffed copy. Its codec
+(`ModbusAsciiMessageCodec`) frames on the first CR LF, gives up (DESYNCHRONIZED) when more
+than 513 bytes are buffered without one, hex-decodes the text between the colon and the CR
+LF (either case; an even number of digits, at least six) and lets the generated parser check
+the LRC. It has no timing logic. The Go port (`MessageCodecAscii`) adds a resynchronization
+that skips to the next colon. The two disagree, and the base class of the Java codec
+(`MessageCodecBase`) differs from what the parity record assumed: a DESYNCHRONIZED result
+drops the front byte and frames again (it is a resynchronization, byte-wise); a frame is
+consumed before it is parsed, so a frame that fails to parse (no colon in front, a bad digit,
+a wrong LRC) is lost and raises `MessageCodecException`; and the noise in front of a colon,
+up to the first CR LF, is consumed together with the frame that follows it, so a good frame
+behind noise on the same line is lost as well. Go keeps such a frame.
+
+### Decision
+1. **The driver and its carriers.** `stonecrab::modbus::ModbusAsciiDriver`, scheme
+   `modbus-ascii`. `modbus-ascii://<port>` and `modbus-ascii:serial://<port>` open a serial
+   port (the authority passed through as written); `modbus-ascii:tcp://host[:port]` carries
+   ASCII frames over TCP to a serial-to-IP gateway, default port 502 as Go injects it (the
+   Java driver has none: the divergence of decision 10 above). `tls`, `tls-psk`, `udp`,
+   `test` and every other code are `InvalidConfig`. An injected transport factory replaces the
+   carrier and the pacer still applies. The parameters are those of `modbus-rtu` (decision
+   11 above), including unit 0 refused and the `serial.` keys on the serial carrier only,
+   with one difference: `serial.data-bits` is 8 (the default, as upstream) or 7, which ASCII
+   devices commonly use with even parity (the SOLO SLM1-C of HW2 ships as ASCII 7E1:
+   `serial.data-bits=7&serial.parity=even`). Five and six are `InvalidConfig` (upstream hands
+   any value to the port; the serial transport takes five to eight, but an ASCII character is
+   seven bits and a Modbus byte two of them).
+2. **One more wire, nothing duplicated.** `Wire` (crate-private) gains `Ascii`, placed after
+   `Rtu`; it picks `AsciiFramer`, the scheme `modbus-ascii` and the 513-byte frame limit, and
+   correlates and refuses broadcast as `Rtu` does (`wire != Tcp`). The session, the
+   connection, the PDU codec and every path above them are unchanged for TCP and RTU (their
+   tests stay as they were). The driver functions that parse and open a serial connection are
+   shared by both serial drivers; the crate-private options type is renamed `SerialOptions`
+   (it was `RtuOptions`). The public additions are `AsciiAdu`, `AsciiFramer` and
+   `ModbusAsciiDriver`; no feature and no dependency is added (`modbus` contains the driver).
+3. **The frame.** A colon, then the address, the PDU and the LRC as two hex characters per
+   byte, then CR LF. The framer writes upper-case digits and reads either case (Java's
+   `Character.digit` and Go's `encoding/hex` do; Go's comment says the protocol is specified with
+   upper case). A frame ends at the first CR LF after its colon; a lone CR or LF is not a
+   terminator, and a CR not followed by LF is a character that is no hex digit. A frame is at
+   least 9 bytes (a colon, three bytes of hex and CR LF: the address, a function code, the
+   LRC) and at most 513 (`AsciiAdu::MAX_BYTES`: the colon, a 253-byte PDU with the address and
+   the LRC at two characters each, CR LF). `AsciiAdu` is the address and the PDU; the LRC is
+   checked on receive and computed on send, as the CRC is for RTU.
+4. **The LRC.** The two's complement of the sum of the address and the PDU bytes modulo 256,
+   so the sum of every byte of the frame, the LRC included, is 0. Upstream's definition is
+   `StaticHelper.asciiLrcCheck` (Java, with Go's port): add the bytes into an 8-bit
+   accumulator, negate. A frame with a wrong LRC is not a frame.
+5. **The size bound.** Past 513 bytes without a CR LF there is no frame: `decode` reports
+   `Oversized` for a colon whose hex has run to the 513th byte without ending, and for a
+   buffer of more than 513 bytes that holds no colon at all (upstream's DESYNCHRONIZED, which
+   waits for the 514th byte; a frame cannot be completed after the 513th, so the framer says so
+   one byte earlier, a recorded divergence). Up to 512 bytes of an unterminated run are
+   waited for. A run of hex that is only long and has its CR LF inside the bound is judged
+   whole.
+6. **Resynchronization (MBS-ASCII-RESYNC).** Decided: Go's rule inside one buffer, Stonecrab's
+   fail-fast between requests, as RTU. `decode` judges each colon of the buffer in turn. A
+   colon that starts a whole frame with a right LRC gives that frame, and everything before the
+   colon (noise, the debris of a frame that never finished) leaves the buffer with it, so noise
+   and a broken frame in front of a good one never lose it (Java loses it). A colon that starts
+   something that cannot be a frame (a character that is no hex digit, a second colon before the
+   CR LF, an odd number of digits, fewer than three bytes, a wrong LRC) is skipped and the next
+   colon is judged: the next frame start is the colon, which cannot appear inside a frame. A
+   colon that starts a frame still arriving (no CR LF yet, and no later colon) is waited for,
+   whatever came before it. When no colon holds a frame and none is still arriving, the first
+   colon's verdict decides: `Malformed`, or `Oversized`; nothing is removed (the `Framer`
+   contract). The request then fails at once with `MalformedData` (a wrong LRC, a bad digit; a
+   read may be retried, a write whose echo failed is `Unknown` and never replayed) or
+   `ResourceLimit` (an unterminated run), where Go skips a byte and waits for the deadline
+   (decision 3 above). Between requests `resync_discards` is true, as for RTU: the tail of a
+   frame the owner gave up on carries no colon to search from, and a byte-wise search would
+   wait for a frame that never comes and close the port (decision 4 above); the buffer is
+   dropped and counted in `GuardStats::resyncs`. The search for a colon is therefore a property
+   of `decode`, not of the resynchronization.
+7. **Timing (MBS-ASCII-TIMING).** Upstream has no inter-character timeout and no inter-frame
+   timing for ASCII, and neither has this driver: a frame is bounded by its colon and its CR LF,
+   so slow characters are accepted until the request's deadline (the serial line specification
+   is remembered to allow up to a second between characters, UNVERIFIED as it is not checked
+   in; nothing enforces it), and the t3.5 silence of RTU
+   does not apply. The line is not watched before a request unless `serial.interframe-delay`
+   asks for a gap (milliseconds, default 0), which for ASCII is the whole gap, not a floor under
+   t3.5.
+8. **Late replies (decision 6 above applies).** The drain stays. A reply that came too late
+   has the right unit and function, and nothing in an ASCII frame tells it from the answer to
+   the next request (there is no transaction id): its colon and CR LF only show that it is a
+   whole frame, which is also what the answer looks like. After a send that nothing answered,
+   the next request watches the line for the gap plus the time of the largest frame, 513
+   characters instead of 256 (534 ms at 9600 8N1: a character is a start bit, the data bits
+   (7 or 8), the parity bit and the stop bits), dropping what arrives; the watch is part of the
+   request's deadline. Over the `tcp` carrier the line is not known and the drain is that of
+   9600 8N1. The residual risk of decision 6 above is unchanged.
+9. **Correlation, bus, broadcast, capabilities.** As RTU (decisions 7, 8, 9 and 12 above): a
+   reply is accepted when its address and function code match, one request on the line, a port
+   is not shared between connections, unit 0 is refused, and the capabilities are those of
+   `modbus-tcp`.
+10. **Evidence level.** `simulator-tested`: the fake transport on the fake clock, the upstream
+    vectors (the parser suite's two ADUs, the codec test's frame and buffers, the Go codec
+    test's frames, garbage and cases, transcribed with provenance), the contract suite over the
+    fake transport, ASCII over a loopback TCP socket and a fuzz target
+    (`fuzz_modbus_ascii`). No independent ASCII server exists yet (a socat pair with libmodbus
+    or modbus-tk in ASCII mode is a later slice, as for RTU) and no hardware has been read
+    (HW2).
+
+### Consequences
+- A reply with a wrong LRC or a bad digit fails its request where upstream (Go) waits; a read
+  retry covers it. Noise or a broken frame in front of a good reply no longer loses it.
+- The drain after an unanswered request is up to 534 ms at 9600 baud (4.3 s at 1200 baud): the
+  default request timeout of 5000 ms leaves room for it and a short reply down to about 1200
+  baud; slower lines need a longer `request-timeout-ms`, as for RTU.
+- A noise-only buffer longer than 513 bytes fails the request with `ResourceLimit` and is
+  dropped before the next one.
+- With no gap by default, a frame that arrives while the line is idle is not dropped before
+  the next request, except by the guard's supervisor inside a Tokio runtime (ADR-0024
+  decision 6 above): a complete unsolicited frame from the right unit with the right function code would
+  answer the next request. `serial.interframe-delay` makes the driver watch the line first,
+  as RTU always does; the default stays upstream's 0.
+- `Wire` and the options type are crate-private; the renamed `SerialOptions` is no API change.
+
+### Alternatives considered
+- **Following Java: byte-wise resynchronization and the frame lost with its noise.**
+  Rejected: it loses a good reply behind noise on the same line, which Go's colon rule and
+  the specification's start marker avoid.
+- **Searching the buffer for a colon in `FramedTransport::resync`.** Rejected, as for RTU
+  (decision 4): the tail of an abandoned frame carries no colon, and a frame begun by a colon
+  would be waited for until the deadline, which closes the port.
+- **Skipping a broken frame and waiting for the deadline (Go).** Rejected for the request
+  path, as for RTU (decision 3): nothing retransmits on Modbus.
+- **A character timeout of one second.** Rejected: upstream has none, and the request
+  deadline already bounds the wait; a timeout that ends a frame mid-way would only add a
+  second kind of failure.
+- **No drain for ASCII because its frames have markers.** Rejected: the markers tell a frame's
+  extent, not whose answer it is.
+- **A separate ASCII session and connection, or a generic over the framer.** Rejected, as for
+  RTU: the `Wire` choice is a few lines, the rest is shared.
+
+### Compliance
+- `crates/stonecrab/src/modbus/framing/ascii.rs` (the LRC, `AsciiAdu`, `AsciiFramer`),
+  `crates/stonecrab/src/modbus/rtu/ascii.rs` (the driver), `rtu/driver.rs` (the parsing and
+  the connecting both serial drivers share), `rtu/line.rs` (the parameters and the silence),
+  `session.rs` (`Wire::Ascii`).
+- Tests: `crates/stonecrab/tests/modbus_ascii.rs` (the upstream vectors, an LRC error, bad
+  digits, a missing CR or LF, lower-case hex, a reply split across reads and two in one, noise
+  before the colon, the size bound, a reply from another unit, a late reply and the drain,
+  slow characters, a lost link, the contract suite, ASCII over a TCP gateway), the unit tests
+  of the framer and of the parameters, and the fuzz target `fuzz_modbus_ascii`.
+- `docs/parity/modbus-serial.md` records the ASCII rows as implemented, with the divergences
+  of decisions 5 and 6 and the LRC fail-fast.

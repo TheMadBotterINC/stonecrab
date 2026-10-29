@@ -435,6 +435,7 @@ commit; gates named were run locally before that commit.
 | S61 | 2026-10-29 | UDP transport and Modbus TCP over UDP, ADR-0027: `UdpFactory` and `UdpTransport` (connected socket, datagrams from other addresses dropped by the OS as upstream filters them, one whole datagram per receive, an oversize datagram `ResourceLimit` where upstream drops it with a warning, empty datagrams skipped, ICMP port-unreachable as `Disconnected`, nothing retransmitted); `modbus-tcp:udp://host[:port]` with the MBAP framing and transaction-id correlation of TCP and the declared default port 502 (upstream fails with "No port defined": `MB-QUIRK-A` stays a divergence); no `udp.*` option ships. Tests on loopback sockets with the paused Tokio clock (boundaries, filter, oversize, closed port, lost, duplicated and late replies, the contract suite with 13 named skips). Interop: diagslave 3.6 (proconX free binary license; downloaded and checked by sha256 at image build, never committed) in Docker with `tc netem` loss, delay, duplication and reordering, six tests, a CI job `interop-udp` and `mise run interop-udp`, kept out of `mise run interop` because colima's default port forwarder does not carry UDP | check, coverage (transport 98.79%), lint-attrs, parity, examples, semver, package list, the UDP tests 50 times; the diagslave interop only through a local relay (colima does not forward UDP), the hosted interop-udp job runs first with this push |
 | S61 (evidence) | 2026-10-29 | The first hosted `interop-udp` run (CI run 40830080420, commit d208261) passed all six diagslave tests on `ubuntu-latest` with `sch_netem` loaded: write and read back, loss, delay below and past the deadline, duplication and reordering. The UDP rows of README, COMPATIBILITY and the component docs now cite it instead of "pending", and an ADR-0027 addendum records it; the pymodbus text test of S49 passed in the same run | parity |
 | S49 (follow-up) | 2026-10-29 | `fixtures/modbus/interop/text-registers.toml` gets its own `[[file]]` entry in `fixtures/modbus/PROVENANCE.toml`, and the testkit test that pins the entries (`golden_dir_lists_every_vector_in_provenance`) names it; an ADR-0025 addendum closes the exception S49 recorded | the golden-file test |
+| S60 | 2026-10-29 | Modbus ASCII, an ADR-0024 addendum: `ModbusAsciiDriver` (`modbus-ascii`; serial by default, the tcp gateway with port 502), `AsciiFramer` and `AsciiAdu` (':' and upper-case hex of address, PDU and LRC, then CR LF; lower case accepted on receive as Java and Go do; at most 513 bytes; the LRC the two's complement of the byte sum), a second serial wire that shares every S59 path (session, connection, codec, batcher, guard and pacer), Go's resynchronization inside a buffer and a fail-fast on a bad frame (reading the pinned source showed Java loses a good frame behind noise; recorded), no character timeout and no t3.5, the RTU drain sized at 513 characters after an unanswered request, and `serial.data-bits` 7 or 8 for ASCII. Upstream ASCII vectors from the parser suite, the Java codec test (whose frame has a wrong LRC, refused here) and the Go codec test; a fuzz target `fuzz_modbus_ascii`. Simulator-tested only: no independent ASCII server or device yet. At landing, `.gitattributes` marks `fuzz/corpus/**` binary, because `text=auto` had turned the seeds' CR LF into LF | check, coverage (modbus 100%), lint-attrs, parity, examples, semver, package list, fuzz smoke (nine targets); at landing the CR LF of the ASCII fuzz seeds kept (a .gitattributes rule) |
 
 ## Verified evidence and reproduction
 
@@ -546,7 +547,7 @@ recorded run (S32, `2d38e48`):
 | `cross` (aarch64 and armv7 compile checks) | green |
 | `dependencies`, `package`, `dco`, `features`, `machete`, `lint-attrs` | green |
 | `geiger` (no first-party `unsafe` outside `forbid(unsafe_code)`), `beta` (report only) | green |
-| `fuzz-smoke` (seven targets at the alpha; eight since S59) | green |
+| `fuzz-smoke` (seven targets at the alpha; eight since S59, nine since S60) | green |
 | `parity` (`scripts/parity-check.sh` and its self-test) | green |
 | `examples` (`sim_read` and the three `profile_read --expect-good` runs on the hosted runner) | green |
 | `interop` (pymodbus 3.8.6 on the amd64 runner: ten interop tests, the `modbus_tcp_read` example, the `profiles` step, the `interop-evidence` artifact) | green |
@@ -699,9 +700,10 @@ Deferred features, each a deferred row in `docs/parity/modbus.md` or an item of 
   (ADR-0022), extended registers with their selections in S50, the `zero-based` and
   `one-based-40001` conventions in S51, and the text types in S49 (ADR-0025).
   `PlcValue::Bytes` waits for a type that produces octet strings (ADR-0025 decision 9).
-- **Modbus ASCII** (S60; RTU shipped in S59, the serial transport in S58), an RTU run
-  against an independent server (a socat pair with libmodbus or modbus-tk) and HW2; TLS
-  and TLS-PSK (M3 or the parity backlog); the ADXL345 board adapter (S64; the MAX31855 shipped in S63); OPC UA (M3, after the
+- **RTU and ASCII against an independent server** (RTU shipped in S59, ASCII in S60, the
+  serial transport in S58; diagslave's encapsulated mode or a socat pair with libmodbus or
+  modbus-tk) and HW2; TLS and TLS-PSK (M3 or the parity backlog); the ADXL345 board adapter
+  (S64; the MAX31855 shipped in S63); OPC UA (M3, after the
   generator); EtherNet/IP and S7 (M4); code generation (S66, S67: vendoring
   `modbus.mspec` waits for the maintainer's approval) and the remaining baseline protocols
   (M5).
@@ -737,6 +739,10 @@ Deferred features, each a deferred row in `docs/parity/modbus.md` or an item of 
   caller cannot read the count; and the supervisor emits no tracing events (the
   `transport` feature does not depend on `tracing`); its state changes are visible
   through `watch_state`.
+- **ASCII residual risk** (S60): with the default gap of 0 an unsolicited complete frame
+  that arrives while the line is idle is dropped before the next request only by the guard's
+  supervisor inside a Tokio runtime; `serial.interframe-delay` makes the driver watch the
+  line first.
 - **RTU residual risks** (S59): a late reply that only begins after the next request is on
   the wire, with the same unit, function and shape, cannot be told apart (the drain after an
   unanswered request bounds it); below about 520 baud the default 5000 ms request timeout

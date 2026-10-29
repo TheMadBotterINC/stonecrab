@@ -36,6 +36,7 @@ src/modbus/batch.rs
 src/modbus/connection.rs
 src/modbus/decode.rs
 src/modbus/driver.rs
+src/modbus/framing/ascii.rs
 src/modbus/framing/mbap.rs
 src/modbus/framing/rtu.rs
 src/modbus/framing.rs
@@ -44,6 +45,7 @@ src/modbus/pdu/code.rs
 src/modbus/pdu/codec.rs
 src/modbus/pdu/model.rs
 src/modbus/pdu.rs
+src/modbus/rtu/ascii.rs
 src/modbus/rtu/driver.rs
 src/modbus/rtu/line.rs
 src/modbus/rtu/pace.rs

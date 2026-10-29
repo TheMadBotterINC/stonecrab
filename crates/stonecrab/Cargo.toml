@@ -100,6 +100,10 @@ name = "modbus_address"
 required-features = ["modbus"]
 
 [[test]]
+name = "modbus_ascii"
+required-features = ["modbus", "testkit"]
+
+[[test]]
 name = "modbus_batch"
 required-features = ["modbus", "testkit"]
 

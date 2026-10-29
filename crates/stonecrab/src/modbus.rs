@@ -40,12 +40,14 @@ pub use batch::{BatchLimits, Batcher, Chunk, Member};
 pub use connection::{ConnectionDefaults, ModbusConnection};
 pub use decode::TypedDecoder;
 pub use driver::ModbusTcpDriver;
-pub use framing::{MbapFramer, MbapHeader, ModbusAdu, RtuAdu, RtuFramer, TransactionId};
+pub use framing::{
+    AsciiAdu, AsciiFramer, MbapFramer, MbapHeader, ModbusAdu, RtuAdu, RtuFramer, TransactionId,
+};
 pub use options::ModbusOptions;
 pub use pdu::{
     ExceptionCode, FileRecord, FileRecordRead, FunctionCode, MAX_PDU_BYTES, MAX_READ_BITS,
     MAX_READ_EXTENDED_REGISTERS, MAX_READ_REGISTERS, ModbusPdu, decode_request, decode_response,
     encode_request, encode_response,
 };
-pub use rtu::ModbusRtuDriver;
+pub use rtu::{ModbusAsciiDriver, ModbusRtuDriver};
 pub use session::{ModbusSession, SessionStats, exception_item_error};

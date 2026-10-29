@@ -1,5 +1,5 @@
-//! `ModbusConnection`: the `Connection` of the `modbus-tcp` and `modbus-rtu` schemes, over a
-//! [`ModbusSession`].
+//! `ModbusConnection`: the `Connection` of the `modbus-tcp`, `modbus-rtu` and `modbus-ascii`
+//! schemes, over a [`ModbusSession`].
 
 use std::any::Any;
 use std::fmt;
@@ -131,14 +131,14 @@ impl Default for ConnectionDefaults {
 /// registers as typed values, in correlated batches, and writes coils and holding registers.
 ///
 /// `ModbusConnection` is what the `modbus-tcp` driver hands out as a `dyn Connection`
-/// (slice S26), and what the `modbus-rtu` driver hands out too, over RTU framing
-/// ([`ModbusRtuDriver`](crate::modbus::ModbusRtuDriver), ADR-0024): everything below
-/// applies to both, with the RTU differences that driver documents (no transaction ids,
-/// the silence before each request, no unit 0). It owns a [`ModbusSession`] (transaction
-/// ids, reply correlation, the
-/// reconnect of the connection guard underneath, in the background when the connection is
-/// opened inside a Tokio runtime) and adds the read semantics of the [`Connection`]
-/// contract:
+/// (slice S26), and what the `modbus-rtu` and `modbus-ascii` drivers hand out too, over RTU
+/// and ASCII framing ([`ModbusRtuDriver`](crate::modbus::ModbusRtuDriver),
+/// [`ModbusAsciiDriver`](crate::modbus::ModbusAsciiDriver), ADR-0024): everything below
+/// applies to all of them, with the serial differences those drivers document (no
+/// transaction ids, the silence before each RTU request, no unit 0). It owns a
+/// [`ModbusSession`] (transaction ids, reply correlation, the reconnect of the connection
+/// guard underneath, in the background when the connection is opened inside a Tokio
+/// runtime) and adds the read semantics of the [`Connection`] contract:
 ///
 /// - **Batching.** A read request is planned by [`Batcher::plan`] into chunks, one wire
 ///   request each (function codes 01 to 04, at most 125 registers or 2000 bits; function
@@ -396,7 +396,7 @@ impl ModbusConnection {
     }
 
     /// [`open`](Self::open) for the framing `wire`, with the address `ping` reads; the
-    /// `modbus-rtu` driver opens its connections here.
+    /// serial drivers open their connections here.
     pub(crate) fn open_on(
         wire: Wire,
         config: ConnectionConfig,

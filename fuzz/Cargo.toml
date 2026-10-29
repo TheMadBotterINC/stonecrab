@@ -66,6 +66,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "fuzz_modbus_ascii"
+path = "fuzz_targets/fuzz_modbus_ascii.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "fuzz_modbus_rtu"
 path = "fuzz_targets/fuzz_modbus_rtu.rs"
 test = false

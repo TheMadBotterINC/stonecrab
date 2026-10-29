@@ -1,4 +1,6 @@
-//! `ModbusRtuDriver`: the `Driver` of the `modbus-rtu` scheme.
+//! `ModbusRtuDriver`: the `Driver` of the `modbus-rtu` scheme, and the parsing and the
+//! connecting both serial drivers share (the `modbus-ascii` driver calls them with its own
+//! framing).
 
 use std::fmt;
 use std::sync::Arc;
@@ -12,7 +14,7 @@ use crate::{
 use crate::modbus::connection::driver_capabilities;
 use crate::modbus::driver::endpoint;
 use crate::modbus::options::invalid;
-use crate::modbus::rtu::line::RtuOptions;
+use crate::modbus::rtu::line::SerialOptions;
 use crate::modbus::rtu::pace::PacedFactory;
 use crate::modbus::session::Wire;
 use crate::modbus::{ModbusAddress, ModbusConnection};
@@ -266,35 +268,7 @@ impl Driver for ModbusRtuDriver {
     /// for `modbus-tcp` (docs/parity/modbus-serial.md#MBS-CFG-UNKNOWN) and the carriers are
     /// docs/parity/modbus-serial.md#MBS-TRANS-TLS and its neighbours.
     fn parse_config(&self, uri: &str) -> Result<ConnectionConfig> {
-        let parsed = ConnectionUri::parse(uri)?;
-        if parsed.scheme() != SCHEME {
-            return Err(invalid("not a modbus-rtu connection string".to_owned()));
-        }
-        let endpoint = match parsed.transport() {
-            None | Some(SERIAL) => Endpoint::Custom(parsed.authority().to_owned()),
-            Some(TCP) => endpoint(parsed.authority())?,
-            Some(_) => {
-                return Err(invalid(
-                    "the transport code of modbus-rtu is serial or tcp; tls, tls-psk, udp \
-                     and test are not supported"
-                        .to_owned(),
-                ));
-            }
-        };
-        let serial = matches!(endpoint, Endpoint::Custom(_));
-        let (options, convention, access) = RtuOptions::from_parameters(parsed.options(), serial)?;
-        let timeouts = Timeouts {
-            request: options.modbus.request_timeout,
-            ..Timeouts::default()
-        };
-        let mut builder = ConnectionConfig::builder(SCHEME, endpoint)
-            .timeouts(timeouts)
-            .access(access)
-            .driver_options(Arc::new(options));
-        if let Some(convention) = convention {
-            builder = builder.address_convention(convention.name());
-        }
-        builder.build()
+        parse_serial_config(Wire::Rtu, uri)
     }
 
     /// Parse Modbus address text with the grammar of `modbus-tcp`; see
@@ -338,32 +312,78 @@ impl Driver for ModbusRtuDriver {
     /// # Compatibility: docs/parity/modbus-serial.md#MBS-OP-CONNECT
     /// Connect opens the transport and sends nothing, as upstream.
     fn connect(&self, config: ConnectionConfig) -> OpFuture<'_, Box<dyn Connection>> {
-        let options = config
-            .driver_options_as::<RtuOptions>()
-            .cloned()
-            .unwrap_or_default();
-        let serial = matches!(config.endpoint(), Endpoint::Custom(_));
-        let carrier: Arc<dyn TransportFactory> = match &self.factory {
-            Some(factory) => Arc::clone(factory),
-            None if serial => Arc::new(options.line),
-            None => Arc::new(TcpFactory::default()),
-        };
-        let factory = Arc::new(PacedFactory {
-            inner: carrier,
-            clock: Arc::clone(&self.clock),
-            silence: options.silence(serial),
-        });
-        let opening = ModbusConnection::open_on(
-            Wire::Rtu,
-            config,
-            factory,
-            Arc::clone(&self.clock),
-            options.modbus.connection_defaults(),
-            options.modbus.ping_address,
-        );
-        Box::pin(async move {
-            let connection: Box<dyn Connection> = Box::new(opening.await?);
-            Ok(connection)
-        })
+        connect_serial(Wire::Rtu, config, &self.clock, self.factory.as_ref())
     }
+}
+
+/// Read `modbus-rtu` or `modbus-ascii` (by `wire`) `[:serial|:tcp]://<port or
+/// host[:port]>[?parameters]` into a validated configuration.
+pub(super) fn parse_serial_config(wire: Wire, uri: &str) -> Result<ConnectionConfig> {
+    let scheme = wire.scheme();
+    let parsed = ConnectionUri::parse(uri)?;
+    if parsed.scheme() != scheme {
+        return Err(invalid(format!("not a {scheme} connection string")));
+    }
+    let endpoint = match parsed.transport() {
+        None | Some(SERIAL) => Endpoint::Custom(parsed.authority().to_owned()),
+        Some(TCP) => endpoint(parsed.authority())?,
+        Some(_) => {
+            return Err(invalid(format!(
+                "the transport code of {scheme} is serial or tcp; tls, tls-psk, udp and test \
+                 are not supported"
+            )));
+        }
+    };
+    let serial = matches!(endpoint, Endpoint::Custom(_));
+    let (options, convention, access) =
+        SerialOptions::from_parameters(parsed.options(), serial, wire)?;
+    let timeouts = Timeouts {
+        request: options.modbus.request_timeout,
+        ..Timeouts::default()
+    };
+    let mut builder = ConnectionConfig::builder(scheme, endpoint)
+        .timeouts(timeouts)
+        .access(access)
+        .driver_options(Arc::new(options));
+    if let Some(convention) = convention {
+        builder = builder.address_convention(convention.name());
+    }
+    builder.build()
+}
+
+/// Open a [`ModbusConnection`] speaking `wire` over the carrier `config` names (the injected
+/// `factory` when there is one), paced by the silence of the line.
+pub(super) fn connect_serial<'a>(
+    wire: Wire,
+    config: ConnectionConfig,
+    clock: &Arc<dyn Clock>,
+    factory: Option<&Arc<dyn TransportFactory>>,
+) -> OpFuture<'a, Box<dyn Connection>> {
+    let options = config
+        .driver_options_as::<SerialOptions>()
+        .cloned()
+        .unwrap_or_default();
+    let serial = matches!(config.endpoint(), Endpoint::Custom(_));
+    let carrier: Arc<dyn TransportFactory> = match factory {
+        Some(factory) => Arc::clone(factory),
+        None if serial => Arc::new(options.line),
+        None => Arc::new(TcpFactory::default()),
+    };
+    let factory = Arc::new(PacedFactory {
+        inner: carrier,
+        clock: Arc::clone(clock),
+        silence: options.silence(serial, wire),
+    });
+    let opening = ModbusConnection::open_on(
+        wire,
+        config,
+        factory,
+        Arc::clone(clock),
+        options.modbus.connection_defaults(),
+        options.modbus.ping_address,
+    );
+    Box::pin(async move {
+        let connection: Box<dyn Connection> = Box::new(opening.await?);
+        Ok(connection)
+    })
 }

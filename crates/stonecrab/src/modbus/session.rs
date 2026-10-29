@@ -18,8 +18,8 @@ use bytes::{Bytes, BytesMut};
 use tracing::Instrument;
 
 use crate::modbus::{
-    ExceptionCode, FunctionCode, MAX_PDU_BYTES, MbapFramer, ModbusAdu, ModbusPdu, RtuAdu,
-    RtuFramer, TransactionId, UnitId, decode_response, encode_request,
+    AsciiAdu, AsciiFramer, ExceptionCode, FunctionCode, MAX_PDU_BYTES, MbapFramer, ModbusAdu,
+    ModbusPdu, RtuAdu, RtuFramer, TransactionId, UnitId, decode_response, encode_request,
 };
 
 /// How many abandoned transaction ids the session remembers, to tell a late reply from a
@@ -36,13 +36,14 @@ const ILLEGAL_DATA_ADDRESS: u8 = 0x02;
 /// The protocol name every `ProtocolStatus` of this crate carries.
 const PROTOCOL: &str = "modbus";
 
-/// The unit address a Modbus RTU master broadcasts to; no server answers it.
+/// The unit address a Modbus serial master broadcasts to; no server answers it.
 const BROADCAST: u8 = 0;
 
 /// The framing a session speaks on its connection: MBAP over TCP, or RTU (the address, the
-/// PDU and the CRC-16) over a serial line or a serial-to-IP gateway (ADR-0024). The PDU
-/// codec, the correlation, the exception mapping and everything above the session are the
-/// same for both.
+/// PDU and the CRC-16) or ASCII (the same bytes with an LRC, as hex between a colon and
+/// CR LF) over a serial line or a serial-to-IP gateway (ADR-0024). The PDU codec, the
+/// correlation, the exception mapping and everything above the session are the same for
+/// all of them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[expect(
     clippy::redundant_pub_crate,
@@ -54,6 +55,8 @@ pub(crate) enum Wire {
     /// Modbus RTU: RTU frames, a reply matched by unit and function (there is no
     /// transaction id), and no broadcast.
     Rtu,
+    /// Modbus ASCII: ASCII frames, correlated and limited as RTU (ADR-0024, addendum S60).
+    Ascii,
 }
 
 impl Wire {
@@ -62,6 +65,7 @@ impl Wire {
         match self {
             Self::Tcp => "modbus-tcp",
             Self::Rtu => "modbus-rtu",
+            Self::Ascii => "modbus-ascii",
         }
     }
 
@@ -70,6 +74,7 @@ impl Wire {
         match self {
             Self::Tcp => ModbusAdu::MAX_BYTES,
             Self::Rtu => RtuAdu::MAX_BYTES,
+            Self::Ascii => AsciiAdu::MAX_BYTES,
         }
     }
 
@@ -78,15 +83,17 @@ impl Wire {
         match self {
             Self::Tcp => WireFramer::Mbap(MbapFramer::new()),
             Self::Rtu => WireFramer::Rtu(RtuFramer::new()),
+            Self::Ascii => WireFramer::Ascii(AsciiFramer::new()),
         }
     }
 }
 
-/// The framer of a session: either framing, seen as [`ModbusAdu`]s. An RTU frame has no
-/// transaction id; it is read as id 0 and the id is ignored when one is written.
+/// The framer of a session: any of the framings, seen as [`ModbusAdu`]s. A serial frame has
+/// no transaction id; it is read as id 0 and the id is ignored when one is written.
 enum WireFramer {
     Mbap(MbapFramer),
     Rtu(RtuFramer),
+    Ascii(AsciiFramer),
 }
 
 impl Framer<ModbusAdu> for WireFramer {
@@ -97,6 +104,10 @@ impl Framer<ModbusAdu> for WireFramer {
         match self {
             Self::Mbap(framer) => framer.decode(buffer),
             Self::Rtu(framer) => framer
+                .decode(buffer)?
+                .map(|adu| ModbusAdu::new(0, adu.unit_id(), adu.pdu().clone()))
+                .transpose(),
+            Self::Ascii(framer) => framer
                 .decode(buffer)?
                 .map(|adu| ModbusAdu::new(0, adu.unit_id(), adu.pdu().clone()))
                 .transpose(),
@@ -113,6 +124,9 @@ impl Framer<ModbusAdu> for WireFramer {
             Self::Rtu(framer) => {
                 framer.encode(&RtuAdu::new(frame.unit_id(), frame.pdu().clone())?, out)
             }
+            Self::Ascii(framer) => {
+                framer.encode(&AsciiAdu::new(frame.unit_id(), frame.pdu().clone())?, out)
+            }
         }
     }
 
@@ -120,6 +134,7 @@ impl Framer<ModbusAdu> for WireFramer {
         match self {
             Self::Mbap(framer) => framer.max_frame_bytes(),
             Self::Rtu(framer) => framer.max_frame_bytes(),
+            Self::Ascii(framer) => framer.max_frame_bytes(),
         }
     }
 
@@ -127,6 +142,7 @@ impl Framer<ModbusAdu> for WireFramer {
         match self {
             Self::Mbap(framer) => framer.resync_discards(),
             Self::Rtu(framer) => framer.resync_discards(),
+            Self::Ascii(framer) => framer.resync_discards(),
         }
     }
 }
@@ -250,11 +266,12 @@ impl Drop for Outstanding<'_> {
 /// PDU does not decode or does not fit the request ([`ErrorKind::MalformedData`]) leaves
 /// the stream aligned, and nothing stays buffered that the next request must discard.
 ///
-/// # Modbus RTU
+/// # Modbus RTU and ASCII
 /// The `modbus-rtu` driver (ADR-0024) runs the same session over RTU framing
-/// ([`RtuFramer`]). An RTU frame has no transaction id, so a reply is accepted when its unit
+/// ([`RtuFramer`]), and the `modbus-ascii` driver (ADR-0024, addendum S60) over ASCII framing
+/// ([`AsciiFramer`]). A serial frame has no transaction id, so a reply is accepted when its unit
 /// id and function code match; every other frame is discarded and counted in
-/// `mismatched_replies` (a late RTU reply cannot be told from a stray one, so
+/// `mismatched_replies` (a late serial reply cannot be told from a stray one, so
 /// `late_replies` stays 0). Unit 0, the serial line's broadcast address, is refused with
 /// [`ErrorKind::InvalidAddress`] before any I/O, because no server answers a broadcast.
 /// After a timeout the guard drops every buffered byte before the next request
@@ -669,7 +686,8 @@ impl ModbusSession {
     /// backoff, the open, the send, the resync and every wait for a reply (the first and
     /// each after a discard) end at it. `token` is honoured as `ConnectionGuard::request`
     /// documents. A span `request` (debug level) covers the call, with the fields
-    /// `scheme` (`"modbus-tcp"`, or `"modbus-rtu"` for a session of the RTU driver),
+    /// `scheme` (`"modbus-tcp"`, or `"modbus-rtu"` or `"modbus-ascii"` for a session of a
+    /// serial driver),
     /// `endpoint` (host and port, or the serial port), `op` (`"read"`, or `"write"` for a
     /// write request) and `txn`.
     ///
@@ -791,12 +809,12 @@ impl ModbusSession {
                 FailureCategory::Validation,
             ));
         };
-        if self.wire == Wire::Rtu && unit_id.get() == BROADCAST {
+        if self.wire != Wire::Tcp && unit_id.get() == BROADCAST {
             return Err(self.stamp(
                 PlcError::new(
                     ErrorKind::InvalidAddress,
                     "unit 0 is the broadcast address of a serial line, which no server \
-                     answers; Modbus RTU broadcast is not supported",
+                     answers; Modbus serial broadcast is not supported",
                 ),
                 started,
                 FailureCategory::Validation,
@@ -837,7 +855,7 @@ impl ModbusSession {
         ModbusAdu::new(txn.get(), unit_id, Bytes::from(writer.into_bytes())).map_err(PlcError::from)
     }
 
-    /// Whether `reply` answers the request: transaction id (Modbus TCP only; an RTU frame
+    /// Whether `reply` answers the request: transaction id (Modbus TCP only; a serial frame
     /// has none), unit id and function code (the reply's function with the exception bit
     /// cleared) all match.
     fn answers(
@@ -847,7 +865,7 @@ impl ModbusSession {
         unit_id: UnitId,
         function: FunctionCode,
     ) -> bool {
-        (self.wire == Wire::Rtu || reply.transaction_id() == txn.get())
+        (self.wire != Wire::Tcp || reply.transaction_id() == txn.get())
             && reply.unit_id() == unit_id
             && reply
                 .pdu()
