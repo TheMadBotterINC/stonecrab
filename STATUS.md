@@ -461,6 +461,7 @@ commit; gates named were run locally before that commit.
 | S59b (evidence) | 2026-10-29 | The first hosted `interop-rtu` run (CI run 40838776577, commit 5858730) passed all nine diagslave RTU tests on `ubuntu-latest`; the RTU rows of README, COMPATIBILITY, the component doc and the serial parity record cite it instead of "next evidence", and an ADR-0024 addendum records it | parity |
 | S60b | 2026-10-29 | ASCII, and RTU on an emulated serial line, against an independent peer: the diagslave image gains two modes in which socat 1.8.0.3 (pinned Debian package) makes a pseudo-terminal pair, diagslave runs on one end (`-m ascii -a 1 -b 19200 -d 7 -s 1 -p even`, and `-m rtu -a 1 -b 19200 -d 8 -s 1 -p none -f 20`) and the other end is bridged to TCP (one connection at a time, a serial line has one master), so the drivers' gateway carrier meets diagslave's ASCII framing and LRC and its gap-cut RTU framing. Nine ignored ASCII tests (`modbus_interop_diagslave_ascii.rs`) and the RTU file run again in the new mode (a filter per mode); a CI matrix job `interop-serial` (`interop-ascii`, `interop-rtu-pty`) and two mise tasks, both in `mise run interop`. Observed: on a line diagslave answers an unserved unit and a bad CRC with silence (the driver reports `Timeout`), where `-m enc` closes the connection. MBS-ASCII-SEND, -LRC, -WIRE-MODEL and the shared operation rows move to automated-verified | check, lint-attrs, parity, semver, interop-ascii and interop-rtu-pty (9 of 9 each), interop for every peer; the hosted runs of the two new jobs come with this push |
 | S69 | 2026-10-29 | The event pump, ADR-0031 (decision E6, the second PLC4X tool): `EventPump`, `TagBatch` and `BatchEvent` at the crate root, no feature or dependency; named batches on a borrowed connection or a per-fetch lease from the connection cache, one read per fetch, start and stop per batch, start-all, stop-all and close; a fixed tick grid after an initial delay (upstream's timer is fixed delay with a one-slot dispatcher, which keeps the interval in practice), a tick during a fetch skipped and counted, upstream's backoff after a failure, events from `recv()` with at most one queued per batch, and a dropped `recv` keeping reads in flight (a deliberate difference from S55's subscriptions, for the maintainer to confirm). The S55 tick helper moved to `clock.rs` for both callers. Upstream's timer, dispatcher, backoff and factory behavior read in the pinned source and recorded in the manifest. `TOOL-EP-CONFIG` and `-TRANSFORM` deferred, `-SUBSCRIPTION` not ported | check, coverage (core 100%), lint-attrs, parity, examples, semver, package list |
+| S70 | 2026-10-29 | Two Modbus follow-ups, an ADR-0015 addendum: (a) a reply that decodes but does not fit its request (libmodbus's short reply, a coil reply with the wrong byte count, an FC20 reply that leaves a sub-request out) fails every member of its chunk with `MalformedData` and keeps the reply PDU in the item's `ProtocolStatus` raw bytes (as ADR-0025 does for text), the other chunks going on; it is no longer retried even if a `RetryPolicy` lists `MalformedData` (no default does; for the maintainer to confirm); a PDU that does not decode at all still fails the whole read without bytes. (b) `ModbusConnection::stats()` returns `SessionStats` (late and mismatched replies, the guard's counters with `discarded_frames`), and the new public `ModbusRtuDriver::open` and `ModbusAsciiDriver::open` give the concrete connection for RTU and ASCII; a `Box<dyn Connection>` from the registry still cannot reach it. A codec round-trip test pins that the kept bytes equal the received ones | check, coverage (modbus 100%), lint-attrs, parity, examples, semver, package list, interop for every peer (the libmodbus short reply asserts its bytes) |
 
 ## Verified evidence and reproduction
 
@@ -755,16 +756,17 @@ Deferred features, each a deferred row in `docs/parity/modbus.md` or an item of 
   retained file configures a swapped mode, so the two swap rows stay `implemented`. The
   write cases are retained but not vectors yet (S45, S46); `DriverTestsuiteOptimized.xml`,
   the file upstream's own driver IT loads, is not retained.
-- **A short reply loses its bytes**: libmodbus's short reply to a two-register FC03 read
-  (S52a) surfaces as a whole-read `MalformedData` from the byte-count check, without the
-  raw bytes the plan expected an item error to keep; keeping them is a small follow-up in
-  the session's decode path.
-- **The background reader is quiet** (S57): since S57b the frames a supervised guard drops
-  between exchanges (a late reply to a timed-out request, an unsolicited frame) are counted
-  in `GuardStats::discarded_frames`, but `ModbusConnection` exposes no stats, so a Modbus
-  caller cannot read the count; and the supervisor emits no tracing events (the
-  `transport` feature does not depend on `tracing`); its state changes are visible
-  through `watch_state`.
+- **A reply that does not decode keeps no bytes** (S70): a reply that decodes but does not
+  fit its request fails every member of its chunk with `MalformedData` and keeps the reply
+  PDU (re-encoded, equal to the received bytes because the codec is canonical) in the
+  item's status; a reply whose PDU does not decode at all still fails the whole read
+  without them.
+- **The background reader is quiet** (S57): the supervisor emits no tracing events (the
+  `transport` feature does not depend on `tracing`); its state changes are visible through
+  `watch_state`. Since S70 `ModbusConnection::stats` returns the late and mismatched
+  replies and the guard's counters, `discarded_frames` included, for a connection held as
+  the concrete type (`ModbusConnection::open`, and `ModbusRtuDriver::open` and
+  `ModbusAsciiDriver::open`); a `Box<dyn Connection>` from the registry cannot reach them.
 - **ASCII residual risk** (S60): with the default gap of 0 an unsolicited complete frame
   that arrives while the line is idle is dropped before the next request only by the guard's
   supervisor inside a Tokio runtime; `serial.interframe-delay` makes the driver watch the

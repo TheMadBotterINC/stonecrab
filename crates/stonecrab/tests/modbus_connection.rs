@@ -1454,4 +1454,148 @@ mod tests {
         assert_eq!(rig.factory.opens().len(), 2, "one reconnect");
         assert_eq!(rig.connection.state(), ConnectionState::Connected, "state");
     }
+
+    /// A read of the tags `(id, address)`, answered or failed as a whole.
+    fn read_of(rig: &Rig, tags: &[(&str, &str)]) -> Result<ReadResponse> {
+        let mut builder = ReadRequest::builder(rig.connection.limits());
+        for (id, address) in tags {
+            builder = builder.tag(tag(id, address));
+        }
+        let request = builder.build()?;
+        block_on_with(&rig.clock, rig.connection.read(request))
+    }
+
+    /// The error of the item `id`, which is expected to have failed.
+    fn item_error<'a>(response: &'a ReadResponse, id: &str) -> &'a stonecrab::ItemError {
+        response
+            .get(&TagId::new(id).expect("tag id"))
+            .expect("the item")
+            .outcome()
+            .as_ref()
+            .expect_err("the item fails")
+    }
+
+    // covers: SPEC mandatory-failure-cases / F5 Modbus level; MB-READ-MATCH
+    // A reply that decodes but holds fewer registers than the chunk asked for answers no
+    // member: each one fails with MalformedData and the reply as received, the chunk of
+    // another area is read as usual, and the stream is aligned for the next read.
+    #[test]
+    fn a_short_reply_fails_every_member_of_its_chunk_and_keeps_the_reply_bytes() {
+        let rig = Rig::open(vec![
+            // A DINT and an INT after it are one chunk of three registers; the device sends
+            // one (what libmodbus does for a read of two, S52a).
+            Step::Expect(adu(1, &[0x03, 0x00, 0x00, 0x00, 0x03])),
+            Step::Reply(adu(1, &[0x03, 0x02, 0x02, 0x2B])),
+            Step::Expect(adu(2, &[0x04, 0x00, 0x00, 0x00, 0x01])),
+            Step::Reply(adu(2, &[0x04, 0x02, 0x00, 0x07])),
+            Step::Expect(request(3)),
+            Step::Reply(reply(3, 99)),
+        ]);
+        let response = read_of(
+            &rig,
+            &[
+                ("dint", "holding-register:1:DINT"),
+                ("int", "holding-register:3"),
+                ("input", "input-register:1"),
+            ],
+        )
+        .expect("the read completes: a short reply is the members' failure");
+        assert_eq!(response.split_into().get(), 2, "two chunks");
+        for id in ["dint", "int"] {
+            let error = item_error(&response, id);
+            assert_eq!(error.kind(), ErrorKind::MalformedData, "{id}: kind");
+            assert_eq!(
+                error.error().diagnostics().category,
+                Some(FailureCategory::Protocol),
+                "{id}: a protocol failure"
+            );
+            let status = error.status().expect("a status");
+            assert_eq!(status.protocol(), "modbus", "{id}: protocol");
+            assert_eq!(
+                status.raw(),
+                Some(&[0x03, 0x02, 0x02, 0x2B][..]),
+                "{id}: the reply PDU as received"
+            );
+        }
+        assert_eq!(
+            response
+                .get(&TagId::new("input").expect("tag id"))
+                .expect("the item")
+                .outcome()
+                .as_ref()
+                .ok(),
+            Some(&PlcValue::I16(7)),
+            "the other chunk is read as usual"
+        );
+
+        let after = read_of(&rig, &[("a", "holding-register:1")]).expect("the next read");
+        assert_eq!(after.iter_failed().count(), 0, "the stream is aligned");
+        assert_eq!(rig.connection.state(), ConnectionState::Connected, "state");
+    }
+
+    // covers: SPEC mandatory-failure-cases / F5 Modbus level; MB-READ-MATCH
+    // The same for a bit read whose byte count is not the one the quantity needs.
+    #[test]
+    fn a_coil_reply_with_the_wrong_byte_count_keeps_the_reply_bytes() {
+        let rig = Rig::open(vec![
+            Step::Expect(adu(1, &[0x01, 0x00, 0x00, 0x00, 0x01])),
+            Step::Reply(adu(1, &[0x01, 0x02, 0xAA, 0xBB])),
+        ]);
+        let response = read_of(&rig, &[("c", "coil:1")]).expect("the read completes");
+        let error = item_error(&response, "c");
+        assert_eq!(error.kind(), ErrorKind::MalformedData, "kind");
+        assert_eq!(
+            error.status().and_then(stonecrab::ProtocolStatus::raw),
+            Some(&[0x01, 0x02, 0xAA, 0xBB][..]),
+            "the reply PDU as received"
+        );
+    }
+
+    // covers: SPEC mandatory-failure-cases / F2 incorrect transaction and unit ids, delayed replies after timeout
+    // `stats` shows what the session discarded: the stale reply of a request that timed out
+    // is late, a reply of another transaction is mismatched, and the guard's counters ride
+    // along.
+    #[test]
+    fn stats_count_a_late_reply_and_a_mismatched_reply() {
+        let rig = Rig::open(vec![
+            Step::Expect(request(1)),
+            // The reply to request 1 arrives three seconds in, after its 1 s deadline.
+            Step::LateReply(secs(3)),
+            Step::Reply(reply(1, 111)),
+            Step::Expect(request(2)),
+            // A reply of transaction 900 comes first, then the right one.
+            Step::Reply(reply(900, 5)),
+            Step::Reply(reply(2, 222)),
+        ]);
+        assert_eq!(
+            rig.connection.stats(),
+            stonecrab::modbus::SessionStats::default(),
+            "nothing yet"
+        );
+        let deadline = Deadline::after(rig.t0, secs(1)).expect("deadline");
+        let timed_out = error_of(block_on_with(
+            &rig.clock,
+            rig.connection.read(rig.request(Some(deadline), None)),
+        ));
+        assert_eq!(timed_out.kind(), ErrorKind::Timeout, "no reply in time");
+        let stats = rig.connection.stats();
+        assert_eq!(
+            (stats.late_replies, stats.mismatched_replies),
+            (0, 0),
+            "the stale reply has not been met yet"
+        );
+        assert_eq!(stats.guard.timeouts, 1, "the timeout");
+
+        let response = rig.read().expect("the second read");
+        assert_eq!(value_of(&response), PlcValue::I16(222), "its own reply");
+        let stats = rig.connection.stats();
+        assert_eq!(stats.late_replies, 1, "the stale reply of request 1");
+        assert_eq!(stats.mismatched_replies, 1, "the reply of transaction 900");
+        assert_eq!(stats.guard.requests, 2, "two requests went out");
+        assert_eq!(stats.guard.timeouts, 1, "one timeout");
+        assert_eq!(
+            stats.guard.discarded_frames, 0,
+            "no reader ran, so the session saw both frames"
+        );
+    }
 }

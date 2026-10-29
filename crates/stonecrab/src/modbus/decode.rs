@@ -380,6 +380,18 @@ fn with_registers(error: PlcError, registers: &[u16], raw_budget: NonZeroUsize) 
     ItemError::new(error).with_status(status)
 }
 
+/// `error` as an item error whose status keeps `raw` (a reply as received) when there is
+/// some and it fits `raw_budget`.
+pub(super) fn with_raw_reply(
+    error: PlcError,
+    raw: Option<&[u8]>,
+    raw_budget: NonZeroUsize,
+) -> ItemError {
+    let status = decode_status();
+    ItemError::new(error)
+        .with_status(raw.map_or(status.clone(), |raw| keep_raw(status, raw, raw_budget)))
+}
+
 /// Whether text takes the two bytes of each register low byte first: under the two
 /// byte-swap modes, where the byte order and the word order disagree, as upstream swaps
 /// the payload of `BIG_ENDIAN_BYTE_SWAP` and `LITTLE_ENDIAN_BYTE_SWAP` and reads strings

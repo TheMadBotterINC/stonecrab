@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use crate::codec::pack_bits_lsb_first;
+use crate::codec::{BoundedWriter, ParseError, pack_bits_lsb_first};
 use crate::transport::{GuardConfig, TransportFactory};
 use crate::{
     AccessPolicy, ByteOrder, CancellationToken, Capabilities, Clock, Connection, ConnectionConfig,
@@ -22,11 +22,12 @@ use tracing::Instrument;
 
 use crate::modbus::address::element_width;
 use crate::modbus::batch::resolve_order;
-use crate::modbus::decode::{decode_text, encode_text};
+use crate::modbus::decode::{decode_text, encode_text, with_raw_reply};
 use crate::modbus::session::{Wire, exception_error};
 use crate::modbus::{
     BatchLimits, Batcher, Chunk, MAX_PDU_BYTES, Member, ModbusAddress, ModbusArea, ModbusOptions,
-    ModbusPdu, ModbusSession, TypedDecoder, UnitId, exception_item_error,
+    ModbusPdu, ModbusSession, SessionStats, TypedDecoder, UnitId, encode_response,
+    exception_item_error,
 };
 use crate::polling::{Lifeline, Plan};
 
@@ -148,11 +149,16 @@ impl Default for ConnectionDefaults {
 ///   Every item is decoded from its chunk's reply with [`TypedDecoder`], with the byte and
 ///   word order of the tag, else of its address, else of [`ConnectionDefaults`].
 /// - **Failure scope.** A device exception answers a whole chunk: every member of that
-///   chunk gets [`exception_item_error`] and the next chunk still runs. A reply whose data
-///   does not decode fails only that member (`MalformedData`). A chunk whose exchange fails
-///   (timeout, lost connection, cancellation, malformed frame) fails the whole read with
-///   that error, because the items of the other chunks would be a partial snapshot the
-///   caller did not ask for.
+///   chunk gets [`exception_item_error`] and the next chunk still runs. So does a reply that
+///   decodes but does not fit the request (a short reply: a byte count other than the
+///   quantity needs): every member of the chunk fails with `MalformedData`, and the status
+///   of each keeps the reply PDU as received
+///   ([`ProtocolStatus::raw`](crate::ProtocolStatus::raw)). A reply whose data does not
+///   decode fails only that member (`MalformedData`). A chunk whose exchange fails (timeout,
+///   lost connection, cancellation, a frame or a PDU that cannot be decoded) fails the whole
+///   read with that error, because the items of the other chunks would be a partial snapshot
+///   the caller did not ask for. A reply that does not fit is not retried: it is an answer,
+///   as an exception is.
 /// - **Time.** A request without a deadline gets `timeouts.request` per chunk; one with a
 ///   deadline is bounded by it. Each attempt of each chunk runs under
 ///   `min(request deadline, now + timeouts.request)` computed when the attempt starts, so a
@@ -393,6 +399,81 @@ impl ModbusConnection {
                 options.ping_address.clone()
             });
         Self::open_on(Wire::Tcp, config, factory, clock, defaults, ping_address)
+    }
+
+    /// A snapshot of the connection's reply counters, the session's and the guard's.
+    ///
+    /// [`late_replies`](SessionStats::late_replies) and
+    /// [`mismatched_replies`](SessionStats::mismatched_replies) count the replies the session
+    /// discarded while it waited for the answer to a request, and
+    /// [`guard.discarded_frames`](crate::transport::GuardStats::discarded_frames) the frames
+    /// the guard dropped between two exchanges (with the background reader of a connection
+    /// opened inside a Tokio runtime, a late reply is usually dropped there, before any
+    /// request sees it).
+    /// The counters only grow, and a read or a write that fails does not reset them.
+    ///
+    /// The method is on the concrete type because the [`Connection`] trait has no
+    /// statistics and no way back to the concrete type: a `Box<dyn Connection>` from
+    /// [`DriverRegistry::connect`](crate::DriverRegistry::connect) or from a driver's
+    /// [`connect`](crate::Driver::connect) cannot reach it. A caller that wants the
+    /// counters opens the link as the concrete type: [`open`](Self::open) for Modbus TCP,
+    /// [`ModbusRtuDriver::open`](crate::modbus::ModbusRtuDriver::open) and
+    /// [`ModbusAsciiDriver::open`](crate::modbus::ModbusAsciiDriver::open) for the serial
+    /// framings.
+    ///
+    /// # Compatibility: docs/parity/modbus.md#MB-READ-MATCH
+    /// Stonecrab's own counters, part of the divergence recorded in that row: upstream drops
+    /// an unknown transaction id with a log line and counts nothing.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[cfg(feature = "testkit")]
+    /// # fn main() -> Result<(), stonecrab::PlcError> {
+    /// use std::sync::Arc;
+    /// use stonecrab::{
+    ///     AddressOptions, Connection, ConnectionConfig, Endpoint, ReadRequest, Tag, TagId,
+    /// };
+    /// use stonecrab::modbus::{ConnectionDefaults, ModbusAddress, ModbusConnection};
+    /// use stonecrab::testkit::{FakeClock, FakeTransportFactory, Script, Step, block_on_with};
+    ///
+    /// let clock = FakeClock::default();
+    /// let factory = FakeTransportFactory::new(clock.clone());
+    /// // A reply to another transaction comes first; the peer then answers the read.
+    /// factory.push_script(Script::strict(vec![
+    ///     Step::Expect(vec![0, 1, 0, 0, 0, 6, 1, 3, 0x00, 0x6B, 0x00, 0x01]),
+    ///     Step::Reply(vec![0x03, 0xE8, 0, 0, 0, 5, 1, 3, 2, 0x00, 0x07]),
+    ///     Step::Reply(vec![0, 1, 0, 0, 0, 5, 1, 3, 2, 0x02, 0x2B]),
+    /// ]));
+    /// let config = ConnectionConfig::builder("modbus-tcp", Endpoint::Custom("fake://plc".to_owned()))
+    ///     .build()?;
+    /// let connection = block_on_with(
+    ///     &clock,
+    ///     ModbusConnection::open(
+    ///         config,
+    ///         Arc::new(factory),
+    ///         Arc::new(clock.clone()),
+    ///         ConnectionDefaults::default(),
+    ///     ),
+    /// )?;
+    /// assert_eq!(connection.stats().mismatched_replies, 0);
+    ///
+    /// let address = ModbusAddress::parse("holding-register:108", &AddressOptions::default())?;
+    /// let tag = Tag::new(TagId::new("level")?, Arc::new(address));
+    /// let request = ReadRequest::builder(connection.limits()).tag(tag).build()?;
+    /// block_on_with(&clock, connection.read(request))?;
+    ///
+    /// let stats = connection.stats();
+    /// assert_eq!((stats.late_replies, stats.mismatched_replies), (0, 1));
+    /// assert_eq!(stats.guard.requests, 1);
+    /// assert_eq!(stats.guard.discarded_frames, 0);
+    /// # Ok::<(), stonecrab::PlcError>(())
+    /// # }
+    /// # #[cfg(not(feature = "testkit"))]
+    /// # fn main() {}
+    /// ```
+    #[must_use]
+    pub fn stats(&self) -> SessionStats {
+        self.link.session.stats()
     }
 
     /// [`open`](Self::open) for the framing `wire`, with the address `ping` reads; the
@@ -812,6 +893,8 @@ impl Link {
         match outcome {
             Ok(reply) => {
                 let answer = Answer {
+                    // The session proved the echo against the request.
+                    misfit: None,
                     reply,
                     arrived: self.clock.now(),
                     retries: 0,
@@ -926,11 +1009,12 @@ impl Link {
             let deadline = self.chunk_deadline(op, request.deadline())?;
             let outcome = self
                 .session
-                .request(&pdu, unit_id, deadline, request.cancel())
+                .request_decoded(&pdu, unit_id, deadline, request.cancel())
                 .await;
             match outcome {
                 Ok(reply) => {
                     return Ok(Answer {
+                        misfit: reply.check_reply_to(&pdu).err(),
                         reply,
                         arrived: self.clock.now(),
                         retries: attempts.saturating_sub(1),
@@ -996,7 +1080,13 @@ impl Link {
             .members
             .iter()
             .map(|member| {
-                let outcome = decode_member(&answer.reply, chunk.area, member, self.defaults)
+                let outcome = answer
+                    .misfit
+                    .as_ref()
+                    .map_or_else(
+                        || decode_member(&answer.reply, chunk.area, member, self.defaults),
+                        |error| Err(misfit_item(error, &answer.reply)),
+                    )
                     .map_err(|error| self.stamp_item(op, error, answer));
                 ReadItem::new(member.tag.clone(), outcome, answer.arrived)
             })
@@ -1028,7 +1118,12 @@ impl Link {
 }
 
 /// How a chunk was answered: the reply PDU, when it arrived and how many retries it took.
+///
+/// `misfit` is why the reply does not answer the request although it decodes (its data is not
+/// the length the request asked for): every member of the chunk fails with it, and no member
+/// is decoded from data that cannot be trusted to be the data asked for.
 struct Answer {
+    misfit: Option<ParseError>,
     reply: ModbusPdu,
     arrived: Instant,
     retries: u32,
@@ -1131,6 +1226,31 @@ fn read_pdu(
                 .map_err(PlcError::from)?
         }
     })
+}
+
+/// The error of a member whose chunk's reply decodes but does not fit the request (a byte
+/// count other than the request's quantity asks for): `MalformedData` whose status keeps the
+/// reply PDU as received, function code and byte count included, when it fits `RAW_BUDGET`.
+///
+/// The bytes are the decoded PDU written again with `encode_response`, not a copy of the
+/// frame. They equal the received bytes because `decode_response` is strictly canonical (it
+/// refuses a byte count that disagrees with the data, trailing bytes, a zero or odd count and
+/// a wrong reference type), so encoding what it accepts gives back what it was given; a
+/// more lenient decode would have to hand the received bytes up instead.
+fn misfit_item(error: &ParseError, reply: &ModbusPdu) -> ItemError {
+    let mut writer = BoundedWriter::new(MAX_PDU_BYTES);
+    let received = encode_response(reply, &mut writer)
+        .ok()
+        .map(|()| writer.into_bytes());
+    with_raw_reply(
+        PlcError::new(
+            ErrorKind::MalformedData,
+            format!("the reply PDU does not answer the request: {error}"),
+        )
+        .with_source(error.clone()),
+        received.as_deref(),
+        RAW_BUDGET,
+    )
 }
 
 /// The value of one member in a chunk's reply, or the error that is the member's alone.
@@ -2078,6 +2198,7 @@ mod tests {
         };
         let outcome = |reply: ModbusPdu| {
             let answer = Answer {
+                misfit: None,
                 reply,
                 arrived: clock.now(),
                 retries: 0,

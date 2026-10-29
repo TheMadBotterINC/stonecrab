@@ -943,6 +943,37 @@ mod tests {
         assert_eq!(value(&response, "a"), Some(PlcValue::U16(500)));
     }
 
+    // `open` returns the concrete connection, so its counters can be read: the replies of
+    // another unit and of another function that the session discarded are mismatches.
+    #[test]
+    fn ascii_open_returns_a_connection_that_counts_the_replies_it_discarded() {
+        let bench = Bench::new(vec![Script::new(vec![
+            Step::Expect(read_registers(5, 0, 1)),
+            Step::Reply(registers(6, &[600])),
+            Step::Delay(Duration::from_millis(10)),
+            Step::Reply(frame(5, &[0x04, 0x02, 0x01, 0xF4])),
+            Step::Delay(Duration::from_millis(10)),
+            Step::Reply(registers(5, &[500])),
+        ])]);
+        let config = bench.driver.parse_config(PORT).expect("config");
+        let connection = block_on_with(&bench.clock, bench.driver.open(config)).expect("open");
+        assert_eq!(connection.stats().mismatched_replies, 0, "nothing yet");
+        let response = bench
+            .read(
+                &connection,
+                vec![tag("a", "holding-register:1:UINT{unit-id: 5}")],
+            )
+            .expect("read");
+        assert_eq!(value(&response, "a"), Some(PlcValue::U16(500)));
+        let stats = connection.stats();
+        assert_eq!(
+            stats.mismatched_replies, 2,
+            "another unit and another function"
+        );
+        assert_eq!(stats.late_replies, 0);
+        assert_eq!(stats.guard.requests, 1);
+    }
+
     // covers: MBS-BUS-EXCEPTION / ascii_exception_reply_answers_the_pending_request
     #[test]
     fn ascii_exception_reply_answers_the_pending_request() {

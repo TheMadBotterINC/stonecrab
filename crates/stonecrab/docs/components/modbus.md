@@ -437,8 +437,9 @@ What the run verifies against it, with unit id 17:
   a reply sent one byte at a time (0x173, unit 255) is reassembled.
 - A reply that holds one register for a two-register read, which the server sends for every
   such read, fails the read as `MalformedData` (category `Protocol`) and the connection
-  goes on. The failure carries no raw bytes: the byte count is proved against the quantity
-  before the registers are decoded.
+  goes on. The reply does not answer the request, so the item fails (the read does not) with
+  the reply PDU as received, `03 02 02 2B` for a register holding 0x022B, in the raw bytes
+  of its status (S70).
 
 Not verified: dropped links, a server that refuses a unit id, and anything the server does
 not do (it never receives function code 07, which makes 3.1.11 exit without a reply).
@@ -842,7 +843,10 @@ reconnect) and returns the PDU that answers it:
 - the accepted PDU is decoded with `decode_response` and proved against the request with
   `ModbusPdu::check_reply_to`; one that does not decode or whose byte count does not fit
   the quantity is `ErrorKind::MalformedData` with the `Protocol` category, and the stream
-  stays aligned because the framer cut exactly one ADU;
+  stays aligned because the framer cut exactly one ADU. The connection's reads use the
+  session without the proof (S70) and prove the reply themselves, so that a reply which
+  decodes but does not fit reaches the members of its chunk (below); a write keeps the
+  proof;
 - a device exception is not an error of the exchange: it is `Ok(ModbusPdu::Exception)`,
   the connection stays `Connected`, and `exception_item_error(function, code)` gives the
   per-member `ItemError` (code 1 `Unsupported(Operation::Read)`, code 2 `InvalidAddress`,
@@ -931,7 +935,14 @@ after another:
   the reply is proved to answer each of them with the registers asked for, and the
   registers of all of them are joined in order (`MB-ADDR-EXTENDED`);
 - a device exception fails every member of that chunk with `exception_item_error` and the
-  next chunk still runs; a reply that does not decode fails the member alone;
+  next chunk still runs; a reply that decodes but does not fit the request (a byte count
+  other than the quantity needs, or too few registers for the sub-requests of a function 20
+  read) fails every member of that chunk the same way, with `MalformedData` and the reply
+  PDU as received (function code, byte count and data) in the raw bytes of the item's
+  `ProtocolStatus`, and the next chunk still runs. It is not retried: it is an answer, not
+  a failed exchange. A reply whose PDU does not decode at all fails the whole read with
+  `MalformedData` and no raw bytes. A reply that fits fails a member alone when that
+  member's data does not decode;
 - a chunk whose exchange fails is retried under the `RetryPolicy` of the configuration
   (one attempt by default), only for kinds in its retry set and only while the request
   deadline has not passed; when the policy gives up, the whole read fails with that error,
@@ -946,6 +957,17 @@ A tag's own byte and word order beat its address's, which beat `ConnectionDefaul
 flight when the peer closed fails with `Disconnected` and is never replayed. `close` ends
 in `Closed`, also during the backoff. A debug span `read` carries `scheme`, `endpoint`,
 `op`, `items` and `chunks`.
+
+`ModbusConnection::stats` (S70) returns the `SessionStats` snapshot: `late_replies` and
+`mismatched_replies` (replies the session discarded while it waited) and `guard`, whose
+`discarded_frames` counts the frames the guard dropped between exchanges (the background
+reader of a connection opened in a Tokio runtime drops a late reply there, before any
+request meets it). It is a method of the concrete type: the `Connection` trait has no
+statistics and no way back to the concrete type, so a `Box<dyn Connection>` from the
+registry or from a driver's `connect` cannot reach it. The counters are reached by opening
+the link as the concrete type: `ModbusConnection::open` for Modbus TCP, and
+`ModbusRtuDriver::open` and `ModbusAsciiDriver::open` (which do what `connect` does, but
+return the `ModbusConnection`) for the serial framings.
 
 `write` (`MB-TCP-WRITE`) sends one request per item, one after another, as the upstream
 driver does, through the same session, single in-flight slot and deadline rule as a read.

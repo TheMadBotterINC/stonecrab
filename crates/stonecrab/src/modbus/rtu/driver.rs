@@ -213,6 +213,49 @@ impl ModbusRtuDriver {
         self.factory = Some(factory);
         self
     }
+
+    /// Open a [`ModbusConnection`] as [`connect`](Driver::connect) does, but as the concrete
+    /// type, so that [`stats`](ModbusConnection::stats) can be reached: `connect` returns a
+    /// `Box<dyn Connection>`, which has no way back to the concrete type.
+    ///
+    /// # Errors
+    /// Those of [`connect`](Driver::connect).
+    ///
+    /// # Cancel safety
+    /// Cancel-safe, as [`connect`](Driver::connect).
+    ///
+    /// # Wire effects
+    /// Opens the port (or the TCP connection) and sends nothing.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[cfg(feature = "testkit")]
+    /// # fn main() -> Result<(), stonecrab::PlcError> {
+    /// use std::sync::Arc;
+    /// use stonecrab::{Connection, ConnectionState, Driver};
+    /// use stonecrab::modbus::ModbusRtuDriver;
+    /// use stonecrab::testkit::{FakeClock, FakeTransportFactory, Script, block_on_with};
+    ///
+    /// let clock = FakeClock::default();
+    /// let factory = FakeTransportFactory::new(clock.clone());
+    /// factory.push_script(Script::default());
+    /// let driver = ModbusRtuDriver::new()
+    ///     .with_clock(Arc::new(clock.clone()))
+    ///     .with_transport_factory(Arc::new(factory));
+    ///
+    /// let config = driver.parse_config("modbus-rtu://COM3")?;
+    /// let connection = block_on_with(&clock, driver.open(config))?;
+    /// assert_eq!(connection.state(), ConnectionState::Connected);
+    /// assert_eq!(connection.stats().mismatched_replies, 0);
+    /// assert_eq!(connection.stats().guard.requests, 0);
+    /// # Ok::<(), stonecrab::PlcError>(())
+    /// # }
+    /// # #[cfg(not(feature = "testkit"))]
+    /// # fn main() {}
+    /// ```
+    pub fn open(&self, config: ConnectionConfig) -> OpFuture<'_, ModbusConnection> {
+        open_serial(Wire::Rtu, config, &self.clock, self.factory.as_ref())
+    }
 }
 
 impl Default for ModbusRtuDriver {
@@ -353,12 +396,12 @@ pub(super) fn parse_serial_config(wire: Wire, uri: &str) -> Result<ConnectionCon
 
 /// Open a [`ModbusConnection`] speaking `wire` over the carrier `config` names (the injected
 /// `factory` when there is one), paced by the silence of the line.
-pub(super) fn connect_serial<'a>(
+pub(super) fn open_serial<'a>(
     wire: Wire,
     config: ConnectionConfig,
     clock: &Arc<dyn Clock>,
     factory: Option<&Arc<dyn TransportFactory>>,
-) -> OpFuture<'a, Box<dyn Connection>> {
+) -> OpFuture<'a, ModbusConnection> {
     let options = config
         .driver_options_as::<SerialOptions>()
         .cloned()
@@ -374,14 +417,24 @@ pub(super) fn connect_serial<'a>(
         clock: Arc::clone(clock),
         silence: options.silence(serial, wire),
     });
-    let opening = ModbusConnection::open_on(
+    ModbusConnection::open_on(
         wire,
         config,
         factory,
         Arc::clone(clock),
         options.modbus.connection_defaults(),
         options.modbus.ping_address,
-    );
+    )
+}
+
+/// [`open_serial`] behind the [`Connection`] trait, as a driver's `connect` returns it.
+pub(super) fn connect_serial<'a>(
+    wire: Wire,
+    config: ConnectionConfig,
+    clock: &Arc<dyn Clock>,
+    factory: Option<&Arc<dyn TransportFactory>>,
+) -> OpFuture<'a, Box<dyn Connection>> {
+    let opening = open_serial(wire, config, clock, factory);
     Box::pin(async move {
         let connection: Box<dyn Connection> = Box::new(opening.await?);
         Ok(connection)

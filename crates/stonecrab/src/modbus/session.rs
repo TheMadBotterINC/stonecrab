@@ -184,6 +184,14 @@ pub struct SessionStats {
     pub guard: GuardStats,
 }
 
+/// Whether an exchange proves the decoded reply against the request
+/// ([`ModbusPdu::check_reply_to`]).
+#[derive(Debug, Clone, Copy)]
+enum Proof {
+    Required,
+    Skipped,
+}
+
 /// The transaction counter and the ids the session has stopped waiting for.
 struct Exchanges {
     next: TransactionId,
@@ -776,6 +784,32 @@ impl ModbusSession {
         deadline: Deadline,
         token: Option<&'a CancellationToken>,
     ) -> OpFuture<'a, ModbusPdu> {
+        self.traced(pdu, unit_id, deadline, token, Proof::Required)
+    }
+
+    /// [`request`](Self::request) without the proof of the reply against the request: the
+    /// reply is matched and decoded, and a device exception is returned as such, but a
+    /// decoded reply of the wrong length is handed back, for the caller that turns it into
+    /// the error of each member it was meant to answer (a read of the connection).
+    pub(crate) fn request_decoded<'a>(
+        &'a self,
+        pdu: &'a ModbusPdu,
+        unit_id: UnitId,
+        deadline: Deadline,
+        token: Option<&'a CancellationToken>,
+    ) -> OpFuture<'a, ModbusPdu> {
+        self.traced(pdu, unit_id, deadline, token, Proof::Skipped)
+    }
+
+    /// The exchange under its `request` span.
+    fn traced<'a>(
+        &'a self,
+        pdu: &'a ModbusPdu,
+        unit_id: UnitId,
+        deadline: Deadline,
+        token: Option<&'a CancellationToken>,
+        proof: Proof,
+    ) -> OpFuture<'a, ModbusPdu> {
         let span = tracing::debug_span!(
             "request",
             scheme = self.wire.scheme(),
@@ -784,7 +818,7 @@ impl ModbusSession {
             txn = tracing::field::Empty
         );
         Box::pin(
-            self.exchange(pdu, unit_id, deadline, token, span.clone())
+            self.exchange(pdu, unit_id, deadline, token, proof, span.clone())
                 .instrument(span),
         )
     }
@@ -796,6 +830,7 @@ impl ModbusSession {
         unit_id: UnitId,
         deadline: Deadline,
         token: Option<&CancellationToken>,
+        proof: Proof,
         span: tracing::Span,
     ) -> Result<ModbusPdu> {
         let started = self.clock.now();
@@ -845,7 +880,7 @@ impl ModbusSession {
             .await
             .map_err(|error| self.stamp(error, started, FailureCategory::Transport))?;
         outstanding.settled = true;
-        self.interpret(request, &reply, started)
+        self.interpret(request, &reply, proof, started)
     }
 
     /// The request PDU as an ADU with the next transaction id.
@@ -880,11 +915,15 @@ impl ModbusSession {
         &self,
         request: &ModbusPdu,
         reply: &ModbusAdu,
+        proof: Proof,
         started: Instant,
     ) -> Result<ModbusPdu> {
         let mut reader = BoundedReader::new(reply.pdu());
         decode_response(&mut reader, request.function())
-            .and_then(|pdu| pdu.check_reply_to(request).map(|()| pdu))
+            .and_then(|pdu| match proof {
+                Proof::Required => pdu.check_reply_to(request).map(|()| pdu),
+                Proof::Skipped => Ok(pdu),
+            })
             .map_err(|error| self.malformed(&error, started))
     }
 

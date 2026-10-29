@@ -1192,3 +1192,76 @@ combine: element offsets count registers through the files, the whole selected s
 at or before 655349999, a selection holds at most the 120 registers of one file record read
 (where upstream allows 125), and a list is written as one FC21 request of at most 251 data
 bytes.
+
+## Addendum: the raw bytes of a short reply and the connection statistics (slice S70, 2026-10-29)
+
+Two follow-ups that STATUS.md listed under "Known gaps".
+
+1. **A reply that decodes but does not fit fails the members of its chunk.** libmodbus's
+   reply to a read of two holding registers holds one (S52a). The PDU decodes, so the
+   framing and the stream are sound; `ModbusPdu::check_reply_to` refuses it because its data
+   is not the length the request asked for. Until now that was `MalformedData` for the whole
+   read, and a `PlcError` has nowhere to keep bytes. It is now reported as a device
+   exception already is (decision 6): every member of the chunk fails with `MalformedData`
+   (category `Protocol`) and the other chunks still run. Each item's `ProtocolStatus`
+   (`modbus`, 0, `decode`, as every decode failure of ADR-0025 decision 5) keeps the reply
+   PDU as received, function code and byte count included, when it fits the 253-byte
+   budget. No member is decoded from the data that did arrive: a reply of the wrong length
+   does not say which registers it holds, so a member whose registers happen to be present
+   would be a value the device may not have meant. The raw bytes are the PDU, not the
+   registers, because the length fault can lie in the byte count; the registers of an item
+   whose own data does not decode (ADR-0025) stay registers. The same holds for a bit read
+   and for a function 20 read whose sub-responses do not match its sub-requests.
+   - The kept bytes are the decoded PDU written again with `encode_response`, not a copy
+     of the frame. They equal the received bytes because `decode_response` is strictly
+     canonical (it refuses a byte count that disagrees with the data, trailing bytes, a zero
+     or odd count and a wrong reference type), so encoding what it accepts gives back what
+     it was given; a more lenient decode would have to hand the received bytes up. The test
+     `decoding_then_encoding_a_read_response_gives_the_received_bytes_back` pins that for the
+     read shapes (padding bits, one byte, the 250-byte bound).
+   - Mechanism: the session keeps the decode and the transaction, unit and function checks
+     in `request`, which still proves the reply for writes, ping and every caller outside the
+     crate. A crate-private `request_decoded` skips only `check_reply_to`; the connection
+     calls it for a read chunk, proves the reply itself and keeps the failure in its
+     `Answer`, from which `items_of` builds the member errors.
+   - A reply whose PDU does not decode at all (a byte count that disagrees with the bytes
+     that follow, an unknown function) stays `MalformedData` for the whole read with no raw
+     bytes: there is no decoded reply to attribute to members and `PlcError` carries no
+     status. That is the remaining gap of this kind; it needs either a carrier on `PlcError`
+     (a core change with one producer) or the session to hand the bytes up, and no peer has
+     produced such a reply.
+   - Retry: a reply that does not fit is an answer, as an exception is, and is no longer
+     retried when a `RetryPolicy` lists `MalformedData` (no default does). A write keeps
+     the proof and the `Unknown` outcome of an echo that does not match.
+2. **`ModbusConnection::stats` returns the `SessionStats`.** One method on the concrete
+   type, additive, with no new type: `late_replies`, `mismatched_replies` and the guard's
+   counters, `discarded_frames` among them. It serves the three framings, because they
+   share the type. A caller holding only a `Box<dyn Connection>` cannot reach it: the
+   `Connection` trait has no statistics and no way back to the concrete type, a required
+   method would break every implementor, a defaulted method would put a Modbus type in the
+   core trait, and an `as_any` hook is a second API with no other caller. So the connections
+   of the registry, which only exist behind that box, have counters nobody can read.
+   `ModbusConnection::open` is the TCP constructor; the serial drivers opened theirs with a
+   crate-private one, so `ModbusRtuDriver::open` and `ModbusAsciiDriver::open` are added
+   (additive; each does what `connect` does, through the same function, and returns the
+   `ModbusConnection`). The two drivers are the two callers that justify the shared
+   `open_serial`; `connect` is that function behind the trait's box. A caller that wants the
+   counters of any framing opens the link as the concrete type; a registry connection has
+   none.
+
+Alternatives considered. Keeping the whole-read failure and attaching the bytes as the
+source of the error (a typed source, or an `ItemError` as source) would need the caller to
+walk the source chain and downcast, and would still fail the other chunks. A new core type
+for the bytes would have one producer. Decoding the members that fit and failing the rest
+was rejected for the reason in item 1. A flag on the public `request` would put a choice on
+a method no caller outside the crate needs; the crate-private `request_decoded` leaves
+`request` as it was.
+
+Compliance: `a_short_reply_fails_every_member_of_its_chunk_and_keeps_the_reply_bytes`,
+`a_coil_reply_with_the_wrong_byte_count_keeps_the_reply_bytes`,
+`a_reply_that_does_not_answer_every_sub_request_is_malformed`,
+`stats_count_a_late_reply_and_a_mismatched_reply`,
+`stats_count_a_late_reply_the_reader_dropped`,
+`rtu_open_returns_a_connection_that_counts_the_replies_it_discarded`,
+`ascii_open_returns_a_connection_that_counts_the_replies_it_discarded`, and
+`interop_a_short_reply_to_a_two_register_read_is_malformed_data` against libmodbus.

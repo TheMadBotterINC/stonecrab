@@ -646,4 +646,85 @@ mod tests {
             "every link was shut down"
         );
     }
+
+    // covers: SPEC mandatory-failure-cases / F2 delayed replies after timeout
+    // With the background reader (a connection opened in a runtime), the late reply of a
+    // request that timed out is dropped between the two requests, and the connection's
+    // `stats` show it as a discarded frame, not as a late reply.
+    #[tokio::test]
+    async fn stats_count_a_late_reply_the_reader_dropped() {
+        let clock = FakeClock::default();
+        let factory = FakeTransportFactory::new(clock.clone());
+        factory.push_script(Script::strict(vec![
+            Step::Expect(request(1)),
+            Step::Delay(secs(2)),
+            Step::Reply(reply(1, 111)),
+            Step::Expect(request(2)),
+            Step::Reply(reply(2, 222)),
+        ]));
+        let t0 = clock.now();
+        let connection = ModbusConnection::open(
+            config(1, None),
+            Arc::new(factory.clone()),
+            Arc::new(clock.clone()),
+            ConnectionDefaults::default(),
+        )
+        .await
+        .expect("open");
+        let wanted = |deadline| {
+            let mut builder = ReadRequest::builder(connection.limits()).tag(tag());
+            if let Some(deadline) = deadline {
+                builder = builder.deadline(deadline);
+            }
+            builder.build().expect("request")
+        };
+        let sent = || {
+            factory
+                .probes()
+                .first()
+                .map_or(0, |probe| probe.sent().len())
+        };
+
+        let asked = connection.read(wanted(Some(
+            Deadline::after(t0, secs(1)).expect("deadline"),
+        )));
+        let moved = async {
+            settle(|| sent() == 1, "the request went out").await;
+            assert!(clock.set(t0 + secs(1)), "forward to the deadline");
+        };
+        let (outcome, ()) = tokio::join!(asked, moved);
+        assert_eq!(error_of(outcome).kind(), ErrorKind::Timeout, "timeout");
+        assert_eq!(
+            connection.stats().guard.discarded_frames,
+            0,
+            "nothing has arrived yet"
+        );
+
+        let late = t0.checked_add(secs(2)).expect("representable");
+        assert!(clock.set(late), "the late reply arrives");
+        settle(
+            || connection.stats().guard.discarded_frames == 1,
+            "the reader dropped the late reply",
+        )
+        .await;
+        let response = connection.read(wanted(None)).await.expect("the next read");
+        assert_eq!(value_of(&response), PlcValue::I16(222), "its own reply");
+
+        let stats = connection.stats();
+        assert_eq!(
+            stats.guard.discarded_frames, 1,
+            "the frame the reader dropped"
+        );
+        assert_eq!(
+            (stats.late_replies, stats.mismatched_replies),
+            (0, 0),
+            "the session never saw it"
+        );
+        assert_eq!(
+            (stats.guard.requests, stats.guard.timeouts),
+            (2, 1),
+            "two requests, one timeout"
+        );
+        connection.close().await.expect("close");
+    }
 }

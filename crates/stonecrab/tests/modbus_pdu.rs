@@ -694,6 +694,29 @@ mod tests {
         );
     }
 
+    /// The kept raw bytes of a reply that does not answer its request are this encoding of the
+    /// decoded PDU, so the codec must hand back every byte it was given.
+    #[test]
+    fn decoding_then_encoding_a_read_response_gives_the_received_bytes_back() {
+        let mut cases = valid_responses();
+        // Padding bits set in the last byte, one data byte and the 250-byte bound.
+        cases.push((COILS, vec![0x01, 0x02, 0xAA, 0xBB]));
+        cases.push((INPUTS, vec![0x02, 0x01, 0x80]));
+        for function in [COILS, INPUTS, HOLDING, INPUT_REGISTERS] {
+            let mut longest = vec![function.as_u8(), 250];
+            longest.extend((0..250u8).map(|n| n.wrapping_mul(7).wrapping_add(3)));
+            cases.push((function, longest));
+        }
+        for (function, received) in cases {
+            let decoded = response(&received, function).expect("a valid response");
+            assert_eq!(
+                encoded_response(&decoded),
+                Ok(received),
+                "{function:?} re-encoded"
+            );
+        }
+    }
+
     // covers: MB-LIMIT-COILS, MB-LIMIT-REGISTERS
     #[test]
     fn encode_response_enforces_the_data_bounds() {

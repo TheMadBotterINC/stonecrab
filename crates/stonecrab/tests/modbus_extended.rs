@@ -37,8 +37,8 @@ mod tests {
     };
     use stonecrab::{
         AccessPolicy, AddressOptions, Clock, Connection, ConnectionConfig, Endpoint, ErrorKind,
-        Operation, PlcValue, ReadRequest, ReadResponse, Result, Tag, TagId, Timeouts,
-        UnknownReason, WriteOutcome, WriteRequest, WriteResponse,
+        Operation, PlcValue, ProtocolStatus, ReadRequest, ReadResponse, Result, Tag, TagId,
+        Timeouts, UnknownReason, WriteOutcome, WriteRequest, WriteResponse,
     };
 
     use crate::responder::Device;
@@ -380,13 +380,13 @@ mod tests {
         let refused = failure(&response, "illegal-address");
         assert_eq!(refused.kind(), ErrorKind::InvalidAddress);
         assert_eq!(
-            refused.status().map(stonecrab::ProtocolStatus::code),
+            refused.status().map(ProtocolStatus::code),
             Some(2),
             "the exception code is the protocol status"
         );
         let busy = failure(&response, "busy");
         assert_eq!(busy.kind(), ErrorKind::DeviceException);
-        assert_eq!(busy.status().map(stonecrab::ProtocolStatus::code), Some(6));
+        assert_eq!(busy.status().map(ProtocolStatus::code), Some(6));
         assert_eq!(
             failure(&response, "illegal-function").kind(),
             ErrorKind::Unsupported(Operation::Read)
@@ -424,10 +424,18 @@ mod tests {
                 Step::Expect(adu(1, &request)),
                 Step::Reply(adu(1, reply)),
             ]);
-            let error = rig
+            // The reply decodes but is not what was asked for: the chunk's members fail, with
+            // the reply as received, and the connection is not torn down.
+            let response = rig
                 .read(&[("d", "extended-register:9999:DINT")])
-                .expect_err(name);
-            assert_eq!(error.kind(), ErrorKind::MalformedData, "{name}");
+                .expect(name);
+            let item = failure(&response, "d");
+            assert_eq!(item.kind(), ErrorKind::MalformedData, "{name}");
+            assert_eq!(
+                item.status().and_then(ProtocolStatus::raw),
+                Some(reply),
+                "{name}: the reply PDU as received"
+            );
         }
     }
 
@@ -591,11 +599,7 @@ mod tests {
         ] {
             let error = rejection(&response, id);
             assert_eq!(error.kind(), kind, "{id}");
-            assert_eq!(
-                error.status().map(stonecrab::ProtocolStatus::code),
-                Some(code),
-                "{id}"
-            );
+            assert_eq!(error.status().map(ProtocolStatus::code), Some(code), "{id}");
         }
     }
 

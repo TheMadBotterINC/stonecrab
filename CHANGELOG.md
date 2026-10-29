@@ -25,6 +25,19 @@ placeholder.
   automated-verified, `MBS-OP-READ`, `MBS-OP-WRITE`, `MBS-OP-PING` and `MBS-TRANS-TCP` for
   the ASCII half too; Modbus ASCII over a gateway is interoperability-tested, over a serial
   port of the driver still simulator-tested.
+- The raw bytes of a short Modbus reply and the connection statistics (ADR-0015 addendum,
+  slice S70; additive). A read reply that decodes but does not fit the request (libmodbus
+  answers a read of two registers with one; a coil reply with the wrong byte count; a
+  function 20 reply that does not answer every sub-request) used to fail the whole read
+  with `MalformedData`. It now fails every member of its chunk with `MalformedData` and the
+  reply PDU as received in the raw bytes of the item's `ProtocolStatus`; the other chunks
+  are read and the next read works. A PDU that does not decode at all still fails the whole
+  read, without raw bytes, and a write still proves its echo. `ModbusConnection::stats`
+  returns the `SessionStats` (late and mismatched replies, and the guard's counters with the
+  frames its reader dropped); it is on the concrete type, so a `Box<dyn Connection>` from
+  the registry cannot reach it. `ModbusRtuDriver::open` and `ModbusAsciiDriver::open` are
+  new: they do what `connect` does and return the `ModbusConnection`, so the serial
+  framings can reach the counters too. The libmodbus interop test now asserts the bytes.
 - Modbus RTU against an independent peer (ADR-0024, slice S59b; no crate API change): the
   diagslave 3.6 image of the UDP run now also serves Modbus RTU over TCP (`diagslave -m enc
   -p 1503 -a 1`, one unit), the stream a serial-to-IP gateway carries, which

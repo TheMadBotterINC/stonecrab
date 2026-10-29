@@ -42,7 +42,7 @@ mod interop;
 mod tests {
     use std::time::{Duration, Instant};
 
-    use stonecrab::{ErrorKind, FailureCategory, PlcValue, Tag};
+    use stonecrab::{ErrorKind, FailureCategory, PlcValue, ProtocolStatus, Tag};
 
     use crate::interop::{DEADLINE, Peer, failure, value_of};
 
@@ -446,24 +446,40 @@ mod tests {
     }
 
     // covers: SPEC mandatory-failure-cases / F5 Modbus level; MB-READ-MATCH
+    // The reply decodes (one register) but answers no part of a read of two: the item fails
+    // with MalformedData and the status keeps the reply PDU as the server sent it.
     #[tokio::test(flavor = "current_thread")]
     #[ignore = "interop: set STONECRAB_INTEROP_LIBMODBUS"]
     async fn interop_a_short_reply_to_a_two_register_read_is_malformed_data() {
-        let peer = connect(READ_ONLY).await;
+        let peer = connect(READ_WRITE).await;
+        // A value that is not the zero of a fresh map, so the bytes asserted below can only
+        // be the server's register 0x160.
+        let written = peer
+            .write(vec![(
+                register_tag(&peer, UT_REGISTERS_ADDRESS),
+                PlcValue::U16(UT_REGISTERS_TAB[0]),
+            )])
+            .await;
+        assert_eq!(written.confirmed_count(), 1, "the register is written");
+
         let two_registers = tag_at(&peer, "holding-register", UT_REGISTERS_ADDRESS, "UDINT");
-        let error = peer
-            .try_read(vec![two_registers], DEADLINE)
-            .await
-            .expect_err("the reply holds one register, the request asked for two");
+        let response = peer.read(vec![two_registers]).await;
+        let error = failure(&response, "holding-register-0x160");
         assert_eq!(
             error.kind(),
             ErrorKind::MalformedData,
             "a reply that does not fit"
         );
         assert_eq!(
-            error.diagnostics().category,
+            error.error().diagnostics().category,
             Some(FailureCategory::Protocol),
             "a protocol failure, not a transport one"
+        );
+        // Function 03, byte count 2, the register 0x022B.
+        assert_eq!(
+            error.status().and_then(ProtocolStatus::raw),
+            Some(&[0x03, 0x02, 0x02, 0x2B][..]),
+            "the reply PDU as received"
         );
 
         // The frame was whole, so the stream is aligned and the connection is usable.
@@ -472,7 +488,7 @@ mod tests {
             .await;
         assert_eq!(
             value_of(&after, "holding-register-0x160"),
-            Some(PlcValue::U16(0)),
+            Some(PlcValue::U16(UT_REGISTERS_TAB[0])),
             "the next read"
         );
         peer.close().await;
