@@ -20,8 +20,8 @@ slave through its gateway carrier (job `interop-rtu`, S59b, first hosted run 408
 9 of 9, on 2026-10-29), and since S60b as a Modbus RTU slave on a
 serial device behind socat (job `interop-rtu-pty`, 9 of 9, the same); the ASCII driver has
 met diagslave 3.6 as a Modbus ASCII slave on a serial device behind socat, through its
-gateway carrier (job `interop-ascii`, S60b, 9 of 9 passed locally on 2026-10-29; the hosted
-run is the next evidence). Neither driver has been run through a serial port of its own
+gateway carrier (job `interop-ascii`, S60b, 9 of 9 locally and in the first hosted run
+40843548924 on 2026-10-29). Neither driver has been run through a serial port of its own
 against an independent peer.
 No independent server serves the file record function codes, so the extended registers are
 checked against the specification examples, the upstream PLC4X frames and a first-party
@@ -216,7 +216,7 @@ assert!(driver.parse_config("modbus-rtu://COM3?default-unit-identifier=0").is_er
 | --- | --- |
 | Read, write, ping and subscribe by polling over RTU framing, with the operations and limits of `modbus-tcp` | simulator-tested |
 | CRC errors, the silence before a request, the drain of a late reply, a lost serial link and its reopen, replies from another unit | simulator-tested |
-| RTU over a serial-to-IP gateway (`modbus-rtu:tcp://`): read of every area, writes read back, a range selection, frames of 255 bytes, ping, an exception, a unit the slave does not serve | interoperability-tested (jobs `interop-rtu`, diagslave 3.6 as `-m enc -a 1`, and `interop-rtu-pty`, as `-m rtu -a 1` on a serial device behind socat; 9 of 9 each passed locally on 2026-10-29; the hosted runs are the next evidence) |
+| RTU over a serial-to-IP gateway (`modbus-rtu:tcp://`): read of every area, writes read back, a range selection, frames of 255 bytes, ping, an exception, a unit the slave does not serve | interoperability-tested (jobs `interop-rtu`, diagslave 3.6 as `-m enc -a 1`, and `interop-rtu-pty`, as `-m rtu -a 1` on a serial device behind socat; 9 of 9 each locally and in their first hosted runs, 40838776577 and 40843548924, on 2026-10-29) |
 | Interoperability against an independent RTU server through a serial port of the driver | planned (a virtual serial pair with libmodbus or modbus-tk) |
 | Hardware verification on RS-485 | planned (HW2) |
 

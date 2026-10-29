@@ -463,3 +463,11 @@ changes no other decision. No code under `crates/stonecrab/src` changes.
   `docs/parity/modbus-serial.md` (rows `MBS-ASCII-SEND`, `MBS-ASCII-LRC` and
   `MBS-ASCII-WIRE-MODEL` carry `automated-verified`; `MBS-OP-READ`, `MBS-OP-WRITE`,
   `MBS-OP-PING` and `MBS-TRANS-TCP` carry it for the ASCII half too).
+
+## Addendum (2026-10-29): the first hosted runs of `interop-ascii` and `interop-rtu-pty`
+
+Both jobs of the S60b matrix ran with commit fc30f8c (CI run 40843548924) on
+`ubuntu-latest` and passed nine of nine each: diagslave behind socat as an ASCII slave and as
+a gap-framed RTU slave, reached through the drivers' TCP gateway carrier. The evidence the
+S60b addendum called the next step now exists; a serial port of the drivers is still the
+open item.

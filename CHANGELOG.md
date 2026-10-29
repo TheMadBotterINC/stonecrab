@@ -20,8 +20,8 @@ placeholder.
   ping; the nine RTU tests run again against `-m rtu`, with the silence test in place of the
   closed-connection one. New CI jobs `interop-ascii` and `interop-rtu-pty` (one matrix job)
   and tasks `mise run interop-ascii` and `mise run interop-rtu-pty`, which `mise run interop`
-  includes. Passed locally, 9 of 9 each, on 2026-10-29; the first hosted runs are the next
-  evidence. Parity rows `MBS-ASCII-SEND`, `MBS-ASCII-LRC` and `MBS-ASCII-WIRE-MODEL` are
+  includes. Passed locally and in the first hosted run (40843548924), 9 of 9 each,
+  on 2026-10-29. Parity rows `MBS-ASCII-SEND`, `MBS-ASCII-LRC` and `MBS-ASCII-WIRE-MODEL` are
   automated-verified, `MBS-OP-READ`, `MBS-OP-WRITE`, `MBS-OP-PING` and `MBS-TRANS-TCP` for
   the ASCII half too; Modbus ASCII over a gateway is interoperability-tested, over a serial
   port of the driver still simulator-tested.

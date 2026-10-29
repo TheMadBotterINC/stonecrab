@@ -20,8 +20,8 @@ end of a pseudo-terminal pair that socat makes, the other end bridged to a TCP p
 drivers' gateway carrier reaches: nine `interop_ascii_*` tests
 (`modbus_interop_diagslave_ascii`, job `interop-ascii`) and the `interop_rtu_*` tests again
 (job `interop-rtu-pty`), so diagslave's ASCII framing and LRC and its RTU framing as it does
-it on a line are met too. The three jobs passed locally on 2026-10-29 (colima, 9 of 9 each);
-the first hosted runs are the next evidence. What none of them is: a serial port of the
+it on a line are met too. The three jobs passed locally on 2026-10-29 (colima, 9 of 9 each)
+and in their first hosted runs (40838776577 for `interop-rtu`, 40843548924 for the other two). What none of them is: a serial port of the
 driver (the carrier is `tcp`, so `serial.*` options, the silence before a request and the
 reopen of a lost port are not exercised) or a device. A row shared by both drivers says
 which halves are done. (S52d added the `MBS-DEVICE-SLM1C-*` rows of "Hardware evidence": a
