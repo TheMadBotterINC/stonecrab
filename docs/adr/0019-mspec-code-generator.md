@@ -1,0 +1,425 @@
+# 0019: MSpec code generator
+## Status
+Accepted (2026-10-28, under decision E3; the maintainer may revisit).
+Written as slice S65 of docs/POST_ALPHA_PLAN.md (Phase G). It decides how Stonecrab turns
+upstream MSpec protocol descriptions into Rust, where the output lives, what provenance it
+carries, how S66 proves the generator on Modbus and what the S67 `regen` gate runs. It
+builds on ADR-0013 (the bounded codec primitives the output must use), ADR-0015 decision 2
+(D6: the hand-written Modbus PDUs and the corpus a generator must meet), ADR-0009 (the
+fuzz workspace layout reused below) and ADR-0018 (one published crate). It amends
+CODING_STANDARDS 1.2, 17.1, 17.2, 17.6, the `gen` commit type of 18.2 and the `regen` row
+of section 19 as stated in decision 9. Nothing is generated, vendored or built by this slice.
+
+## Context
+`docs/SPEC.md` ("Code generation and upstream maintenance") asks Stonecrab to reuse the
+PLC4X separation of protocol descriptions, language templates and generated code, to
+start with the MSpec constructs Modbus needs, and sets eight requirements: provenance and
+options recorded with the output, explicit failure on unsupported constructs,
+deterministic output checked by CI with a clean diff, no hand patches of output,
+independent vectors per construct, bounded recursion and allocation, retained test
+provenance, and an explicit MSpec feature matrix. Its porting rules say ordinary builds
+never need Java, a maintainer-only step "may initially use upstream Java/Maven tooling",
+and "a native Rust generation pipeline belongs in the eventual port". CODING_STANDARDS
+section 17 already names the tool (`tools/stonecrab-codegen`), the location
+(`src/generated/` in the owning driver module) and a Java bootstrap that CI never runs on
+pull requests (17.6). Decision E3 moved the generator before OPC UA (M3), proven first on
+Modbus against the hand codec.
+
+What upstream has at the pinned baseline (Apache PLC4X v1.0.0, commit
+`ea229918f5d07700e04d7d69ab1645da679cb700`; paths are relative to the PLC4X root):
+
+- **The MSpec grammar and model.** Below, `mspec/` abbreviates
+  `code-generation/protocol-base-mspec/src/main/antlr4/org/apache/plc4x/plugins/codegenerator/language/mspec/`
+  for the grammars and the same path under `src/main/java` for the Java sources. The
+  ANTLR grammar `mspec/MSpec.g4` (435 lines) has a file level of optional
+  `constants`, `globals` and `context` blocks (lines 21-35) followed by four type forms,
+  `type`, `discriminatedType`, `enum` and `dataIo` (lines 41-46), twenty field kinds (lines 61-82)
+  and thirteen base data types (lines 177-191). Field expressions have their own grammar,
+  `mspec/expression/Expression.g4` (127 lines), whose precedence differs from Rust's: `&&`
+  binds tighter than `&` and `||` tighter than `|` (lines 38-59). `MessageFormatListener`
+  builds `Default*` model objects (`mspec/model/`) into a `HashMap`
+  (`mspec/parser/MessageFormatListener.java` lines 61-74), and `MessageFormatParser` only
+  logs a warning for type references that never resolve
+  (`mspec/parser/MessageFormatParser.java` lines 78-80), and
+  `ValidatableTypeContext.validate()` then throws "Unresolved types left"
+  (`protocol-base-mspec/.../protocol/ValidatableTypeContext.java` lines 31-35), which
+  `ModbusProtocol` and `OpcuaProtocol` both call. The model interfaces and the Maven
+  plugin that drives generation are not in this source tree: they are
+  `org.apache.plc4x.plugins` artifacts (`code-generation/protocol-base-mspec/pom.xml`
+  lines 79-82; `code-generation/language/go/pom.xml` lines 71-73) at the version property
+  `plc4x-code-generation.version`, which no `pom.xml` of the sparse checkout read for this
+  ADR defines; its root `pom.xml` is not part of that checkout.
+- **Languages.** Five language modules, `c`, `cs`, `go`, `java` and `python`, each behind
+  its own Maven profile (`code-generation/language/pom.xml` lines 38-72); there is no Rust
+  module. Four use FreeMarker through `FreemarkerLanguageOutput`, which renders one
+  template per type and takes the output file name from the first rendered line
+  (`code-generation/language-base-freemarker/src/main/java/org/apache/plc4x/plugins/codegenerator/protocol/freemarker/FreemarkerLanguageOutput.java`
+  lines 113-151 and 172-210). Java instead emits code with JavaPoet
+  (`code-generation/language/java/pom.xml` lines 141-145, and the import on line 22 of
+  `code-generation/language/java/src/main/java/org/apache/plc4x/codegeneration/language/java/generators/BaseGenerator.java`).
+  A language module is sizeable: the Go module is 5,087 lines (a 2,029-line
+  `GoLanguageTemplateHelper.java` and a 1,861-line `complex-type-template.go.ftlh`),
+  Python 4,572, Java 4,118, C 3,682 and C# 2,674 (`code-generation/language/*/src/main`,
+  counts excluding each module's 19-line `META-INF/services` registration file).
+- **Generation is a maintainer step, and the output is committed.** The language
+  modules build only under the `update-generated-code` profile
+  (`code-generation/pom.xml` lines 44-50), the Go drivers regenerate under the same profile
+  (`plc4go/pom.xml` lines 582-605), and the generated Java for Modbus is committed under
+  `plc4j/drivers/modbus/src/main/generated/` (57 files) with the marker "Code generated by
+  code-generation. DO NOT EDIT." (for example
+  `.../readwrite/ModbusPDUReadHoldingRegistersRequest.java` lines 30-32).
+- **A construct catalog without vectors.** `code-generation/protocol-test` holds a
+  569-line `test.mspec` that exercises the field kinds, and its comments record per-language
+  gaps: a checksum field "Disabled for PLC4C" (lines 41-42) and virtual fields in
+  discriminated types failing for Go (lines 230-244). The module contains only that file,
+  `TestProtocol.java` and site documentation; no wire vectors.
+- **Modbus.** `protocols/modbus/src/main/resources/protocols/modbus/modbus.mspec` (439
+  lines, sha256 `cb8ea683da2f3ddc207ee2b4469f1737a6a34ccc5d425b12d37c69110ff94143`) uses
+  a constants block (lines 24-28), six enums, two of them with sub-byte or parameterized
+  forms (`uint 7`, lines 430-434; `ModbusDataType(uint 8 dataTypeSize)` with constant
+  values, lines 380-408), a parameterized `discriminatedType ModbusADU(DriverType
+  driverType, bit response)` with byte-order and encoding attributes (lines 36-76), the
+  39-case
+  `ModbusPDU` switched on two sub-byte discriminators and a parameter, where the error
+  case matches on the first discriminator only (lines 78-276), five plain types (lines
+  278-311) and a `dataIo DataItem` with `vstring` and string encodings (lines 318-378).
+  Its field kinds are `simple`, `const`, `implicit`, `array` (`count` and `length` loops),
+  `checksum` with `STATIC_CALL` (RTU and ASCII only, lines 65 and 73), `discriminator`
+  and `typeSwitch`. It uses no `manual`, `manualArray`, `virtual`, `optional`, `padding`,
+  `peek`, `reserved`, `assert`, `validation`, `abstract`, `state`, `unknown` or
+  `batchSet` field. Its own comment assigns register alignment to the driver, not to
+  `DataItem` (lines 313-317).
+- **OPC UA.** Five mspec files under
+  `protocols/opcua/src/main/generated/protocols/opcua/` are themselves generated and
+  committed: under the `update-generated-code` profile a Groovy script downloads the OPC
+  Foundation schemas from the moving `UA-Nodeset/raw/latest` URL
+  (`protocols/opcua/src/main/script/downloadAndEditOpcuaNodeSet.groovy` lines 95-99) and
+  XSLT turns them into mspec (`protocols/opcua/pom.xml` lines 67-297). `OpcuaProtocol`
+  parses the five files into one type context
+  (`protocols/opcua/src/main/java/org/apache/plc4x/protocol/opcua/OpcuaProtocol.java`
+  lines 40-61). `opc-services.mspec` is 15,335 lines (1.3 MB) of 181 enums;
+  `opc-manual.mspec` is 3,813 lines with six discriminated types, the largest of them
+  `ExtensionObjectDefinition` with 354 cases (lines 204-2663), and uses `virtual` (18),
+  `optional` (44), `reserved` (60) and `abstract` (3) fields, none of which Modbus has.
+
+On the Stonecrab side, the Modbus PDU codec is hand-written from the same mspec
+(`crates/stonecrab/src/modbus/pdu/`, ADR-0015 decision 2, D6) with semantic bounds the
+mspec does not express (quantity 1 to 2000 or 1 to 125, the address span, a nonzero and,
+for registers, even byte count, a 253-byte PDU, no write function codes under D3). Its
+corpus is `fixtures/modbus/` (177 `.hex` vectors with independently written expected
+files, six of them the upstream parser-suite frames retained by S04a) and the fuzz seeds
+under `fuzz/corpus/fuzz_modbus_pdu/` and `fuzz/corpus/fuzz_modbus_mbap/`. D6 says a
+future generator "must reproduce this output or pass the same vector corpus". There is no
+`tools/` directory and no `xtask`; gates are `mise` tasks and `scripts/`.
+
+## Options
+- **(A) A native Rust generator.** `tools/stonecrab-codegen` parses MSpec itself and emits
+  Rust over `stonecrab::codec`. One toolchain, the pinned Rust, generates and checks.
+- **(B) The upstream Java and FreeMarker toolchain, with a Rust language module.** A new
+  Maven module registers a `LanguageOutput` next to the five existing ones, with
+  FreeMarker templates and a Java helper, and the upstream Maven plugin drives it.
+- **(C) A hybrid.** Once per baseline, a maintainer runs the upstream parser under Java
+  and exports the resolved type model to a committed file (for example JSON); a Rust
+  emitter consumes that file. Upstream has no exporter, so this is new first-party Java
+  over the `Default*` model classes.
+
+## Criteria
+| Criterion | (A) native Rust | (B) upstream toolchain | (C) hybrid |
+| --- | --- | --- | --- |
+| Reproducibility and determinism | One pinned toolchain (`rust-toolchain.toml`, with its `rustfmt`); source order and sorted maps by construction | JDK, Maven and plugin versions from a root `pom.xml` outside the pinned checkout; template output goes through a default-charset writer (`FreemarkerLanguageOutput.java` line 178) | The model export is reproducible only on a maintainer machine with Java; it must sort a `HashMap` (`MessageFormatListener.java` line 73) |
+| Supply chain and CI toolchain | Rust only; the tool's few crates are audited and checked by `cargo deny`; the gate runs offline in CI | A JVM, Maven Central and the plugin graph (ANTLR, commons, logback; `protocol-base-mspec/pom.xml` lines 79-103, plus FreeMarker in `language-base-freemarker`) outside `cargo deny`; CODING_STANDARDS 17.6 keeps it off pull-request CI, so the regen gate cannot run | CI runs only the Rust half; the committed model is an intermediate CI cannot check against the mspec |
+| Upstream baseline moves | Re-vendor the mspec, update the hashes, regenerate; a change to `MSpec.g4` or `Expression.g4` must be ported to the Rust parser first | Grammar changes arrive for free; helper or template API changes break the Rust module | Re-export the model; changes to the model classes change our export schema |
+| Fidelity to MSpec semantics | Our parser must match upstream on grammar, expression precedence and type resolution; behavior is proven by vectors, not by upstream generator output | Upstream parse and resolution; emitter semantics still hand-written in templates | Upstream parse and resolution; emitter as in (A) |
+| Safety under CODING_STANDARDS | Emitter is first-party Rust under our lints and tests; output checked by the crate's own lints | Emitter is Java and FreeMarker, outside clippy, coverage and mutation testing | Emitter as in (A); exporter is first-party Java with no gate |
+| Effort | Highest at first: a parser for both grammars plus the emitter | A template set the size of an upstream language module (2,674 to 5,087 lines) plus Java CI | Exporter plus emitter; saves the parser, adds a second language |
+
+## Decision
+1. **Option (A): a native Rust generator.** The reasons, in order:
+   - SPEC requirement 3 asks CI to regenerate and check for a clean diff on every change,
+     and CODING_STANDARDS 17.6 keeps the Java path off pull-request CI. Only (A) lets the
+     whole chain, mspec to Rust, run in the `regen` gate; under (B) and (C) CI would check
+     at most the last step.
+   - SPEC's porting rules make a native pipeline the end state, and requirement 8 asks the
+     eventual native generator to reproduce or prove equivalent the accepted output.
+     Choosing (B) or (C) now means writing the native generator later and proving it a
+     second time.
+   - Modbus needs a small construct set (Context), so the parser and the emitter can be
+     proven end to end on Modbus before OPC UA, which is what E3 asks. OPC UA's mspecs are
+     committed upstream, so they are more input files for the same tool, not an XSLT or
+     download step for Stonecrab.
+   - No JVM, Maven or unaudited plugin graph enters the project's tooling.
+
+   The CODING_STANDARDS 17.6 bootstrap stays permitted but unused.
+2. **The tool.** `tools/stonecrab-codegen` is a binary package with `publish = false` in
+   its own Cargo workspace (its own `[workspace]` table and committed `Cargo.lock`), and
+   the root `Cargo.toml` adds it to `exclude`, as ADR-0009 decision 4 did for `fuzz/`. The
+   root workspace keeps one package (ADR-0018). It uses the root `rust-toolchain.toml` and
+   is first-party code under CODING_STANDARDS 1.1 (tools may `unwrap`, section 6.2; the
+   tool uses plain error types, because the root `deny.toml` bans `anyhow`), excluded from
+   coverage (13.10). Its entry point is `generate` (2.8). Its dependencies are limited to
+   `toml` (already audited for the crate) and a SHA-256 implementation (`sha2`, a new
+   DEPENDENCY_AUDIT entry); S66 records the D23 check. The parser is hand-written
+   recursive descent for the whole of `MSpec.g4` and `Expression.g4`, with no parser
+   generator, and the emitter writes text and passes it through the pinned `rustfmt`, with
+   no `syn` or `quote`.
+3. **Parse everything, emit a growing subset, fail on the rest.** The parser accepts every
+   construct of both grammars, so a vendored mspec always parses whole; an unresolved type
+   reference is an error at parse time, as upstream's `validate()` makes it. The emitter
+   supports a set of constructs that grows per protocol, and a construct outside the set
+   in an enabled type is a generation error naming the construct, the type and the mspec
+   line (SPEC requirement 2). The set is the MSpec feature matrix (requirement 8): a table
+   in `tools/stonecrab-codegen/README.md` with one row per field kind, file-level block
+   (`constants`, `globals`, `context`), type form, data type, built-in function and
+   property access, each marked parsed, emitted and vector-validated, with the protocol
+   whose vectors validate it. For Modbus, the `[constants ...]` block (modbus.mspec lines
+   24-28) is parsed and not emitted: S66 emits no constants, and an option that enables a
+   type whose expressions refer to a constant is a generation error naming the constant. A
+   `globals` or `context` block is parsed and is a generation error until a protocol needs
+   it. The "MSpec feature matrix" section of `docs/parity/modbus.md` points there once S66
+   lands.
+4. **Semantics of the emitted code.**
+   - A `type` becomes a struct. A `discriminatedType` becomes an enum with one variant per
+     case, wrapped in a struct when the parent has fields of its own. Discriminators are
+     not stored: serialization derives them from the variant. Cases are tried in source
+     order and the first match wins; a case with fewer values than discriminators matches
+     on the prefix (`ModbusPDUError`); no match is `ParseError::InvalidDiscriminator`.
+     The exception: when a case matches only a prefix, the discriminator values it left
+     unmatched are stored in the variant and written back on serialize
+     (`functionFlag` in `ModbusPDUError`), because they carry data. Upstream drops them and
+     serializes 0 (`ModbusPDUError.java` lines 52-54); the hand model keeps the function
+     (`ModbusPdu::Exception { function, code }`, so `81 02` must round-trip). This is a
+     deliberate divergence, recorded in the feature matrix and in the parity record.
+     Type parameters (`response`, `driverType`) are arguments of `parse`.
+   - An `enum` becomes a Rust enum with its wire value and its constant values as `const
+     fn` accessors; an unknown wire value is `InvalidDiscriminator`.
+   - An `implicit` field is read, used by later expressions and not stored; on serialize it
+     is computed from its expression. `const` fields are checked on parse, and a mismatch
+     is `ParseError::InvalidDiscriminator` naming the field (no new variant).
+   - Property access on a complex field (`pdu.lengthInBytes` in the `ModbusTcpADU` length
+     field, `modbus.mspec` line 48) and the built-in functions `COUNT`, `ARRAY_SIZE_IN_BYTES`
+     and `lengthInBytes` compute the serialized size of the value with the same checked
+     arithmetic; each has its own row in the feature matrix.
+   - A `dataIo` becomes a parse and a serialize function between bytes and `PlcValue`; a
+     case whose value has no `PlcValue` variant (the strings until S49) is a generation
+     error unless the case is disabled (decision 6).
+   - Expressions are emitted fully parenthesized in MSpec precedence (`Expression.g4` lines
+     38-59), never Rust's. Arithmetic is checked (`checked_*`, failing with
+     `ParseError::Overflow`) and conversions use `try_from`, so a serialized byte count
+     that does not fit its field fails instead of truncating. Upstream casts here (`(short)`
+     in the generated Java, `.../ModbusPDUReadHoldingRegistersResponse.java` lines 91-93);
+     the Rust behavior is recorded as a divergence in the protocol's parity record.
+   - `STATIC_CALL` names, and later `manual` field expressions, resolve to functions in a
+     hand-written support module next to the generated one (SPEC requirement 4); a name
+     the protocol's configuration does not list is a generation error. Modbus would need
+     `rtuCrcCheck` and `asciiLrcCheck`, which belong to RTU and ASCII (S59, S60), so S66
+     disables those cases instead.
+   - `virtual`, `optional`, `reserved`, `abstract` and the other kinds Modbus does not use
+     are generation errors until the protocol that needs them (OPC UA) adds them with
+     vectors.
+5. **Safety of the output (CODING_STANDARDS 17.3, SPEC requirement 6).** The output reads
+   and writes only through `BoundedReader` and `BoundedWriter`, never indexes or slices,
+   never panics, and uses no `as` cast and no unchecked arithmetic. It is compiled under the
+   lints of the module it lives in, including the `modbus` promotions (`indexing_slicing`,
+   `arithmetic_side_effects`, `as_conversions`). A byte array is read with `read_bytes`
+   against the bytes present; an array of fixed-width elements checks `count * width`
+   against the remaining input before it allocates; an array of complex elements grows one
+   parsed element at a time, and an element type whose minimum encoded size is zero is a
+   generation error, so input length bounds every allocation. Runs of sub-byte fields (`bit`
+   and `uint 7` in `ModbusPDU`) are read as one byte-aligned integer and split most
+   significant bit first; a run that does not end on a byte boundary is a generation error.
+   The split goes through a helper added to `stonecrab::codec` under an ADR-0013 addendum
+   (ADR-0013 says a driver that needs a field the primitives do not offer "adds it here,
+   not in the driver"; keeping generated files free of such helpers is this ADR's own rule).
+   A recursive type is a generation error until the first protocol that has one adds a
+   depth argument and `ParseError::RecursionLimit` (deferred by ADR-0013). The output
+   copies no comment text from the mspec, only names, so the `geiger` grep for `unsafe`
+   cannot match generated text. Identifiers are ASCII (`MSpec.g4` lines 403-405, which
+   also allow `-`) and map to Rust case conventions with `-` replaced; a name collision or
+   a Rust keyword is a generation error.
+6. **Output layout.** Generated code for a driver lives in `crates/stonecrab/src/<driver>/`:
+   - `generated.rs` declares one module per top-level mspec type, sorted by name, and
+     `generated/<type_in_snake_case>.rs` holds each type. Both are written by the
+     generator and nothing else; the generator deletes and rewrites the whole set, so a type
+     removed upstream disappears from the diff too.
+   - `generated/MANIFEST.toml` records the generator name and version, the upstream tag and
+     commit, for each mspec its upstream path, its vendored path and its sha256, and the
+     options: the enabled cases and types and the support module path. It holds no
+     timestamp; git records when.
+   - The vendored mspec is a verbatim copy with its ASF header (CODING_STANDARDS 1.3) at
+     `upstream/mspec/<protocol>/<file>.mspec`, and `upstream/manifest.toml` lists its
+     upstream path, git blob and sha256, following the S04a provenance entries. The
+     generator refuses to run when the copy's sha256 differs from the manifest.
+   - Options are per protocol and are recorded, never implicit. A disabled case is still
+     parsed from the mspec and its discriminator values are known, so the generated
+     parser refuses it with `InvalidDiscriminator`, as the hand codec refuses the write
+     function codes (D3); it is not silently absent.
+7. **Provenance header.** Every generated `.rs` file begins with:
+
+   ```rust
+   // @generated by stonecrab-codegen 0.1.0. DO NOT EDIT; regenerate with `mise run regen`.
+   // Source: Apache PLC4X protocols/modbus/src/main/resources/protocols/modbus/modbus.mspec
+   //   at ea229918f5d07700e04d7d69ab1645da679cb700 (v1.0.0),
+   //   sha256 cb8ea683da2f3ddc207ee2b4469f1737a6a34ccc5d425b12d37c69110ff94143,
+   //   vendored as upstream/mspec/modbus/modbus.mspec. Options: generated/MANIFEST.toml.
+   ```
+
+   The version is the tool's package version, bumped whenever its output changes for an
+   unchanged input, so a header diff always means a generator or input change. There is no
+   `#![allow(...)]` line: the output obeys the crate's lints, and a suppression the output
+   genuinely needs is an item-level `#[expect(..., reason = "...")]` emitted by the
+   generator, as in hand-written code (CODING_STANDARDS 5.8).
+8. **Scope of S66 and the equivalence proof.** S66 vendors `modbus.mspec`, builds the tool
+   for the Modbus constructs and generates `crate::modbus::generated` with the hand
+   codec's domain enabled: `ModbusTcpADU`, `ModbusPDUError`, the read requests and
+   responses of function codes 01 to 04, `ModbusErrorCode`, and the numeric cases of
+   `DataItem` except `BOOL` (a lone bit is not a byte-aligned run, decision 5). Every
+   other case is disabled in the options. The module is declared `#[cfg(test)]`, so it is
+   compiled and linted by every `--all-targets` run and exercised by the tests but adds
+   nothing to the library build, the public API or `semver`. Its files are still in the
+   `src/**` package include, so S66 adds them to `packaging/stonecrab.txt` (the reviewed
+   file list) and they ship as an unused `cfg(test)` module. The hand codec stays the
+   shipped codec, and whether the driver later delegates to generated code is decided by
+   the slice that does it. The proof is an in-crate test, behind `testkit` for the
+   golden-vector loader, with a hand-written mapping from the generated types to
+   `ModbusPdu`. For every input of the corpus (every `.hex` vector under
+   `fixtures/modbus/`, the seeds under `fuzz/corpus/fuzz_modbus_pdu/` and
+   `fuzz/corpus/fuzz_modbus_mbap/`, and property tests over arbitrary bytes and arbitrary
+   valid `ModbusPdu` values), in the request and the response direction:
+   - When the hand codec accepts, the generated codec accepts, maps to the same
+     `ModbusPdu` (exception PDUs included, by the stored `functionFlag` of decision 4),
+     and serializes back to the same bytes the hand encoder writes.
+   - When the hand codec refuses, the generated codec refuses with the same `ParseError`
+     variant, or accepts and the vector is in a committed table of hand-only checks, each
+     row naming one: quantity zero or above its maximum, span past the address space, byte
+     count zero, odd register byte count, PDU over 253 bytes, response function other than
+     the expected one. Any other difference fails.
+   - When the generated codec refuses what the hand codec accepts, the test fails.
+   - ADU vectors compare the generated `ModbusTcpADU` with the MBAP framer followed by the
+     PDU codec; where the framer refuses (for example `adu_protocol-id-1`, expected
+     `Malformed`) the generated codec must refuse with a `ParseError`, and the pairing is
+     a row of the hand-only table, and `DataItem` is compared with `TypedDecoder` on the
+     `typed_*` vectors in the big-endian, high-word-first layout, where register bytes are
+     the value's natural bytes; register alignment and word order stay hand-written
+     (`modbus.mspec` lines 313-317).
+   Every enabled variant also needs one valid and one negative vector of its own
+   (CODING_STANDARDS 17.5). S66 lands only when the corpus passes with no unlisted
+   difference.
+9. **The S67 `regen` gate.** `mise run regen`, and a blocking CI job `regen` that runs the
+   same task, does this:
+   1. The one network step: `cargo fetch --locked` for the tool workspace and `cargo deny
+      fetch db index` (the RustSec advisory database and the crates index, which the
+      `yanked = "deny"` policy needs). Everything after it runs with `--offline`.
+   2. Format, lint and test the tool workspace (`cargo fmt --check`, `cargo clippy
+      --all-targets -- -D warnings`, `cargo test`) and run `cargo deny --offline check`
+      over it (advisories read the database fetched in step 1). `cargo deny` reads
+      `<cwd>/deny.toml`, so the tool workspace keeps a copy of the root `deny.toml` with a
+      drift check, the approach `scripts/fuzz-smoke.sh` takes for `fuzz/`; the copy needs
+      no license exception. S67 proves in CI that the offline run works with the fetched
+      index (UNVERIFIED until then).
+   3. Verify each vendored mspec against the sha256 in `upstream/manifest.toml`.
+   4. Run the generator twice into two scratch directories and require byte-identical
+      results, then run it in place and require an empty `git status --porcelain` for
+      every `generated.rs` and `generated/` directory, which catches edits, new files and
+      deletions alike.
+   5. A self-test that edits one generated file in a scratch copy and expects the check to
+      fail, like `scripts/parity-check.sh --self-test`.
+
+   Steps 2 to 5 need no network because every input is in the checkout: the vendored
+   mspec, the upstream commit and hashes in `upstream/manifest.toml`, the generator source
+   and lock file, and the pinned toolchain with its `rustfmt`. It never clones PLC4X,
+   never runs Maven or a JDK and never downloads OPC Foundation schemas, and after step 1
+   `--offline` makes any network attempt fail the job. This amends CODING_STANDARDS
+   section 19 (`cargo xtask generate --all && git diff --exit-code` becomes `mise run
+   regen`, because `git diff` misses untracked files and there is no `xtask`), 17.1 (the
+   header of decision 7, a manifest without a timestamp, and no `#![allow]`), 17.2 (the
+   check is `mise run regen`, not a `git diff` of `src/generated/`), 18.2 (a `gen` commit
+   holds `generated.rs`, `generated/` and the manifest, and the vendored mspec joins the
+   manifest commit), 1.2 (generated code is not exempt from lints) and 17.6 (the bootstrap
+   is unused). S67 adds margin notes at each of these.
+10. **Upstream baseline moves.** A baseline move (CONTRIBUTING, "Changing the upstream
+    baseline") re-vendors each mspec, updates the hashes and the commit in
+    `upstream/manifest.toml`, and then regenerates in a following `gen` commit of the same
+    PR. Generated output is not logic, but CONTRIBUTING item 1 (the manifest change alone)
+    and CODING_STANDARDS 18.4 (no regeneration mixed with logic) stay true commit by
+    commit; S67 amends CONTRIBUTING to say the vendored mspec joins the manifest commit
+    and the `gen` commit follows. The generated diff is reviewed as part of the parity
+    diff. Before that, the maintainer diffs `MSpec.g4` and `Expression.g4` between the two
+    commits; any grammar change is a generator change landed first with its own tests. A
+    maintainer-only command, `stonecrab-codegen check <plc4x checkout>`, parses every
+    `*.mspec` of a local read-only checkout without emitting anything and reports each
+    file's result; its output for the new commit is recorded with the move. It never runs
+    in CI.
+## Consequences
+- The project owns a second Rust code base: a parser for two grammars and an emitter, of
+  the order of an upstream language module (Context). It is linted and tested like other
+  tools and carries the feature matrix.
+- Two Modbus codecs coexist after S66: the shipped hand codec and a test-only generated
+  one. The generated one is evidence that the generator is right, not a second runtime
+  path. A later slice that enables more cases (FC05 to FC16 for S45, FC20 and FC21 for S50)
+  can choose the generated code instead of new hand-written PDUs.
+- `rustfmt` is part of the generator's output, so a toolchain bump that changes formatting
+  shows up as a regen diff in the bump's own change, which is the intended place to review
+  it.
+- The header names the tool version, so a generator change that alters output touches
+  every generated file of every protocol; such changes are regeneration-only commits under
+  the `gen` type (CODING_STANDARDS 18.2) after the generator change itself.
+- `crates/stonecrab/src/modbus/generated/` is excluded from the handwritten coverage
+  thresholds (CODING_STANDARDS 13.10, 17.5); `scripts/coverage-gate.sh` already excludes
+  any `generated/` path component (`EXCLUDE` in the script), so only a file named
+  `generated.rs` needs adding there. `.gitattributes` has no generated rule today; S66 adds
+  one for `crates/stonecrab/src/*/generated/**` and `generated.rs`.
+- OPC UA will extend the matrix with `virtual`, `optional`, `reserved` and `abstract`,
+  `STATIC_CALL` helpers and recursion bounds, and its size (about 19,500 mspec lines, 354
+  cases in one switch) will test compile time and file count. Its mspecs come from OPC
+  Foundation schemas fetched from a moving URL, so the schema version behind the pinned
+  files is UNVERIFIED and goes to the M0 inventory; Stonecrab consumes the committed files
+  and never reruns that step.
+
+## Risks
+- **Parser fidelity.** A grammar or precedence mistake in our parser could pass review.
+  Mitigations: the parser covers the whole grammar, expressions are emitted parenthesized
+  in MSpec precedence, unresolved references fail, the `check` command runs over every
+  upstream mspec at each baseline, and behavior is judged by vectors, including the
+  upstream parser-suite frames, never by agreement with an upstream generator.
+- **No upstream oracle.** Upstream's own languages disagree (`test.mspec` lines 41-42 and
+  230-244), so "what upstream generates" is not one behavior. Where Rust differs from
+  PLC4J, the parity record states it, as for the checked byte counts in decision 4.
+- **Vendoring needs approval.** Decision E2 approved redistributing the Apache-2.0 PLC4X
+  test vectors; `modbus.mspec` is a protocol description, not a vector. S66 needs the
+  maintainer's approval to vendor it with NOTICE attribution before it can land.
+- **Scope creep in S66.** The equivalence table of hand-only checks must stay a closed list
+  of named checks; a row added to make a failing vector pass, without a named check, is a
+  review failure.
+- **The generator becomes the bottleneck for OPC UA.** If its construct set lags, M3
+  waits on it. E3 accepted that cost to avoid hand-porting an unverifiable OPC UA codec
+  (docs/POST_ALPHA_PLAN.md, "Risks").
+
+## Alternatives considered
+- **(B) The upstream toolchain with a Rust language module.** Rejected: the gate SPEC asks
+  for cannot run on pull requests without Java in CI, which CODING_STANDARDS 17.6 forbids,
+  and the emitter would sit outside every Rust gate. It remains the documented fallback if
+  the native parser proves unworkable, through an amendment of this ADR.
+- **(C) An exported upstream model and a Rust emitter.** Rejected: it adds first-party Java
+  and a committed intermediate that CI cannot check against its mspec, and a native parser
+  would still be owed under SPEC's porting rules. Its one gain, upstream's parse and type
+  resolution, is pursued in (A) by the `check` command and the vectors.
+- **Keep hand-porting, no generator.** Rejected by E3 for OPC UA's size.
+- **One generated file per mspec.** Rejected: `opc-manual.mspec` would become one very large
+  file; one file per type keeps diffs and compiler messages local, and the provenance
+  header still names the mspec each type came from.
+- **A `MessageCodec` trait for generated types.** Not added: generated types expose
+  inherent `parse` and `serialize` functions, and a trait waits for a second caller that
+  needs dispatch over it (this ADR's own principle: no abstraction before its second caller).
+
+## Compliance
+- S66: `tools/stonecrab-codegen` with its README and feature matrix,
+  `upstream/mspec/modbus/modbus.mspec` and its manifest entry,
+  `crates/stonecrab/src/modbus/generated.rs`, `crates/stonecrab/src/modbus/generated/`
+  with `MANIFEST.toml`, the equivalence test with its table of hand-only checks,
+  DEPENDENCY_AUDIT entries for the tool, the root `exclude` entry and the
+  `packaging/stonecrab.txt` update for the generated files. `mise run check`,
+  `coverage`, `lint-attrs` and `package` stay green.
+- S67: the `regen` task in `mise.toml`, the blocking `regen` job in
+  `.github/workflows/ci.yml` and its self-test.
+- Every later protocol that generates code adds its rows to the feature matrix, vectors for
+  each new construct (SPEC requirement 5) and its options to its `MANIFEST.toml`.

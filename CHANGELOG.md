@@ -20,6 +20,10 @@ placeholder.
 - Upstream Modbus test vectors (no crate changes): four Apache PLC4X test files are
   retained verbatim under `fixtures/modbus/upstream/` with NOTICE attribution, and the six
   frames of the parser suite are vectors, none of them in the published crate.
+- MSpec code generator decision (no crate changes): ADR-0019 chooses a native Rust
+  maintainer tool, `tools/stonecrab-codegen`, proven first on Modbus against the
+  hand-written codec through the vector corpus, with a provenance header and an offline
+  `regen` gate; nothing is generated yet.
 
 ## Alpha
 The first pre-release is `stonecrab` 0.2.0, one crate (ADR-0018). Its section below opens
