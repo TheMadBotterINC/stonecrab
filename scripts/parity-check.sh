@@ -15,7 +15,11 @@
 #
 # Because the exit criterion of S31 is "no implemented row without a test id", a third
 # check rides along: such a row must also carry at least one backticked test id in its
-# test-id column.
+# test-id column. And because a renamed test leaves its old name behind in the records,
+# a fourth: every backticked snake_case name (one underscore or more) in the test-id
+# column of such a row, or of a table without a `Status` column (the divergence tables'
+# regression tests), must appear as a word in crates/**/*.rs or fuzz/**/*.rs, or be the
+# file name of an example or a fuzz target.
 #
 # How a row id appears in the records: the first cell of a table row, an upper-case id of
 # two or more hyphen-joined groups (`MB-TCP-CONNECT`, `CORE-URI-GRAMMAR`). That is the
@@ -38,7 +42,7 @@ script_dir=$(cd "$(dirname "$0")" && pwd)
 repo_root=$(cd "$script_dir/.." && pwd)
 
 usage() {
-  sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 # Upper-case, hyphen-joined id as an extended regular expression (no anchors).
@@ -46,7 +50,9 @@ ID_RE='[A-Z][A-Z0-9]*(-[A-Z0-9]+)+'
 
 # Prints one line per row id, fields separated by the ASCII unit separator (a status may
 # be empty, which a tab separator would collapse), in docs/parity/*.md:
-#   file  line  id  status  test-cell-has-backticked-id(0|1)  has-status-column(0|1)
+#   ROW  file  line  id  status  test-cell-has-backticked-id(0|1)  has-status-column(0|1)
+# one line per test name the fourth check covers:
+#   TOK  file  line  id  name
 # and, on stderr via a leading "ERR" line on stdout, any malformed table.
 extract_rows() { # parity-directory
   local f
@@ -84,6 +90,13 @@ extract_rows() { # parity-directory
         hastest = 0
         if (testcol && cell[testcol] ~ /`[^`]+`/) hastest = 1
         printf "ROW\037%s\037%d\037%s\037%s\037%d\037%d\n", file, FNR, cell[1], status, hastest, (statuscol ? 1 : 0)
+        if (testcol && (!statuscol || status ~ /^(implemented|automated-verified)/)) {
+          rest = cell[testcol]
+          while (match(rest, /`[a-z][a-z0-9]*(_[a-z0-9]+)+`/)) {
+            printf "TOK\037%s\037%d\037%s\037%s\n", file, FNR, cell[1], substr(rest, RSTART + 1, RLENGTH - 2)
+            rest = substr(rest, RSTART + RLENGTH)
+          }
+        }
       }
     ' "$f"
   done
@@ -112,7 +125,7 @@ scan() { # root
 
   # Source files: the three scan sets of the header comment. A tree without one of the
   # roots (a fixture, say) is searched in the roots it has.
-  local lib_files test_files all_files roots=()
+  local lib_files test_files all_files name_files roots=()
   [ -d crates ] && roots+=(crates)
   if [ "${#roots[@]}" -eq 0 ]; then
     printf 'parity-check: no crates directory under %s\n' "$root" >&2
@@ -123,6 +136,7 @@ scan() { # root
   test_files=$(find "${roots[@]}" -type f -name '*.rs' |
     awk '/^crates\/[^\/]+\/tests\// { print }' | sort)
   all_files=$(printf '%s\n%s\n' "$lib_files" "$test_files" | awk 'NF' | sort -u)
+  name_files=$(find "${roots[@]}" $( [ -d fuzz ] && echo fuzz ) -type f -name '*.rs' | sort)
   if [ -z "$lib_files" ]; then
     printf 'parity-check: no crates/*/src/**/*.rs under %s\n' "$root" >&2
     return 1
@@ -187,6 +201,23 @@ EOF
 $rows
 EOF
   rm -f "$tokens_file"
+
+  # The fourth check: every cited test name is a word of the Rust sources, examples and
+  # fuzz targets, or one of their file names.
+  local words_file
+  words_file=$(mktemp)
+  { printf '%s\n' "$name_files" | awk 'NF' | xargs grep -ohwE '[a-z_][a-z0-9_]*' 2>/dev/null || true
+    printf '%s\n' "$name_files" | awk 'NF' | sed 's#.*/##; s#\.rs$##'
+  } | sort -u >"$words_file"
+  while IFS=$'\037' read -r file lineno id token; do
+    [ -n "$file" ] || continue
+    report "$file" "$lineno" "$id" "cites \`$token\`, which no Rust source, example or fuzz target names"
+  done <<EOF
+$(printf '%s\n' "$rows" | awk -F'\037' -v words="$words_file" '
+    BEGIN { while ((getline w < words) > 0) known[w] = 1 }
+    $1 == "TOK" && !($5 in known) { print $2 "\037" $3 "\037" $4 "\037" $5 }')
+EOF
+  rm -f "$words_file"
 
   if [ "$violations" -gt 0 ]; then
     printf 'parity-check: FAIL, %s finding(s)\n' "$violations" >&2

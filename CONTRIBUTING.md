@@ -11,8 +11,10 @@ of the same names; `mise run coverage` applies the per-module thresholds of ADR-
 `mise run parity` (`scripts/parity-check.sh`) fails when a `# Compatibility:
 docs/parity/<file>.md#<ROW-ID>` section in `crates/*/src` names a row that does not exist,
 or when a row marked `implemented` or `automated-verified` in `docs/parity/*.md` has no
-test id or is named by no `# Compatibility` section or test; a change to a parity row and
-to the code it describes goes in the same PR.
+test id or is named by no `# Compatibility` section or test, or when such a row (or a
+divergence row) cites a test name that no Rust source, example or fuzz target contains;
+a change to a parity row and to the code it describes goes in the same PR, and so does a
+test rename and the records that cite the test.
 Unit tests and doctests must also pass with `cargo test --all-features` (what `mise run
 check` runs). A plain `cargo test` builds only the default features, leaves out the
 `testkit` feature and skips the test files that need it, so it runs the reduced suite; the

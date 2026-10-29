@@ -196,3 +196,15 @@ cargo-semver-checks 0.51.0, so a new lint release cannot fail an unchanged tree.
 change; assume minor"), so additive changes pass and a breaking change fails until the
 version bump that announces it, as CODING_STANDARDS 9.10 requires. The first blocking run
 is recorded in STATUS.md. Third-party actions still float on a major tag.
+
+Addendum (2026-10-28): cited test names. Twice since S31 a renamed test left its old name
+in a record (the S58 Linux serial test after its fix, and the S52b Toxiproxy reset test
+after its review), and the gate could not see it. A fourth check, (d), now fails when a
+backticked snake_case name with at least one underscore, in the test-id column of a row
+that (b) covers or of a divergence-table row, is neither a word of any `crates/**/*.rs` or
+`fuzz/**/*.rs` file nor the file name of an example or a fuzz target. It is a word check,
+not a `fn` check: a field or helper of the same name satisfies it, and it still does not
+prove that the test passes or verifies the row. When it was added, all 1,301 cited names
+resolved once the two stale ones were fixed. The self-test gains `fail-cited-test-renamed`,
+and every fixture now defines the names its record cites, so each fails only for its own
+defect.
