@@ -196,6 +196,25 @@ These are milestone-level until S41 gives them source-checked scope. Each is sli
 - **M4, PLC drivers.** S7 with the COTP transport, and EtherNet/IP with Logix, in the order E5 sets. Differential tests against PLC4J and named-device evidence before any hardware claim.
 - **M5, baseline parity.** ADS/AMS, SLMP and UMAS first, then the remaining protocols with their transports (CAN, SocketCAN, raw socket, PCAP replay). Tools in the order E6 sets, starting with the connection cache and Object PLC Mapping. The integrations list stays visible in every release matrix.
 
+### Phase K: follow-ups found while executing (added 2026-10-29)
+
+Slices that executing the plan without hardware showed were needed or possible. Each has a
+row in the slice log of STATUS.md once it lands. The connection cache and the event pump
+are the first tools of decision E6, taken ahead of M5 because they need neither hardware
+nor the generator; Object PLC Mapping is not taken, because the derive macro drawn in
+`docs/parity/tools.md` needs a proc-macro crate, which decision ADR-0018 (one crate) rules
+out until the maintainer decides how it should ship.
+
+| Slice | Work | Size | Depends on | Exit check |
+| --- | --- | --- | --- | --- |
+| S52e | Replay the documented SOLO SLM1-C map over Modbus RTU | S | S52d, S59 | The replay runs through `ModbusRtuDriver` (landed 2026-10-29) |
+| S57b | The flaky zero-idle test and a counter for frames dropped between exchanges | S | S57 | The race closed by a deterministic test (landed 2026-10-29) |
+| S59b | RTU against diagslave over a TCP gateway | S | S59, S61 | Job `interop-rtu` green (landed 2026-10-29) |
+| S60b | ASCII (and RTU, if it works) against diagslave through a socat pseudo-terminal | S | S60, S59b | An interop job green |
+| S68 | The connection cache (E6) | M | S47, S55 | `TOOL-CC-*` rows implemented (landed 2026-10-29) |
+| S69 | The event pump (E6) | M | S55, S68 | `TOOL-EP-*` rows implemented |
+| S70 | Raw bytes of a short Modbus reply; Modbus connection statistics | S | S52a, S57b | The two Known-gaps items closed |
+
 ## Test hardware
 
 E4 is deferred, so nothing here is bought yet. The devices were researched on 2026-10-28 against vendor documents. Prices are in USD from the vendors' stores that day, before sales tax. Device facts come from the linked documents; "engineering advice" marks what does not. Operating any device, the SigCore UC included, needs the maintainer's separate approval, as STATUS.md requires.
