@@ -1348,8 +1348,8 @@ otherwise fail with `InvalidAddress` naming the ambiguity and the two spellings 
 parse. An optional `{unit-id: N, byte-order: 'NAME'}` block follows the type. `TYPE` is one
 of `BOOL`, `BYTE`, `WORD`, `DWORD`, `LWORD`, `SINT`, `USINT`, `INT`, `UINT`, `DINT`,
 `UDINT`, `LINT`, `ULINT`, `REAL`, `LREAL`, one element per tag; bit areas accept `BOOL`
-only. `AddressConvention` has the single value `Plc4xCompatible` (`#[non_exhaustive]`);
-`ZeroBased` and `OneBased40001` are deferred (M2). Unlike the diagram, the address has no
+only. `AddressConvention` has the values `Plc4xCompatible`, `ZeroBased` and `OneBased40001`
+(`#[non_exhaustive]`; ADR-0015 addendum S51). Unlike the diagram, the address has no
 element `count`: the count lives on `Tag` and must be 1.
 
 **Session.** `ModbusSession::request(&pdu, unit_id, deadline, token)` encodes one read,
@@ -2065,7 +2065,7 @@ times out is retried per `RetryPolicy` (default one attempt), a write never.
 | 9.4 Reconnect with backoff | shipped, request-driven | no background sleep: the next request waits out the backoff; no `Subscription` participates (M2) |
 | 9.5 Polling subscription | **deferred, M2** | `SubscribeRequest`, `Subscription`, `QueuePolicy`, `LossCounters`, `StaleTracker` and the poll task do not exist |
 | 9.6 Write with an ambiguous outcome | shipped (S46) | the Modbus driver sends one request per item, reports `Unknown` for a request that went out without a usable answer and stops after the first one; the simulator's `UnknownAfterTransmit` step exercises the same |
-| 9.7 Sensor profile to measurement | partly shipped | `tags` and `measurements` exist; `Acquisition`, address convention `ZeroBased` and the polling loop are deferred (M2); the convention is `plc4x` |
+| 9.7 Sensor profile to measurement | partly shipped | `tags` and `measurements` exist; `Acquisition` and the polling loop are deferred (M2); a profile declares `plc4x`, `one-based-40001` or `zero-based` (S51) |
 
 ### 9.1 Connect through the registry
 

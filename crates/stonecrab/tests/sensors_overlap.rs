@@ -354,6 +354,42 @@ mod tests {
         );
     }
 
+    /// The canonical (one-based) address text of the one measurement of a `modbus-tcp`
+    /// profile that declares `convention` and reads `address`.
+    fn canonical_under(convention: &str, address: &str) -> String {
+        let text = format!(
+            "id = \"synthetic_convention\"\nschema_version = 1\nvalidation = \"synthetic\"\n\
+             [connection]\nscheme = \"modbus-tcp\"\naddress_convention = \"{convention}\"\n\
+             [provenance]\nsource = \"Synthetic test profile\"\n\
+             [[measurements]]\nname = \"level\"\naddress = \"{address}:WORD\"\n\
+             data_type = \"WORD\"\nunit = \"1\"\n"
+        );
+        let profile = SensorProfile::from_toml(&text).expect("test document loads");
+        let tags = profile.tags(&ModbusTcpDriver::new()).expect("tags build");
+        tags.first().expect("one tag").address().canonical()
+    }
+
+    // covers: MB-ADDR-CONVENTIONS
+    #[test]
+    fn the_declared_convention_decides_the_wire_offset_of_the_tags() {
+        // Wire offset 0 is spelled `0` zero-based and `1` (or `40001`) one-based; the
+        // canonical text is one-based whatever the convention.
+        let first = "holding-register:1:WORD";
+        assert_eq!(canonical_under("zero-based", "holding-register:0"), first);
+        assert_eq!(canonical_under("zero-based", "40000"), first);
+        assert_eq!(canonical_under("one-based-40001", "40001"), first);
+        assert_eq!(canonical_under("plc4x", "holding-register:1"), first);
+        // The same text reads one register further under zero-based.
+        assert_eq!(
+            canonical_under("zero-based", "holding-register:1"),
+            "holding-register:2:WORD"
+        );
+        assert_eq!(
+            canonical_under("one-based-40001", "holding-register:1"),
+            first
+        );
+    }
+
     // covers: SENSORS-VALIDATION / a refused status address is reported by validate_for
     #[test]
     fn a_refused_status_address_is_reported_once_and_in_document_order() {

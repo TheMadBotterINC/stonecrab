@@ -9,13 +9,13 @@ use crate::{ErrorKind, PlcError, Result};
 /// [`Clone`] so a caller can take it from a
 /// [`ConnectionConfig`](crate::ConnectionConfig) before `connect` consumes the config.
 ///
-/// The only option at alpha is the address convention, which selects how ambiguous
-/// address spellings are read. It is derived from the shared connection-string key
+/// The only option is the address convention, which selects how ambiguous address
+/// spellings are read. It is derived from the shared connection-string key
 /// `address-convention`: every driver maps that key into [`AddressOptionsBuilder`], so
-/// the key means the same thing for every scheme. The Modbus driver accepts only the
-/// value `plc4x` at alpha and rejects any other name as an invalid address (D16). Core
-/// does not know the legal names; it only guarantees the name is a short token with no
-/// whitespace or control characters, so a driver can compare it without further
+/// the key means the same thing for every scheme. The Modbus driver accepts `plc4x`,
+/// `one-based-40001` and `zero-based` and rejects any other name as an invalid address
+/// (D16). Core does not know the legal names; it only guarantees the name is a short token
+/// with no whitespace or control characters, so a driver can compare it without further
 /// normalisation.
 ///
 /// The default carries no convention, which means "none supplied", not "use the

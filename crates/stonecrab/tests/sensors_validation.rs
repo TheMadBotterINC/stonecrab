@@ -360,6 +360,24 @@ mod tests {
         assert_eq!(declared.validate(), Ok(()));
     }
 
+    // covers: MB-ADDR-CONVENTIONS
+    #[test]
+    fn a_profile_may_declare_any_of_the_three_conventions() {
+        for name in ["plc4x", "one-based-40001", "zero-based"] {
+            let declared = profile(
+                &format!("scheme = \"modbus-tcp\"\naddress_convention = \"{name}\""),
+                &[],
+            );
+            assert_eq!(declared.validate(), Ok(()), "{name}");
+            let options = declared.address_options().expect("a convention name");
+            assert_eq!(
+                options.convention(),
+                Some(name),
+                "{name} reaches the options"
+            );
+        }
+    }
+
     // covers: SENSORS-VALIDATION / every error is returned, in document order
     #[test]
     fn a_profile_with_several_faults_returns_every_error_in_document_order() {

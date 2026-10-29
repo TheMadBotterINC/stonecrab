@@ -136,7 +136,8 @@ pub enum ProfileError {
         /// Position of the reference in `bad_when` followed by `uncertain_when`.
         entry: usize,
     },
-    /// The connection declares an address convention other than `plc4x`.
+    /// The connection declares an address convention other than `plc4x`, `one-based-40001`
+    /// or `zero-based`.
     UnknownAddressConvention,
     /// The scheme is `modbus-tcp` and the connection declares no address convention.
     MissingAddressConvention,
@@ -293,9 +294,10 @@ impl fmt::Display for ProfileError {
                 f,
                 "quality entry {entry} of measurement {measurement} names an undeclared status field"
             ),
-            Self::UnknownAddressConvention => {
-                f.write_str("the address convention is not supported; the only convention is plc4x")
-            }
+            Self::UnknownAddressConvention => f.write_str(
+                "the address convention is not supported; the conventions are plc4x, \
+                     one-based-40001 and zero-based",
+            ),
             Self::MissingAddressConvention => {
                 f.write_str("a modbus-tcp profile must declare its address_convention")
             }
@@ -436,7 +438,8 @@ mod tests {
             ),
             (
                 ProfileError::UnknownAddressConvention,
-                "the address convention is not supported; the only convention is plc4x",
+                "the address convention is not supported; the conventions are plc4x, \
+                 one-based-40001 and zero-based",
             ),
             (
                 ProfileError::MissingAddressConvention,

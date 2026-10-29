@@ -7,8 +7,10 @@ use crate::sensors::{
 };
 use crate::{AddressOptions, PlcValueType};
 
-/// The one address convention that exists at alpha.
-const PLC4X_CONVENTION: &str = "plc4x";
+/// The address conventions a profile may declare: the names of the Modbus conventions
+/// (`stonecrab::modbus::AddressConvention`; this module does not depend on the `modbus`
+/// feature).
+const CONVENTIONS: [&str; 3] = ["plc4x", "one-based-40001", "zero-based"];
 
 /// The connection scheme whose profiles must declare an address convention (decision D17).
 const MODBUS_TCP_SCHEME: &str = "modbus-tcp";
@@ -29,8 +31,9 @@ impl SensorProfile {
     /// its 0-based index; errors never contain any text of the profile.
     ///
     /// Rules:
-    /// - the address convention, when set, is `plc4x`, and a `modbus-tcp` connection must
-    ///   set it (`UnknownAddressConvention`, `MissingAddressConvention`);
+    /// - the address convention, when set, is `plc4x`, `one-based-40001` or `zero-based`,
+    ///   and a `modbus-tcp` connection must set it (`UnknownAddressConvention`,
+    ///   `MissingAddressConvention`);
     /// - measurement names are unique (`DuplicateMeasurementName`; the later one is
     ///   reported). Names are `snake_case` already, because the loader refuses anything
     ///   else;
@@ -248,7 +251,7 @@ impl SensorProfile {
 
 fn check_connection(connection: &ConnectionRequirements, errors: &mut Vec<ProfileError>) {
     match connection.address_convention.as_deref() {
-        Some(PLC4X_CONVENTION) => {}
+        Some(name) if CONVENTIONS.contains(&name) => {}
         Some(_) => errors.push(ProfileError::UnknownAddressConvention),
         None if connection.scheme == MODBUS_TCP_SCHEME => {
             errors.push(ProfileError::MissingAddressConvention);
@@ -517,7 +520,13 @@ mod tests {
     fn arb_profile() -> impl Strategy<Value = SensorProfile> {
         (
             prop::sample::select(vec!["modbus-tcp", "sim", ""]),
-            prop::option::of(prop::sample::select(vec!["plc4x", "other", ""])),
+            prop::option::of(prop::sample::select(vec![
+                "plc4x",
+                "zero-based",
+                "one-based-40001",
+                "other",
+                "",
+            ])),
             prop::collection::vec(arb_measurement(), 0..5),
         )
             .prop_map(|(scheme, convention, measurements)| SensorProfile {
@@ -542,7 +551,7 @@ mod tests {
     fn oracle_says_valid(profile: &SensorProfile) -> bool {
         let connection = &profile.connection;
         let convention_ok = match connection.address_convention.as_deref() {
-            Some(text) => text == "plc4x",
+            Some(text) => ["plc4x", "one-based-40001", "zero-based"].contains(&text),
             None => connection.scheme != "modbus-tcp",
         };
         let names: BTreeSet<&str> = profile
@@ -676,5 +685,28 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// `CONVENTIONS` repeats the names of `AddressConvention`; this fails to compile when a
+    /// variant is added (the match has no wildcard) and fails when the lists differ.
+    #[cfg(feature = "modbus")]
+    #[test]
+    fn the_declarable_conventions_are_the_modbus_conventions() {
+        use crate::modbus::AddressConvention;
+
+        let all = [
+            AddressConvention::Plc4xCompatible,
+            AddressConvention::ZeroBased,
+            AddressConvention::OneBased40001,
+        ];
+        for convention in all {
+            match convention {
+                AddressConvention::Plc4xCompatible
+                | AddressConvention::ZeroBased
+                | AddressConvention::OneBased40001 => {}
+            }
+            assert!(CONVENTIONS.contains(&convention.name()));
+        }
+        assert_eq!(CONVENTIONS.len(), all.len());
     }
 }

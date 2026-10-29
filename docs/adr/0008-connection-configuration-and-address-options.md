@@ -242,3 +242,8 @@ S08, and the first enforcement of the policies with S11b-2, S19 and S25.
 Decision 5 no longer holds for `modbus-tcp`, which now writes. `access=read-write` in its
 connection string sets this policy; see the S46 addendum of ADR-0015, which supersedes the
 sentence about the alpha.
+
+## Addendum (S51, 2026-10-28)
+The sentence about `ModbusTcpDriver` accepting only `plc4x` no longer holds: it accepts
+`plc4x`, `one-based-40001` and `zero-based`. See the S51 addendum of ADR-0015. Core is
+unchanged, as this ADR intended.

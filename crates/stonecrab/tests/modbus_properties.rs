@@ -33,11 +33,30 @@ mod tests {
         ModbusDataType::LReal,
     ];
 
-    fn plc4x() -> AddressOptions {
+    fn named(convention: &str) -> AddressOptions {
         AddressOptions::builder()
-            .convention("plc4x")
+            .convention(convention)
             .build()
-            .expect("plc4x is a valid convention name")
+            .expect("a valid convention name")
+    }
+
+    fn plc4x() -> AddressOptions {
+        named("plc4x")
+    }
+
+    /// No convention, then each of the three.
+    fn every_option() -> [AddressOptions; 4] {
+        [
+            AddressOptions::default(),
+            plc4x(),
+            named("one-based-40001"),
+            named("zero-based"),
+        ]
+    }
+
+    /// The options under which the one-based canonical text reads back unchanged.
+    fn one_based_options() -> [AddressOptions; 3] {
+        [AddressOptions::default(), plc4x(), named("one-based-40001")]
     }
 
     fn orders() -> impl Strategy<Value = Option<(ByteOrder, WordOrder)>> {
@@ -82,7 +101,7 @@ mod tests {
             long in "\\PC{0,400}",
         ) {
             for text in [&arbitrary, &soup, &long] {
-                for options in [AddressOptions::default(), plc4x()] {
+                for options in every_option() {
                     if let Err(error) = ModbusAddress::parse(text, &options) {
                         prop_assert_eq!(error.kind(), ErrorKind::InvalidAddress);
                         prop_assert!(!error.to_string().chars().any(char::is_control));
@@ -117,7 +136,7 @@ mod tests {
                 return Ok(());
             };
             let canonical = address.canonical();
-            for options in [AddressOptions::default(), plc4x()] {
+            for options in one_based_options() {
                 let parsed = ModbusAddress::parse(&canonical, &options);
                 prop_assert_eq!(parsed.as_ref().ok(), Some(&address), "{}", canonical);
             }
@@ -126,10 +145,13 @@ mod tests {
         // covers: SPEC mandatory-failure-cases / F3 invalid register
         #[test]
         fn prop_parse_success_is_stable_under_canonicalisation(soup in grammar_soup()) {
-            for options in [AddressOptions::default(), plc4x()] {
+            // The canonical text is one-based whatever convention read the soup.
+            for options in every_option() {
                 if let Ok(address) = ModbusAddress::parse(&soup, &options) {
-                    let again = ModbusAddress::parse(&address.canonical(), &options);
-                    prop_assert_eq!(again.as_ref().ok(), Some(&address));
+                    for again in one_based_options() {
+                        let reread = ModbusAddress::parse(&address.canonical(), &again);
+                        prop_assert_eq!(reread.as_ref().ok(), Some(&address));
+                    }
                 }
             }
         }
@@ -148,6 +170,27 @@ mod tests {
             prop_assert_eq!(&long, &ModbusAddress::parse(&short, &AddressOptions::default()).ok());
             prop_assert_eq!(&long, &ModbusAddress::parse(&bare, &plc4x()).ok());
             prop_assert!(ModbusAddress::parse(&bare, &AddressOptions::default()).is_err());
+            prop_assert_eq!(&long, &ModbusAddress::parse(&bare, &named("one-based-40001")).ok());
+        }
+
+        // covers: MB-ADDR-CONVENTIONS
+        #[test]
+        fn prop_zero_based_forms_agree_and_sit_one_below_the_one_based_number(
+            area in proptest::sample::select(AREAS.to_vec()),
+            number in 0_u32..=65_535,
+        ) {
+            let zero = named("zero-based");
+            let long = format!("{}:{}", area.long_name(), number);
+            let short = format!("{}x{:05}", area.prefix_digit(), number);
+            let bare = format!("{}{:05}", area.prefix_digit(), number);
+            let long = ModbusAddress::parse(&long, &zero).ok();
+            prop_assert!(long.is_some());
+            prop_assert_eq!(long.as_ref().map(|a| u32::from(a.offset())), Some(number));
+            prop_assert_eq!(&long, &ModbusAddress::parse(&short, &zero).ok());
+            prop_assert_eq!(&long, &ModbusAddress::parse(&bare, &zero).ok());
+            // The same register in the one-based spelling has the number plus one.
+            let one_based = format!("{}:{}", area.long_name(), number.saturating_add(1));
+            prop_assert_eq!(&long, &ModbusAddress::parse(&one_based, &plc4x()).ok());
         }
     }
 }

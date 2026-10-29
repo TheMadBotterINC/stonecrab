@@ -247,7 +247,7 @@ mod tests {
                 "{text} names the prefixed spelling: {message}"
             );
             assert!(
-                message.contains("address-convention=plc4x"),
+                message.contains("address-convention to plc4x, one-based-40001 or zero-based"),
                 "{text} says how to opt in: {message}"
             );
         }
@@ -297,7 +297,7 @@ mod tests {
     // covers: SPEC mandatory-failure-cases / F3 invalid register
     #[test]
     fn unknown_convention_name_is_rejected() {
-        for name in ["PLC4X", "plc4x2", "zero-based", "one-based", "x"] {
+        for name in ["PLC4X", "plc4x2", "zero_based", "one-based", "x"] {
             let options = AddressOptions::builder()
                 .convention(name)
                 .build()
@@ -941,6 +941,230 @@ mod tests {
             accept_plc4x("40016").canonical(),
             "holding-register:16:INT",
             "the bare form is never rendered"
+        );
+    }
+
+    fn with(name: &str) -> AddressOptions {
+        AddressOptions::builder()
+            .convention(name)
+            .build()
+            .expect("a valid convention name")
+    }
+
+    /// The conventions that read numbers from 1, then the one that reads from 0.
+    const ONE_BASED: [&str; 2] = ["plc4x", "one-based-40001"];
+    const ZERO_BASED: &str = "zero-based";
+
+    /// Every area with its long name and prefix digit.
+    const AREAS: [(ModbusArea, &str, u8); 4] = [
+        (ModbusArea::Coil, "coil", 0),
+        (ModbusArea::DiscreteInput, "discrete-input", 1),
+        (ModbusArea::InputRegister, "input-register", 3),
+        (ModbusArea::HoldingRegister, "holding-register", 4),
+    ];
+
+    /// The numbers at the edges of the digit groups and of the map.
+    const BOUNDARIES: [u32; 6] = [0, 1, 9_999, 10_000, 65_535, 65_536];
+
+    /// Every spelling of `number` on an area: long, prefixed short and the two bare
+    /// lengths (a 4-digit group only while the number has at most 4 digits).
+    fn spellings(name: &str, prefix: u8, number: u32) -> Vec<(&'static str, String)> {
+        let mut texts = vec![
+            ("long", format!("{name}:{number}")),
+            ("prefixed", format!("{prefix}x{number:05}")),
+            ("bare 6 digits", format!("{prefix}{number:05}")),
+        ];
+        if number <= 9_999 {
+            texts.push(("prefixed 4 digits", format!("{prefix}x{number:04}")));
+            texts.push(("bare 5 digits", format!("{prefix}{number:04}")));
+        }
+        texts
+    }
+
+    // covers: MB-ADDR-CONVENTIONS
+    #[test]
+    fn each_convention_reads_every_form_on_every_area_at_the_boundaries() {
+        for (area, name, prefix) in AREAS {
+            for number in BOUNDARIES {
+                for (form, text) in spellings(name, prefix, number) {
+                    let bare = form.starts_with("bare");
+                    // One-based: the number minus one, 1 to 65536.
+                    for convention in ONE_BASED {
+                        let result = ModbusAddress::parse(&text, &with(convention));
+                        if number == 0 {
+                            let message = result.expect_err("0 is not one-based").to_string();
+                            assert!(message.contains("logical address 0"), "{text}: {message}");
+                        } else {
+                            let address = result
+                                .unwrap_or_else(|e| panic!("{convention} {form} {text}: {e}"));
+                            assert_eq!(address.area(), area, "{convention} {text}");
+                            assert_eq!(
+                                u32::from(address.offset()),
+                                number - 1,
+                                "{convention} {text}"
+                            );
+                        }
+                    }
+                    // Zero-based: the number itself, 0 to 65535.
+                    let result = ModbusAddress::parse(&text, &with(ZERO_BASED));
+                    if number <= 65_535 {
+                        let address =
+                            result.unwrap_or_else(|e| panic!("zero-based {form} {text}: {e}"));
+                        assert_eq!(address.area(), area, "zero-based {text}");
+                        assert_eq!(u32::from(address.offset()), number, "zero-based {text}");
+                    } else {
+                        let message = result.expect_err("65536 is past the map").to_string();
+                        assert!(
+                            message.contains("zero-based address 65536 is above 65535"),
+                            "{text}: {message}"
+                        );
+                    }
+                    // No convention: the PLC4X reading of the unambiguous forms, and the
+                    // bare forms refused whatever their number.
+                    let plain = ModbusAddress::parse(&text, &none());
+                    if bare {
+                        assert!(plain.is_err(), "{text} needs a convention");
+                    } else if (1..=65_536).contains(&number) {
+                        assert_eq!(
+                            u32::from(plain.expect("unambiguous form").offset()),
+                            number - 1,
+                            "no convention, {text}"
+                        );
+                    } else {
+                        assert!(plain.is_err(), "no convention, {text}");
+                    }
+                }
+            }
+        }
+    }
+
+    // covers: MB-ADDR-CONVENTIONS
+    #[test]
+    fn the_same_text_is_one_register_higher_under_zero_based() {
+        for text in ["holding-register:16", "4x00016", "40016"] {
+            let one = ModbusAddress::parse(text, &with("one-based-40001")).expect("one-based");
+            let zero = ModbusAddress::parse(text, &with("zero-based")).expect("zero-based");
+            assert_eq!(one.offset(), 15, "{text} one-based");
+            assert_eq!(zero.offset(), 16, "{text} zero-based");
+        }
+        // The first register has the number 1 or 0 by convention, and the same wire offset.
+        let first_one = ModbusAddress::parse("40001", &with("one-based-40001")).expect("first");
+        let first_zero = ModbusAddress::parse("40000", &with("zero-based")).expect("first");
+        assert_eq!(first_one, first_zero, "one register, two spellings");
+        assert_eq!(first_zero.offset(), 0);
+    }
+
+    // covers: MB-ADDR-CONVENTIONS
+    #[test]
+    fn the_two_one_based_names_read_every_spelling_alike() {
+        for text in [
+            "holding-register:16:REAL{unit-id: 2}",
+            "4x00016:INT",
+            "40016:UINT{byte-order: 'LITTLE_ENDIAN'}",
+            "00001",
+            "165536",
+            "30001:LREAL",
+        ] {
+            assert_eq!(
+                ModbusAddress::parse(text, &with("plc4x")).ok(),
+                ModbusAddress::parse(text, &with("one-based-40001")).ok(),
+                "{text}"
+            );
+        }
+        assert_eq!(accept_plc4x("40016"), accept("4x00016"), "as before");
+    }
+
+    // covers: MB-ADDR-CONVENTIONS
+    #[test]
+    fn an_address_is_the_wire_target_whatever_the_convention_that_read_it() {
+        let zero = ModbusAddress::parse("holding-register:0:REAL{unit-id: 3}", &with("zero-based"))
+            .expect("zero-based");
+        let one = accept("holding-register:1:REAL{unit-id: 3}");
+        assert_eq!(zero, one, "equal wire targets compare equal");
+        assert_eq!(
+            zero.convention(),
+            AddressConvention::Plc4xCompatible,
+            "an address records no reading"
+        );
+        assert_eq!(
+            zero.canonical(),
+            "holding-register:1:REAL{unit-id: 3}",
+            "canonical text is one-based"
+        );
+        assert_eq!(accept(&zero.canonical()), zero, "and reads back with none");
+    }
+
+    // covers: MB-ADDR-CONVENTIONS
+    #[test]
+    fn zero_based_spans_end_at_wire_offset_65535() {
+        let options = with("zero-based");
+        let last = ModbusAddress::parse("holding-register:65532:LREAL", &options).expect("fits");
+        assert_eq!(last.offset(), 65_532);
+        let edge = ModbusAddress::parse("holding-register:65535", &options).expect("one INT");
+        assert_eq!(edge.offset(), 65_535);
+        let past = reject_with("holding-register:65533:LREAL", &options).to_string();
+        assert!(past.contains("passes the last address"), "{past}");
+        // Four digits are enough for a bare number only up to 9999; five give the rest.
+        assert_eq!(
+            ModbusAddress::parse("465535:INT", &options)
+                .expect("top")
+                .offset(),
+            65_535
+        );
+    }
+
+    // covers: MB-ADDR-CONVENTIONS
+    #[test]
+    fn digit_counts_and_prefixes_are_checked_under_every_convention() {
+        for convention in ["plc4x", "one-based-40001", "zero-based"] {
+            let options = with(convention);
+            for text in [
+                "4001",
+                "4000001",
+                "20001",
+                "60001",
+                "4x001",
+                "4x000001",
+                "2x00001",
+                "6x00001",
+                "holding-register:",
+                "holding-register:1234567890",
+                "holding-register:0x10",
+            ] {
+                reject_with(text, &options);
+            }
+        }
+    }
+
+    // covers: MB-ADDR-CONVENTIONS
+    #[test]
+    fn the_names_are_exact_and_round_trip() {
+        for convention in [
+            AddressConvention::Plc4xCompatible,
+            AddressConvention::ZeroBased,
+            AddressConvention::OneBased40001,
+        ] {
+            assert_eq!(
+                AddressConvention::from_name(convention.name()),
+                Some(convention)
+            );
+        }
+        assert_eq!(AddressConvention::ZeroBased.name(), "zero-based");
+        assert_eq!(AddressConvention::OneBased40001.name(), "one-based-40001");
+        for name in [
+            "",
+            "ZeroBased",
+            "zero_based",
+            "Zero-Based",
+            " zero-based",
+            "one-based",
+        ] {
+            assert_eq!(AddressConvention::from_name(name), None, "{name:?}");
+        }
+        let message = reject_with("40001", &with("one-based")).to_string();
+        assert!(
+            message.contains("plc4x, one-based-40001 and zero-based"),
+            "the refusal lists the names: {message}"
         );
     }
 }

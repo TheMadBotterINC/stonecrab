@@ -103,8 +103,8 @@ impl SensorProfile {
     /// Returns [`ProfileError::UnknownAddressConvention`] when the declared convention is
     /// not a valid convention name (empty, longer than 64 bytes, or containing whitespace
     /// or control characters). [`SensorProfile::validate`] is stricter and accepts only
-    /// `plc4x`. The error converts into a [`PlcError`](crate::PlcError) of kind
-    /// `InvalidConfig`.
+    /// `plc4x`, `one-based-40001` and `zero-based`. The error converts into a
+    /// [`PlcError`](crate::PlcError) of kind `InvalidConfig`.
     ///
     /// # Compatibility: docs/parity/sensors.md#SENSORS-TAGS
     /// Upstream parses address text with the driver's field handler and has no convention

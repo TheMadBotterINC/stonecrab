@@ -528,8 +528,26 @@ mod tests {
             .parse_address("40001:UINT", &explicit.address_options())
             .expect("the bare form under the explicit convention");
         assert_eq!(address.canonical(), "holding-register:1:UINT");
-        for value in ["", "zero-based", "PLC4X", "plc4x2"] {
+        for value in ["", "zero_based", "one-based", "PLC4X", "plc4x2"] {
             assert_refused(&format!("{HOST}?address-convention={value}"));
+        }
+    }
+
+    // covers: MB-ADDR-CONVENTIONS
+    #[test]
+    fn address_convention_names_reach_the_address_options() {
+        let driver = driver();
+        for (name, canonical) in [
+            ("plc4x", "holding-register:1:UINT"),
+            ("one-based-40001", "holding-register:1:UINT"),
+            ("zero-based", "holding-register:2:UINT"),
+        ] {
+            let config = config(&format!("{HOST}?address-convention={name}"));
+            assert_eq!(config.address_options().convention(), Some(name), "{name}");
+            let address = driver
+                .parse_address("40001:UINT", &config.address_options())
+                .expect("the bare form under an explicit convention");
+            assert_eq!(address.canonical(), canonical, "{name}");
         }
     }
 

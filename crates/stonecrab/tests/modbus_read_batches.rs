@@ -420,6 +420,39 @@ mod tests {
         assert_eq!(rig.sent(0).len(), 2, "both chunks were requested");
     }
 
+    // covers: MB-READ-GAP
+    #[test]
+    fn a_hole_between_two_tags_is_never_read_so_it_cannot_fail_either() {
+        // Registers 3 to 9 are not mapped in this device. Reading through the hole as one
+        // ten-register request would be refused with exception 02 and fail all three tags;
+        // two requests that stop at the tags' own registers both succeed.
+        let rig = Rig::open(vec![
+            Step::Expect(read_request(1, 1, 0x03, 0, 2)),
+            Step::Reply(registers_reply(1, 1, 0x03, &[5, 6])),
+            Step::Expect(read_request(2, 1, 0x03, 9, 1)),
+            Step::Reply(registers_reply(2, 1, 0x03, &[7])),
+        ]);
+        let response = rig
+            .read(vec![
+                tag("first", "holding-register:1"),
+                tag("second", "holding-register:2"),
+                tag("far", "holding-register:10"),
+            ])
+            .expect("the read succeeds");
+        assert_eq!(response.split_into().get(), 2, "the hole splits the read");
+        assert_eq!(value_of(&response, "first"), PlcValue::I16(5), "first");
+        assert_eq!(value_of(&response, "second"), PlcValue::I16(6), "second");
+        assert_eq!(value_of(&response, "far"), PlcValue::I16(7), "far");
+        assert_eq!(
+            rig.sent(0),
+            [
+                read_request(1, 1, 0x03, 0, 2),
+                read_request(2, 1, 0x03, 9, 1)
+            ],
+            "no request covers an address no tag asked for"
+        );
+    }
+
     // covers: SPEC mandatory-failure-cases / F3 mixed success, device exception
     #[test]
     fn an_exception_in_the_last_chunk_fails_every_member_of_that_chunk() {

@@ -193,7 +193,7 @@ pub struct Member {
 ///
 /// # Compatibility: docs/parity/modbus.md#MB-READ-MERGE
 /// A chunk is the counterpart of an upstream merged block (docs/parity/modbus.md#MB-READ-MERGE)
-/// except that it never spans a gap (docs/parity/modbus.md#MB-READ-GAP).
+/// except that it never spans a gap (docs/parity/modbus.md#MB-READ-GAP, decided in S51).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Chunk {
@@ -293,7 +293,8 @@ impl Batcher {
     ///
     /// # Compatibility: docs/parity/modbus.md#MB-READ-MERGE
     /// Counterpart of upstream `ModbusReadOptimizer` (docs/parity/modbus.md#MB-READ-MERGE).
-    /// Divergence: no gap reads (docs/parity/modbus.md#MB-READ-GAP). The bounds are
+    /// Divergence: no gap reads, a decision upstream gives no option to reverse
+    /// (docs/parity/modbus.md#MB-READ-GAP). The bounds are
     /// docs/parity/modbus.md#MB-LIMIT-REGISTERS (63 `DINT` tags are 126 registers and
     /// split into two chunks) and docs/parity/modbus.md#MB-LIMIT-COILS.
     #[must_use = "a plan does nothing until its chunks are read"]

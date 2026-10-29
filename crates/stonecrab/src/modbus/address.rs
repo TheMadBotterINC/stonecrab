@@ -463,32 +463,99 @@ impl ModbusDataType {
     }
 }
 
-/// How the digits of an address are interpreted.
+/// How the numbers of an address are read.
 ///
-/// The enum is `#[non_exhaustive]`: `ZeroBased` and `OneBased40001` conventions are
-/// planned for a later milestone. The convention does not change what a parsed
-/// [`ModbusAddress`] means; it records which convention the address text was read under
-/// so that selection stays explicit rather than a hidden driver state.
+/// The convention decides two things about address text: which spellings are accepted
+/// and what offset the written number is counted from. It is not part of the address it
+/// produces, which is always the wire offset (see [`ModbusAddress::convention`]).
+/// The enum is `#[non_exhaustive]`; a convention is selected by its name in
+/// [`AddressOptions`](crate::AddressOptions), never inferred from the text.
+///
+/// | Variant | Name | Number counts from | Long and prefixed short forms | Bare short forms |
+/// | --- | --- | --- | --- | --- |
+/// | (none supplied) | | 1 | accepted | refused |
+/// | [`Plc4xCompatible`](Self::Plc4xCompatible) | `plc4x` | 1 | accepted | accepted |
+/// | [`OneBased40001`](Self::OneBased40001) | `one-based-40001` | 1 | accepted | accepted |
+/// | [`ZeroBased`](Self::ZeroBased) | `zero-based` | 0 | accepted | accepted |
+///
+/// Counting from 1, the wire offset is the number minus one and the numbers run from 1
+/// to 65536; counting from 0, the wire offset is the number and the numbers run from 0 to
+/// 65535. The rule applies to every number in the text: `holding-register:N`, the digits
+/// of `4xNNNNN` and the digits after the prefix digit of a bare `4NNNN`. So
+/// `holding-register:1` reads wire offset 0 with no convention, `plc4x` and
+/// `one-based-40001`, and wire offset 1 with `zero-based`. With none supplied the long and
+/// prefixed short forms keep the PLC4X reading and the bare forms are refused.
 ///
 /// # Examples
 /// ```
 /// use stonecrab::modbus::AddressConvention;
 /// assert_eq!(AddressConvention::default(), AddressConvention::Plc4xCompatible);
+/// assert_eq!(AddressConvention::ZeroBased.name(), "zero-based");
+/// assert_eq!(
+///     AddressConvention::from_name("one-based-40001"),
+///     Some(AddressConvention::OneBased40001)
+/// );
+/// assert_eq!(AddressConvention::from_name("PLC4X"), None);
 /// ```
 ///
 /// # Compatibility: docs/parity/modbus.md#MB-ADDR-BARE-40001
 /// `Plc4xCompatible` is the verified upstream grammar, in which a bare `40001` is
 /// holding register 1. Upstream accepts the bare forms unconditionally; Stonecrab accepts
-/// them only when the convention is supplied explicitly (divergence row of the same id,
-/// implemented by [`ModbusAddress::parse`]). Every parsed address carries this variant,
-/// whether or not the caller named the convention: the name decides what text is
-/// accepted, not what an accepted address means.
+/// them only when a convention is supplied explicitly (divergence row of the same id,
+/// implemented by [`ModbusAddress::parse`]). `OneBased40001` reads every spelling exactly
+/// as `Plc4xCompatible` does: the two names accept the same text and give the same
+/// offsets, and differ in what they promise. `plc4x` says the text follows the PLC4X
+/// grammar; `one-based-40001` says only that the numbers are the one-based Modicon
+/// numbers of a device manual, with no claim about PLC4X. `ZeroBased` has no upstream
+/// counterpart (docs/parity/modbus.md#MB-ADDR-CONVENTIONS).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[non_exhaustive]
 pub enum AddressConvention {
     /// The Apache PLC4X grammar: one-based logical addresses, wire address = logical - 1.
     #[default]
     Plc4xCompatible,
+    /// Numbers are the zero-based wire addresses of the protocol, 0 to 65535: `4x00000`,
+    /// `holding-register:0` and the bare `40000` are all wire offset 0.
+    ZeroBased,
+    /// Numbers are the one-based Modicon numbers of a device manual, as in
+    /// `Plc4xCompatible`: bare `40001` is the first holding register, wire offset 0.
+    OneBased40001,
+}
+
+impl AddressConvention {
+    /// The name that selects this convention in `address-convention` and in
+    /// [`AddressOptionsBuilder::convention`](crate::AddressOptionsBuilder::convention).
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab::modbus::AddressConvention;
+    /// assert_eq!(AddressConvention::Plc4xCompatible.name(), "plc4x");
+    /// assert_eq!(AddressConvention::OneBased40001.name(), "one-based-40001");
+    /// ```
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Plc4xCompatible => "plc4x",
+            Self::ZeroBased => "zero-based",
+            Self::OneBased40001 => "one-based-40001",
+        }
+    }
+
+    /// The convention a name selects, `None` for any other text. Names are exact: no
+    /// case folding and no trimming.
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab::modbus::AddressConvention;
+    /// assert_eq!(AddressConvention::from_name("plc4x"), Some(AddressConvention::Plc4xCompatible));
+    /// assert_eq!(AddressConvention::from_name("zero_based"), None);
+    /// ```
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        [Self::Plc4xCompatible, Self::ZeroBased, Self::OneBased40001]
+            .into_iter()
+            .find(|convention| convention.name() == name)
+    }
 }
 
 /// A validated Modbus read address: unit, area, wire offset, type and byte order.
@@ -521,8 +588,10 @@ pub enum AddressConvention {
 /// | `LittleEndian` | `HighWordFirst` | `BIG_ENDIAN_BYTE_SWAP` |
 /// | `BigEndian` | `LowWordFirst` | `LITTLE_ENDIAN_BYTE_SWAP` |
 ///
-/// [`ModbusAddress::parse`] accepts this text with or without an address convention and
-/// returns an equal address, which `prop_canonical_round_trips` checks.
+/// The number is one-based. [`ModbusAddress::parse`] accepts this text with no
+/// convention, `plc4x` or `one-based-40001` and returns an equal address, which
+/// `prop_canonical_round_trips` checks; under `zero-based` the same text names the next
+/// register up, so a zero-based reader writes the number minus one.
 ///
 /// # Examples
 /// ```
@@ -657,7 +726,12 @@ impl ModbusAddress {
         self.byte_order
     }
 
-    /// The convention the address text was read under.
+    /// The convention recorded on the address: [`AddressConvention::Plc4xCompatible`]
+    /// unless [`ModbusAddressBuilder::convention`] set another.
+    ///
+    /// [`ModbusAddress::parse`] never sets another: an address is a wire target, so the
+    /// same register read under `plc4x`, `one-based-40001` or `zero-based` compares equal
+    /// and renders the same [`canonical`](crate::ProtocolAddress::canonical) text.
     #[must_use]
     pub const fn convention(&self) -> AddressConvention {
         self.convention
@@ -761,7 +835,7 @@ impl ModbusAddressBuilder {
         self
     }
 
-    /// Set the convention the address text was read under.
+    /// Record a convention on the address; it does not change the offset.
     pub const fn convention(mut self, convention: AddressConvention) -> Self {
         self.convention = convention;
         self
@@ -872,16 +946,13 @@ const BYTE_ORDERS: [(ByteOrder, WordOrder); 4] = [
     (ByteOrder::BigEndian, WordOrder::LowWordFirst),
 ];
 
-/// The only convention name accepted at alpha.
-const PLC4X: &str = "plc4x";
-
 /// Most digits in the number of a long form (`\d{1,9}` upstream).
 const MAX_LONG_DIGITS: usize = 9;
 
-/// The last logical address: wire offset 65535 plus one.
-const LAST_LOGICAL: u32 = 65_536;
+/// The last wire offset.
+const LAST_WIRE: u32 = 65_535;
 
-/// The area, one-based logical address and unparsed remainder of the address head.
+/// The area, the number as written and the unparsed remainder of the address head.
 type Located<'a> = (ModbusArea, u32, &'a str);
 
 impl ModbusAddress {
@@ -889,21 +960,26 @@ impl ModbusAddress {
     /// any scanning.
     pub const MAX_TEXT_BYTES: usize = 256;
 
-    /// Parse address text under the PLC4X-compatible grammar.
+    /// Parse address text under the PLC4X-compatible grammar, or the convention named in
+    /// `options`.
     ///
     /// Accepted forms (everything is case-sensitive and the digits are decimal):
     ///
-    /// | Form | Example | Needs `address-convention=plc4x` |
+    /// | Form | Example | Needs a convention |
     /// | --- | --- | --- |
     /// | long, `AREA:N` or `AREA:N:TYPE` | `holding-register:16:INT` | no |
     /// | prefixed short, `0x`, `1x`, `3x`, `4x` plus 4 or 5 digits | `4x00016:INT` | no |
     /// | bare short, prefix digit `0`, `1`, `3`, `4` plus 4 or 5 digits | `40016:INT` | yes |
     ///
     /// `AREA` is `coil`, `discrete-input`, `holding-register` or `input-register`; the
-    /// long form takes 1 to 9 digits. The number is the one-based logical address: the
-    /// wire offset is the number minus one, so `holding-register:16` reads wire address
-    /// 15. When the type is omitted it is `BOOL` for the bit areas and `INT` for the
-    /// register areas. `TYPE` is one of the 15 upper-case names of
+    /// long form takes 1 to 9 digits. With no convention, `plc4x` or `one-based-40001`
+    /// the number is the one-based logical address: the wire offset is the number minus
+    /// one, so `holding-register:16` reads wire address 15 and the numbers run from 1 to
+    /// 65536. With `zero-based` the number is the wire offset itself, from 0 to 65535, so
+    /// `holding-register:16` reads wire address 16 and the bare `40016` too. The rule is
+    /// the same for every form; see [`AddressConvention`] for the table. When the type is
+    /// omitted it is `BOOL` for the bit areas and `INT` for the register areas. `TYPE` is
+    /// one of the 15 upper-case names of
     /// [`ModbusDataType`]. An address may end with a block
     /// `{unit-id: N, byte-order: 'NAME'}` holding either key or both, in any order:
     /// `unit-id` is a decimal integer from 0 to 255 and `byte-order` a quoted (single or
@@ -912,28 +988,32 @@ impl ModbusAddress {
     /// commas inside the braces and nowhere else; the brace follows the type directly. An
     /// empty block `{}` is accepted and sets nothing.
     ///
-    /// The convention is read from `options`: `None` means none was supplied, `plc4x` is
-    /// the only name accepted and anything else is an error even for unambiguous
-    /// spellings, so a misspelt option never goes unnoticed. The returned address always
-    /// carries [`AddressConvention::Plc4xCompatible`], the only variant; the convention
-    /// affects what is accepted, not what a parsed address means. [`canonical`] renders
-    /// the long form, which this function accepts under every option, so
-    /// `parse(canonical(a))` equals `a`.
+    /// The convention is read from `options`: `None` means none was supplied, `plc4x`,
+    /// `one-based-40001` and `zero-based` are the names accepted
+    /// ([`AddressConvention::from_name`]) and anything else is an error even for
+    /// unambiguous spellings, so a misspelt option never goes unnoticed. The returned
+    /// address always carries [`AddressConvention::Plc4xCompatible`]: the convention
+    /// decides what the text means, and the address is the wire offset that results.
+    /// [`canonical`] renders the one-based long form, which this function reads back to an
+    /// equal address with no convention, `plc4x` or `one-based-40001`, so
+    /// `parse(canonical(a))` equals `a` there; with `zero-based` the same text is one
+    /// register higher.
     ///
     /// [`canonical`]: crate::ProtocolAddress::canonical
     ///
     /// # Errors
     /// Returns [`ErrorKind::InvalidAddress`](crate::ErrorKind::InvalidAddress)
-    /// with a message naming the reason, for: a convention name other than `plc4x`; empty
-    /// input, input over [`MAX_TEXT_BYTES`](Self::MAX_TEXT_BYTES) bytes or input with a
-    /// control character; an unrecognised area or prefix; a bare short form when no
+    /// with a message naming the reason, for: a convention name that is not one of the
+    /// three; empty input, input over [`MAX_TEXT_BYTES`](Self::MAX_TEXT_BYTES) bytes or
+    /// input with a control character; an unrecognised area or prefix; a bare short form when no
     /// convention was supplied (the message names the ambiguity and the two always
     /// accepted spellings); a missing, overlong (more than 9 digits in the long form,
     /// other than 4 or 5 in a short form) or hexadecimal number; logical address 0 or
-    /// above 65536 (wire offset above 65535); a lowercase or unknown type name; any type
-    /// other than `BOOL` on a coil or discrete input; a span that passes wire address
-    /// 65535 (`LREAL` at logical 65534); array selections `[n]` and `[a..b]`; `STRING`,
-    /// `WSTRING`, `CHAR`, `WCHAR`, a parenthesised length and the `TIME` and `DATE`
+    /// above 65536 (wire offset above 65535), or under `zero-based` a number above 65535;
+    /// a lowercase or unknown type name; any type other than `BOOL` on a coil or discrete
+    /// input; a span that passes wire address 65535 (`LREAL` at logical 65534); array
+    /// selections `[n]` and `[a..b]`; `STRING`, `WSTRING`, `CHAR`, `WCHAR`, a
+    /// parenthesised length and the `TIME` and `DATE`
     /// family; `extended-register`, `6x` and the bare `6` prefix; the legacy
     /// `AREA:N:TYPE[n]` form (the message gives the replacement spelling); and a
     /// malformed address block (unterminated, unknown or repeated key, `unit-id` that is
@@ -979,7 +1059,7 @@ impl ModbusAddress {
     /// upstream value pattern and the whitespace rules inside the block are a Stonecrab
     /// choice; both are recorded as inferences under `MB-ADDR-CONFIG-BLOCK`.
     pub fn parse(text: &str, options: &AddressOptions) -> Result<Self> {
-        let explicit = check_convention(options)?;
+        let convention = check_convention(options)?;
         check_text(text)?;
         let (head, block) = match text.split_once('{') {
             Some((head, after)) => match after.strip_suffix('}') {
@@ -1008,9 +1088,9 @@ impl ModbusAddress {
                     .to_owned(),
             ));
         }
-        let (area, logical, rest) = locate(head, explicit)?;
+        let (area, number, rest) = locate(head, convention.is_some())?;
         let data_type = parse_type(head, rest, area)?;
-        let offset = wire_offset(logical)?;
+        let offset = wire_offset(number, convention.unwrap_or_default())?;
         let mut builder = Self::builder(area, offset)
             .data_type(data_type)
             .convention(AddressConvention::Plc4xCompatible);
@@ -1027,17 +1107,18 @@ impl ModbusAddress {
     }
 }
 
-/// `true` when the caller named the `plc4x` convention, `false` when none was supplied.
-fn check_convention(options: &AddressOptions) -> Result<bool> {
-    match options.convention() {
-        None => Ok(false),
-        Some(PLC4X) => Ok(true),
-        Some(other) => Err(invalid_address(format!(
-            "unknown address convention '{}': the only accepted name is '{PLC4X}' \
-             (docs/parity/modbus.md#MB-ADDR-BARE-40001)",
-            excerpt(other)
-        ))),
-    }
+/// The convention the caller named, `None` when none was supplied.
+fn check_convention(options: &AddressOptions) -> Result<Option<AddressConvention>> {
+    let Some(name) = options.convention() else {
+        return Ok(None);
+    };
+    AddressConvention::from_name(name).map(Some).ok_or_else(|| {
+        invalid_address(format!(
+            "unknown address convention '{}': the accepted names are plc4x, one-based-40001 \
+             and zero-based (docs/parity/modbus.md#MB-ADDR-CONVENTIONS)",
+            excerpt(name)
+        ))
+    })
 }
 
 /// Reject empty, over-long and control-character input before any scanning.
@@ -1062,8 +1143,8 @@ fn check_text(text: &str) -> Result<()> {
     Ok(())
 }
 
-/// Find the area and one-based logical address at the start of `head`; the remainder is
-/// the (possibly empty) type part.
+/// Find the area and the number as written at the start of `head`; the remainder is the
+/// (possibly empty) type part.
 fn locate(head: &str, explicit: bool) -> Result<Located<'_>> {
     for area in AREAS {
         if let Some(after) = head.strip_prefix(area.long_name()) {
@@ -1147,8 +1228,8 @@ fn locate_bare(digit: u8, head: &str, explicit: bool) -> Result<Located<'_>> {
             "bare address '{run}' is ambiguous: it reads as {name} number {number} under the \
              PLC4X convention, but a bare number can equally be a zero-based wire address; \
              write '{name}:N' or '{digit}xNNNNN' (for example '{name}:1' or '{digit}x00001'), \
-             or set address-convention=plc4x to accept the bare form \
-             (docs/parity/modbus.md#MB-ADDR-BARE-40001)",
+             or set address-convention to plc4x, one-based-40001 or zero-based to accept \
+             the bare form (docs/parity/modbus.md#MB-ADDR-BARE-40001)",
             name = area.long_name(),
             number = decimal_value(digits)
         )));
@@ -1199,22 +1280,28 @@ fn short_digits(digits: &str, prefix: u8) -> Result<()> {
     }
 }
 
-/// The zero-based wire offset for a one-based logical address.
-fn wire_offset(logical: u32) -> Result<u16> {
-    if logical == 0 {
+/// The zero-based wire offset for a number written under `convention`.
+fn wire_offset(number: u32, convention: AddressConvention) -> Result<u16> {
+    let (base, shown) = match convention {
+        AddressConvention::ZeroBased => (0, "zero-based"),
+        AddressConvention::Plc4xCompatible | AddressConvention::OneBased40001 => (1, "logical"),
+    };
+    if number < base {
         return Err(invalid_address(
             "logical address 0 does not exist: addresses are one-based, the first is 1 \
              (docs/parity/modbus.md#MB-LIMIT-ADDR)"
                 .to_owned(),
         ));
     }
-    if logical > LAST_LOGICAL {
+    let offset = number.saturating_sub(base);
+    if offset > LAST_WIRE {
+        let last = LAST_WIRE.saturating_add(base);
         return Err(invalid_address(format!(
-            "logical address {logical} is above {LAST_LOGICAL}: wire offsets run from 0 to \
-             65535 (docs/parity/modbus.md#MB-LIMIT-ADDR)"
+            "{shown} address {number} is above {last}: wire offsets run from 0 to \
+             {LAST_WIRE} (docs/parity/modbus.md#MB-LIMIT-ADDR)"
         )));
     }
-    Ok(u16::try_from(logical.saturating_sub(1)).unwrap_or(u16::MAX))
+    Ok(u16::try_from(offset).unwrap_or(u16::MAX))
 }
 
 /// Parse what follows the number: nothing, or `:TYPE`.

@@ -18,9 +18,12 @@ feature adds `serde` and `toml` and nothing else; the module depends on the core
 driver.
 
 Profiles declare their address convention. A bare Modbus number such as `40001` is
-ambiguous (holding register 1 under the PLC4X convention, wire address 40001 otherwise),
-so a profile that uses the `modbus-tcp` scheme must say which convention its addresses
-follow in `address_convention`, and the driver parses every address under it. A profile
+ambiguous (holding register 1 under the PLC4X convention, wire address 1 or 40001
+otherwise), so a profile that uses the `modbus-tcp` scheme must say which convention its
+addresses follow in `address_convention` (`plc4x`, `one-based-40001` or `zero-based`, the
+names of the Modbus component document), and the driver parses every address under it.
+Canonical address text is always one-based, so a `zero-based` address such as
+`holding-register:0` is shown as `holding-register:1` in logs and tags. A profile
 names one connection scheme and its addresses belong to that scheme's grammar; a device
 that is reachable through two schemes has two profile files (decision D17). No named
 device profile exists: every profile that ships with Stonecrab is a synthetic reference,
@@ -103,8 +106,8 @@ first, in a fixed order: the connection, then each measurement in document order
 name a measurement by its 0-based index and never repeat any text of the profile. It
 checks:
 
-- the address convention: when set it must be `plc4x`, and a `modbus-tcp` connection must
-  set it;
+- the address convention: when set it must be `plc4x`, `one-based-40001` or `zero-based`,
+  and a `modbus-tcp` connection must set it;
 - unique measurement names (names are already `snake_case`, which the loader enforces);
 - `count` is 1 (arrays are not supported at alpha);
 - scaling steps that can run: finite constants, a non-zero divisor, a clamp with

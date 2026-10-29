@@ -44,11 +44,11 @@ const DEFAULT_PORT: u16 = 502;
 /// (`BIG_ENDIAN` by default, `LITTLE_ENDIAN`, `BIG_ENDIAN_BYTE_SWAP`,
 /// `LITTLE_ENDIAN_BYTE_SWAP`), `max-coils-per-request` (1 to 2000, default 2000) and
 /// `max-registers-per-request` (1 to 125, default 125). The shared `address-convention`
-/// key accepts only `plc4x`. Every other key is [`ErrorKind::InvalidConfig`], where
-/// upstream warns (`MB-CFG-UNKNOWN`). The parsed values travel in the configuration as
-/// [`ModbusOptions`], seeded from the driver's defaults ([`with_defaults`](Self::with_defaults))
-/// and overridden by the connection string; a configuration built by hand carries none and
-/// gets the driver's defaults.
+/// key accepts `plc4x`, `one-based-40001` and `zero-based`. Every other key is
+/// [`ErrorKind::InvalidConfig`], where upstream warns (`MB-CFG-UNKNOWN`). The parsed
+/// values travel in the configuration as [`ModbusOptions`], seeded from the driver's
+/// defaults ([`with_defaults`](Self::with_defaults)) and overridden by the connection
+/// string; a configuration built by hand carries none and gets the driver's defaults.
 ///
 /// # Compatibility: docs/parity/modbus.md#MB-TCP-CONNECT
 /// Protocol code `modbus-tcp`, transport `tcp`, port 502 as upstream
@@ -245,7 +245,8 @@ impl Driver for ModbusTcpDriver {
     /// reconnect, retry and limits, a read-only access policy, and:
     ///
     /// - `request-timeout-ms` as `Timeouts.request` (5000 ms by default);
-    /// - `address-convention=plc4x` as the configuration's address convention, which
+    /// - `address-convention` (`plc4x`, `one-based-40001` or `zero-based`) as the
+    ///   configuration's address convention, which
     ///   [`ConnectionConfig::address_options`] hands to
     ///   [`parse_address`](Driver::parse_address);
     /// - `access=read-write` as the configuration's access policy; `read-only`, which is
@@ -262,8 +263,9 @@ impl Driver for ModbusTcpDriver {
     /// 65535, an IPv6 address without brackets, a path), and a parameter that is unknown,
     /// empty, not a whole number where one is required, outside its bounds, an unknown
     /// byte-order name, an invalid `ping-address`, an `address-convention` other than
-    /// `plc4x` or an `access` other than `read-only` and `read-write`. The messages never
-    /// repeat the authority or the connection string; a parameter error names its key.
+    /// the three names or an `access` other than `read-only` and `read-write`. The
+    /// messages never repeat the authority or the connection string; a parameter error
+    /// names its key.
     ///
     /// # Compatibility: docs/parity/modbus.md#MB-CFG-UNKNOWN
     /// Protocol code, transport code and default port 502 as upstream
@@ -287,7 +289,7 @@ impl Driver for ModbusTcpDriver {
             return Err(invalid("the transport code of modbus-tcp is tcp"));
         }
         let endpoint = endpoint(parsed.authority())?;
-        let (options, plc4x, access) = ModbusOptions::from_parameters(
+        let (options, convention, access) = ModbusOptions::from_parameters(
             ModbusOptions::from_defaults(self.defaults),
             parsed.options(),
         )?;
@@ -299,8 +301,8 @@ impl Driver for ModbusTcpDriver {
             .timeouts(timeouts)
             .access(access)
             .driver_options(Arc::new(options));
-        if plc4x {
-            builder = builder.address_convention("plc4x");
+        if let Some(convention) = convention {
+            builder = builder.address_convention(convention.name());
         }
         builder.build()
     }
@@ -308,7 +310,8 @@ impl Driver for ModbusTcpDriver {
     /// Parse Modbus address text; see [`ModbusAddress::parse`] for the grammar.
     ///
     /// `options` carries the address convention: the bare `40001` spellings are accepted
-    /// only with the explicit `plc4x` convention.
+    /// only with an explicit convention, and the convention decides whether the numbers
+    /// count from 1 or from 0.
     ///
     /// # Errors
     /// Returns [`ErrorKind::InvalidAddress`] as [`ModbusAddress::parse`] does.
@@ -650,7 +653,7 @@ mod tests {
                 .err()
                 .map(|error| error.kind()),
             Some(ErrorKind::InvalidAddress),
-            "only plc4x is a convention"
+            "an unknown convention name is refused"
         );
     }
 

@@ -63,14 +63,15 @@ or an unknown key names the key, and no error repeats the connection string.
 | `default-payload-byte-order` | `BIG_ENDIAN` | `BIG_ENDIAN`, `LITTLE_ENDIAN`, `BIG_ENDIAN_BYTE_SWAP`, `LITTLE_ENDIAN_BYTE_SWAP` | `MB-CFG-BYTE-ORDER` |
 | `max-coils-per-request` | 2000 | 1 to 2000 | `MB-CFG-MAX-COILS` |
 | `max-registers-per-request` | 125 | 1 to 125 | `MB-CFG-MAX-REGISTERS` |
-| `address-convention` | none | `plc4x` only | `MB-ADDR-BARE-40001` |
+| `address-convention` | none | `plc4x`, `one-based-40001` or `zero-based` | `MB-ADDR-BARE-40001`, `MB-ADDR-CONVENTIONS` |
 | `access` | `read-only` | `read-only` or `read-write`; `read-write` is what lets `write` reach the wire (a Stonecrab parameter, upstream has no access policy) | `MB-CFG-ACCESS` |
 
-Numbers are decimal digits only: no sign, no space, no `0x`. `address-convention=plc4x`
-is the explicit-convention rule of the address grammar below: the bare short forms such
-as `40001` parse only under it, and the driver hands it to every `parse_address` call
-through `ConnectionConfig::address_options()`. Without it only the long forms
-(`holding-register:1`) and the prefixed short forms (`4x00001`) parse.
+Numbers are decimal digits only: no sign, no space, no `0x`. `address-convention` is the
+explicit-convention rule of the address grammar below: the bare short forms such as
+`40001` parse only under one of the three names, and the driver hands the name to every
+`parse_address` call through `ConnectionConfig::address_options()`. Without it only the
+long forms (`holding-register:1`) and the prefixed short forms (`4x00001`) parse, read
+one-based as under `plc4x`.
 
 ### Byte order names
 The four upstream names set the byte and word order a value uses when neither its tag nor
@@ -181,8 +182,10 @@ error rather than ignoring it; operations that have no API at all do not exist:
   form (`MB-ADDR-*`, `MB-TYPE-*`);
 - UDP, TLS and TLS-PSK transports (`MB-TCP-TRANSPORTS-*`); RTU and ASCII framing are
   milestone M2 (no row yet);
-- the upstream gap-filling read optimizer: Stonecrab merges adjacent or overlapping tags
-  only (`MB-READ-GAP`), and a background reconnect task: reconnect is request-driven;
+- the upstream gap-filling read optimizer, by decision (S51, ADR-0015 addendum): Stonecrab
+  merges adjacent or overlapping tags only (`MB-READ-GAP`), because reading through a hole
+  in a device's map is refused with exception 02 for every tag of the request; and a
+  background reconnect task: reconnect is request-driven;
 - the two byte-swap modes (`BIG_ENDIAN_BYTE_SWAP`, `LITTLE_ENDIAN_BYTE_SWAP`) as upstream
   vectors: the retained PLC4X files configure only `BIG_ENDIAN` and `LITTLE_ENDIAN`, so
   those two rows stay `implemented`, not `automated-verified`;
@@ -221,7 +224,8 @@ What the run verifies against the independent server:
   code 2 on the item), and a good tag in another chunk still succeeds.
 - Batches split at 125 registers and 2000 coils and say so in `split_into`; 125 registers
   and 2000 coils are one request each.
-- The bare `40001` spelling is refused without `address-convention=plc4x` and reads with it.
+- The bare `40001` spelling is refused without an `address-convention` and reads with
+  `plc4x`.
 - A holding register (function 06) and a coil (function 15) are written and read back, the
   multi-register types (DINT, REAL, LREAL, and a REAL in the little-endian layout) land in
   the register words the map documents, and a write the server refuses (exception 02) is
@@ -239,14 +243,16 @@ the run are in ADR-0015, decision 16.
 ## Address grammar
 `ModbusAddress::parse(text, &AddressOptions)` reads the grammar of the upstream PLC4X Modbus
 driver, with the divergences listed below. Everything is case-sensitive and decimal, and
-the number is the one-based logical address: the wire offset is the number minus one, so
+under the default reading (no convention, `plc4x`, `one-based-40001`) the number is the
+one-based logical address: the wire offset is the number minus one, so
 `holding-register:16` reads wire address 15 and the first register is `holding-register:1`.
+Under `zero-based` the number is the wire offset itself, see the conventions below.
 
 | Form | Examples | Accepted |
 | --- | --- | --- |
 | long: `AREA:N` or `AREA:N:TYPE`, N has 1 to 9 digits | `holding-register:16:INT`, `coil:1` | always |
 | prefixed short: `0x`, `1x`, `3x` or `4x` plus 4 or 5 digits | `4x00016:INT`, `0x0010` | always |
-| bare short: prefix digit `0`, `1`, `3` or `4` plus 4 or 5 digits | `40001`, `400001`, `10001` | only with `address-convention=plc4x` |
+| bare short: prefix digit `0`, `1`, `3` or `4` plus 4 or 5 digits | `40001`, `400001`, `10001` | only with an `address-convention` |
 
 `AREA` is `coil`, `discrete-input`, `holding-register` or `input-register`, and the prefixes
 are `0x` coil, `1x` discrete input, `3x` input register and `4x` holding register; there is
@@ -260,12 +266,39 @@ wire address 65535 is refused (`LREAL` at `holding-register:65534`). The last ad
 
 The explicit-convention rule: a bare number such as `40001` could be holding register 1
 under the PLC4X convention or a zero-based wire address, so the parser accepts the bare
-forms only when the caller named the convention (`AddressOptions` with convention `plc4x`,
-from the connection option `address-convention=plc4x` or a profile's `address_convention`).
+forms only when the caller named the convention (`AddressOptions` with a convention name,
+from the connection option `address-convention` or a profile's `address_convention`).
 Without it the error names the ambiguity and the two spellings that are always accepted:
-`holding-register:1` and `4x00001`. Any other convention name is an error, even for the
-unambiguous spellings. The text `canonical()` renders is always the long form, which parses
-back to an equal address under every option.
+`holding-register:1` and `4x00001`. A name other than the three below is an error, even
+for the unambiguous spellings.
+
+| `address-convention` | `AddressConvention` | The number counts from | Numbers | Forms |
+| --- | --- | --- | --- | --- |
+| none | | 1 | 1 to 65536 | long and prefixed short; bare refused |
+| `plc4x` | `Plc4xCompatible` | 1 | 1 to 65536 | long, prefixed short, bare |
+| `one-based-40001` | `OneBased40001` | 1 | 1 to 65536 | long, prefixed short, bare |
+| `zero-based` | `ZeroBased` | 0 | 0 to 65535 | long, prefixed short, bare |
+
+The convention governs every number in the text, whatever the form: the digits of
+`AREA:N`, of `Nx` plus 4 or 5 digits, and the digits after the prefix digit of a bare
+form. The prefix digit still selects the area (`0` coil, `1` discrete input, `3` input
+register, `4` holding register). Counting from 1, the wire offset is the number minus one;
+counting from 0 it is the number. So the first holding register is `holding-register:1`,
+`4x00001` and `40001` under the first three rows and `holding-register:0`, `4x00000` and
+`40000` under `zero-based`, and `holding-register:1` is the second register there. The
+boundaries are the same in every form: 0 is refused except under `zero-based`, 65536 is
+accepted except under `zero-based` and the digit group is 4 or 5 digits in the short forms
+(so the number 10000 needs the five-digit group, `4x10000` or `410000`). `plc4x` and
+`one-based-40001` read every text alike; they differ in what they say, `plc4x` that the
+text follows the PLC4X grammar and `one-based-40001` only that the numbers are the
+one-based Modicon numbers of a device manual. A profile or connection that uses a
+zero-based map should select `zero-based` rather than subtract one by hand.
+
+An address is the wire offset it names, so one register read under two conventions
+compares equal and carries `AddressConvention::Plc4xCompatible`. The text `canonical()`
+renders is always the one-based long form, which parses back to an equal address with no
+convention, `plc4x` or `one-based-40001`; under `zero-based` the same text is one register
+higher.
 
 An address may end with a config block, directly after the type with no space before the
 brace: `{unit-id: 10, byte-order: 'LITTLE_ENDIAN'}`. The two keys are `unit-id`, a decimal
@@ -310,6 +343,13 @@ assert_eq!(address.canonical(), "holding-register:16:REAL{unit-id: 10}");
 // Without the convention the bare form is ambiguous and refused.
 assert!(ModbusAddress::parse("40016", &AddressOptions::default()).is_err());
 assert!(ModbusAddress::parse("4x00016", &AddressOptions::default()).is_ok());
+
+// Under `zero-based` the same number is the wire offset: register 0 is the first.
+let zero_based = AddressOptions::builder().convention("zero-based").build()?;
+let first = ModbusAddress::parse("40000", &zero_based)?;
+assert_eq!(first.offset(), 0);
+assert_eq!(first, ModbusAddress::parse("40001", &options)?);
+assert!(ModbusAddress::parse("40000", &options).is_err());
 # Ok::<(), stonecrab::PlcError>(())
 ```
 

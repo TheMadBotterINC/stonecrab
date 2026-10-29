@@ -19,6 +19,22 @@ placeholder.
   no `deny.toml` change. Additive API only. Not offered yet: `dtr`, `rts`, `reuse-port`,
   `interframe-delay`, mark and space parity (docs/parity/transport.md). Tested over a
   pseudo-terminal pair on Unix other than macOS; no hardware. ADR-0014 addendum S58.
+- Address conventions `zero-based` and `one-based-40001` (additive): `AddressConvention`
+  gains `ZeroBased` and `OneBased40001` after `Plc4xCompatible`, with `name()` and
+  `from_name()`. `address-convention` (connection string, `AddressOptions`, a sensor
+  profile's `address_convention`) now accepts `plc4x`, `one-based-40001` and `zero-based`;
+  any other name is still an error. `one-based-40001` reads every text as `plc4x` does
+  (numbers from 1, bare forms accepted). `zero-based` reads every numeric form (`AREA:N`,
+  `Nx` digits, bare `4NNNN`) as the wire offset, numbers 0 to 65535. With no convention
+  nothing changes: the long and prefixed forms are one-based and the bare forms are
+  refused. A parsed address is the wire offset and still carries `Plc4xCompatible`;
+  `canonical()` stays the one-based long form. The fuzz target `fuzz_modbus_address` reads
+  every text under all four options and gains five seeds. New parity row `MB-ADDR-CONVENTIONS`.
+- Decision, no behavior change: the batcher still never reads through a gap between tags.
+  Upstream merges tags up to the request limit with no gap option and no way to turn it
+  off, and a hole in a device's map would turn that into exception 02 for every tag of the
+  merged request. `MB-READ-GAP` is recorded as a decided divergence (ADR-0015 addendum)
+  and a test shows the two requests on the wire.
 - Subscription types and a bounded event queue (ADR-0020; additive): `SubscribeRequest`
   and its builder, `SubscriptionKind` (cyclic, change-of-state, event), `QueuePolicy`
   (backpressure, latest-value coalescing, drop-oldest), `LossCounters`, `Subscription`

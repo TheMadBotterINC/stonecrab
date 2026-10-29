@@ -9,7 +9,7 @@ use crate::{
 };
 
 use crate::modbus::address::byte_order_by_name;
-use crate::modbus::{ConnectionDefaults, ModbusAddress, UnitId};
+use crate::modbus::{AddressConvention, ConnectionDefaults, ModbusAddress, UnitId};
 
 /// `request-timeout-ms`.
 const REQUEST_TIMEOUT: &str = "request-timeout-ms";
@@ -30,7 +30,7 @@ const ACCESS: &str = "access";
 /// The access value that grants writes; `read-only` is the other and the default.
 const READ_WRITE: &str = "read-write";
 const READ_ONLY: &str = "read-only";
-/// The only convention name accepted at alpha.
+/// The convention the ping address is always read under.
 const PLC4X: &str = "plc4x";
 
 /// The most key characters an error message repeats.
@@ -189,8 +189,9 @@ impl ModbusOptions {
         }
     }
 
-    /// Read the query parameters of a connection string: the options, whether
-    /// `address-convention=plc4x` was named and the access policy `access` names
+    /// Read the query parameters of a connection string: the options, the convention
+    /// `address-convention` names (`None` when the key is absent) and the access policy
+    /// `access` names
     /// ([`AccessPolicy::ReadOnly`] when it is absent).
     ///
     /// The core grammar has already refused duplicate and empty keys, so each key appears
@@ -201,9 +202,9 @@ impl ModbusOptions {
     pub(crate) fn from_parameters(
         seed: Self,
         parameters: &[(String, String)],
-    ) -> Result<(Self, bool, AccessPolicy)> {
+    ) -> Result<(Self, Option<AddressConvention>, AccessPolicy)> {
         let mut options = seed;
-        let mut plc4x = false;
+        let mut convention = None;
         let mut access = AccessPolicy::ReadOnly;
         for (key, value) in parameters {
             match key.as_str() {
@@ -237,11 +238,12 @@ impl ModbusOptions {
                 }
                 MAX_COILS => options.max_coils = limit(MAX_COILS, value, 2000)?,
                 MAX_REGISTERS => options.max_registers = limit(MAX_REGISTERS, value, 125)?,
-                CONVENTION if value == PLC4X => plc4x = true,
                 CONVENTION => {
-                    return Err(invalid(format!(
-                        "{CONVENTION} accepts only {PLC4X} at alpha"
-                    )));
+                    convention = Some(AddressConvention::from_name(value).ok_or_else(|| {
+                        invalid(format!(
+                            "{CONVENTION} must be plc4x, one-based-40001 or zero-based"
+                        ))
+                    })?);
                 }
                 ACCESS => {
                     access = match value.as_str() {
@@ -257,7 +259,7 @@ impl ModbusOptions {
                 other => return Err(unknown_key(other)),
             }
         }
-        Ok((options, plc4x, access))
+        Ok((options, convention, access))
     }
 }
 
@@ -333,7 +335,9 @@ fn invalid(message: String) -> PlcError {
 mod tests {
     use super::*;
 
-    fn parse(pairs: &[(&str, &str)]) -> Result<(ModbusOptions, bool, AccessPolicy)> {
+    fn parse(
+        pairs: &[(&str, &str)],
+    ) -> Result<(ModbusOptions, Option<AddressConvention>, AccessPolicy)> {
         let owned: Vec<(String, String)> = pairs
             .iter()
             .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
@@ -376,7 +380,7 @@ mod tests {
         assert_eq!(defaults.max_registers.get(), 125);
         assert_eq!(
             parse(&[]).expect("none"),
-            (defaults, false, AccessPolicy::ReadOnly)
+            (defaults, None, AccessPolicy::ReadOnly)
         );
     }
 
@@ -436,10 +440,20 @@ mod tests {
             options(&[(PING_ADDRESS, "40007:UINT")]).ping_address,
             "the ping address is read under the plc4x convention, bare forms included"
         );
-        let (_, plc4x, _) = parse(&[(CONVENTION, "plc4x")]).expect("convention");
-        assert!(plc4x, "address-convention=plc4x is reported");
+        for (name, expected) in [
+            ("plc4x", AddressConvention::Plc4xCompatible),
+            ("zero-based", AddressConvention::ZeroBased),
+            ("one-based-40001", AddressConvention::OneBased40001),
+        ] {
+            let (_, named, _) = parse(&[(CONVENTION, name)]).expect("convention");
+            assert_eq!(
+                named,
+                Some(expected),
+                "address-convention={name} is reported"
+            );
+        }
         let (_, none, _) = parse(&[(UNIT_ID, "3")]).expect("no convention");
-        assert!(!none, "no convention without the key");
+        assert_eq!(none, None, "no convention without the key");
     }
 
     #[test]
@@ -533,7 +547,8 @@ mod tests {
             (BYTE_ORDER, "'BIG_ENDIAN'"),
             (CONVENTION, ""),
             (CONVENTION, "PLC4X"),
-            (CONVENTION, "zero-based"),
+            (CONVENTION, "zero_based"),
+            (CONVENTION, "one-based"),
         ] {
             let error = refusal(&[(key, value)]);
             assert_eq!(error.kind(), ErrorKind::InvalidConfig, "{key}={value:?}");

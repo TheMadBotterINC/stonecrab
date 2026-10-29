@@ -194,8 +194,10 @@ on a bit area (`MB-ADDR-BIT-TYPES`), `STRING`, `WSTRING`, `CHAR`, `WCHAR`
 
 Address text: the long form `holding-register:16:INT` and the prefixed short form
 `4x00016:INT` are always accepted; the bare short forms (`40001`) are accepted only when
-the caller selects `address-convention=plc4x` (profiles declare it explicitly). The
-logical number is one-based; the wire address is one less. See the grammar in the
+the caller selects an `address-convention` (profiles declare it explicitly). The
+logical number is one-based and the wire address is one less, except under
+`address-convention=zero-based`, where the number is the wire address
+(`MB-ADDR-CONVENTIONS`). See the grammar in the
 [Modbus component document](../crates/stonecrab/docs/components/modbus.md).
 
 ## Byte-order modes
@@ -228,7 +230,7 @@ may appear once and every other key is `InvalidConfig` (upstream warns and ignor
 | `default-payload-byte-order` | `BIG_ENDIAN` | `BIG_ENDIAN`, `LITTLE_ENDIAN`, `BIG_ENDIAN_BYTE_SWAP`, `LITTLE_ENDIAN_BYTE_SWAP` | `MB-CFG-BYTE-ORDER` |
 | `max-coils-per-request` | 2000 | 1 to 2000 | `MB-CFG-MAX-COILS` |
 | `max-registers-per-request` | 125 | 1 to 125 | `MB-CFG-MAX-REGISTERS` |
-| `address-convention` | none | `plc4x` | `MB-ADDR-BARE-40001` |
+| `address-convention` | none | `plc4x`, `one-based-40001`, `zero-based` | `MB-ADDR-BARE-40001`, `MB-ADDR-CONVENTIONS` |
 
 Simulator: `sim://<device>?latency-ms=<n>&seed=<u64>`; `address-convention` is accepted
 and ignored. Core connection defaults (`Timeouts` 5 s connect and 5 s request, `idle`
@@ -310,7 +312,7 @@ and why.
 | `MB-EXC-05` | exception 5 (ACKNOWLEDGE) is `DeviceException`, never success |
 | `MB-EXC-UNKNOWN` | an exception code outside the ten defined ones is refused as malformed |
 | `MB-ADDR-SELECTION`, `MB-ADDR-STRING`, `MB-TYPE-TIME`, `MB-ADDR-EXTENDED` | deferred address features are typed `InvalidAddress` rejections |
-| `MB-READ-GAP` | no gap reads: only adjacent or overlapping tags merge |
+| `MB-READ-GAP` | no gap reads: only adjacent or overlapping tags merge (decided S51: a hole in a device map would fail the whole merged request) |
 | `MB-LIMIT-ADU` | the MBAP length is bounded (2..=254, ADU at most 260 bytes) before the body is read |
 | `MB-QUIRK-A`, `MB-QUIRK-B`, `MB-QUIRK-C` | the bogus `UDPTransport` import, the split FC20 second-item loss and the dead FC05 branch are not ported |
 | `MB-QUIRK-D` | ported on purpose: `ping` reports success for any reply that answers it, an exception included, as upstream's `onPing` does |

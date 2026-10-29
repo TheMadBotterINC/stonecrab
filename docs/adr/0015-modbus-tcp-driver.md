@@ -1033,3 +1033,88 @@ no write on the wire, and ADR-0010 decision 7 and ADR-0008 decision 5 for `modbu
 6. **Halt after the first `Unknown`.** The remaining items of the batch are not sent,
    because the state of the device is no longer known; the application decides what to do
    next, as ADR-0010 says.
+
+## Addendum: the gap question and the address conventions (slice S51, 2026-10-28)
+This addendum records the S51 decisions. It supersedes decision 5 where that says
+`Plc4xCompatible` is the only variant and only `plc4x` is a convention name, and it
+settles the "deferred (M2)" status of `MB-READ-GAP`. It changes nothing else above.
+
+1. **No gap reads; `MB-READ-GAP` is a decided divergence.** Upstream's rule is
+   unconditional: tags of one unit and area, sorted by address, join one block while the
+   tag end is within the first address plus the request limit (`Opt:247`, `Opt:300`), and
+   the gap between them is read. It has no option: `ModbusTcpConfiguration` declares six
+   parameters and none concerns gaps (`Cfg:29-67`), and the optimizer test states the
+   intent (coils or registers at 0 and 100 become one block of 101 elements, and tags
+   2100 apart split because the span would pass the limit, `ModbusReadOptimizerTest`
+   lines 74-100 and 139-160). Matching it would read registers that no tag asked for. On
+   a device with holes in its map (the usual case for a sensor with a few scattered
+   registers) the merged request is refused with exception 02 (V1.1b section 7), and the
+   exception fails every member of the chunk (`MB-READ-MERGE`), so tags that read fine
+   today would fail. Stonecrab therefore keeps the D19 plan: adjacent or overlapping
+   spans merge, a gap starts a new chunk. The alternative the slice allowed, gap filling
+   behind an upstream-named option whose default keeps today's behavior, has no upstream
+   name to use, and a Stonecrab-named option (a maximum gap in registers, default 0)
+   would be a new surface with no caller that needs it. It is the way to revisit this if a
+   device record (HW1) shows that the request count, not the unmapped registers, is the
+   cost; the row and this decision then change together. Evidence in the repository:
+   `batcher_does_not_bridge_gaps` (the plan) and
+   `a_hole_between_two_tags_is_never_read_so_it_cannot_fail_either` (the wire: two
+   requests that stop at the tags' own registers). The divergence row stays and the
+   behavior row is `implemented (divergence decided S51)`.
+2. **`AddressConvention` gains `ZeroBased` and `OneBased40001`** after `Plc4xCompatible`
+   (additive, the enum is `#[non_exhaustive]`), with `name()` and `from_name()`. The
+   names are `plc4x`, `one-based-40001` and `zero-based`, exact and case-sensitive. They
+   are accepted by `address-convention` in the connection string, by `AddressOptions` and
+   by a sensor profile's `address_convention`; any other name is `InvalidAddress` when
+   parsing, `InvalidConfig` in a connection string and `UnknownAddressConvention` in a
+   profile. Core still does not know the names (ADR-0008): `AddressOptions`
+   carries text and the drivers and the profile validator compare it.
+3. **Definitions.** A convention decides which text is accepted and which number the
+   digits of every numeric form stand for. The forms are the long `AREA:N`, the prefixed
+   short `Nx` plus 4 or 5 digits and the bare short prefix digit plus 4 or 5 digits;
+   the prefix digit of a bare form still selects the area.
+
+   | Convention | Number counts from | Numbers | Wire offset | Forms accepted |
+   | --- | --- | --- | --- | --- |
+   | none supplied | 1 | 1 to 65536 | number - 1 | long, prefixed short |
+   | `plc4x` | 1 | 1 to 65536 | number - 1 | long, prefixed short, bare |
+   | `one-based-40001` | 1 | 1 to 65536 | number - 1 | long, prefixed short, bare |
+   | `zero-based` | 0 | 0 to 65535 | number | long, prefixed short, bare |
+
+   `one-based-40001` and `plc4x` read every text alike. Two names for one reading are
+   deliberate: `plc4x` claims the PLC4X grammar, including whatever upstream accepts
+   later, and `one-based-40001` claims only the Modicon numbering of a device manual, so a
+   profile for a device with no PLC4X connection does not have to say `plc4x`. They are
+   covered by one test table and one parser path, so they cannot drift. Only `zero-based`
+   changes an offset. It applies to every form, not just the bare one, because a profile
+   that selects it has copied zero-based protocol addresses from a manual and
+   `holding-register:0` must be the first register there. The rule that a bare number is
+   refused unless a convention is named (decision 5) is unchanged, and the refusal now
+   names the three names.
+4. **The address does not remember the convention.** `ModbusAddress::parse` still
+   returns `AddressConvention::Plc4xCompatible` on every address: the address is the wire
+   offset, so one register read under two conventions compares equal, hashes alike and
+   renders the same `canonical()` text, the one-based long form. The alternative,
+   recording the reading, makes two spellings of one register unequal and makes the
+   canonical text depend on a convention that the text cannot carry. The consequence is
+   that `parse(canonical(a))` equals `a` with no convention, `plc4x` and `one-based-40001`
+   but not with `zero-based`, where the same text is the next register up. The
+   `ModbusAddress::convention` getter and the builder setter are kept (removing them is
+   not additive) and are documented as what the builder was given.
+5. **Boundaries.** Under every convention the type span rule of `MB-LIMIT-SPAN` applies to
+   the wire offset (`LREAL` at wire offset 65533 passes the end of the map); digit
+   limits (1 to 9 long, 4 or 5 short) are unchanged. The tests cover every area and every
+   form at the numbers 0, 1, 9999, 10000, 65535 and 65536 for the three names and for no
+   convention.
+6. **Not changed.** The ping address is still read under `plc4x` whatever the
+   connection's convention (`MB-CFG-PING-ADDRESS`), so a `zero-based` connection pings
+   `4x00001`, wire offset 0. Strings, selections, extended registers and the other
+   deferred forms are still typed rejections under every convention.
+
+Compliance: `each_convention_reads_every_form_on_every_area_at_the_boundaries` and its
+companions in `tests/modbus_parse.rs`,
+`prop_zero_based_forms_agree_and_sit_one_below_the_one_based_number` in
+`tests/modbus_properties.rs`, `address_convention_names_reach_the_address_options` in
+`tests/modbus_config.rs`, `a_profile_may_declare_any_of_the_three_conventions` in
+`tests/sensors_validation.rs` and the fuzz target `fuzz_modbus_address`, which reads every
+input under all four options and has five new seeds.
