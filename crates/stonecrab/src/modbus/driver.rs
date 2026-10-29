@@ -370,7 +370,7 @@ impl Driver for ModbusTcpDriver {
 }
 
 /// The endpoint a `host[:port]` authority names.
-fn endpoint(authority: &str) -> Result<Endpoint> {
+pub(super) fn endpoint(authority: &str) -> Result<Endpoint> {
     let (host, port) = if let Some(bracketed) = authority.strip_prefix('[') {
         let Some((host, rest)) = bracketed.split_once(']') else {
             return Err(invalid("an IPv6 host in brackets needs a closing bracket"));

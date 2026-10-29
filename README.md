@@ -21,8 +21,9 @@ profiles, write coils and holding registers when a connection is granted write a
 run the same code against a built-in simulator with no network and no hardware. It has been
 checked against two independent Modbus servers (pymodbus 3.8.6 and libmodbus 3.1.11) and
 has never touched a physical device. **It is alpha software and is not for production use
-yet**: it subscribes only by polling, does not browse, discover or speak Modbus RTU, and its
-APIs may change before 1.0.
+yet**: it subscribes only by polling, does not browse or discover, its Modbus RTU driver
+has met neither an independent RTU server nor a serial device yet, and its APIs may change
+before 1.0.
 
 ## Add it
 ```sh
@@ -43,9 +44,10 @@ Everything is in the one crate; the features only decide what is compiled in.
 | Feature | What you get | On by default |
 | --- | --- | --- |
 | `sim` | `stonecrab::sim`, the in-process simulator | yes |
-| `modbus` | `stonecrab::modbus`, the Modbus TCP driver (reads and writes); brings in Tokio | yes |
+| `modbus` | `stonecrab::modbus`, the Modbus TCP and Modbus RTU drivers (reads and writes); brings in Tokio and the serial transport | yes |
 | `sensors` | `stonecrab::sensors`, declarative sensor profiles and the TOML loader | yes |
 | `transport` | `stonecrab::transport`, deadline-bounded transports; the only thing that needs Tokio, and on whenever `modbus` is | no |
+| `serial` | the serial transport in `stonecrab::transport` (`SerialFactory`, one worker thread per port); on whenever `modbus` is | no |
 | `testkit` | `stonecrab::testkit`, fakes and the driver contract suite for tests; not for applications | no |
 
 `default-features = false` gives the small core with no Tokio and no network code, for a
@@ -74,10 +76,14 @@ changes no level). Nothing is `hardware-verified`.
 | Modbus TCP | subscriptions by polling: cyclic and change-of-state, event refused (as upstream's polling emulation) | simulator-tested | `MB-TCP-SUBSCRIBE`; fake transport and fake clock, the six subscription contract cases |
 | Modbus TCP | ping (one read of the configured `ping-address`) | interoperability-tested | `MB-TCP-PING`; `interop_ping_reads_each_configured_area_and_succeeds`, `interop_ping_of_an_address_the_server_refuses_still_answers` |
 | Modbus TCP | browse, discover | not supported | `MB-TCP-BROWSE`, `MB-TCP-DISCOVER` (deferred) |
-| Modbus TCP | RTU, ASCII, UDP, TLS | not supported | `MB-TCP-TRANSPORTS-*` (deferred); the parser rejects them |
+| Modbus TCP | ASCII, UDP, TLS | not supported | `MB-TCP-TRANSPORTS-*` (deferred); the parser rejects them |
 | Modbus TCP | array selections `[i]`, `[lo..hi]`, `;base`: a range read and written as one `PlcValue::List`, on the extended registers too | simulator-tested | `MB-ADDR-SELECTION`; fake transport, including the upstream array read and write exchanges |
 | Modbus TCP | extended registers (FC20 read, FC21 write) | simulator-tested | `MB-ADDR-EXTENDED`, `MB-LIMIT-EXT`; fake transport and the first-party responder (no interop peer serves FC20 or FC21) |
 | Modbus TCP | strings, calendar types | not supported | `MB-ADDR-STRING`, `MB-TYPE-TIME` (rejected with typed errors) |
+| Modbus RTU | read, write, ping and polling subscriptions over RTU framing (CRC-16) on a serial port or a serial-to-IP gateway (`modbus-rtu:tcp://`) | simulator-tested | `MBS-OP-*`, `MBS-RTU-*` in `docs/parity/modbus-serial.md`; fake transport and fake clock, the contract suite, the upstream RTU vectors, a fuzz target; ADR-0024 |
+| Modbus RTU | CRC errors, the silence before each request, a late reply after a timeout, a lost serial link and its reopen, replies from another unit | simulator-tested | `MBS-RTU-CRC`, `MBS-RTU-SILENCE`, `MBS-BUS-LATE-REPLY`, `MBS-BUS-CORRELATION` |
+| Modbus RTU | an independent RTU server, a serial device; broadcast and shared ports | planned; broadcast and shared ports not supported | no interop peer or hardware record yet (HW2); `MBS-CFG-UNIT-ID`, `MBS-BUS-SHARED-PORT` |
+| Modbus ASCII | everything | planned | slice S60 |
 | Simulator (`sim`) | read, write, scripted failures, bounded read retry | simulator-tested | driver contract suite; `docs/parity/sim.md` |
 | Sensor profiles | load, validate, build tags, scale and grade measurements | simulator-tested | synthetic `sim` profiles, `profile_read` in the `examples` job |
 | Sensor profiles | the same synthetic profiles against a Modbus TCP server | interoperability-tested | synthetic `modbus-tcp` profiles, `profile_read` in the `interop` job; green on the hosted runner for S30 (the `profiles` step, run 40548582722) |

@@ -28,11 +28,11 @@ full = ["sim", "modbus", "sensors"]
 # Deadline-bounded byte transports and the Tokio TCP transport (`stonecrab::transport`).
 transport = ["dep:tokio"]
 # The serial transport on a blocking worker thread (`stonecrab::transport::SerialTransport`).
-# Needs the transport. Not part of `modbus` yet: Modbus RTU and ASCII will enable it.
+# Needs the transport. `modbus` enables it for Modbus RTU (ADR-0024).
 serial = ["transport", "dep:serial2"]
-# The native Modbus TCP driver (`stonecrab::modbus`). Needs the transport and the codec
-# (the codec is always built).
-modbus = ["transport", "dep:tracing"]
+# The native Modbus TCP and Modbus RTU drivers (`stonecrab::modbus`). Needs the transport,
+# the serial transport for RTU, and the codec (the codec is always built).
+modbus = ["transport", "serial", "dep:tracing"]
 # The in-process simulator driver (`stonecrab::sim`).
 sim = ["dep:tracing"]
 # Declarative sensor profiles and their bounded TOML loader (`stonecrab::sensors`).
@@ -175,6 +175,10 @@ required-features = ["modbus", "testkit"]
 
 [[test]]
 name = "modbus_retry"
+required-features = ["modbus", "testkit"]
+
+[[test]]
+name = "modbus_rtu"
 required-features = ["modbus", "testkit"]
 
 [[test]]

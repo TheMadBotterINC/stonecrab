@@ -403,6 +403,11 @@ impl<F: Send, R: Framer<F>> FramedTransport<F, R> {
     /// - `Err(_)`, or `Ok(None)` with a full buffer: not a frame start. Discard one byte
     ///   and ask again.
     ///
+    /// A framer whose [`Framer::resync_discards`] is true (Modbus RTU, where only silence
+    /// separates frames) is not searched: every buffered byte is dropped, nothing is
+    /// received and the call returns at once with no frame held, so the next
+    /// [`next_frame`](Self::next_frame) reads what arrives after it.
+    ///
     /// A frame held by an earlier `resync` is dropped first. A framer with no sync marker
     /// (a bare length prefix) can lock onto a false header in garbage; `resync` is best
     /// effort for such protocols, and a caller that gets a wrong frame afterwards (a
@@ -471,6 +476,10 @@ impl<F: Send, R: Framer<F>> FramedTransport<F, R> {
     pub fn resync(&mut self, deadline: Deadline) -> OpFuture<'_, ()> {
         Box::pin(async move {
             self.ready = None;
+            if self.framer.resync_discards() {
+                self.buffer.clear();
+                return Ok(());
+            }
             loop {
                 let bound = self.transport.limits().max_buffered_bytes().get();
                 let discarded = match self.framer.decode(&mut self.buffer) {

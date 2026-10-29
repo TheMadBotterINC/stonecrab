@@ -35,12 +35,17 @@ src/modbus/connection.rs
 src/modbus/decode.rs
 src/modbus/driver.rs
 src/modbus/framing/mbap.rs
+src/modbus/framing/rtu.rs
 src/modbus/framing.rs
 src/modbus/options.rs
 src/modbus/pdu/code.rs
 src/modbus/pdu/codec.rs
 src/modbus/pdu/model.rs
 src/modbus/pdu.rs
+src/modbus/rtu/driver.rs
+src/modbus/rtu/line.rs
+src/modbus/rtu/pace.rs
+src/modbus/rtu.rs
 src/modbus/session.rs
 src/modbus.rs
 src/order.rs

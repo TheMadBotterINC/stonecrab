@@ -69,7 +69,10 @@ hardware record exists.
 | Modbus TCP | ping | `modbus` | interoperability-tested | `MB-TCP-PING`, `MB-CFG-PING-ADDRESS`, `MB-QUIRK-D` | one read of `ping-address`; any correlated reply, an exception included, is success as upstream's; pymodbus 3.8.6 via the `interop` job |
 | Modbus TCP | UDP, TLS, TLS-PSK, `test` transports | `modbus` | not supported | `MB-TCP-TRANSPORTS-*` | deferred; `InvalidConfig` |
 | Modbus TCP | extended registers (FC20 read, FC21 write) | `modbus` | simulator-tested | `MB-ADDR-EXTENDED`, `MB-LIMIT-EXT`, `MB-QUIRK-B` | no interop peer serves FC20 or FC21; strict fake-transport scripts and the first-party responder |
-| Modbus RTU, ASCII | everything | none yet | planned | `MBS-*` in [`parity/modbus-serial.md`](parity/modbus-serial.md) | milestone M2 |
+| Modbus RTU | connect, close, read, write, ping and subscribe by polling over RTU framing (CRC-16) on a serial port (`modbus-rtu://<port>`) or a serial-to-IP gateway (`modbus-rtu:tcp://`), with the operations and limits of Modbus TCP | `modbus` | simulator-tested | `MBS-OP-*`, `MBS-RTU-*`, `MBS-TRANS-SERIAL`, `MBS-TRANS-TCP` in [`parity/modbus-serial.md`](parity/modbus-serial.md) | S59, ADR-0024: `FakeTransport` and fake clock, the contract suite (`the_suite_is_green_against_modbus_rtu_over_the_fake_transport`), the upstream RTU parser vectors, `fuzz_modbus_rtu`, RTU over a loopback socket; no independent RTU server yet (a virtual serial pair with libmodbus or modbus-tk is a later slice) and no hardware (HW2) |
+| Modbus RTU | CRC errors, the silence before a request (t3.5, `serial.interframe-delay`), the drain of a late reply after a timeout, a lost serial link and its reopen, replies from another unit or function | `modbus` | simulator-tested | `MBS-RTU-CRC`, `MBS-RTU-SILENCE`, `MBS-BUS-LATE-REPLY`, `MBS-BUS-CORRELATION` | `a_reply_with_a_bad_crc_fails_the_read_and_the_next_read_is_answered`, `serial_write_waits_for_the_interframe_gap`, `serial_late_reply_after_timeout_does_not_answer_the_next_request`, `a_lost_serial_link_is_disconnected_and_the_next_read_reopens_it`, `serial_response_from_another_unit_or_function_is_ignored` |
+| Modbus RTU | broadcast (unit 0), shared serial ports, TLS, TLS-PSK, UDP and `test` carriers | `modbus` | not supported | `MBS-CFG-UNIT-ID`, `MBS-BUS-SHARED-PORT`, `MBS-TRANS-TLS`, `MBS-TRANS-UDP`, `MBS-TRANS-TEST` | `InvalidConfig` (or `InvalidAddress` for a tag addressed to unit 0) |
+| Modbus ASCII | everything | none yet | planned | `MBS-ASCII-*` in [`parity/modbus-serial.md`](parity/modbus-serial.md) | S60 |
 | Simulator (`sim`) | connect, read, write, scripted failures, bounded read retry, polling subscriptions (S55; on the default `RealtimeClock` the interval is disclosed but not paced, and change-of-state is refused) | `sim` | simulator-tested | `SIM-DRIVER`, `SIM-CONNECTION`, `SIM-FAILURE-SCRIPT`, `SIM-SUBSCRIBE` | driver contract suite (29 passed, 4 named skips since S55) |
 | Sensor profiles | load, validate, build tags, scale and grade measurements | `sensors`, `sim` | simulator-tested | `SENSORS-*` | `sim` profiles through `profile_read` in the `examples` job |
 | Sensor profiles | the same, with the `modbus-tcp` synthetic profiles | `sensors`, `modbus` | interoperability-tested | `SENSORS-SYNTHETIC-PROFILES` | `profile_read --expect-good` in the `interop` job; green on the hosted runner for S30 (the `profiles` step, run 40548582722) |
@@ -97,7 +100,8 @@ where this table says otherwise. Counts of rows per record are in the records th
 | Upstream driver (code) | Stonecrab support | Level | Parity record | Milestone |
 | --- | --- | --- | --- | --- |
 | Modbus TCP (`modbus-tcp`) | `modbus` feature | see the operations table above | [`parity/modbus.md`](parity/modbus.md) | M1 (read path and ping shipped); writes, polling subscriptions (S55), extended registers, UDP and TLS per the table above |
-| Modbus RTU (`modbus-rtu`), Modbus ASCII (`modbus-ascii`) | none | not supported | [`parity/modbus-serial.md`](parity/modbus-serial.md) | M2 (S58 to S60, HW2) |
+| Modbus RTU (`modbus-rtu`) | `modbus` feature, `ModbusRtuDriver` | simulator-tested; see the operations table above | [`parity/modbus-serial.md`](parity/modbus-serial.md) | M2: shipped in S59; an interop peer on a virtual serial pair and HW2 to come |
+| Modbus ASCII (`modbus-ascii`) | none | not supported | [`parity/modbus-serial.md`](parity/modbus-serial.md) | M2 (S60, HW2) |
 | OPC UA (`opcua`) | none | not supported | [`parity/opcua.md`](parity/opcua.md) | M3 |
 | S7 (`s7`) | none | not supported | [`parity/s7.md`](parity/s7.md) | M4 |
 | EtherNet/IP (`eip`), Logix (`logix`) | none | not supported | [`parity/eip.md`](parity/eip.md) | M4 |
@@ -127,7 +131,7 @@ where this table says otherwise. Counts of rows per record are in the records th
 | UDP (`udp`) | none | not supported | [`parity/transport.md`](parity/transport.md): `UTR-UDP` | M2 (S61) |
 | TLS (`tls`), TLS-PSK (`tls-psk`) | none | not supported | [`parity/transport.md`](parity/transport.md): `UTR-TLS`, `UTR-TLS-PSK` | M3 |
 | COTP (`cotp`) | none | not supported | [`parity/transport.md`](parity/transport.md): `UTR-COTP`; wire rows in [`parity/s7.md`](parity/s7.md) | M4 with S7 |
-| Serial (`serial`) | none | not supported | [`parity/transport.md`](parity/transport.md): `UTR-SERIAL` | M2 (S58) |
+| Serial (`serial`) | `SerialFactory`, `serial` feature (on through `modbus` since S59) | simulator-tested (a virtual pseudo-terminal pair on Linux, S58; through Modbus RTU on the in-memory transport, S59) | [`parity/transport.md`](parity/transport.md): `UTR-SERIAL`, `TRANSPORT-SERIAL-CONFIG`, `TRANSPORT-SERIAL-WORKER` | shipped (S58); no hardware |
 | Raw socket (`raw-socket`) | none | not supported | [`parity/transport.md`](parity/transport.md): `UTR-RAW-SOCKET` | M5 |
 | PCAP replay (`pcap-replay`) | none | not supported | [`parity/transport.md`](parity/transport.md): `UTR-PCAP-REPLAY` | M5 |
 | SocketCAN (`can-socketcan`), Virtual CAN (`can-virtualcan`); the CAN support library is not a transport | none | not supported | [`parity/transport.md`](parity/transport.md): `UTR-CAN-LIB`, `UTR-CAN-SOCKETCAN`, `UTR-CAN-VIRTUALCAN`; [`parity/can.md`](parity/can.md) | M5 |
@@ -306,7 +310,7 @@ order of the SPEC bullets. Counts are the number of tagged tests at S31.
 
 | Tag | SPEC case | Alpha coverage | Tagged tests |
 | --- | --- | --- | --- |
-| F1 | truncated headers and payloads, oversized lengths, malformed discriminators, unexpected function codes (invalid checksums are RTU and out of scope) | codec, PDU codec, MBAP framer, connection strings, profile loader | 50 |
+| F1 | truncated headers and payloads, oversized lengths, malformed discriminators, unexpected function codes (invalid RTU checksums since S59, see below) | codec, PDU codec, MBAP framer, connection strings, profile loader | 50 |
 | F2 | TCP fragmentation and coalescing, peer close at each framing boundary, wrong transaction and unit ids, delayed replies after a timeout | transport, framing, session | 71 |
 | F3 | device exception, invalid register, unsupported capability, mixed success within a batch | simulator, Modbus connection, session | 69 |
 | F4 | cancellation while connecting, queued, transmitting and awaiting a response | guard, simulator, Modbus connection; the queued case is exercised on `ConnectionGuard` only, not on the simulator, which has no wait queue | 44 |
@@ -314,7 +318,10 @@ order of the SPEC bullets. Counts are the number of tagged tests at S31.
 | F6 | queue exhaustion, slow consumer, dropped events, stale last-known values, timestamp absence | queue exhaustion (`Backpressure`) and timestamp absence at the alpha; since then the subscription queue (S54: slow consumer, dropped events) and polling subscriptions (S55: skipped ticks counted, no burst after a stall); stale values wait for the stale tracker (S56) | 4 |
 | F7 | negative and scaled values, swapped words, integer boundaries, counter rollover, NaN and infinity, incompatible profile version | typed decoder, scaling pipeline, profile loader | 36 |
 
-The RTU, OPC UA and direct-sensor cases of SPEC.md are out of scope for the alpha.
+The RTU cases of SPEC.md (CRC errors, timing boundaries, serial disconnect and reopen,
+wrong unit replies) are covered since S59 by the tests of `crates/stonecrab/tests/modbus_rtu.rs`
+tagged `// covers: SPEC mandatory-failure-cases / RTU ...`, on the in-memory transport and
+the fake clock. The OPC UA and direct-sensor cases are out of scope for the alpha.
 
 ## Divergences from upstream
 
@@ -356,8 +363,9 @@ byte-order names (`MB-ADDR-CONFIG-BLOCK`). Inferences about upstream behavior ar
 
 ## Known gaps
 
-Strings, calendar types, RTU, UDP and TLS, and hardware verification are listed above; Modbus
-subscriptions poll since S55 and extended registers are read and written since S50. Also not done: a mutation
+Strings, calendar types, Modbus ASCII, RTU against an independent server, UDP and TLS,
+and hardware verification are listed above; Modbus subscriptions poll since S55 and
+extended registers are read and written since S50. Also not done: a mutation
 threshold as a gate (one recorded run, `docs/evidence/alpha.md`), soak and benchmark
 gates, branch-coverage gating (line coverage per module is gated, ADR-0005), a
 differential test against PLC4J, and a write whose outcome is lost on demand against an

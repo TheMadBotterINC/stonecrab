@@ -185,3 +185,11 @@ TOML, so it now takes `#[deny(clippy::indexing_slicing)]` on its declaration in 
 like `codec`, `transport` and the drivers; the other lints are not promoted there. The
 `sensors` row of the per-module table in `scripts/lint-attrs.sh` and CODING_STANDARDS 5.1
 list it. The module already had no indexing or slicing, so no code changed.
+
+## Addendum (S59, 2026-10-29): `modbus` enables `serial`
+ADR-0024 decision 13 amends the `modbus` row of the feature table of decision 2: `modbus`
+pulls in `transport`, `serial` and `tracing`, so the default build contains `serial2`
+(BSD-2-Clause OR Apache-2.0; it adds no other crate to the lock file), as the S58 addendum
+of ADR-0014 announced. The Modbus RTU driver needs the serial transport, and the
+`modbus-rtu` scheme is part of the `modbus` module. No feature is added or removed, and the
+Tokio-free core of `default-features = false` is unchanged.

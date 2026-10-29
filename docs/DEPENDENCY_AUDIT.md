@@ -441,7 +441,7 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
   checks (`mise run dependencies`, exit 0); this records the trust boundary, not a
   memory-safety certification.
 
-## serial2 0.2.39 (stonecrab, feature `serial`; dev-dependency with `unix`)
+## serial2 0.2.39 (stonecrab, feature `serial`, which `modbus` enables since S59; dev-dependency with `unix`)
 - Purpose: open a serial port by name, apply baud rate, character size, parity, stop bits
   and flow control, and give `Read` and `Write` with a read and a write timeout. The serial
   transport (`stonecrab::transport::SerialTransport`, slice S58, ADR-0014 addendum) runs it
@@ -452,9 +452,11 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
   `deny.toml` is unchanged. This is why it replaces `serialport` (MPL-2.0), which would have
   needed a license exception the maintainer has not granted.
 - Features: `default-features = false` in `[workspace.dependencies]` (`serial2 = "0.2.39"`;
-  the crate has no default features). Stonecrab enables it only through `serial = ["transport",
-  "dep:serial2"]`; the `default`, `full` and `modbus` features do not, and `cargo tree -p
-  stonecrab -e normal` shows no `serial2` without it. The dev-dependency entry adds the
+  the crate has no default features). Stonecrab enables it through `serial = ["transport",
+  "dep:serial2"]`, and since S59 the `modbus` feature enables `serial`, because Modbus RTU
+  needs the serial transport (ADR-0024 decision 13, ADR-0018 addendum S59); so the
+  `default` and `full` features include `serial2`, and only a build without `modbus` and
+  `serial` leaves it out. The dev-dependency entry adds the
   `unix` feature (it only exposes `SerialPort::pair` and the raw `termios` type), so test
   builds always compile the crate; it is not in the packaged manifest's dependencies. The
   `serde` feature (which would pull `serde`), `rs4xx` and `windows` stay off.

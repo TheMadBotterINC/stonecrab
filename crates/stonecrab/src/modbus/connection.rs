@@ -1,4 +1,5 @@
-//! `ModbusConnection`: the `Connection` of the `modbus-tcp` scheme, over a [`ModbusSession`].
+//! `ModbusConnection`: the `Connection` of the `modbus-tcp` and `modbus-rtu` schemes, over a
+//! [`ModbusSession`].
 
 use std::any::Any;
 use std::fmt;
@@ -21,15 +22,12 @@ use tracing::Instrument;
 
 use crate::modbus::address::element_width;
 use crate::modbus::batch::resolve_order;
-use crate::modbus::session::exception_error;
+use crate::modbus::session::{Wire, exception_error};
 use crate::modbus::{
-    BatchLimits, Batcher, Chunk, MAX_PDU_BYTES, Member, ModbusAddress, ModbusAdu, ModbusArea,
-    ModbusOptions, ModbusPdu, ModbusSession, TypedDecoder, UnitId, exception_item_error,
+    BatchLimits, Batcher, Chunk, MAX_PDU_BYTES, Member, ModbusAddress, ModbusArea, ModbusOptions,
+    ModbusPdu, ModbusSession, TypedDecoder, UnitId, exception_item_error,
 };
 use crate::polling::{Lifeline, Plan};
-
-/// The only scheme this connection serves.
-const SCHEME: &str = "modbus-tcp";
 
 /// The most register or coil bytes an item error keeps for inspection (the PDU bound).
 const RAW_BUDGET: NonZeroUsize = match NonZeroUsize::new(MAX_PDU_BYTES) {
@@ -132,7 +130,11 @@ impl Default for ConnectionDefaults {
 /// registers as typed values, in correlated batches, and writes coils and holding registers.
 ///
 /// `ModbusConnection` is what the `modbus-tcp` driver hands out as a `dyn Connection`
-/// (slice S26). It owns a [`ModbusSession`] (transaction ids, reply correlation, the
+/// (slice S26), and what the `modbus-rtu` driver hands out too, over RTU framing
+/// ([`ModbusRtuDriver`](crate::modbus::ModbusRtuDriver), ADR-0024): everything below
+/// applies to both, with the RTU differences that driver documents (no transaction ids,
+/// the silence before each request, no unit 0). It owns a [`ModbusSession`] (transaction
+/// ids, reply correlation, the
 /// reconnect of the connection guard underneath, in the background when the connection is
 /// opened inside a Tokio runtime) and adds the read semantics of the [`Connection`]
 /// contract:
@@ -259,6 +261,8 @@ pub struct ModbusConnection {
 /// subscriptions read through, holding it weakly so they never keep it alive.
 struct Link {
     session: ModbusSession,
+    /// The framing, and so the scheme the spans name.
+    wire: Wire,
     clock: Arc<dyn Clock>,
     /// `host:port` of the endpoint, for spans; it carries no credentials.
     endpoint: String,
@@ -382,15 +386,33 @@ impl ModbusConnection {
         clock: Arc<dyn Clock>,
         defaults: ConnectionDefaults,
     ) -> OpFuture<'static, Self> {
+        let ping_address = config
+            .driver_options_as::<ModbusOptions>()
+            .map_or(ModbusAddress::DEFAULT_PING, |options| {
+                options.ping_address.clone()
+            });
+        Self::open_on(Wire::Tcp, config, factory, clock, defaults, ping_address)
+    }
+
+    /// [`open`](Self::open) for the framing `wire`, with the address `ping` reads; the
+    /// `modbus-rtu` driver opens its connections here.
+    pub(crate) fn open_on(
+        wire: Wire,
+        config: ConnectionConfig,
+        factory: Arc<dyn TransportFactory>,
+        clock: Arc<dyn Clock>,
+        defaults: ConnectionDefaults,
+        ping_address: ModbusAddress,
+    ) -> OpFuture<'static, Self> {
         let span = tracing::info_span!(
             "connect",
-            scheme = SCHEME,
+            scheme = wire.scheme(),
             endpoint = %config.endpoint(),
             op = "connect"
         );
         Box::pin(
             async move {
-                let link = Link::build(&config, factory, clock, defaults)?;
+                let link = Link::build(wire, &config, factory, clock, defaults, ping_address)?;
                 link.session.connect().await?;
                 let supervised = link.session.supervise();
                 tracing::info!(supervised, "modbus connection established");
@@ -406,28 +428,36 @@ impl ModbusConnection {
 impl Link {
     /// The connection in the `Disconnected` state, after checking the configuration.
     fn build(
+        wire: Wire,
         config: &ConnectionConfig,
         factory: Arc<dyn TransportFactory>,
         clock: Arc<dyn Clock>,
         defaults: ConnectionDefaults,
+        ping_address: ModbusAddress,
     ) -> Result<Self> {
-        if config.scheme() != SCHEME {
-            return Err(invalid_config("the connection scheme must be modbus-tcp"));
+        let scheme = wire.scheme();
+        if config.scheme() != scheme {
+            return Err(invalid_config(format!(
+                "the connection scheme must be {scheme}"
+            )));
         }
         let limits = *config.limits();
-        if limits.max_frame_bytes().get() < ModbusAdu::MAX_BYTES {
-            return Err(invalid_config(
-                "max_frame_bytes must be at least 260, the largest Modbus TCP frame",
-            ));
+        let largest = wire.max_frame_bytes();
+        if limits.max_frame_bytes().get() < largest {
+            return Err(invalid_config(format!(
+                "max_frame_bytes must be at least {largest}, the largest {scheme} frame"
+            )));
         }
         let batch = BatchLimits::new(
             defaults.max_registers,
             defaults.max_coils,
             limits.max_items_per_request(),
         )?;
-        let session = ModbusSession::new(GuardConfig::from(config), factory, Arc::clone(&clock));
+        let session =
+            ModbusSession::on_wire(wire, GuardConfig::from(config), factory, Arc::clone(&clock));
         Ok(Self {
             session,
+            wire,
             clock,
             endpoint: config.endpoint().to_string(),
             timeouts: *config.timeouts(),
@@ -435,11 +465,7 @@ impl Link {
             limits,
             batch,
             defaults,
-            ping_address: config
-                .driver_options_as::<ModbusOptions>()
-                .map_or(ModbusAddress::DEFAULT_PING, |options| {
-                    options.ping_address.clone()
-                }),
+            ping_address,
             capabilities: driver_capabilities(),
             access: config.access(),
             in_flight: AtomicBool::new(false),
@@ -513,7 +539,7 @@ impl Link {
     fn read(&self, request: ReadRequest) -> OpFuture<'_, ReadResponse> {
         let span = tracing::debug_span!(
             "read",
-            scheme = SCHEME,
+            scheme = self.wire.scheme(),
             endpoint = %self.endpoint,
             op = "read",
             items = request.items().len(),
@@ -1182,7 +1208,7 @@ fn decode_registers_at(
 }
 
 /// An `InvalidConfig` error of opening the connection.
-fn invalid_config(message: &'static str) -> PlcError {
+fn invalid_config(message: String) -> PlcError {
     let diagnostics = Diagnostics {
         operation: Some(Operation::Connect),
         category: Some(FailureCategory::Validation),
@@ -1410,7 +1436,7 @@ impl Connection for ModbusConnection {
     fn write(&self, request: WriteRequest) -> OpFuture<'_, WriteResponse> {
         let span = tracing::debug_span!(
             "write",
-            scheme = SCHEME,
+            scheme = self.link.wire.scheme(),
             endpoint = %self.link.endpoint,
             op = "write",
             items = request.items().len()
@@ -1438,7 +1464,7 @@ impl Connection for ModbusConnection {
     fn close(&self) -> OpFuture<'_, ()> {
         let span = tracing::info_span!(
             "close",
-            scheme = SCHEME,
+            scheme = self.link.wire.scheme(),
             endpoint = %self.link.endpoint,
             op = "close"
         );
@@ -1520,7 +1546,7 @@ impl Connection for ModbusConnection {
     fn ping(&self) -> OpFuture<'_, ()> {
         let span = tracing::debug_span!(
             "ping",
-            scheme = SCHEME,
+            scheme = self.link.wire.scheme(),
             endpoint = %self.link.endpoint,
             op = "ping"
         );
@@ -1634,7 +1660,7 @@ impl Connection for ModbusConnection {
     fn subscribe(&self, request: SubscribeRequest) -> OpFuture<'_, Subscription> {
         let span = tracing::debug_span!(
             "subscribe",
-            scheme = SCHEME,
+            scheme = self.link.wire.scheme(),
             endpoint = %self.link.endpoint,
             op = "subscribe",
             items = request.items().len()
@@ -1827,10 +1853,12 @@ mod tests {
                 .build()
                 .expect("config");
         let connection = Link::build(
+            Wire::Tcp,
             &config,
             Arc::new(factory.clone()),
             Arc::new(clock.clone()),
             ConnectionDefaults::default(),
+            ModbusAddress::DEFAULT_PING,
         )
         .expect("connection");
         let address =
@@ -1870,10 +1898,12 @@ mod tests {
                 .build()
                 .expect("config");
         let connection = Link::build(
+            Wire::Tcp,
             &config,
             Arc::new(factory),
             Arc::new(clock.clone()),
             ConnectionDefaults::default(),
+            ModbusAddress::DEFAULT_PING,
         )
         .expect("connection");
         let address = ModbusAddress::parse("holding-register:1", &AddressOptions::default())
@@ -1920,10 +1950,12 @@ mod tests {
                 .build()
                 .expect("config");
         let connection = Link::build(
+            Wire::Tcp,
             &config,
             Arc::new(factory),
             Arc::new(clock.clone()),
             ConnectionDefaults::default(),
+            ModbusAddress::DEFAULT_PING,
         )
         .expect("connection");
         (clock, connection)

@@ -232,10 +232,11 @@ timeout, `close` bounded by `Timeouts.request`; since S57 an opt-in supervisor t
 started by `ConnectionGuard::supervise` inside a Tokio runtime and used by every Modbus
 connection, notices a drop and reconnects without waiting for a request and enforces
 `Timeouts.idle` by closing an unused link), `SystemClock` and `Jitter`.
-Behind the off-by-default `serial` feature (S58): `SerialFactory` and `SerialTransport` on
-the `serial2` crate, one blocking worker thread per port talking to async callers over a
-bounded channel, every call bounded by its deadline, `recv` cancel-safe through a
-worker-side stash; `modbus` does not enable it yet (RTU is S59).
+Behind the `serial` feature (S58), which `modbus` enables since S59: `SerialFactory` and
+`SerialTransport` on the `serial2` crate, one blocking worker thread per port talking to
+async callers over a bounded channel, every call bounded by its deadline, `recv`
+cancel-safe through a worker-side stash. Since S59 a framer may ask `resync` to drop the
+whole buffer instead of searching it (`Framer::resync_discards`, the RTU framer does).
 
 ### `stonecrab::sim`, feature `sim`
 
@@ -266,8 +267,22 @@ never replayed, and the items after an `Unknown` are not sent. `ping` reads the 
 `ping-address` once (S47): any correlated reply, an exception included, is success, as
 upstream does (quirk d). `subscribe` polls (S55), and a connection opened inside a Tokio
 runtime reconnects in the background and enforces `Timeouts.idle` (S57). Extended registers
-are `implemented`, not `automated-verified`: no interop peer serves FC20 or FC21. Deferred
-items are in "Known gaps".
+are `implemented`, not `automated-verified`: no interop peer serves FC20 or FC21.
+
+Modbus RTU since S59 (ADR-0024): `ModbusRtuDriver` for the `modbus-rtu` scheme on a serial
+port (`modbus-rtu:///dev/ttyUSB0`, the default) or a serial-to-IP gateway
+(`modbus-rtu:tcp://`, port 502 by default), `RtuFramer` and `RtuAdu` with CRC-16 (sized by
+upstream's function-code table, noise in front of a whole frame skipped, a whole-buffer
+drop on resync), the silence before each request (t3.5, at least 1.75 ms above 19200 baud,
+or `serial.interframe-delay`) and a drain after an unanswered request, correlation by unit
+and function code, one request in flight per port, and the TCP driver's read, write
+(extended registers and selections included), ping and polling-subscribe paths shared
+through a crate-private wire choice. A CRC error fails the request at once (a read may be
+retried, a write is `Unknown`), where upstream waits for the deadline; broadcast (unit 0),
+shared ports, data bits other than 8, mark and space parity and the TLS, TLS-PSK, UDP and
+`test` carriers are `InvalidConfig`. The evidence is `simulator-tested`: the fake
+transport, the contract suite (30 passed, 3 skipped), a loopback gateway and a fuzz target;
+no independent RTU server and no device yet. Deferred items are in "Known gaps".
 
 ### `stonecrab::sensors`, feature `sensors`
 
@@ -404,6 +419,7 @@ commit; gates named were run locally before that commit.
 | S56 | 2026-10-29 | Staleness and the acquisition loop (finding G09 resolved), ADR-0023: `StaleTracker` in `stonecrab::sensors`, pure logic per profile with no clock of its own (`record`, `expire(now)`, `next_expiry()`); a retained measurement is `Stale` once its age (now minus `received_mono`) exceeds `stale_after`, exclusive at the threshold, reported once, value and timestamps kept, the earlier quality in the new field `Measurement::quality_before_stale`; a measurement without a value erases nothing. `Acquisition::new(&profile, &dyn Driver, &dyn Connection, &dyn Clock, interval)` reads through `Connection::read` (not S55 subscriptions: one interval per subscription, item-by-item delivery and grid catch-up would break `min_interval`), raises a faster interval to `min_interval`, reads everything due together in one request, hands fresh measurements and stale transitions out of `recv()` with no spawned task, ends when the connection closes, and refuses a clock that cannot pace it. 17 tests on FakeClock against the simulator and Modbus over the fake transport, including wall-clock jumps and dropped `recv` calls. Also reconciles the deferred list of this file and ARCHITECTURE notes left stale by S45 to S58 | check, coverage (sensors 100%), lint-attrs, parity, examples, semver; package steps with --allow-dirty |
 | span tests (fix) | 2026-10-29 | Under load, `cargo test` failed two span tests of `modbus_connection` ("a read span", "the tick read has its own read span") while nextest passed them: in tracing-core 0.1.36 a callsite another test first hits while the binary installs its global tap is filed before it asks the default dispatcher for its interest, so it can keep `never` after the install-time rebuild, and its spans are lost. The `traced` helpers of `modbus_connection` and `modbus_session` now call `tracing::callsite::rebuild_interest_cache()` once the tap is installed | check; both binaries under 12 busy loops: unfixed 1 failure in 300 runs, fixed 0 in 300 |
 | S50 | 2026-10-29 | Extended registers through FC20 and FC21 (`MB-ADDR-EXTENDED` implemented, ADR-0015 addendum): `extended-register:N`, `6x` and the bare `6` form under an explicit convention, the address being the register number (0 refused), file = address / 10000 + 1 and record = address % 10000 as upstream sends them (its parser-suite frames decode byte for byte), the last address 655349999 (upstream's 655359999 would need file 65536; divergence `MB-LIMIT-EXT`); reads in chunks of at most 120 registers (125 would answer over the 245 data bytes V1.1b allows), one FC20 request per chunk cut at file ends and every sub-response checked and joined in order (upstream used the first only, `MB-QUIRK-B` fixed); writes as one FC21 request per item cut the same way and confirmed only by the whole echo. Merged with S48 by a dedicated merge (ADR-0022 addendum of 2026-10-29): selections work on the extended registers, offsets count through the files, a selection is at most 120 registers, and a list written across a file end at most 118. No interop peer serves FC20 or FC21, so the evidence is fake-transport and responder tests | check (1542 tests), coverage (modbus 100%), lint-attrs, parity, examples, semver, fuzz smoke (10 s per target), package list |
+| S59 | 2026-10-29 | Modbus RTU, ADR-0024: `ModbusRtuDriver` (`modbus-rtu` on a serial port by default, or a serial-to-IP gateway over `tcp` with port 502 as Go has it), `RtuFramer` and `RtuAdu` with CRC-16/MODBUS sized by upstream's function-code table, the line silence before every request (t3.5 or `serial.interframe-delay`) and a drain after an unanswered one, correlation by unit and function code, one request per port at a time, and the TCP driver's read, write, ping and polling paths shared through a crate-private wire choice (so extended registers and selections work over RTU, tested at the merge). Divergences: a CRC error fails at once instead of waiting for the deadline, multi-item writes go one request per item, only 8 data bits, broadcast and shared ports refused. `modbus` now enables `serial`, so `serial2` is in the default build (ADR-0018 addendum, DEPENDENCY_AUDIT updated). New fuzz target `fuzz_modbus_rtu`. Simulator-tested only: no independent RTU server or device yet | check, coverage (modbus 100%), lint-attrs, parity, examples, semver, fuzz smoke (eight targets), package list; at the merge with S48 and S50 the same gates again |
 
 ## Verified evidence and reproduction
 
@@ -515,7 +531,7 @@ recorded run (S32, `2d38e48`):
 | `cross` (aarch64 and armv7 compile checks) | green |
 | `dependencies`, `package`, `dco`, `features`, `machete`, `lint-attrs` | green |
 | `geiger` (no first-party `unsafe` outside `forbid(unsafe_code)`), `beta` (report only) | green |
-| `fuzz-smoke` (seven targets) | green |
+| `fuzz-smoke` (seven targets at the alpha; eight since S59) | green |
 | `parity` (`scripts/parity-check.sh` and its self-test) | green |
 | `examples` (`sim_read` and the three `profile_read --expect-good` runs on the hosted runner) | green |
 | `interop` (pymodbus 3.8.6 on the amd64 runner: ten interop tests, the `modbus_tcp_read` example, the `profiles` step, the `interop-evidence` artifact) | green |
@@ -668,7 +684,8 @@ Deferred features, each a deferred row in `docs/parity/modbus.md` or an item of 
   Modbus encoding for them (S44); the calendar values shipped in S53 (ADR-0021), array
   selections in S48 (ADR-0022), extended registers with their selections in S50 and the
   `zero-based` and `one-based-40001` conventions in S51.
-- **Modbus RTU and ASCII** (S59, S60; the serial transport shipped in S58); UDP (S61), TLS
+- **Modbus ASCII** (S60; RTU shipped in S59, the serial transport in S58), an RTU run
+  against an independent server (a socat pair with libmodbus or modbus-tk) and HW2; UDP (S61), TLS
   and TLS-PSK (M3 or the parity backlog); board adapters (M2S); OPC UA (M3, after the
   generator); EtherNet/IP and S7 (M4); code generation (S66, S67: vendoring
   `modbus.mspec` waits for the maintainer's approval) and the remaining baseline protocols
@@ -701,6 +718,12 @@ Deferred features, each a deferred row in `docs/parity/modbus.md` or an item of 
   caller cannot read the count; and the supervisor emits no tracing events (the
   `transport` feature does not depend on `tracing`); its state changes are visible
   through `watch_state`.
+- **RTU residual risks** (S59): a late reply that only begins after the next request is on
+  the wire, with the same unit, function and shape, cannot be told apart (the drain after an
+  unanswered request bounds it); below about 520 baud the default 5000 ms request timeout
+  is shorter than the drain plus a reply; there is no pseudo-terminal RTU test (`serial2`
+  cannot make a pty on macOS); and the documented SOLO SLM1-C profile of S52d still names a
+  planned serial scheme instead of `modbus-rtu`.
 - **SOLO bit writes**: the SOLO SLM1-C manual (S52d) lists only FC05 for writing a bit
   register, and Stonecrab sends FC15 for every coil write as upstream does (S45, quirk c),
   so its bits cannot be written yet; and profile schema version 1 cannot map its PV

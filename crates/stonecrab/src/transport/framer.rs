@@ -133,4 +133,50 @@ pub trait Framer<F>: Send {
     /// is above the transport's `max_buffered_bytes` can hit the buffer bound first
     /// (`ResourceLimit` without a frame boundary).
     fn max_frame_bytes(&self) -> usize;
+
+    /// Whether [`FramedTransport::resync`](crate::transport::FramedTransport::resync)
+    /// discards every buffered byte for this framer instead of searching them for the next
+    /// frame start.
+    ///
+    /// The default, `false`, suits a framing whose frames start with a header that can be
+    /// recognised (MBAP, a length prefix): the resync drops one byte at a time until one
+    /// decodes. A framing where only silence on the line separates frames (Modbus RTU)
+    /// returns `true`. Such a stream has no marker to search for: the tail of a frame the
+    /// owner gave up on looks like the start of a frame that is still arriving, and a
+    /// search would wait for bytes that never come. When the owner resynchronizes (before
+    /// its next request), every buffered byte belongs to an exchange it abandoned, so all
+    /// of them are dropped.
+    ///
+    /// # Compatibility: docs/parity/transport.md#TRANSPORT-RESYNC
+    /// No upstream parity claim (see the trait); the Modbus RTU use is
+    /// docs/parity/modbus-serial.md#MBS-RTU-RESYNC.
+    ///
+    /// # Examples
+    /// ```
+    /// use bytes::{Buf, BufMut, BytesMut};
+    /// use stonecrab::transport::{FrameError, Framer};
+    ///
+    /// /// Frames of one byte each: a boundary everywhere, so the default search applies.
+    /// struct Bytewise;
+    ///
+    /// impl Framer<u8> for Bytewise {
+    ///     fn decode(&mut self, buffer: &mut BytesMut) -> Result<Option<u8>, FrameError> {
+    ///         Ok(buffer.has_remaining().then(|| buffer.get_u8()))
+    ///     }
+    ///
+    ///     fn encode(&mut self, frame: &u8, out: &mut BytesMut) -> Result<(), FrameError> {
+    ///         out.put_u8(*frame);
+    ///         Ok(())
+    ///     }
+    ///
+    ///     fn max_frame_bytes(&self) -> usize {
+    ///         1
+    ///     }
+    /// }
+    ///
+    /// assert!(!Bytewise.resync_discards());
+    /// ```
+    fn resync_discards(&self) -> bool {
+        false
+    }
 }

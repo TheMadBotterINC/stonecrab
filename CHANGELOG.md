@@ -73,6 +73,26 @@ placeholder.
   sub-responses, and written by one function 21 request; a list whose request would pass the
   251 data bytes of function 21 (more than 118 registers across the end of a file) is the
   item's `ResourceLimit` rejection, with no request.
+- Modbus RTU (ADR-0024; additive): `ModbusRtuDriver`, scheme `modbus-rtu`, with the
+  operations of `modbus-tcp` (reads, writes, ping, polling subscriptions, retry, reconnect)
+  over RTU framing. `modbus-rtu:///dev/ttyUSB0` or `modbus-rtu://COM3` opens a serial port
+  with `serial.baud-rate`, `serial.data-bits` (8), `serial.stop-bits`, `serial.parity`,
+  `serial.flow-control`, `serial.interframe-delay` and `serial.reuse-port` (`false`);
+  `modbus-rtu:tcp://host[:port]` reaches a serial-to-IP gateway (default port 502); the
+  other carriers, unknown keys and unit 0 (broadcast) are refused. New public types
+  `RtuAdu` and `RtuFramer` (CRC-16/MODBUS checked on receive, appended on send, replies
+  sized by function code as upstream). The PDU codec, the session and `ModbusConnection`
+  are shared with Modbus TCP, whose behavior does not change. A reply with a wrong CRC
+  fails its request with `MalformedData` and is dropped before the next request; a reply
+  from another unit or function is discarded; before each request the line is watched
+  until quiet for t3.5 (1.75 ms above 19200 baud) or `serial.interframe-delay`, and after
+  an unanswered request for longer, so a late reply cannot answer the next one (over a
+  gateway: no gap, and the drain of a 9600 8N1 line). The
+  `Framer` trait gains the provided method `resync_discards` (default `false`), which makes
+  `FramedTransport::resync` drop the buffer for a framing without a frame marker. The
+  `modbus` feature now enables `serial`, so the default build contains `serial2`. New fuzz
+  target `fuzz_modbus_rtu`. Simulator-tested only: no independent RTU server and no
+  hardware yet. The RTU rows of `docs/parity/modbus-serial.md` are implemented or decided.
 - Calendar values (ADR-0021; additive): `PlcValue` and `PlcValueType` gain
   `SignedDuration`, `Date`, `TimeOfDay` and `DateTime` after `Duration`, holding the new
   root types `PlcSignedDuration` (an `i64` nanosecond count; IEC `TIME` and `LTIME`),

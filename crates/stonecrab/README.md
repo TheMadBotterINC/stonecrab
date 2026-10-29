@@ -2,8 +2,8 @@
 An independent native Rust industrial protocol library, built for sensor acquisition
 first. **Alpha**: pre-release versions with experimental APIs. This is one crate, with one
 version: the runtime-independent core contracts are at the crate root, and the codec, the
-transport, the in-process simulator, the Modbus TCP driver, declarative sensor
-profiles and the test kit are modules, switched on by Cargo features. No hardware access
+transport, the in-process simulator, the Modbus TCP and Modbus RTU drivers, declarative
+sensor profiles and the test kit are modules, switched on by Cargo features. No hardware access
 is implemented and no physical device has been tried.
 
 ```sh
@@ -21,10 +21,11 @@ for the contracts. Upstream compatibility is claimed only where a parity row say
 | --- | --- | --- | --- |
 | none | the core at the crate root, and `stonecrab::codec` | `thiserror`, `bytes` | always built |
 | `sim` | `stonecrab::sim`, the in-process simulator | `tracing` | yes |
-| `modbus` | `stonecrab::modbus`, the Modbus TCP driver (reads and writes) | `transport`, `tracing` | yes |
+| `modbus` | `stonecrab::modbus`, the Modbus TCP and Modbus RTU drivers (reads and writes) | `transport`, `serial`, `tracing` | yes |
 | `sensors` | `stonecrab::sensors`, sensor profiles and the TOML loader | `serde`, `toml` | yes |
 | `full` | the same set as the defaults, spelled out; the `profile_read` example requires it | `sim`, `modbus`, `sensors` | no |
 | `transport` | `stonecrab::transport`, deadline-bounded transports and the Tokio TCP transport | `tokio` | no (on through `modbus` and `testkit`) |
+| `serial` | the serial transport in `stonecrab::transport` (`SerialFactory`, `SerialTransport`) | `transport`, `serial2` | no (on through `modbus`) |
 | `testkit` | `stonecrab::testkit`, fakes, scripted peers, golden-vector loader and the driver contract suite | `transport`, `serde`, `serde_json`, `toml`, Tokio `macros` | no |
 
 `default-features = false` is the Tokio-free core: the crate root and the codec, which pull
@@ -48,6 +49,7 @@ operations.
 | `modbus`: Modbus TCP connect, close and reads of coils, discrete inputs, holding registers and input registers (FC01 to FC04) | interoperability-tested |
 | `modbus`: reconnect, retry, cancellation, timeout, late-reply discard | simulator-tested |
 | `modbus`: write of coils and holding registers (FC15, FC06, FC16), refused unless the connection string says `access=read-write` | interoperability-tested |
+| `modbus`: Modbus RTU (`modbus-rtu`) reads, writes, ping and polling over a serial port or a gateway, with CRC errors, the silence before a request, late-reply drain and reopen | simulator-tested |
 | Subscribe by polling (`sim` and `modbus`): cyclic and change-of-state, event refused; on a clock that never sleeps (the simulator's default) change-of-state is refused and the interval paces nothing | simulator-tested |
 | Browse and discover | not supported |
 | `sensors`: synthetic profiles against the simulator | simulator-tested |

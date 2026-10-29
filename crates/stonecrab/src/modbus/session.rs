@@ -7,17 +7,19 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use crate::codec::{BoundedReader, BoundedWriter, ParseError};
-use crate::transport::{ConnectionGuard, GuardConfig, GuardStats, TransportFactory};
+use crate::transport::{
+    ConnectionGuard, FrameError, Framer, GuardConfig, GuardStats, TransportFactory,
+};
 use crate::{
     CancellationToken, Clock, ConnectionState, Deadline, ErrorKind, FailureCategory, ItemError,
     OpFuture, Operation, PlcError, ProtocolStatus, Result, StateWatch,
 };
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use tracing::Instrument;
 
 use crate::modbus::{
-    ExceptionCode, FunctionCode, MAX_PDU_BYTES, MbapFramer, ModbusAdu, ModbusPdu, TransactionId,
-    UnitId, decode_response, encode_request,
+    ExceptionCode, FunctionCode, MAX_PDU_BYTES, MbapFramer, ModbusAdu, ModbusPdu, RtuAdu,
+    RtuFramer, TransactionId, UnitId, decode_response, encode_request,
 };
 
 /// How many abandoned transaction ids the session remembers, to tell a late reply from a
@@ -33,6 +35,101 @@ const ILLEGAL_DATA_ADDRESS: u8 = 0x02;
 
 /// The protocol name every `ProtocolStatus` of this crate carries.
 const PROTOCOL: &str = "modbus";
+
+/// The unit address a Modbus RTU master broadcasts to; no server answers it.
+const BROADCAST: u8 = 0;
+
+/// The framing a session speaks on its connection: MBAP over TCP, or RTU (the address, the
+/// PDU and the CRC-16) over a serial line or a serial-to-IP gateway (ADR-0024). The PDU
+/// codec, the correlation, the exception mapping and everything above the session are the
+/// same for both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "unreachable_pub forbids plain pub in a private module"
+)]
+pub(crate) enum Wire {
+    /// Modbus TCP: MBAP frames, a reply matched by transaction id, unit and function.
+    Tcp,
+    /// Modbus RTU: RTU frames, a reply matched by unit and function (there is no
+    /// transaction id), and no broadcast.
+    Rtu,
+}
+
+impl Wire {
+    /// The connection-string scheme of the driver that speaks this framing.
+    pub(crate) const fn scheme(self) -> &'static str {
+        match self {
+            Self::Tcp => "modbus-tcp",
+            Self::Rtu => "modbus-rtu",
+        }
+    }
+
+    /// The largest frame of this framing, in bytes on the wire.
+    pub(crate) const fn max_frame_bytes(self) -> usize {
+        match self {
+            Self::Tcp => ModbusAdu::MAX_BYTES,
+            Self::Rtu => RtuAdu::MAX_BYTES,
+        }
+    }
+
+    /// A fresh framer for one transport.
+    const fn framer(self) -> WireFramer {
+        match self {
+            Self::Tcp => WireFramer::Mbap(MbapFramer::new()),
+            Self::Rtu => WireFramer::Rtu(RtuFramer::new()),
+        }
+    }
+}
+
+/// The framer of a session: either framing, seen as [`ModbusAdu`]s. An RTU frame has no
+/// transaction id; it is read as id 0 and the id is ignored when one is written.
+enum WireFramer {
+    Mbap(MbapFramer),
+    Rtu(RtuFramer),
+}
+
+impl Framer<ModbusAdu> for WireFramer {
+    fn decode(
+        &mut self,
+        buffer: &mut BytesMut,
+    ) -> std::result::Result<Option<ModbusAdu>, FrameError> {
+        match self {
+            Self::Mbap(framer) => framer.decode(buffer),
+            Self::Rtu(framer) => framer
+                .decode(buffer)?
+                .map(|adu| ModbusAdu::new(0, adu.unit_id(), adu.pdu().clone()))
+                .transpose(),
+        }
+    }
+
+    fn encode(
+        &mut self,
+        frame: &ModbusAdu,
+        out: &mut BytesMut,
+    ) -> std::result::Result<(), FrameError> {
+        match self {
+            Self::Mbap(framer) => framer.encode(frame, out),
+            Self::Rtu(framer) => {
+                framer.encode(&RtuAdu::new(frame.unit_id(), frame.pdu().clone())?, out)
+            }
+        }
+    }
+
+    fn max_frame_bytes(&self) -> usize {
+        match self {
+            Self::Mbap(framer) => framer.max_frame_bytes(),
+            Self::Rtu(framer) => framer.max_frame_bytes(),
+        }
+    }
+
+    fn resync_discards(&self) -> bool {
+        match self {
+            Self::Mbap(framer) => framer.resync_discards(),
+            Self::Rtu(framer) => framer.resync_discards(),
+        }
+    }
+}
 
 /// Counters a [`ModbusSession`] keeps for tests and diagnostics.
 ///
@@ -153,6 +250,18 @@ impl Drop for Outstanding<'_> {
 /// PDU does not decode or does not fit the request ([`ErrorKind::MalformedData`]) leaves
 /// the stream aligned, and nothing stays buffered that the next request must discard.
 ///
+/// # Modbus RTU
+/// The `modbus-rtu` driver (ADR-0024) runs the same session over RTU framing
+/// ([`RtuFramer`]). An RTU frame has no transaction id, so a reply is accepted when its unit
+/// id and function code match; every other frame is discarded and counted in
+/// `mismatched_replies` (a late RTU reply cannot be told from a stray one, so
+/// `late_replies` stays 0). Unit 0, the serial line's broadcast address, is refused with
+/// [`ErrorKind::InvalidAddress`] before any I/O, because no server answers a broadcast.
+/// After a timeout the guard drops every buffered byte before the next request
+/// ([`Framer::resync_discards`]); the driver's transport also waits for the line to
+/// fall silent before each request, discarding what arrives, which is what keeps a late
+/// reply from answering a newer request (docs/parity/modbus-serial.md#MBS-BUS-LATE-REPLY).
+///
 /// # Compatibility: docs/parity/modbus.md#MB-READ-MATCH
 /// Upstream matches a reply to its request by transaction id alone, one request in flight
 /// (`MB-READ-INFLIGHT`), and times a request out after `request-timeout-ms`
@@ -200,7 +309,8 @@ impl Drop for Outstanding<'_> {
 /// # fn main() {}
 /// ```
 pub struct ModbusSession {
-    guard: ConnectionGuard<ModbusAdu, MbapFramer>,
+    guard: ConnectionGuard<ModbusAdu, WireFramer>,
+    wire: Wire,
     clock: Arc<dyn Clock>,
     /// `host:port`, for the span; the endpoint carries no credentials.
     endpoint: String,
@@ -267,15 +377,26 @@ impl ModbusSession {
         factory: Arc<dyn TransportFactory>,
         clock: Arc<dyn Clock>,
     ) -> Self {
+        Self::on_wire(Wire::Tcp, config, factory, clock)
+    }
+
+    /// A session that speaks `wire`; [`new`](Self::new) is the Modbus TCP one.
+    pub(crate) fn on_wire(
+        wire: Wire,
+        config: GuardConfig,
+        factory: Arc<dyn TransportFactory>,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
         let endpoint = config.endpoint.to_string();
         let guard = ConnectionGuard::new(
             config,
             factory,
-            Box::new(MbapFramer::new),
+            Box::new(move || wire.framer()),
             Arc::clone(&clock),
         );
         Self {
             guard,
+            wire,
             clock,
             endpoint,
             exchanges: Mutex::new(Exchanges {
@@ -548,8 +669,9 @@ impl ModbusSession {
     /// backoff, the open, the send, the resync and every wait for a reply (the first and
     /// each after a discard) end at it. `token` is honoured as `ConnectionGuard::request`
     /// documents. A span `request` (debug level) covers the call, with the fields
-    /// `scheme = "modbus-tcp"`, `endpoint` (host and port), `op` (`"read"`, or `"write"`
-    /// for a write request) and `txn`.
+    /// `scheme` (`"modbus-tcp"`, or `"modbus-rtu"` for a session of the RTU driver),
+    /// `endpoint` (host and port, or the serial port), `op` (`"read"`, or `"write"` for a
+    /// write request) and `txn`.
     ///
     /// # Compatibility: docs/parity/modbus.md#MB-READ-MATCH
     /// Upstream matches by transaction id only (`MB-READ-MATCH`), keeps one request in
@@ -638,7 +760,7 @@ impl ModbusSession {
     ) -> OpFuture<'a, ModbusPdu> {
         let span = tracing::debug_span!(
             "request",
-            scheme = "modbus-tcp",
+            scheme = self.wire.scheme(),
             endpoint = %self.endpoint,
             op = operation_name(pdu.function()),
             txn = tracing::field::Empty
@@ -669,6 +791,17 @@ impl ModbusSession {
                 FailureCategory::Validation,
             ));
         };
+        if self.wire == Wire::Rtu && unit_id.get() == BROADCAST {
+            return Err(self.stamp(
+                PlcError::new(
+                    ErrorKind::InvalidAddress,
+                    "unit 0 is the broadcast address of a serial line, which no server \
+                     answers; Modbus RTU broadcast is not supported",
+                ),
+                started,
+                FailureCategory::Validation,
+            ));
+        }
         let txn = self.issue();
         span.record("txn", txn.get());
         let frame = Self::frame(request, unit_id, txn)
@@ -682,7 +815,7 @@ impl ModbusSession {
         // The guard keeps the in-flight slot from the send to the reply that answers, so
         // a supervisor never comes between two reads of the correlation.
         let mut answers = |reply: &ModbusAdu| {
-            let answered = Self::answers(reply, txn, unit_id, request.function());
+            let answered = self.answers(reply, txn, unit_id, request.function());
             if !answered {
                 self.discard(reply, txn);
             }
@@ -704,15 +837,17 @@ impl ModbusSession {
         ModbusAdu::new(txn.get(), unit_id, Bytes::from(writer.into_bytes())).map_err(PlcError::from)
     }
 
-    /// Whether `reply` answers the request: transaction id, unit id and function code (the
-    /// reply's function with the exception bit cleared) all match.
+    /// Whether `reply` answers the request: transaction id (Modbus TCP only; an RTU frame
+    /// has none), unit id and function code (the reply's function with the exception bit
+    /// cleared) all match.
     fn answers(
+        &self,
         reply: &ModbusAdu,
         txn: TransactionId,
         unit_id: UnitId,
         function: FunctionCode,
     ) -> bool {
-        reply.transaction_id() == txn.get()
+        (self.wire == Wire::Rtu || reply.transaction_id() == txn.get())
             && reply.unit_id() == unit_id
             && reply
                 .pdu()
@@ -937,5 +1072,71 @@ mod tests {
         }
         let read = exception_item_error(FunctionCode::ReadCoils, ExceptionCode::IllegalFunction);
         assert_eq!(read.kind(), ErrorKind::Unsupported(Operation::Read));
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "testkit")]
+mod rtu_tests {
+    use std::time::Duration;
+
+    use crate::testkit::{FakeClock, FakeTransportFactory, Script, Step, block_on_with};
+    use crate::{Endpoint, ResourceLimits};
+
+    use super::*;
+
+    /// The read of holding register 1 of unit 1, and a reply carrying 42 with a CRC that is
+    /// right when `good`.
+    fn exchange(good: bool) -> [Step; 2] {
+        let reply_crc = if good { 0x9B } else { 0x9A };
+        [
+            Step::Expect(vec![0x01, 0x03, 0x00, 0x00, 0x00, 0x01, 0x84, 0x0A]),
+            Step::Reply(vec![0x01, 0x03, 0x02, 0x00, 0x2A, 0x39, reply_crc]),
+        ]
+    }
+
+    // covers: MBS-RTU-CRC / a frame with a bad CRC is discarded and counted
+    #[test]
+    fn a_bad_crc_fails_the_request_and_the_resync_before_the_next_one_drops_and_counts_it() {
+        let clock = FakeClock::default();
+        let factory = FakeTransportFactory::new(clock.clone());
+        factory.push_script(Script::new(
+            exchange(false).into_iter().chain(exchange(true)).collect(),
+        ));
+        let limits = ResourceLimits::builder().build().expect("limits");
+        let config = GuardConfig::new(Endpoint::Custom("/dev/ttyS0".to_owned()), limits);
+        let session = ModbusSession::on_wire(
+            Wire::Rtu,
+            config,
+            Arc::new(factory),
+            Arc::new(clock.clone()),
+        );
+        block_on_with(&clock, session.connect()).expect("connect");
+        let request = ModbusPdu::ReadHoldingRegisters {
+            start: 0,
+            quantity: 1,
+        };
+        let deadline = || Deadline::after(clock.now(), Duration::from_secs(1)).expect("deadline");
+        let unit = UnitId::from(1);
+        let error = block_on_with(&clock, session.request(&request, unit, deadline(), None))
+            .expect_err("a bad CRC is no reply");
+        assert_eq!(error.kind(), ErrorKind::MalformedData);
+        assert_eq!(session.stats().guard.resyncs, 0, "nothing dropped yet");
+        let reply = block_on_with(&clock, session.request(&request, unit, deadline(), None))
+            .expect("the next request is answered");
+        assert_eq!(
+            reply,
+            ModbusPdu::ReadRegistersResponse {
+                function: FunctionCode::ReadHoldingRegisters,
+                registers: vec![42],
+            }
+        );
+        let stats = session.stats();
+        assert_eq!(
+            stats.guard.resyncs, 1,
+            "the bad frame was dropped and counted"
+        );
+        assert_eq!(stats.guard.requests, 2);
+        assert_eq!(stats.mismatched_replies, 0);
     }
 }

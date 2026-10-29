@@ -106,7 +106,8 @@ no-background-work rule of decision D15 holds here too.
   name, a zero baud rate or a rate the platform has no setting for is `InvalidConfig`.
 - **Not offered yet.** `read-timeout-ms`, `write-timeout-ms` (replaced by the deadlines),
   `dtr`, `rts`, `reuse-port` and `interframe-delay`; mark and space parity and 1.5 stop
-  bits. The Modbus RTU slice owns inter-frame timing and bus sharing. `send` returns when
+  bits. The Modbus RTU driver (S59, ADR-0024) owns inter-frame timing
+  (`serial.interframe-delay`) and refuses a shared port (`serial.reuse-port=true`). `send` returns when
   the bytes are handed to the operating system, not when the last bit has left the line.
   The port is not opened exclusively: keep one transport per port.
 
@@ -125,7 +126,9 @@ receive buffer, bounded by `max_buffered_bytes`:
 - `resync(deadline)` realigns after a framing error or an abandoned request: it discards
   bytes from the front, one at a time, while the framer rejects them, and keeps
   receiving. It fails with `Disconnected` when the deadline passes without a frame
-  boundary. Its deadline is the remaining deadline of the request whose timeout triggered
+  boundary. A framer whose `Framer::resync_discards` is true (Modbus RTU since S59, where
+  a byte-wise search could wait for a frame tail that never comes) has the whole buffer
+  dropped instead, counted in `GuardStats::resyncs`. Its deadline is the remaining deadline of the request whose timeout triggered
   it, or `Deadline::after(clock.now(), timeouts.request)` from close or recovery.
 
 ## The connection guard

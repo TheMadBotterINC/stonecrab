@@ -34,7 +34,7 @@ const READ_ONLY: &str = "read-only";
 const PLC4X: &str = "plc4x";
 
 /// The most key characters an error message repeats.
-const KEY_ECHO_LIMIT: usize = 32;
+pub(super) const KEY_ECHO_LIMIT: usize = 32;
 
 /// The six upstream connection parameters of the `modbus-tcp` driver, parsed and validated.
 ///
@@ -266,7 +266,7 @@ impl ModbusOptions {
 
 /// A non-negative whole number in decimal digits only (no sign, no space, not empty) that
 /// fits `T`.
-fn number<T: FromStr>(key: &str, value: &str) -> Result<T> {
+pub(super) fn number<T: FromStr>(key: &str, value: &str) -> Result<T> {
     if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
         return Err(invalid(format!(
             "{key} must be a whole number in decimal digits"
@@ -328,7 +328,7 @@ fn unknown_key(key: &str) -> PlcError {
     ))
 }
 
-fn invalid(message: String) -> PlcError {
+pub(super) fn invalid(message: String) -> PlcError {
     PlcError::new(ErrorKind::InvalidConfig, message)
 }
 
