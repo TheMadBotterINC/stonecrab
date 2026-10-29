@@ -68,6 +68,8 @@ src/sim/driver.rs
 src/sim/script.rs
 src/sim.rs
 src/state.rs
+src/subscribe_request.rs
+src/subscription.rs
 src/tag.rs
 src/testkit/address.rs
 src/testkit/clock.rs
