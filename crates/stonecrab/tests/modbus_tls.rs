@@ -287,16 +287,19 @@ mod tests {
             .parse_config(&format!("modbus-tcp:tls://127.0.0.1?{}", pki.query(true)))
             .expect("config");
         let shown = config.redacted_display();
-        assert!(shown.contains(&pki.trust_store), "the trust store: {shown}");
+        // Paths are shown in their Debug form, which doubles a Windows backslash; the
+        // keystore's file name is checked because it is the same in every form.
+        let trust_store = format!("{:?}", pki.trust_store);
+        assert!(shown.contains(&trust_store), "the trust store: {shown}");
         assert!(
             shown.contains("[REDACTED]"),
             "the keystore is marked: {shown}"
         );
         assert!(
-            !shown.contains(&pki.keystore),
+            !shown.contains("client.pem"),
             "not the keystore path: {shown}"
         );
-        assert!(!format!("{config:?}").contains(&pki.keystore), "nor Debug");
+        assert!(!format!("{config:?}").contains("client.pem"), "nor Debug");
         assert!(
             pki.scratch.path().exists(),
             "the files exist while the test runs"

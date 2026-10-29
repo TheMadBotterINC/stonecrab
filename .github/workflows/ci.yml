@@ -74,9 +74,12 @@ jobs:
             target/coverage.lcov
             target/coverage-summary.txt
   cross:
+    # ring (feature tls, ADR-0032) compiles C and assembly in its build script, so even a
+    # cargo check of these targets needs their C cross compilers; cc finds Ubuntu's by name.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
         with:
           toolchain: "1.99.1"
