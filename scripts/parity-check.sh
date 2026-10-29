@@ -153,8 +153,10 @@ EOF
       report "$file" "$lineno" "$ref_id" "refers to $ref_file, which does not exist"
       continue
     fi
+    # awk reads its whole input (no early exit): with pipefail, an early exit would break the
+    # pipe under printf once the rows outgrow the pipe buffer, and fail the check.
     found=$(printf '%s\n' "$rows" |
-      awk -F'\037' -v f="$ref_file" -v id="$ref_id" '$1 == "ROW" && $2 == f && $4 == id { print "y"; exit }')
+      awk -F'\037' -v f="$ref_file" -v id="$ref_id" '$1 == "ROW" && $2 == f && $4 == id { hit = 1 } END { if (hit) print "y" }')
     if [ -z "$found" ]; then
       report "$file" "$lineno" "$ref_id" "no row with this id in $ref_file"
     fi
