@@ -18,6 +18,11 @@ placeholder.
   `validate`), two spellings of one address and bit are `OverlappingStatusBits`, and a status bit
   inside the measurement's own leading `bit_field` is the new `StatusBitInBitField`; a refused
   status address is now reported there too. Additive: two `#[non_exhaustive]` variants.
+- Benchmarks (no crate API change): Criterion benches for Modbus parsing, PDU and MBAP codec,
+  `TypedDecoder`, `Batcher::plan` and batched reads over a loopback socket (`mise run
+  bench`), a recorded local baseline in `docs/evidence/benchmarks/`, and a weekly
+  scheduled-CI gate that fails on a regression of more than 10% beyond the noise band
+  (`scripts/bench-compare.sh`); `criterion` is a dev-dependency only.
 - CI (no crate changes): the `semver` job is blocking against the published 0.2.0, with
   cargo-semver-checks pinned to 0.51.0.
 - `SensorProfile::validate` rejects a measurement range with a NaN or infinite bound or

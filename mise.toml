@@ -20,12 +20,18 @@
 #   mise run mutants       = the "scheduled" job's mutation step once it is enabled (it is a
 #                            no-op there today; scripts/mutants.sh, mutants.toml, evidence
 #                            under docs/evidence/mutants/, ADR-0017)
+#   mise run bench         = the Criterion benches by hand, for a baseline or a local look
+#                            (no CI job runs them alone; slice S52, ADR-0009 addendum;
+#                            docs/evidence/benchmarks/)
+#   mise run bench-compare -- BASE_REF
+#                          = the "scheduled" job's 10% benchmark gate (scripts/bench-compare.sh)
 #   mise run sbom          = the "release-evidence" workflow (workflow_dispatch only,
 #                            scripts/sbom.sh, files under target/release-evidence/)
 #
 # CI selects the nextest `ci` profile, which only adds a JUnit file; `mise run check` uses
 # the default profile. These CI jobs have no task: the 1.97.1 and OS cells of "test",
-# "cross" (needs the foreign targets), "beta", "geiger" and "scheduled".
+# "cross" (needs the foreign targets), "beta", "geiger" and "scheduled" (whose benchmark
+# step is `mise run bench-compare`).
 # ADR-0005 records the coverage and waiver decisions; ADR-0017 records the release
 # process, and the pins of cargo-mutants, cargo-cyclonedx and cargo-release below.
 # scripts/fuzz-evidence.sh (the recorded 30-minute run of all fuzz targets) has no task.
@@ -84,6 +90,14 @@ run = "cargo machete"
 [tasks.mutants]
 description = "Recorded cargo-mutants run over the modules named in mutants.toml, outcomes.json copied to docs/evidence/mutants/ (ADR-0017; MUTANTS_JOBS sets the parallelism, default 4)"
 run = "scripts/mutants.sh"
+
+[tasks.bench]
+description = "Run the Criterion benches (modbus_wire, modbus_loopback); arguments after -- go to Criterion, e.g. mise run bench -- --sample-size 20"
+run = "cargo bench --locked -p stonecrab --all-features --bench modbus_wire --bench modbus_loopback --"
+
+[tasks.bench-compare]
+description = "The scheduled job's 10% gate: build BASE_REF and the working tree, run both in alternating rounds on this machine and fail on a regression beyond the noise band (ADR-0009 addendum S52)"
+run = "scripts/bench-compare.sh"
 
 [tasks.sbom]
 description = "Write the CycloneDX SBOM of the one published crate and the archive file list to target/release-evidence/ (ADR-0017)"

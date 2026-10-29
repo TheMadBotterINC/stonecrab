@@ -16,6 +16,7 @@ categories = ["network-programming", "embedded"]
 thiserror = { version = "2.0", default-features = false, features = ["std"] }
 bytes = { version = "1.10", default-features = false, features = ["std"] }
 proptest = { version = "1.12", default-features = false, features = ["std"] }
+criterion = { version = "0.8", default-features = false }
 tokio = { version = "1.54", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }

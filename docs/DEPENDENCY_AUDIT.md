@@ -390,3 +390,53 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
   read-only tree reader the plan names).
 - Review date: 2026-10-28. `cargo-deny` passes advisory, license, ban and source checks;
   this records the trust boundary, not a memory-safety certification.
+
+## criterion 0.8.2 (stonecrab, dev-dependency)
+- Purpose: the benchmark harness of slice S52 (`crates/stonecrab/benches/modbus_wire.rs` and
+  `modbus_loopback.rs`, ADR-0009 addendum "S52"). The crate is a dev-dependency of `stonecrab`
+  only, so it is not in the published manifest's dependencies and
+  `cargo tree -e normal --all-features -p stonecrab` does not list it or any crate below
+  (checked on 2026-10-28). `scripts/bench-compare.sh` reads the `estimates.json` files it writes.
+- License: Apache-2.0 OR MIT.
+- Features: `[workspace.dependencies]` has `criterion = { version = "0.8", default-features =
+  false }` with no feature. The default features are `rayon` (parallel statistics), `plotters`
+  (SVG plots) and `cargo_bench_support`, which is an empty marker in 0.8.2. Without
+  `plotters` there are no HTML reports (the gate and the evidence need none); without `rayon`
+  the analysis is single-threaded, which also keeps it off the cores a benchmark measures.
+  The `async_*` features are off: the loopback benchmark drives its own current-thread Tokio
+  runtime with `block_on`.
+- Transitive crates this adds to `Cargo.lock` (all dev-only): `criterion-plot`, `anes`,
+  `cast`, `ciborium` with `ciborium-io` and `ciborium-ll`, `half` with `zerocopy` and
+  `crunchy`, `clap` with `clap_builder`, `clap_lex` and `anstyle`, `itertools` with
+  `either`, `oorandom`, `page_size`, `regex` with `regex-automata`, `regex-syntax` and
+  `aho-corasick`, `tinytemplate`, `walkdir` with `same-file` (and `winapi-util` on Windows),
+  `alloca` with its build dependencies `cc`, `shlex` and `find-msvc-tools`, a second `syn`
+  (2.0.119, through `zerocopy-derive`; the tree already had 3.0.9), and the Windows-only
+  `winapi` family. Already audited and shared: `serde`, `serde_json`, `num-traits`, `memchr`, `libc`.
+  Licenses are MIT or Apache-2.0 or both (`ciborium` is Apache-2.0 only; `alloca` MIT;
+  `zerocopy` BSD-2-Clause OR Apache-2.0 OR MIT; `same-file` and `walkdir` Unlicense/MIT, of
+  which MIT is taken; `unicode-ident` already carries Unicode-3.0). `cargo deny` accepts all
+  of them under the existing allow list, so `deny.toml` is unchanged.
+- Unsafe and native code: none of these crates is `forbid(unsafe_code)` except `clap`,
+  `clap_builder` and `regex-syntax`; `aho-corasick`, `regex-automata`, `half` and `zerocopy`
+  carry the most (the keyword appears on 227, 57, 84 and 554 lines of source and comments).
+  They run only inside the bench binaries, never in the library or its tests. The one native
+  step is `alloca`'s `build.rs`, which compiles a short C file with the `cc` crate (a C
+  compiler is needed to build the benches; every CI runner and the development machines
+  have one). `crunchy`, `zerocopy` and `num-traits` have build scripts that only emit cfg
+  lines or generate Rust. First-party code stays `forbid(unsafe_code)`: the CI geiger grep
+  finds the keyword only in the attribute of the two bench files.
+- Banned crates: `cargo tree --workspace --all-features -e normal,dev,build -i <name>` for
+  each of `once_cell`, `lazy_static`, `log`, `time` and `chrono`: the two existing paths
+  (`once_cell` through `tracing-core`, `lazy_static` through `sharded-slab`, both wrapped in
+  `deny.toml`) are unchanged and the other three match no package. Criterion adds no path to
+  any of them, so no `deny.toml` change. `multiple-versions` is `warn`: `syn` 2.0.119 and
+  3.0.9 now coexist, both as build-time proc-macro dependencies.
+- Alternatives: `divan` (named beside criterion in CODING_STANDARDS 15.8) was not evaluated
+  beyond its feature list, because criterion passes the policy: its defaults pull
+  `clap` with `wrap_help` and it has no saved-baseline files with confidence intervals for
+  the gate to read. A hand-written timing loop would replace the statistics (outlier
+  handling, confidence intervals, saved baselines) that the gate depends on.
+- Review date: 2026-10-28. `cargo-deny` 0.20.2 passes advisory, license, ban and source
+  checks (`mise run dependencies`, exit 0); this records the trust boundary, not a
+  memory-safety certification.

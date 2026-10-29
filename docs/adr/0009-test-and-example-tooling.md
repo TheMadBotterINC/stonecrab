@@ -352,3 +352,86 @@ back, which is an independent check of the serializer.
 (`tracing-core` and `sharded-slab`); `log`, `time` and `chrono` match no package.
 `roxmltree` adds a single crate, `memchr`, which is already in the tree through
 `serde_json` and has no path to a banned crate. No `deny.toml` change.
+
+## Addendum (S52): benchmarks and the 10% regression gate
+Slice S52 adds the first benchmarks (SPEC.md 'Performance', CODING_STANDARDS 16) and the
+scheduled gate that compares two builds of the tree. It adds one dev-dependency and no
+runtime dependency, feature or source line.
+
+**Harness: `criterion` 0.8.2.** CODING_STANDARDS 15.8 names `criterion` or `divan` "per
+ADR"; this is that ADR: `criterion`. `[workspace.dependencies]` has `criterion = { version
+= "0.8", default-features = false }` and `stonecrab` takes it as a dev-dependency. With the
+defaults off there is no `rayon` and no `plotters` (so no HTML reports; `cargo_bench_support`
+is an empty marker). It passes the dependency policy: the D23 check finds `once_cell` and
+`lazy_static` only on their two existing wrapped paths and `log`, `time` and `chrono` not at
+all, every license is already allowed, and `mise run dependencies` exits 0 with `deny.toml`
+unchanged. `cargo tree -e normal --all-features -p stonecrab` does not list it. The
+DEPENDENCY_AUDIT entry records the 30-odd transitive crates it adds, the one native build
+step (`alloca` compiles a C file through `cc`) and why `divan` was not pursued. No lighter
+alternative was needed.
+
+**Targets.** `benches/modbus_wire.rs` (feature `modbus`) times address and connection-string
+parsing, PDU encode and decode (a request, and a 2-register and a 125-register response),
+MBAP encode and decode of the same two frames, `TypedDecoder` over a 125-register response
+read as 62 floats and as 125 integers, and `Batcher::plan` for a 28-tag plant set and 1024
+adjacent registers. `benches/modbus_loopback.rs` (features `modbus` and `testkit`) times
+`Connection::read` through the registry, the real `TcpFactory` and the Tokio clock against a
+`ScriptedPeer` on `127.0.0.1` in the same process, for 1 tag, 24 tags in 2 requests and 125
+tags in 1 request: the pair the S26 loopback tests use, so no new double. Both are
+`harness = false` and have their own `main` instead of `criterion_main!`, because the macro's
+`fn()` signature cannot return an error and the lints deny `expect`; the run proves one
+success outside the timing and fails if a measured read errors. Benches use only the public
+API. They build under `[profile.bench]` (`release` with `overflow-checks`, thin LTO, one
+codegen unit), which is also what the library ships with. Nothing sleeps; the numbers are
+library overhead plus loopback, not network or device latency.
+
+**Not covered.** SPEC.md and CODING_STANDARDS 16.2 ask for allocation counts, multi-device
+polling, subscription tail latency, soak figures and binary size. Allocation counts need a
+counting `GlobalAlloc`, which is `unsafe` and so forbidden in first-party code (4.3); it waits
+for an ADR that proposes an external audited crate. The rest need features that do not exist
+yet (S56 and later) or a soak rig.
+
+**The gate: `scripts/bench-compare.sh BASE_REF` (`mise run bench-compare -- BASE_REF`).**
+A stored baseline cannot be compared on a shared runner: its speed and neighbours differ
+from run to run and from the machine that recorded the number. So the scheduled job
+(weekly, `if: github.event_name == 'schedule'`; never on a pull request or push) builds the
+working tree and `BASE_REF` (the newest commit at least seven days old, exported with `git
+archive`) and runs both on the same runner, three rounds, alternating which side goes first,
+each round a full Criterion run (1 s warm-up, 3 s measurement, 50 samples per benchmark,
+`BENCH_ARGS` overrides) that saves the baseline `r<round>`. Per benchmark and round it takes
+the median and its 95% confidence interval. A round separates when `head.lower >
+base.upper * 1.10`: the head is more than 10% slower even at the favourable end of both
+noise bands. A benchmark regresses, and the step fails, only when every round separates.
+Other outcomes are reported, never failed: "slower, within noise" (median ratio above 1.10
+without separation), "improved", "ok" and "unpaired" (a benchmark on one side only, so a
+benchmark added by a commit does not fail its first week). A base that predates S52 has no
+benches: the first scheduled run after this slice ends with a notice and status 0. The report
+(`report.md`, `report.json`) goes to the job summary and an artifact.
+
+**Limits.** The gate flags a regression only when it exceeds 10% plus the width of the two
+bands, so a 11% slowdown on a noisy runner passes; it cannot see a slowdown that comes and
+goes between rounds, a drift smaller than the weekly step spread across several weeks, or
+anything the benchmarks do not exercise. Loopback reads are the noisiest benchmarks. Release
+CODING_STANDARDS 16.4 says "the last release's stored baseline on the same runner class";
+this gate compares with last week's commit instead, and the release checklist's "within 10%
+of baseline" (20.3) is still a manual comparison with `mise run bench-compare -- <tag>`.
+`--self-test` exercises the verdict logic on synthetic Criterion output (steady, noisy, a
+spike in one round, faster, added, and a 13% regression). The whole script was also run on a
+scratch repository whose head carried an injected slowdown in `ModbusAddress::parse`
+(20 samples, 1 s per benchmark): it exited 1 naming the two benchmarks that got 3.6 times
+slower and passed the other twenty; a 1.25 to 1.5 times slowdown of a third benchmark was
+reported as "within noise" because of that short run's wide bands, which is the limit above in
+practice. The base and the head build into separate target directories: Cargo's unit hash
+ignores the checkout path, so a shared directory reused the base's artifacts for the head and
+the first trial of the script compared a binary with itself.
+
+**Baseline.** `docs/evidence/benchmarks/` records one local run (machine, OS, toolchain, date,
+commit, each benchmark's estimate and interval) and a short report. A laptop baseline does
+not transfer to CI runners and is not an input to the gate; it shows orders of magnitude
+and gives the next local run something to compare with.
+
+**Compliance.** The scheduled step runs the script every week. `mise run check` lints both
+bench targets (clippy `--all-targets --all-features`) and `cargo bench --no-run --locked -p
+stonecrab --all-features` builds them (a check of this slice, not a CI job); no pull
+request or push runs a benchmark.
+`scripts/bench-compare.sh --self-test` checks the verdict logic and needs only `jq`.

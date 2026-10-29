@@ -1,0 +1,324 @@
+{
+ "schema": 1,
+ "note": "A laptop baseline. It does not transfer to CI runners and is not an input to the 10% gate (scripts/bench-compare.sh compares two builds on one machine).",
+ "date": "2026-10-28",
+ "commit": "48b65e3e5eb3a288bf42e8fbddda319aa14ffbcc",
+ "tree": "HEAD plus the uncommitted slice S52 changes (benches, Cargo.toml dev-dependency)",
+ "machine": "Apple M2 Max, 12 cores, 96 GiB; a developer laptop, not isolated from other processes",
+ "os": "macOS 26.6.2 (arm64)",
+ "toolchain": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+ "profile": "bench (inherits release: thin LTO, codegen-units 1, overflow-checks on)",
+ "features": "--all-features",
+ "criterion": "0.8.2, default settings (3 s warm-up, 5 s measurement, 100 samples, 95% confidence)",
+ "command": "mise run bench",
+ "benchmarks": [
+  {
+   "id": "loopback_read/full_response_125_tags_1_request",
+   "median_ns": {
+    "estimate": 51950.11,
+    "lower": 51248.86,
+    "upper": 52464.6
+   },
+   "mean_ns": {
+    "estimate": 53567.79,
+    "lower": 51309.64,
+    "upper": 56361.86
+   },
+   "std_dev_ns": 13047.08
+  },
+  {
+   "id": "loopback_read/one_register_1_request",
+   "median_ns": {
+    "estimate": 20667.81,
+    "lower": 20619.01,
+    "upper": 20746.69
+   },
+   "mean_ns": {
+    "estimate": 19837.61,
+    "lower": 19222.7,
+    "upper": 20518.8
+   },
+   "std_dev_ns": 3296.36
+  },
+  {
+   "id": "loopback_read/plant_24_tags_2_requests",
+   "median_ns": {
+    "estimate": 45275.7,
+    "lower": 45207.69,
+    "upper": 45375.6
+   },
+   "mean_ns": {
+    "estimate": 44673.03,
+    "lower": 44208.7,
+    "upper": 45093.58
+   },
+   "std_dev_ns": 2266.77
+  },
+  {
+   "id": "mbap/decode_max",
+   "median_ns": {
+    "estimate": 32.91,
+    "lower": 31.64,
+    "upper": 33.57
+   },
+   "mean_ns": {
+    "estimate": 32.3,
+    "lower": 31.64,
+    "upper": 33.13
+   },
+   "std_dev_ns": 3.83
+  },
+  {
+   "id": "mbap/decode_small",
+   "median_ns": {
+    "estimate": 21.2,
+    "lower": 21.15,
+    "upper": 21.31
+   },
+   "mean_ns": {
+    "estimate": 21.3,
+    "lower": 21.21,
+    "upper": 21.39
+   },
+   "std_dev_ns": 0.47
+  },
+  {
+   "id": "mbap/encode_max",
+   "median_ns": {
+    "estimate": 17.58,
+    "lower": 17.45,
+    "upper": 17.62
+   },
+   "mean_ns": {
+    "estimate": 17.63,
+    "lower": 17.58,
+    "upper": 17.69
+   },
+   "std_dev_ns": 0.28
+  },
+  {
+   "id": "mbap/encode_small",
+   "median_ns": {
+    "estimate": 16.52,
+    "lower": 16.49,
+    "upper": 16.55
+   },
+   "mean_ns": {
+    "estimate": 16.64,
+    "lower": 16.59,
+    "upper": 16.69
+   },
+   "std_dev_ns": 0.25
+  },
+  {
+   "id": "parse/address_bit_area",
+   "median_ns": {
+    "estimate": 28.18,
+    "lower": 28.09,
+    "upper": 28.32
+   },
+   "mean_ns": {
+    "estimate": 29.79,
+    "lower": 28.93,
+    "upper": 30.8
+   },
+   "std_dev_ns": 4.82
+  },
+  {
+   "id": "parse/address_long",
+   "median_ns": {
+    "estimate": 36.07,
+    "lower": 35.92,
+    "upper": 36.24
+   },
+   "mean_ns": {
+    "estimate": 62.19,
+    "lower": 49.63,
+    "upper": 76.8
+   },
+   "std_dev_ns": 70.12
+  },
+  {
+   "id": "parse/address_with_block",
+   "median_ns": {
+    "estimate": 124.81,
+    "lower": 124.18,
+    "upper": 126.39
+   },
+   "mean_ns": {
+    "estimate": 125.42,
+    "lower": 125.02,
+    "upper": 125.83
+   },
+   "std_dev_ns": 2.09
+  },
+  {
+   "id": "parse/connection_string_all_parameters",
+   "median_ns": {
+    "estimate": 910.5,
+    "lower": 909.92,
+    "upper": 911.06
+   },
+   "mean_ns": {
+    "estimate": 913.87,
+    "lower": 912.33,
+    "upper": 915.58
+   },
+   "std_dev_ns": 8.35
+  },
+  {
+   "id": "parse/connection_string_host_only",
+   "median_ns": {
+    "estimate": 213.76,
+    "lower": 212.98,
+    "upper": 214.22
+   },
+   "mean_ns": {
+    "estimate": 214.7,
+    "lower": 213.05,
+    "upper": 216.78
+   },
+   "std_dev_ns": 9.64
+  },
+  {
+   "id": "pdu/decode_request",
+   "median_ns": {
+    "estimate": 4.27,
+    "lower": 4.26,
+    "upper": 4.27
+   },
+   "mean_ns": {
+    "estimate": 4.26,
+    "lower": 4.25,
+    "upper": 4.27
+   },
+   "std_dev_ns": 0.05
+  },
+  {
+   "id": "pdu/decode_response_max",
+   "median_ns": {
+    "estimate": 24.8,
+    "lower": 24.71,
+    "upper": 24.94
+   },
+   "mean_ns": {
+    "estimate": 28.07,
+    "lower": 25.92,
+    "upper": 30.71
+   },
+   "std_dev_ns": 12.41
+  },
+  {
+   "id": "pdu/decode_response_small",
+   "median_ns": {
+    "estimate": 18.98,
+    "lower": 18.89,
+    "upper": 19.07
+   },
+   "mean_ns": {
+    "estimate": 20.87,
+    "lower": 19.91,
+    "upper": 22.03
+   },
+   "std_dev_ns": 5.47
+  },
+  {
+   "id": "pdu/encode_request",
+   "median_ns": {
+    "estimate": 35,
+    "lower": 34.92,
+    "upper": 35.07
+   },
+   "mean_ns": {
+    "estimate": 35.15,
+    "lower": 35.07,
+    "upper": 35.25
+   },
+   "std_dev_ns": 0.46
+  },
+  {
+   "id": "pdu/encode_response_max",
+   "median_ns": {
+    "estimate": 82.86,
+    "lower": 82.73,
+    "upper": 83.02
+   },
+   "mean_ns": {
+    "estimate": 82.86,
+    "lower": 82.7,
+    "upper": 83.04
+   },
+   "std_dev_ns": 0.87
+  },
+  {
+   "id": "pdu/encode_response_small",
+   "median_ns": {
+    "estimate": 39.21,
+    "lower": 39.08,
+    "upper": 39.34
+   },
+   "mean_ns": {
+    "estimate": 56.86,
+    "lower": 45.91,
+    "upper": 71.09
+   },
+   "std_dev_ns": 64.75
+  },
+  {
+   "id": "plan/adjacent_1024_tags",
+   "median_ns": {
+    "estimate": 13551.42,
+    "lower": 13527.05,
+    "upper": 13582.4
+   },
+   "mean_ns": {
+    "estimate": 13739.92,
+    "lower": 13649.27,
+    "upper": 13865.22
+   },
+   "std_dev_ns": 563.81
+  },
+  {
+   "id": "plan/plant_28_tags",
+   "median_ns": {
+    "estimate": 835.59,
+    "lower": 834.07,
+    "upper": 836.84
+   },
+   "mean_ns": {
+    "estimate": 836.22,
+    "lower": 833.68,
+    "upper": 838.87
+   },
+   "std_dev_ns": 13.35
+  },
+  {
+   "id": "typed_decode/real_batch_of_62",
+   "median_ns": {
+    "estimate": 2124.69,
+    "lower": 2114.05,
+    "upper": 2143.19
+   },
+   "mean_ns": {
+    "estimate": 2330.59,
+    "lower": 2191.75,
+    "upper": 2561.93
+   },
+   "std_dev_ns": 1022.83
+  },
+  {
+   "id": "typed_decode/uint_batch_of_125",
+   "median_ns": {
+    "estimate": 3875.2,
+    "lower": 3850.93,
+    "upper": 3907.49
+   },
+   "mean_ns": {
+    "estimate": 3899.86,
+    "lower": 3885.27,
+    "upper": 3915.48
+   },
+   "std_dev_ns": 77.62
+  }
+ ]
+}

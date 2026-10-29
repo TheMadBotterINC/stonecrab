@@ -295,11 +295,15 @@ jobs:
       - run: scripts/fuzz-smoke.sh
   scheduled:
     # Weekly evidence: the 30-minute fuzz run (S03b), the scoped mutation run of
-    # mutants.toml (S32, ADR-0017; about 25 minutes with four jobs) and an advisory dry run.
+    # mutants.toml (S32, ADR-0017; about 25 minutes with four jobs), the 10% benchmark gate
+    # (S52, ADR-0009 addendum; about 20 minutes) and an advisory dry run.
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
+      # The full history, so the benchmark step can check out the commit of a week ago.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
         with:
           toolchain: nightly-2026-10-01
@@ -319,6 +323,26 @@ jobs:
         with:
           name: mutants-outcomes
           path: docs/evidence/mutants/outcomes.json
+          if-no-files-found: ignore
+      # Both trees are built and run on this one runner, alternately, so the comparison
+      # carries no number from another machine. The base is the last commit that is at least
+      # a week old; a base without benchmarks (before S52) is a notice, not a failure.
+      - name: Benchmarks against last week's commit (fails on a >10% regression beyond noise)
+        if: ${{ !cancelled() }}
+        run: |
+          base=$(git rev-list -n 1 --before="7 days ago" HEAD)
+          if [ -z "$base" ]; then
+            echo "no commit older than a week; nothing to compare"
+          else
+            scripts/bench-compare.sh "$base"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: bench-compare
+          path: |
+            target/bench-compare/report.md
+            target/bench-compare/report.json
           if-no-files-found: ignore
       - name: Advisory dry run (report only)
         run: cargo update --dry-run 2>&1 | tail -40

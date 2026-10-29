@@ -246,6 +246,19 @@ required-features = ["testkit"]
 name = "transport_tcp"
 required-features = ["testkit"]
 
+# Benchmarks (slice S52, ADR-0009 addendum): Criterion supplies its own `main`, so the default
+# libtest harness is off. Run them with `mise run bench`; `mise run bench-compare` is the
+# scheduled job's 10% regression gate.
+[[bench]]
+name = "modbus_wire"
+harness = false
+required-features = ["modbus"]
+
+[[bench]]
+name = "modbus_loopback"
+harness = false
+required-features = ["modbus", "testkit"]
+
 [dependencies]
 thiserror.workspace = true
 bytes.workspace = true
@@ -258,6 +271,7 @@ toml = { workspace = true, optional = true }
 # Test and example tooling only; never part of the packaged runtime graph.
 [dev-dependencies]
 proptest.workspace = true
+criterion.workspace = true
 tokio = { workspace = true, features = ["rt", "macros", "sync", "test-util", "rt-multi-thread"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
