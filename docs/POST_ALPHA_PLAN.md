@@ -103,6 +103,11 @@ The maintainer accepted E1, E2, E3, E6 and E7, and the recommendation for E5, on
 | E5 | S7 or EtherNet/IP first | Accepted as recommended: decided when a test PLC is available. S41 inventories both |
 | E6 | Tools and integrations | Accepted. PLC4X tools count toward parity, starting with the connection cache and Object PLC Mapping. Integrations go in a tracked list and are built on demand |
 | E7 | An unknown unit (G06) | Accepted: `unit` becomes `Option<String>` in the next 0.x minor release |
+| E8 | Vendoring `modbus.mspec` (2026-10-29) | Approved: verbatim, ASF header kept, NOTICE attribution, under `upstream/mspec/`; unblocks S66 and S67 |
+| E9 | The 24-hour soak and 8-hour fuzz run (2026-10-29) | Wait; not part of 0.3.0 |
+| E10 | The behavior choices of S59, S60, S69 and S70 (2026-10-29) | Accepted as shipped |
+| E11 | TLS library, Object PLC Mapping, FC05, profile schema, Linux I2C (2026-10-29) | As recommended: rustls with ring behind an opt-in `tls` feature and no TLS-PSK; OPM by a declarative macro in this crate; opt-in FC05; schema version 2 with value-matched quality; Linux I2C deferred |
+| E12 | Release (2026-10-29) | 0.3.0 after the next run, with G06 (E7) |
 
 ## Ordered slices
 
@@ -210,10 +215,14 @@ out until the maintainer decides how it should ship.
 | S52e | Replay the documented SOLO SLM1-C map over Modbus RTU | S | S52d, S59 | The replay runs through `ModbusRtuDriver` (landed 2026-10-29) |
 | S57b | The flaky zero-idle test and a counter for frames dropped between exchanges | S | S57 | The race closed by a deterministic test (landed 2026-10-29) |
 | S59b | RTU against diagslave over a TCP gateway | S | S59, S61 | Job `interop-rtu` green (landed 2026-10-29) |
-| S60b | ASCII (and RTU, if it works) against diagslave through a socat pseudo-terminal | S | S60, S59b | An interop job green |
+| S60b | ASCII (and RTU, if it works) against diagslave through a socat pseudo-terminal | S | S60, S59b | An interop job green (landed 2026-10-29) |
 | S68 | The connection cache (E6) | M | S47, S55 | `TOOL-CC-*` rows implemented (landed 2026-10-29) |
-| S69 | The event pump (E6) | M | S55, S68 | `TOOL-EP-*` rows implemented |
-| S70 | Raw bytes of a short Modbus reply; Modbus connection statistics | S | S52a, S57b | The two Known-gaps items closed |
+| S69 | The event pump (E6) | M | S55, S68 | `TOOL-EP-*` rows implemented (landed 2026-10-29) |
+| S70 | Raw bytes of a short Modbus reply; Modbus connection statistics | S | S52a, S57b | The two Known-gaps items closed (landed 2026-10-29) |
+| S71 | TLS transport and `modbus-tcp:tls` (E11) | M | S19, S61 | `MB-TCP-TRANSPORTS-TLS` implemented; an interop job over TLS |
+| S72 | Object PLC Mapping through a declarative macro and a trait (E6, E11) | M | S68 | `TOOL-OPM-*` rows implemented or deferred with reasons |
+| S73 | SOLO follow-ups: opt-in FC05 and profile schema version 2 with value-matched quality (E11) | S | S52e | The SOLO bits writable and its PV sentinels `Bad` in the replay |
+| S74 | G06: `unit` becomes `Option<String>`, and the version moves to 0.3.0 (E7, E12) | S | none | The semver job passes against 0.2.0 with a 0.3.0 version |
 
 ## Test hardware
 

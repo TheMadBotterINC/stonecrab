@@ -835,6 +835,28 @@ hardware, deferred).
 - **E6** PLC4X tools count toward parity; integrations go in a tracked list.
 - **E7** the sensor `unit` becomes `Option<String>` in the next 0.x minor release.
 
+### Maintainer decisions (2026-10-29)
+
+- **E8** vendoring PLC4X's `modbus.mspec` (Apache-2.0, ASF header kept, NOTICE
+  attribution) under `upstream/mspec/` is approved, which unblocks S66 and S67 (ADR-0019).
+- **E9** the 24-hour soak and the 8-hour release fuzz run wait; they are not part of 0.3.0.
+- **E4** stays deferred. The one device to buy first is now HW2, the SOLO SLM1-C with a
+  USB to RS-485 adapter: Modbus TCP has five independent peers, while no serial driver has
+  met a real line (parity, seven data bits, real baud timing).
+- **E10** the behavior choices of S59, S60, S69 and S70 are accepted as shipped: one RTU
+  request per write item, a CRC error failing at once, port 502 for a TCP gateway, the
+  `modbus` feature enabling `serial` (`serial2` in the default build), a dropped event-pump
+  `recv` keeping its reads in flight, a misfit reply not retried, and the public
+  `ModbusRtuDriver::open` and `ModbusAsciiDriver::open`.
+- **E11** the design calls follow the recommendations: TLS through rustls with the ring
+  provider behind an opt-in `tls` feature, mutual TLS with explicit trust anchors and no
+  TLS-PSK (rustls has no external PSK); Object PLC Mapping in this crate through a
+  declarative macro and a trait, so ADR-0018 holds; an opt-in FC05 for single-coil writes
+  (upstream always sends FC15); profile schema version 2 with value-matched quality rules;
+  the Linux I2C backend stays deferred until hardware.
+- **E12** release 0.3.0 after this run, with G06 (E7) in it. This is the separate approval
+  the line below asks for, for 0.3.0 only.
+
 Keep changes reviewable, commit tested slices one signed-off commit per green slice, and
 maintain the per-module coverage gates. No first-party unsafe, panics on input, unbounded
 I/O, silent sample loss, inferred byte order or automatic replay of ambiguous writes. Do
