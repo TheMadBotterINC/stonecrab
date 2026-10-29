@@ -5,6 +5,7 @@ Cargo.toml.orig
 LICENSE
 NOTICE
 README.md
+docs/components/boards.md
 docs/components/codec.md
 docs/components/core.md
 docs/components/modbus.md
@@ -13,6 +14,7 @@ docs/components/sim.md
 docs/components/testkit.md
 docs/components/transport.md
 src/address_options.rs
+src/boards.rs
 src/cancel.rs
 src/capability.rs
 src/clock.rs
@@ -88,6 +90,7 @@ src/testkit/convention.rs
 src/testkit/counting_factory.rs
 src/testkit/executor.rs
 src/testkit/fake_factory.rs
+src/testkit/fake_spi.rs
 src/testkit/fake_transport.rs
 src/testkit/framer.rs
 src/testkit/golden.rs

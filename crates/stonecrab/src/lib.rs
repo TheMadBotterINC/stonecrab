@@ -41,6 +41,9 @@ mod value;
 mod write_request;
 mod write_response;
 
+#[cfg(feature = "boards")]
+#[cfg_attr(docsrs, doc(cfg(feature = "boards")))]
+pub mod boards;
 #[deny(
     clippy::indexing_slicing,
     clippy::arithmetic_side_effects,

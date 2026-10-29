@@ -26,6 +26,8 @@ for the contracts. Upstream compatibility is claimed only where a parity row say
 | `full` | the same set as the defaults, spelled out; the `profile_read` example requires it | `sim`, `modbus`, `sensors` | no |
 | `transport` | `stonecrab::transport`, deadline-bounded transports and the Tokio TCP transport | `tokio` | no (on through `modbus` and `testkit`) |
 | `serial` | the serial transport in `stonecrab::transport` (`SerialFactory`, `SerialTransport`) | `transport`, `serial2` | no (on through `modbus`) |
+| `boards` | `stonecrab::boards`, direct board adapters: the MAX31855 thermocouple converter over an `SpiBus` | `sensors` | no |
+| `adapters-linux` | `LinuxSpiDev`, a `/dev/spidev` node read on a worker thread | `boards`, `transport` | no |
 | `testkit` | `stonecrab::testkit`, fakes, scripted peers, golden-vector loader and the driver contract suite | `transport`, `serde`, `serde_json`, `toml`, Tokio `macros` | no |
 
 `default-features = false` is the Tokio-free core: the crate root and the codec, which pull
@@ -54,6 +56,7 @@ operations.
 | Browse and discover | not supported |
 | `sensors`: synthetic profiles against the simulator | simulator-tested |
 | `sensors`: synthetic profiles against a Modbus TCP server | interoperability-tested |
+| `boards`: MAX31855 over SPI (decode, faults, measurements) and the Linux `/dev/spidev` backend, over scripted buses and in-memory readers | simulator-tested |
 | Hardware verification | planned |
 
 `interoperability-tested` means the `interop` CI job ran the code against pymodbus 3.8.6.

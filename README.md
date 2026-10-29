@@ -48,6 +48,8 @@ Everything is in the one crate; the features only decide what is compiled in.
 | `sensors` | `stonecrab::sensors`, declarative sensor profiles and the TOML loader | yes |
 | `transport` | `stonecrab::transport`, deadline-bounded transports; the only thing that needs Tokio, and on whenever `modbus` is | no |
 | `serial` | the serial transport in `stonecrab::transport` (`SerialFactory`, one worker thread per port); on whenever `modbus` is | no |
+| `boards` | `stonecrab::boards`, direct board adapters: the MAX31855 thermocouple converter over an `SpiBus`; needs `sensors`, no Tokio | no |
+| `adapters-linux` | `LinuxSpiDev`, which reads a `/dev/spidev` node on a worker thread; brings in `boards` and `transport` | no |
 | `testkit` | `stonecrab::testkit`, fakes and the driver contract suite for tests; not for applications | no |
 
 `default-features = false` gives the small core with no Tokio and no network code, for a
@@ -87,6 +89,7 @@ changes no level). Nothing is `hardware-verified`.
 | Simulator (`sim`) | read, write, scripted failures, bounded read retry | simulator-tested | driver contract suite; `docs/parity/sim.md` |
 | Sensor profiles | load, validate, build tags, scale and grade measurements | simulator-tested | synthetic `sim` profiles, `profile_read` in the `examples` job |
 | Sensor profiles | the same synthetic profiles against a Modbus TCP server | interoperability-tested | synthetic `modbus-tcp` profiles, `profile_read` in the `interop` job; green on the hosted runner for S30 (the `profiles` step, run 40548582722) |
+| Board adapters (`boards`) | MAX31855 over SPI: thermocouple and cold-junction temperature, open and short flags, negative readings, refused frames, the three measurements (`Bad` thermocouple with no value under a fault); the Linux `/dev/spidev` read backend (`adapters-linux`) | simulator-tested | scripted `FakeSpiBus`, in-memory readers and property tests (ADR-0026); an extension with no upstream parity row; no converter was read |
 | Any physical device | everything | planned | `docs/hardware/TEMPLATE.md` only; no record exists |
 | Linux aarch64 and armv7 | compile | build-tested | `cross` job (`cargo check`, no tests) |
 | macOS, Windows | compile and test | build-tested | CI `test` matrix; results in [`STATUS.md`](STATUS.md) |

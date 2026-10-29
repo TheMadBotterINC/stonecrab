@@ -66,6 +66,14 @@ assert_eq!(clock.now(), deadline);
 # Ok::<(), stonecrab::PlcError>(())
 ```
 
+## Board adapters
+With the `boards` feature the kit also ships `FakeSpiBus`, an `SpiBus` that plays a script
+of `SpiStep`s on a `FakeClock`: `Reply(bytes)` answers a read with exactly those bytes
+(so a script can play a short or long answer), `Fail(kind)` fails it with a typed error,
+and `Silence` never answers, so the read waits out its deadline on the fake clock and
+times out. A spent script is silent. Clones share the script and the log of requested
+lengths (`reads`), so a test keeps a handle after boxing the bus into a `Max31855`.
+
 ## Driver contract suite
 
 `ContractSuite::run(driver, uri, fixture)` runs one set of 33 cases, named as sentences,

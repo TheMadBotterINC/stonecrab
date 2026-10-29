@@ -5,6 +5,25 @@ as `stonecrab` 0.2.0 (2026-10-27); `stonecrab` 0.1.0 is the specification-stage
 placeholder.
 
 ## Unreleased
+- Board adapters, the MAX31855 thermocouple converter over SPI (ADR-0026, slice S63;
+  additive): the new off-by-default feature `boards` (`boards = ["sensors"]`, no new
+  dependency) adds `stonecrab::boards` with the `SpiBus` trait (`read(len, deadline)`, one
+  chip-select cycle), `Max31855` and `ThermocoupleReading`. `ThermocoupleReading::from_raw`
+  decodes the 32-bit frame with exact integers (14-bit thermocouple field at 0.25 C a count,
+  12-bit internal field at 0.0625 C a count, both sign-extended; the open, short-to-ground and
+  short-to-Vcc flags as `ThermocoupleFault`) and refuses a frame the chip could not send:
+  all zeros or all ones is `Disconnected` (no device answered), a set reserved bit or a
+  fault bit that disagrees with the flags is `MalformedData`. `measurements()` returns
+  `thermocouple_temperature` (`Bad` with no value while a fault is flagged),
+  `cold_junction_temperature` (`Good`) and `thermocouple_fault` (a `U8` of the flags) as
+  `sensors::Measurement`s of origin `Documented`. The feature `adapters-linux`
+  (`["boards", "transport"]`) adds `LinuxSpiDev`, which reads a `/dev/spidev` node with
+  plain `read(2)` on a worker thread: no dependency, no `unsafe`, deadline-bounded, and it
+  cannot set the bus mode or speed (the device tree does). The testkit gains `FakeSpiBus`
+  and `SpiStep` when `boards` is on. Simulator-tested only: the datasheet could not be
+  retrieved while this was written, no converter was read, and the bench record is a runbook,
+  `docs/hardware/max31855-spi.md`, that needs the maintainer's approval. No change to any
+  industrial parity status.
 - Lists and Modbus array selections (ADR-0022; additive): `PlcValue::List(Vec<PlcValue>)`
   and `PlcValueType::List`, appended after `DateTime`; equality compares the elements in
   order, and nothing is coerced. Modbus addresses take the upstream array notation on every

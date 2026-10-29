@@ -60,7 +60,7 @@ flowchart TB
 
         subgraph sensing["Sensors"]
             SENSORS["<b>stonecrab::sensors</b><br/>feature sensors<br/>declarative profiles , units , scaling , quality"]
-            MAX["<b>max31855</b> (deferred)<br/>thermocouple over SPI"]
+            MAX["<b>max31855</b> (S63, in stonecrab::boards)<br/>thermocouple over SPI"]
             ADXL["<b>adxl345</b> (deferred)<br/>accelerometer over I2C (SPI later)"]
         end
 
@@ -148,11 +148,13 @@ Where the alpha differs from the graph and the original brief:
   explain and to version. The module edges above are the former crate edges, and the
   lint promotions and coverage thresholds that were per crate are per module.
 - **Deferred modules.** `opcua` (milestone M3), `eip` and `s7` (M4), the remaining
-  baseline drivers (M5), both board adapters (M2S), the MSpec code generator (M5) and the
+  baseline drivers (M5), the ADXL345 board adapter (M2S; the MAX31855 shipped in S63 as
+  `stonecrab::boards`), the MSpec code generator (M5) and the
   differential runner (M5) do not exist. `xtask` does not exist either: its jobs are shell
-  scripts under `scripts/` and mise tasks (ADR-0005). Serial and UDP transports and Modbus
-  RTU are M2 and M3. Each arrives as a module behind its own feature; whether a large one
-  is split into its own crate again is a decision for its ADR.
+  scripts under `scripts/` and mise tasks (ADR-0005). The serial transport (S58) and Modbus
+  RTU (S59, inside `modbus`) have shipped; UDP is S61. Each arrives as a module behind its
+  own feature; whether a large one is split into its own crate again is a decision for its
+  ADR.
 - **Drivers and shared modules.** The simulator depends on the core alone, so the rule that
   driver modules depend on transport and codec applies to `modbus` only.
 - **Opt-in.** The defaults give the simulator, Modbus TCP and the sensor profiles; a build
@@ -1681,7 +1683,8 @@ classDiagram
 
 **Shipped at alpha (ADR-0016).** The `stonecrab::sensors` module (feature `sensors`) ships the schema (version 1), the
 loader, validation, the tag builder and the measurement pipeline, and since S56 the stale
-tracker and the acquisition loop (ADR-0023); board adapters are deferred.
+tracker and the acquisition loop (ADR-0023). The MAX31855 board adapter shipped in S63 in
+its own module, `stonecrab::boards` (ADR-0026, section 6.1); the ADXL345 is deferred.
 
 - `SensorProfile::from_toml(&str) -> Result<SensorProfile, ProfileError>` (64 KiB
   bound checked before parsing, unknown keys denied), `validate(&self)
@@ -1710,8 +1713,8 @@ tracker and the acquisition loop (ADR-0023); board adapters are deferred.
   stale transitions, with no spawned task. The drawn `Arc` and `Box` handles, `plan()`,
   `run()`, `BoundedReceiver` and per-tag `trackers` map do not exist, and the loop reads
   through `Connection::read`, not through a subscription.
-- **Deferred:** `Lookup` scale steps (M2) and the `max31855` and `adxl345` board adapters
-  (M2S). Section 6.1 is entirely deferred to M2S. Named device profiles exist since S52d
+- **Deferred:** `Lookup` scale steps (M2) and the `adxl345` board adapter (M2S, S64); the
+  `max31855` adapter shipped in S63 (section 6.1). Named device profiles exist since S52d
   as documented maps under `profiles/documented/`, none hardware-verified.
 
 Section 9.7 shows the target pipeline with `Acquisition`; at the alpha an application calls
@@ -1805,6 +1808,34 @@ classDiagram
     note for Max31855 "Negative readings and the fault state are preserved.\nTests verify decode, not calibration accuracy."
     note for Adxl345 "Missing samples and FIFO overflow are reported in\nSampleBlock. Bandwidth beyond bus/host is never promised."
 ```
+
+**Update (2026-10-29), S63 and ADR-0026: the MAX31855 half shipped, not as drawn.** The
+diagram above is the original design and is not redrawn. `stonecrab::boards`, behind the
+`boards` feature (`boards = ["sensors"]`, off by default), holds the shipped half; the
+`Adxl345`, `I2cBus` and `LinuxI2cDev` classes are still deferred (S64).
+- `SpiBus` is `read(len, deadline) -> OpFuture<Bytes>`: a receive under one chip-select cycle,
+  not `transfer(tx, rx_len, deadline)`, because the MAX31855 sends nothing. A transmitting
+  method arrives with the first device that needs it.
+- `LinuxSpiDev` (feature `adapters-linux`, `adapters-linux = ["boards", "transport"]`) reads
+  a `/dev/spidev` node with plain `read(2)` on a dedicated thread, with a bounded command
+  channel of two. It has no dependency and no `unsafe`, and it cannot set the bus mode or
+  speed (the device tree does). It is built from any `Read` (`LinuxSpiDev::from_device`) so
+  the tests run it without a device.
+- `ThermocoupleFault` is a struct of three flags (`open`, `short_to_ground`, `short_to_vcc`),
+  not the drawn enum, because the datasheet does not make them exclusive. `ThermocoupleReading`
+  keeps the integer counts (`thermocouple_quarters`, `cold_junction_sixteenths`), the raw
+  frame, `fault: Option<ThermocoupleFault>` and the two receipt stamps; the temperatures in
+  degrees are methods (`thermocouple_celsius` is `None` while a fault is flagged). It is
+  built by `ThermocoupleReading::from_raw`, which refuses an all-zeros or all-ones frame
+  (`Disconnected`, no device answered), a set reserved bit and a fault bit that disagrees with
+  the flags (`MalformedData`).
+- `Max31855::new(Box<dyn SpiBus>, Arc<dyn Clock>)` and `read(deadline)`; `as_measurements` is
+  `ThermocoupleReading::measurements()`, which returns `thermocouple_temperature` (`Bad`, no
+  value, while a fault is flagged), `cold_junction_temperature` and `thermocouple_fault` (a
+  `U8` of the flags) as `Measurement`s of origin `Documented`.
+- The test double is `testkit::FakeSpiBus` with `SpiStep` (`Reply`, `Fail`, `Silence`).
+- The module is a single file for now (ADR-0026 decision 1); no hardware record exists. The
+  runbook is `docs/hardware/max31855-spi.md`.
 
 ---
 
@@ -2342,10 +2373,11 @@ every combination builds and exposes its traits and types. The quality gates run
 `--all-features`; a plain `cargo test` runs the reduced suite without the `testkit`
 tests (ADR-0018).
 
-**Deferred (not declared):** the features `modbus-rtu`, `opcua`, `eip`, `s7`, `ads`, `slmp`
-and `adapters-linux`, and the transport features `udp` and `serial`. They arrive with
-their modules (RTU and serial in M2, OPC UA in M3, EtherNet/IP and S7 in M4, the board
-adapters in M2S).
+**Deferred (not declared):** the features `opcua`, `eip`, `s7`, `ads` and `slmp`, and the
+transport feature `udp`. They arrive with their modules (OPC UA in M3, EtherNet/IP and S7
+in M4, UDP with S61). Declared since the alpha: `serial` (S58; `modbus` enables it since
+S59, which ships RTU inside `modbus` rather than behind a `modbus-rtu` feature), and
+`boards` and `adapters-linux` (S63).
 
 ---
 
