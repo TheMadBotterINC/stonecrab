@@ -1,0 +1,2 @@
+# The tool workspace builds into its own target directory (its own Cargo.lock, ADR-0019).
+/target

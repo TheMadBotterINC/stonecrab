@@ -5583,3 +5583,17 @@ java = "Manifest inventory.umas tag: SymbolicUmasTag accepts symbolic names only
 here = "UmasTag allows '%' in the tag name; %SW<n> maps to an INT word and %S<n> to a BOOL in system block 0x2B (word offset n*2+80 for SW, n*2+50 for S); every other %-address raises PlcFieldParseException."
 evidence = "system_words"
 note = "Offsets read from source, not run. The %S branch tests tag[1:2] but parses the number from tag[3:], which looks off by one for a one-letter area (UNCERTAIN)."
+
+# Vendored MSpec protocol descriptions (ADR-0019 decision 6; maintainer decision E8 of
+# 2026-10-29 approved vendoring modbus.mspec verbatim with its ASF header and NOTICE
+# attribution). Each entry is a byte-for-byte copy of the file at the [upstream] commit
+# above; tools/stonecrab-codegen refuses to generate when the copy's sha256 differs from
+# the value here, and `mise run regen` checks it in CI. A baseline move re-vendors the
+# file and updates git_blob and sha256 in the same commit (ADR-0019 decision 10).
+[[mspec]]
+protocol = "modbus"
+upstream_path = "protocols/modbus/src/main/resources/protocols/modbus/modbus.mspec"
+vendored_path = "upstream/mspec/modbus/modbus.mspec"
+git_blob = "d6d102422ae654ca2745df6806a6f2ad9bb1fb65"
+sha256 = "cb8ea683da2f3ddc207ee2b4469f1737a6a34ccc5d425b12d37c69110ff94143"
+vendored_on = "2026-10-29"

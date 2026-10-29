@@ -30,7 +30,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-EXCLUDE='(^|/)(examples|benches|fuzz|generated)/'
+EXCLUDE='(^|/)(examples|benches|fuzz|generated)/|(^|/)generated\.rs$'
 SRC=crates/stonecrab/src
 LCOV=target/branch-coverage.lcov
 REPORT=target/branch-coverage.txt

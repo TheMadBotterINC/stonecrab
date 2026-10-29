@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/stonecrab"]
-exclude = ["fuzz"]
+exclude = ["fuzz", "tools/stonecrab-codegen"]
 
 [workspace.package]
 edition = "2024"

@@ -501,3 +501,46 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
   `cargo-deny` reports no open RUSTSEC advisory against it.
 - Review date: 2026-10-28. `cargo-deny` passes advisory, license, ban and source checks with
   `deny.toml` unchanged; this records the trust boundary, not a memory-safety certification.
+
+## sha2 0.11.1 (tools/stonecrab-codegen workspace only)
+- Purpose: the SHA-256 of each vendored mspec, which the generator compares with
+  `upstream/manifest.toml` before it generates anything and writes into every provenance
+  header and `generated/MANIFEST.toml` (ADR-0019 decisions 2, 6 and 7, slice S66). A
+  first-party SHA-256 would be cryptographic code the project would have to own and test;
+  the standard library has none.
+- License: MIT OR Apache-2.0, as are all its dependencies below, so `deny.toml` and the
+  workspace's copy of it (`tools/stonecrab-codegen/deny.toml`) are unchanged.
+- Declared in `tools/stonecrab-codegen/Cargo.toml` only, with `default-features = false`
+  (`sha2 = { version = "0.11", default-features = false }`): the defaults `alloc` and `oid`
+  (OID constants for ASN.1) are not needed, and `zeroize` stays off. The generator workspace
+  is excluded from the root workspace (ADR-0019 decision 2, the layout of ADR-0009), so
+  nothing here reaches the root `Cargo.lock`, the published crate or its dev-dependencies.
+- Transitive crates in this configuration (`cargo tree --locked -e normal,build` in the tool
+  workspace): `digest` 0.11.3, `block-buffer` 0.12.1, `crypto-common` 0.2.2, `hybrid-array`
+  0.4.15, `typenum` 1.20.1, `cpufeatures` 0.3.1 with `libc` 0.2.191 (CPU feature detection),
+  and `cfg-if` 1.0.5. No proc macro. `libc` has a build script that only sets `cfg` flags; no
+  crate compiles native code. 0.11 was chosen over 0.10.9 because it drops `generic-array`
+  and its `version_check` build dependency for `hybrid-array`.
+- Unsafe: `sha2` 0.11.1 has the keyword on 39 lines of its sources on 2026-10-29, in
+  its architecture back ends (`x86_sha`, `x86_avx2`, `aarch64_sha2`, `riscv_zknh`,
+  `loongarch64_asm`, `wasm32_simd128`: SIMD intrinsics and inline assembly behind runtime
+  feature detection); `cpufeatures` reads CPUID or the OS feature flags; `block-buffer`,
+  `hybrid-array`, `digest`, `crypto-common` and `typenum` use it for fixed-size arrays. That
+  is the expected surface of a hash crate; ADR-0019 decision 2 chose it. The tool's own code is
+  `forbid(unsafe_code)`, and nothing of this runs in a library build or a test of the crate:
+  only `mise run generate` and the `regen` gate run the tool.
+- The other dependency of the tool is `toml` 0.9.12, the version and features audited above
+  for the crate (`parse`, `serde`, `std`), with the same `toml_parser` 1.0.9 pin in the tool's
+  `Cargo.lock`, so `clippy::multiple_crate_versions` stays quiet there too.
+- Banned crates: the D23 check in the tool workspace (`cargo tree --locked -e
+  normal,dev,build -i <name>` for each of `once_cell`, `lazy_static`, `log`, `time` and
+  `chrono`) matches no package, so no wrapper is needed. The root policy's two wrappers
+  (`tracing-core`, `sharded-slab`) are reported as unused there, a warning.
+- Maintenance: 0.11.1 is the newest release resolved on the review date, and `cargo deny
+  --frozen check` in the tool workspace reports no RUSTSEC advisory, yanked crate, banned
+  crate or unknown source (advisories, bans, licenses and sources ok).
+- Alternatives: `ring` or `aws-lc-rs` (native code and a C toolchain for one hash), a
+  first-party SHA-256 (rejected above), shelling out to `shasum` or `sha256sum` (differs per
+  platform; the gate still uses whichever exists for its own step 3).
+- Review date: 2026-10-29. This records the trust boundary, not a memory-safety
+  certification.

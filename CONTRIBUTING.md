@@ -68,7 +68,9 @@ item may be marked n/a when the change cannot affect a driver. Commit any
 Follow `docs/SPEC.md` "Code generation and upstream maintenance". A baseline change is
 its own PR and contains:
 
-1. The `upstream/manifest.toml` change, alone, with no logic changes.
+1. The `upstream/manifest.toml` change, alone, with no logic changes. Each vendored mspec
+   under `upstream/mspec/` is re-vendored in the same commit, and the regenerated code
+   (`mise run generate`) follows in its own `gen` commit (ADR-0019 decision 10).
 2. A parity diff over `docs/parity` showing every capability whose status changes.
 3. A full regression run, including interop and fuzz-smoke.
 4. A migration note in `CHANGELOG.md` under `Unreleased`.

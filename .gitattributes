@@ -4,3 +4,6 @@
 # Fuzz seeds are raw inputs: the Modbus ASCII seeds end in CR LF, which text=auto would
 # turn into LF.
 fuzz/corpus/** binary
+# Generator output (ADR-0019): collapsed in review diffs and left out of language statistics.
+crates/stonecrab/src/*/generated/** linguist-generated=true
+crates/stonecrab/src/*/generated.rs linguist-generated=true

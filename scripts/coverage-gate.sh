@@ -19,8 +19,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# Excluded from every pass (D7): not handwritten library logic.
-EXCLUDE='(^|/)(examples|benches|fuzz|generated)/'
+# Excluded from every pass (D7): not handwritten library logic. Generated code is any
+# generated/ directory and the generated.rs that declares it (ADR-0019, Consequences).
+EXCLUDE='(^|/)(examples|benches|fuzz|generated)/|(^|/)generated\.rs$'
 
 # Where the single crate's sources live; a component is a path prefix below it.
 SRC=crates/stonecrab/src

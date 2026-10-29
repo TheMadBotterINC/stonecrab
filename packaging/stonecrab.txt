@@ -45,6 +45,16 @@ src/modbus/framing/ascii.rs
 src/modbus/framing/mbap.rs
 src/modbus/framing/rtu.rs
 src/modbus/framing.rs
+src/modbus/generated/MANIFEST.toml
+src/modbus/generated/data_item.rs
+src/modbus/generated/driver_type.rs
+src/modbus/generated/modbus_adu.rs
+src/modbus/generated/modbus_data_type.rs
+src/modbus/generated/modbus_error_code.rs
+src/modbus/generated/modbus_pdu.rs
+src/modbus/generated.rs
+src/modbus/generated_equivalence.rs
+src/modbus/generated_support.rs
 src/modbus/options.rs
 src/modbus/pdu/code.rs
 src/modbus/pdu/codec.rs

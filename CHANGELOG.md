@@ -5,6 +5,28 @@ as `stonecrab` 0.2.0 (2026-10-27); `stonecrab` 0.1.0 is the specification-stage
 placeholder.
 
 ## Unreleased
+- The MSpec code generator, proven on Modbus (ADR-0019 and its addendum of 2026-10-29,
+  slices S66 and S67; no crate API change). Apache PLC4X's `modbus.mspec` is vendored verbatim,
+  ASF header kept, at `upstream/mspec/modbus/modbus.mspec` (maintainer decision E8; upstream
+  path, git blob and sha256 in `upstream/manifest.toml`, attribution in `NOTICE`). The new,
+  unpublished tool `tools/stonecrab-codegen` (its own workspace; dependencies `toml` and
+  `sha2`) parses the whole of `MSpec.g4` and `Expression.g4` by hand-written recursive
+  descent, emits the subset its feature matrix lists (`tools/stonecrab-codegen/README.md`) and
+  refuses anything else with the construct, the type and the mspec line. It generates
+  `crate::modbus::generated`, a test-only module (the TCP ADU, the exception PDU, the reads of
+  FC01 to FC04, the exception codes and the numeric `DataItem` cases; every other case refused
+  by name) with an `@generated` provenance header and `generated/MANIFEST.toml`. An in-crate
+  proof runs every Modbus vector, the PDU and MBAP fuzz seeds and property tests through it and
+  the hand codec in both directions and finds no difference outside a closed list of checks
+  only the hand codec makes; the hand codec stays the shipped one. Divergences of the
+  generated codec from upstream's generated Java are parity rows `MB-GEN-EXCEPTION-FUNCTION`,
+  `MB-GEN-CHECKED-COUNT`, `MB-GEN-IMPLICIT` and `MB-GEN-DISABLED`. A new blocking CI job
+  `regen` (`mise run regen`, `scripts/regen.sh`) checks the generator workspace (fmt, clippy,
+  tests, cargo deny), the vendored mspec hash, two byte-identical generator runs and an
+  unchanged tree, with a self-test; `mise run generate` regenerates in place. The tool's
+  maintainer-only `check` parses 57 of the 59 mspec files of the pinned PLC4X checkout; the two
+  others (`ads.mspec`, `eip.mspec`) break the grammar and pass upstream only through ANTLR's
+  error recovery.
 - Modbus RTU and Modbus ASCII through the drivers' serial carrier against an independent peer
   (ADR-0024, slice S59c; no crate API change): on Linux, socat makes a pseudo-terminal pair,
   diagslave 3.6 (the pinned archive, checked against its SHA-256 before it is unpacked, its

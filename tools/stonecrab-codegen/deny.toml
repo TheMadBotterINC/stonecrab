@@ -1,0 +1,47 @@
+# Copy of the root deny.toml (cargo-deny 0.20 has no include mechanism), for the generator
+# workspace of ADR-0019 decision 9; the same approach fuzz/deny.toml takes (ADR-0009).
+# scripts/regen.sh fails when the two differ in anything but these comment lines, so edit both
+# files in the same change. The copy needs no license exception.
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = []
+
+[licenses]
+version = 2
+allow = ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "Unicode-3.0", "CC0-1.0", "0BSD"]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+deny = [
+  { crate = "openssl", reason = "use rustls" },
+  { crate = "openssl-sys", reason = "use rustls" },
+  { crate = "async-trait", reason = "use explicit Send boxed futures" },
+  { crate = "anyhow", reason = "published code uses PlcError" },
+  { crate = "eyre", reason = "published code uses PlcError" },
+  { crate = "chrono", reason = "calendar types are not adopted in core" },
+  { crate = "time", reason = "calendar types are not adopted in core" },
+  { crate = "jiff", reason = "calendar types are not adopted in core" },
+  { crate = "lazy_static", reason = "use std lazy initialization in first-party code", wrappers = ["sharded-slab"] },
+  { crate = "once_cell", reason = "use std lazy initialization in first-party code", wrappers = ["tracing-core"] },
+  { crate = "failure", reason = "published code uses PlcError" },
+  { crate = "error-chain", reason = "published code uses PlcError" },
+  { crate = "color-eyre", reason = "published code uses PlcError" },
+  { crate = "log", reason = "use tracing when diagnostics need output" },
+]
+
+# tokio's umbrella feature is banned in published crates (CODING_STANDARDS 8.1, ADR-0014);
+# each crate lists the scoped features it uses.
+[[bans.features]]
+crate = "tokio"
+deny = ["full"]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

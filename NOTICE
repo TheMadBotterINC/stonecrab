@@ -12,6 +12,14 @@ copied from the <raw> elements of one of those files. Each XML file keeps its AS
 license header. fixtures/modbus/PROVENANCE.toml records the origin of every file and
 vector. These fixtures are not part of the published stonecrab crate.
 
+This repository also redistributes one Apache PLC4X protocol description under the
+Apache License, Version 2.0: upstream/mspec/modbus/modbus.mspec, an unmodified copy of
+protocols/modbus/src/main/resources/protocols/modbus/modbus.mspec from the same commit,
+with its ASF license header kept. upstream/manifest.toml records its upstream path, git
+blob and sha256. tools/stonecrab-codegen reads it to generate Rust code, and the generated
+files under crates/stonecrab/src/modbus/generated/ name it in their headers. The mspec
+itself is not part of the published stonecrab crate.
+
 The NOTICE file of Apache PLC4X at that commit reads:
 
     Apache PLC4X

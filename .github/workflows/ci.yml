@@ -556,7 +556,7 @@ jobs:
       - uses: actions/checkout@v5
       - name: No first-party unsafe outside forbid(unsafe_code)
         run: |
-          if grep -rnw --include='*.rs' unsafe crates | grep -v 'forbid(unsafe_code)'; then
+          if grep -rnw --include='*.rs' unsafe crates tools fuzz | grep -v 'forbid(unsafe_code)'; then
             echo "first-party unsafe found; CODING_STANDARDS section 4 forbids it" >&2
             exit 1
           fi
@@ -582,6 +582,25 @@ jobs:
         with:
           tool: cargo-semver-checks@0.51.0
       - run: cargo semver-checks -p stonecrab
+  regen:
+    # ADR-0019 decision 9 (slice S67): the generated code is exactly what the generator makes
+    # from the vendored mspec files. scripts/regen.sh fetches once (the generator's crates,
+    # the advisory database and the crates index) and runs everything else --frozen: the
+    # generator workspace's fmt, clippy, tests and cargo deny, the vendored mspec sha256 of
+    # upstream/manifest.toml, two byte-identical runs and a clean tree after an in-place run.
+    # The two run steps are the commands of `mise run regen` (mise.toml); keep them in step.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
+        with:
+          toolchain: "1.99.1"
+          components: rustfmt, clippy
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.20.2
+      - run: scripts/regen.sh
+      - run: scripts/regen.sh --self-test
   fuzz-smoke:
     # Also runs on workflow_dispatch. cargo-deny on the fuzz workspace comes first inside
     # the script; with zero targets the job is green (ADR-0009).

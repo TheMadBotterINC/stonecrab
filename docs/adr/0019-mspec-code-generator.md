@@ -423,3 +423,153 @@ future generator "must reproduce this output or pass the same vector corpus". Th
   `.github/workflows/ci.yml` and its self-test.
 - Every later protocol that generates code adds its rows to the feature matrix, vectors for
   each new construct (SPEC requirement 5) and its options to its `MANIFEST.toml`.
+
+## Addendum (S66 and S67, 2026-10-29): the generator, the Modbus proof and the regen gate
+### Status
+Accepted (2026-10-29), as slices S66 and S67 of docs/POST_ALPHA_PLAN.md, after the
+maintainer approved vendoring `modbus.mspec` (decision E8, 2026-10-29). The decisions above
+stand; this addendum records what the implementation settled and the two places where it
+departs from their letter, each with its reason.
+
+### Context
+S45 (the write PDUs FC06, FC15 and FC16) and S50 (the file record PDUs FC20 and FC21) landed
+in the hand codec while this ADR was written, so the hand codec accepts PDUs that decision 8
+leaves disabled in the generated one; decision 8's third rule ("when the generated codec
+refuses what the hand codec accepts, the test fails") cannot hold for them. Running the
+proof also showed three refusals of the hand codec that are not in decision 8's list of
+hand-only checks, and that an implicit field read and dropped, as upstream does, lets an ADU
+whose MBAP length disagrees with its PDU through, which decision 8 requires the generated
+codec to refuse wherever the framer refuses.
+
+### Decision
+1. **The tool.** `tools/stonecrab-codegen` (package 0.1.0, its own workspace, `Cargo.lock`,
+   `deny.toml` copy and `.gitignore` for its `target/`) with `generate <options>
+   [<output>]` and the maintainer-only `check <checkout>` of decision 10. The parser is
+   `src/mspec.rs` (`MSpec.g4`) and `src/expression.rs` (`Expression.g4`, upstream's
+   precedence), both hand-written recursive descent; the emitter is `src/emit.rs` and
+   `src/emit/`; `src/output.rs` writes the header, runs the pinned `rustfmt` and replaces the
+   output set. Dependencies: `toml` 0.9 (the root's version, features and `toml_parser` pin)
+   and `sha2` 0.11 with default features off. The tool's lint table copies the root
+   `[workspace.lints]`, because a workspace cannot inherit another's; its items are
+   `pub(crate)` in `pub mod`s of the binary, which satisfies both `unreachable_pub` and
+   `redundant_pub_crate` without suppressions.
+2. **Options and provenance.** A protocol's options are `tools/stonecrab-codegen/protocols/
+   <protocol>.toml` (output directory, support module, enabled types, enabled cases); its
+   vendored files are the `[[mspec]]` entries of `upstream/manifest.toml` with that
+   `protocol` (upstream path, vendored path, git blob, sha256). `generated/MANIFEST.toml`
+   records the generator and version, the upstream project, tag and commit, each mspec and the
+   options. The header of decision 7 is written verbatim; it is added after `rustfmt`, which
+   skips any file whose first lines say `@generated`, so the files are formatted by
+   construction and `cargo fmt --check` skips them.
+3. **Enum values are raw text.** An enum value and its constants are kept as written, not
+   parsed as expressions, as upstream's `MessageFormatListener.enterEnumValueDefinition`
+   takes them (lines 744-784): `canopen.mspec` writes binary literals (`'0b0000'`) and
+   `knx-master-data.mspec` an empty constant, neither an expression of `Expression.g4`. A
+   value without a wire value (upstream counts up) is a generation error until a protocol
+   needs it.
+4. **The emitted subset is the validated subset.** The feature matrix in
+   `tools/stonecrab-codegen/README.md` lists every construct; the emitter writes only what
+   the Modbus vectors prove and refuses the rest with the construct, the type and the line:
+   `byteOrder` is `BIG_ENDIAN` only, a case `*` value, a default case, a `*Name` case and case
+   parameters are refused, the only operator is `+` (as `checked_add`), the only built-in is
+   `COUNT` of a byte array and the only property `lengthInBytes` of a nested type. A recursive
+   type is refused (decision 5).
+5. **Implicit fields are checked on parse.** Once a case is read, each implicit field is
+   compared with its expression over the parsed values, and a mismatch is
+   `ParseError::InvalidDiscriminator` naming the field. Upstream reads and drops it
+   (`ModbusTcpADU.java` lines 96-97 under `plc4j/drivers/modbus/src/main/generated/`); without
+   the check an ADU with a wrong MBAP length and a valid PDU parses, where the framer refuses
+   it. This is a divergence of the generated codec only, recorded in the parity record
+   (`MB-GEN-IMPLICIT`).
+6. **Generated code conventions.** Variants keep the mspec's case names; a disabled case keeps
+   its arm and is refused with `field: "<Type>.<Case> (disabled)"`, a value no case matches
+   with `field: "<Type>"`, and the `value` is the last discriminator that is not a `bit`.
+   Arms with the same body are merged (clippy's `match_same_arms`), the last write of a
+   `serialize` arm is its value (`branches_sharing_code`), and the generator emits
+   `#[expect(clippy::enum_variant_names, ...)]` where clippy's rule fires on the mspec's
+   names and `#[expect(clippy::redundant_pub_crate, ...)]` on every item, as hand-written
+   private modules do (`crate::modbus::session::Wire`). A byte array is
+   `read_bytes(count, usize::MAX)`: the bytes present bound it.
+7. **The bit-run helpers stay next to the generated module.** `split_bits` and `join_bits`
+   live in the hand-written support module `crate::modbus::generated_support`, not in
+   `stonecrab::codec` as decision 5 says. While the generated codec is test-only, a public
+   codec function would grow the published API (and the `semver` baseline) for a test-only
+   caller; the slice that ships generated code moves them under the ADR-0013 addendum
+   decision 5 asks for.
+8. **`cfg(all(test, feature = "testkit"))`.** The generated module and the support module are
+   declared with this instead of decision 8's `#[cfg(test)]`: the proof needs the golden-vector
+   loader of `testkit`, a build without it would compile generated code nothing uses (dead
+   code warnings), and clippy treats only a plain `#[cfg(test)]` module as test code, so the
+   generated code is linted as library code, which is what decision 5 wants. The proof
+   itself is `#[cfg(test)]` and `#[cfg(feature = "testkit")]`, an in-crate test, because a
+   private `cfg(test)` module cannot be reached from `tests/`.
+9. **The enabled set of S66 is decision 8's, and the disabled cases are a rule of the
+   proof.** S45 and S50 do not widen it: enabling FC06, FC15, FC16, FC20 and FC21 is for the
+   slice that chooses generated code for writes (Consequences above), and it will meet an
+   upstream defect there (`ModbusPDUWriteFileRecordResponseItem` reads `recordLength` bytes
+   where V1.1b has twice that, `MB-ADDR-EXTENDED`). Decision 8's rules gain one: an input of
+   a disabled case is outside the generated codec's domain, and the generated codec must
+   refuse it with `InvalidDiscriminator` naming the disabled case, whatever the hand codec
+   does (decision 6). Nothing else is compared for it.
+10. **The closed list of hand-only checks.** Decision 8's seven rows stand. Three are added,
+    each naming the check that makes it: a response byte count above 250 (`MB-LIMIT-PDU`; the
+    mspec reads any `uint 8` count and a 251-byte count still fits a 253-byte PDU); an
+    exception PDU given to the request parser (the hand request decoder has no function code
+    with the exception bit, and the mspec matches `ModbusPDUError` on `errorFlag` whatever
+    `response` is); and an exception response for a function code the hand codec does not
+    implement (`FunctionCode::Unknown`; the mspec's `ModbusPDUError` takes any
+    `functionFlag`). The ADU rows are an ADU over 260 bytes (the framer's `Oversized`,
+    `MB-LIMIT-ADU`), where the generated codec is not constrained, and every other framer
+    refusal or incomplete frame, where it must refuse. When a hand-only check fires, the
+    generated codec may accept or refuse. The proof fails when a row is exercised by no
+    input, so the list cannot go stale.
+11. **ADU comparisons.** The framer cuts the stream and the generated `ModbusTcpADU` parses from
+    the same position. When both accept, the transaction id, unit id, consumed bytes, mapped
+    PDU and serialized bytes must agree; when the hand side refuses, the generated side must
+    refuse unless a hand-only row applies, and the refusal variant is compared at the PDU
+    level, where the PDU of every framed ADU is also compared on its own (a generated parser
+    that reads past an ADU's end fails the length check of item 5 instead of the PDU
+    decoder's `Truncated`).
+12. **`DataItem`.** The `typed_*` vectors in the `BIG_ENDIAN` layout are compared with
+    `TypedDecoder` (values by bits, so NaN payloads count); a lone 8-bit value sits in the low
+    byte of its register, which the test strips by hand (register alignment stays
+    hand-written). The negative vector of every enabled case is the same value one byte
+    short.
+13. **The regen gate.** `scripts/regen.sh` runs the five steps of decision 9; `mise run regen`
+    runs it and its `--self-test`, and the blocking CI job `regen` does the same; `mise run
+    generate` rewrites in place. Step 4's in-place check compares a copy of `generated.rs` and
+    `generated/` taken before the run with the files after it (`diff -r`, which an edit, a new
+    file and a deleted file all fail) and requires `git status --porcelain
+    --untracked-files=no` to be empty for them. On a clean checkout, as in CI, that is the
+    `git status --porcelain` of decision 9; the copy also works before the generated files are
+    first committed. The offline run with the fetched advisory database and index works
+    locally (`cargo deny --frozen check` after `cargo deny --locked fetch db index`); the first
+    hosted run proves it in CI.
+14. **`check` at the pinned baseline.** On 2026-10-29, over the read-only checkout of v1.0.0, 57
+    of 59 mspec files parse and resolve (the files of one `protocols/<name>` module resolve
+    together, as each protocol loads them), the five OPC UA files included. Two break
+    `MSpec.g4` and are accepted upstream only through ANTLR's error recovery: `ads.mspec` line
+    1088 (a `validation` description in ticks where the grammar takes a `"string"`) and
+    `eip.mspec` line 310 (a stray `]`). The parser reports them; it does not imitate the
+    recovery.
+
+### Consequences
+- The equivalence proof (`crate::modbus::generated_equivalence`) passes over the 296 Modbus
+  PDU and ADU vectors, the 35 fuzz seeds and two inline inputs of item 10, in both directions,
+  and over property tests of arbitrary bytes, arbitrary PDUs in an MBAP frame and arbitrary
+  valid PDUs of the enabled domain, with no difference outside the rules above.
+- Done in the landing commit, outside these slices' files: the margin notes of decision 9 in
+  CODING_STANDARDS (1.2, 17.1, 17.2, 17.6, 18.2 and section 19), the CONTRIBUTING change of
+  decision 10 (the vendored mspec joins the manifest commit, the `gen` commit follows), the
+  crate's own `NOTICE`, which now names the mspec the shipped (`cfg(test)`) generated files
+  come from, and the `geiger` grep of CI, which now also scans `tools/` and `fuzz/`.
+
+### Compliance
+- S66: `tools/stonecrab-codegen` with its README and feature matrix, `upstream/mspec/modbus/
+  modbus.mspec` and its `[[mspec]]` entry, `crates/stonecrab/src/modbus/generated.rs`,
+  `generated/` with `MANIFEST.toml`, `generated_support.rs`, `generated_equivalence.rs`, the
+  `sha2` entry of `docs/DEPENDENCY_AUDIT.md`, the root `exclude` entry, the coverage exclusion
+  of `generated.rs`, the `.gitattributes` rule for generated files named in Consequences
+  above and the `packaging/stonecrab.txt` update.
+- S67: `scripts/regen.sh`, the `regen` and `generate` tasks in `mise.toml` and the blocking
+  `regen` job in `.github/workflows/ci.yml` with its self-test.

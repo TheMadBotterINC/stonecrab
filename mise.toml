@@ -6,6 +6,11 @@
 #   mise run coverage      = CI "quality" coverage step (scripts/coverage-gate.sh)
 #   mise run lint-attrs    = CI "lint-attrs" job
 #   mise run parity        = CI "parity" job (scripts/parity-check.sh and its --self-test)
+#   mise run regen         = CI "regen" job (scripts/regen.sh and its --self-test, ADR-0019
+#                            decision 9: the generator workspace's own gates, the vendored
+#                            mspec hashes, two identical generator runs and an unchanged tree)
+#   mise run generate      = no CI job: rewrites the generated code of every protocol under
+#                            tools/stonecrab-codegen/protocols/ in place (ADR-0019)
 #   mise run features      = CI "features" job
 #   mise run examples      = CI "examples" job
 #   mise run interop       = CI "interop", "interop-libmodbus", "interop-modbus-tk",
@@ -101,6 +106,17 @@ run = [
   "scripts/parity-check.sh",
   "scripts/parity-check.sh --self-test",
 ]
+
+[tasks.regen]
+description = "The regen gate (ADR-0019 decision 9): fetch, then offline the generator workspace's fmt, clippy, tests and cargo deny, the vendored mspec sha256, two byte-identical generator runs and an unchanged tree, then the comparison's self-test"
+run = [
+  "scripts/regen.sh",
+  "scripts/regen.sh --self-test",
+]
+
+[tasks.generate]
+description = "Regenerate the code of every protocol under tools/stonecrab-codegen/protocols/ in place from the vendored mspec files (ADR-0019; review the diff, then commit it as a gen commit)"
+run = "for options in tools/stonecrab-codegen/protocols/*.toml; do cargo run --locked --quiet --manifest-path tools/stonecrab-codegen/Cargo.toml -- generate \"$options\" || exit 1; done"
 
 [tasks.features]
 description = "Check the feature powerset (depth 2) of the single crate and the crate without default features"

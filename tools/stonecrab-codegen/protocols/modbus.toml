@@ -1,0 +1,35 @@
+# Generation options of the Modbus protocol (ADR-0019 decisions 6 and 8). The vendored mspec
+# and its hashes are found by `protocol` in upstream/manifest.toml. Every case of an enabled
+# type that is not listed here is disabled: it is still parsed, and the generated parser
+# refuses it with ParseError::InvalidDiscriminator naming the case. A type that is not listed
+# is not generated. generated/MANIFEST.toml repeats these options next to the output.
+protocol = "modbus"
+output = "crates/stonecrab/src/modbus"
+support_module = "crate::modbus::generated_support"
+
+# The hand codec's domain of decision 8: the TCP ADU, the exception PDU, the read requests and
+# responses of function codes 01 to 04, the exception codes, and the numeric DataItem cases
+# except BOOL (a lone bit is not a byte-aligned run). DriverType and ModbusDataType are the
+# parameter types of ModbusADU and DataItem.
+types = ["DataItem", "DriverType", "ModbusADU", "ModbusDataType", "ModbusErrorCode", "ModbusPDU"]
+
+[cases]
+# RTU and ASCII need the STATIC_CALL checksums rtuCrcCheck and asciiLrcCheck (S59, S60).
+ModbusADU = ["ModbusTcpADU"]
+ModbusPDU = [
+  "ModbusPDUError",
+  "ModbusPDUReadCoilsRequest",
+  "ModbusPDUReadCoilsResponse",
+  "ModbusPDUReadDiscreteInputsRequest",
+  "ModbusPDUReadDiscreteInputsResponse",
+  "ModbusPDUReadHoldingRegistersRequest",
+  "ModbusPDUReadHoldingRegistersResponse",
+  "ModbusPDUReadInputRegistersRequest",
+  "ModbusPDUReadInputRegistersResponse",
+]
+DataItem = [
+  "BYTE", "WORD", "DWORD", "LWORD",
+  "SINT", "INT", "DINT", "LINT",
+  "USINT", "UINT", "UDINT", "ULINT",
+  "REAL", "LREAL",
+]

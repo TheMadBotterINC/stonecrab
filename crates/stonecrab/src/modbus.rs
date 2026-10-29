@@ -27,6 +27,16 @@ mod connection;
 mod decode;
 mod driver;
 mod framing;
+// The codec generated from the vendored modbus.mspec and its proof against the hand codec
+// (ADR-0019 decision 8): test-only, so it adds nothing to the library build or the API.
+#[cfg(all(test, feature = "testkit"))]
+mod generated;
+// Two attributes: clippy counts only a literal `#[cfg(test)]` as a test module.
+#[cfg(test)]
+#[cfg(feature = "testkit")]
+mod generated_equivalence;
+#[cfg(all(test, feature = "testkit"))]
+mod generated_support;
 mod options;
 mod pdu;
 mod rtu;

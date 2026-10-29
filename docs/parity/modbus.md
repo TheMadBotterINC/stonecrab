@@ -733,14 +733,39 @@ both the behavior row and its divergence.
 | MB-TCP-TRANSPORTS | The authority is an IPv4-like or host name with an optional port of 1 to 5 digits and trailing text after it is silently accepted; there is no IPv6 form (`TcpTransport.java:39-57`) | A bracketed IPv6 authority is accepted, with or without a port; text after the authority is refused | behavioral difference, not a protocol rule; no upstream issue drafted | `parse_config_accepts_bracketed_ipv6_with_and_without_a_port`, `parse_config_refuses_a_bad_authority` |
 
 ## MSpec feature matrix
-Nothing generated; PDUs hand-written from modbus.mspec (decision D6) under
-`crates/stonecrab/src/modbus/pdu/` (S21).
+The shipped codec is still hand-written from modbus.mspec (decision D6) under
+`crates/stonecrab/src/modbus/pdu/` (S21, S45, S50). Since S66 (ADR-0019 and its addendum of
+2026-10-29) the pinned mspec is vendored verbatim, ASF header kept, at
+`upstream/mspec/modbus/modbus.mspec` (decision E8; upstream path, git blob and sha256 in
+`upstream/manifest.toml`), and `tools/stonecrab-codegen` generates a second codec from it,
+`crate::modbus::generated`, a test-only module that proves the generator against the hand
+codec and adds nothing to the library build or the API. The feature matrix itself, one row per
+MSpec construct marked parsed, emitted and validated, is in `tools/stonecrab-codegen/README.md`.
 
-The pinned mspec is 439 lines with an ASF header (`Mspec:1-18`). It models TCP, RTU and
-ASCII ADUs (`Mspec:36-75`) and many PDUs beyond the four read functions; the alpha
-transcribes FC01 to FC04 request/response and the exception PDU only. The corpus a future
-generator would have to meet is `fixtures/modbus/tcp/` (spec-authored and adversarial
-PDU vectors, S21, and the six upstream parser-suite frames, S04a).
+The generated module enables the hand codec's read domain of ADR-0019 decision 8:
+`ModbusTcpADU`, `ModbusPDUError`, the read requests and responses of FC01 to FC04,
+`ModbusErrorCode` and the numeric `DataItem` cases except `BOOL` (`Mspec:36-58, 78-142,
+318-364, 380-421`). Every other case is disabled and refused by name, among them the RTU and
+ASCII ADUs (their `STATIC_CALL` checksums, `Mspec:65, 73`) and the write and file record PDUs
+the hand codec implements (S45, S50). The equivalence proof runs every Modbus vector of
+`fixtures/modbus/`, the `fuzz_modbus_pdu` and `fuzz_modbus_mbap` seeds and property tests
+through both codecs in both directions; `mise run regen` (CI job `regen`, S67) regenerates the
+module and fails on any difference.
+
+Where the generated codec and the hand codec may disagree is a closed list. The hand codec
+alone checks a read quantity of zero or above 2000 bits or 125 registers, a span past the
+65536 addresses, a response byte count of zero or above 250, an odd register byte count, a PDU
+over 253 bytes, a response function other than the one asked for, an exception PDU given to
+the request parser, an exception for a function code it does not implement, and an ADU over
+260 bytes (`MB-LIMIT-PDU`, `MB-LIMIT-ADU`): modbus.mspec states none of these bounds. The
+divergences of the generated codec from upstream's generated Java:
+
+| Row id | Upstream behavior (file:line at ea229918) | Generated codec behavior | Reference | Regression test id |
+| --- | --- | --- | --- | --- |
+| MB-GEN-EXCEPTION-FUNCTION | `ModbusPDUError` drops the `functionFlag` it was parsed with and serializes 0 (`plc4j/drivers/modbus/src/main/generated/org/apache/plc4x/java/modbus/readwrite/ModbusPDUError.java:52-54`) | The unmatched discriminator is stored and written back, so `81 02` round-trips as the hand `ModbusPdu::Exception { function, code }` does | ADR-0019 decision 4 | `the_generated_codec_agrees_with_the_hand_codec_on_the_whole_corpus`, `prop_every_valid_pdu_of_the_enabled_domain_is_the_same_in_both_codecs` |
+| MB-GEN-CHECKED-COUNT | A serialized byte count is cast, `(short) (StaticHelper.COUNT(value))` (`.../readwrite/ModbusPDUReadHoldingRegistersResponse.java:91-93`), so 256 data bytes would write a count of 0 | The count is `u8::try_from(len)`: a value that does not fit fails with `ParseError::Overflow`; a `functionFlag` above 127 is refused the same way | ADR-0019 decision 4 | `a_function_flag_above_seven_bits_or_an_oversized_response_is_not_serialized` |
+| MB-GEN-IMPLICIT | Implicit fields are read and dropped: the MBAP `length` is never compared with the PDU (`.../readwrite/ModbusTcpADU.java:96-97, 106`) | Each implicit field is checked against its expression once the case is read; a mismatch is `ParseError::InvalidDiscriminator` naming the field, so an ADU the framer refuses for its length is refused here too | ADR-0019 addendum of 2026-10-29, decision 5 | `the_generated_codec_agrees_with_the_hand_codec_on_the_whole_corpus`, `prop_the_codecs_agree_on_arbitrary_pdus_in_an_mbap_frame` |
+| MB-GEN-DISABLED | Every case of `ModbusPDU` and `ModbusADU` is generated (`Mspec:36-276`) | A case the options disable is refused with `InvalidDiscriminator { field: "<Type>.<Case> (disabled)" }`, as the hand codec refuses FC05 (`MB-QUIRK-C`); RTU and ASCII ADUs, the write and file record PDUs and the other function codes of the mspec are disabled | ADR-0019 decisions 6 and 8, addendum decision 9 | `the_rtu_and_ascii_adus_are_disabled_and_refused`, `a_data_item_of_a_disabled_or_absent_case_or_of_the_wrong_value_is_refused` |
 
 ## Test vectors available upstream
 Under `protocols/modbus/src/test/resources/protocols/modbus` (all Apache-2.0 with ASF headers;

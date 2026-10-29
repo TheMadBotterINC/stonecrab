@@ -40,6 +40,12 @@ The standards exist for one reason: this library parses bytes from industrial ne
 
 ## 1. Scope and precedence
 
+> Amended by [ADR-0019](adr/0019-mspec-code-generator.md) decision 9: 1.2 no longer
+> exempts generated code from the lint rules. The generator's output passes the crate's
+> lints and `rustfmt`, and a suppression it genuinely needs is an item-level
+> `#[expect(..., reason = "...")]` emitted by the generator. The coverage exclusion and the
+> ban on hand edits stand.
+
 1.1. These standards apply to all first-party Rust in the workspace: the published crate under `crates/stonecrab/`, tooling under `tools/` when it exists, examples, benchmarks, fuzz targets and tests. Where a rule is relaxed for a category (tests may `unwrap`, binaries may use `anyhow`), the relaxation is stated explicitly; otherwise the rule applies everywhere.
 
 1.2. Generated code (§17) is exempt from style and lint rules, is excluded from coverage thresholds, and is never edited by hand. It is **not** exempt from §4 (`unsafe`), §6 (panics) or §7 (bounded parsing): the generator must emit code that satisfies them.
@@ -557,6 +563,14 @@ A library crate emits nothing above `warn` in steady-state operation. A log line
 
 ## 17. Generated code
 
+> Amended by [ADR-0019](adr/0019-mspec-code-generator.md) (S66, S67). 17.1: generated Rust
+> lives in a `generated/` directory beside the `generated.rs` that declares it, in the
+> owning module (`crates/stonecrab/src/modbus/`); each file starts with the header of
+> decision 7, without the `#![allow]` line, and `MANIFEST.toml` has no timestamp because git
+> records when. 17.2: the check is `mise run regen` (`scripts/regen.sh`), which also catches
+> new and deleted files. 17.6: the Java bootstrap is unused, because the generator is native
+> Rust. `.gitattributes` marks the generated files `linguist-generated` without `-diff`.
+
 17.1. **Location and marker.** Generated Rust lives under `src/generated/` in the owning driver module. Every generated file begins with:
 
 ```rust
@@ -584,6 +598,11 @@ and a `MANIFEST.toml` in the same directory records upstream tag, commit, genera
 > Repository override: [ADR-0004](adr/0004-master-default-branch.md) replaces
 > `main` with `master` throughout branch naming and hardware-job references in
 > §18–19. The source policy below is otherwise retained.
+>
+> [ADR-0019](adr/0019-mspec-code-generator.md) decisions 9 and 10: a `gen` commit (18.2)
+> holds `generated.rs`, `generated/` and their `MANIFEST.toml`; a re-vendored mspec under
+> `upstream/mspec/` joins the `upstream/manifest.toml` commit, and the `gen` commit follows
+> it.
 
 18.1. **Branching.** Trunk is `main` and is always releasable. Work happens on short-lived branches named `<type>/<scope>-<slug>` (`feat/modbus-rtu-framing`, `fix/core-deadline-overflow`, `gen/modbus-regen-1.0.1`). No long-lived feature branches; land behind a feature flag or an unexposed module instead.
 
@@ -618,6 +637,11 @@ Types: `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`, `chore`
 ---
 
 ## 19. CI gates
+
+> [ADR-0019](adr/0019-mspec-code-generator.md) decision 9: the `regen` row runs `mise run
+> regen` (`scripts/regen.sh` and its self-test) offline after one fetch, not `cargo xtask
+> generate --all && git diff --exit-code`: there is no `xtask`, and `git diff` misses
+> untracked files.
 
 Every pull request runs the following; all are required for merge unless marked otherwise.
 
