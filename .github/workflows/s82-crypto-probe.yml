@@ -144,7 +144,8 @@ jobs:
       - name: deny.toml is unchanged from the base commit
         run: git diff --exit-code d14ffa9daf38c2368d1f653b89907095e784c6cf -- deny.toml Cargo.toml Cargo.lock crates
       # D23: none of these may appear in the probe's graph, with no wrapper to excuse them.
-      # cargo tree -i exits 101 ("did not match any packages") when the package is absent.
+      # cargo tree -i exits 101 ("did not match any packages") when the package is absent; any
+      # other failure (a resolution error, say) fails the step instead of counting as absent.
       - name: D23, banned crates in the probe graph
         working-directory: spikes/opcua-crypto-probe
         run: |
@@ -152,8 +153,10 @@ jobs:
           for name in once_cell lazy_static log time chrono; do
             if out=$(cargo tree --locked --all-features --target all -e normal,dev,build -i "$name" 2>&1); then
               echo "FOUND $name:"; echo "$out"; status=1
-            else
+            elif printf '%s' "$out" | grep -q 'did not match any packages'; then
               echo "$name: $out" | head -1
+            else
+              echo "cargo tree failed for $name without saying the package is absent:"; echo "$out"; status=1
             fi
           done
           exit $status
