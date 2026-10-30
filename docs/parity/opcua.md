@@ -15,6 +15,8 @@ TLS-PSK transports that M3 also lists are for Modbus: upstream OPC UA uses no TL
 repository `apache/plc4x-extras`, outside the pinned baseline) is a tool, not part of this
 driver, and is tracked by the tools record, not here.
 
+Slice S75 (2026-10-29) assigned every planned row to a slice of M3 (S76 to S123); see "Slice assignment (S75)" below. Nothing was implemented and no status changed.
+
 Sources: the Java driver `plc4j/drivers/opcua` is the baseline (manifest `inventory.opcua`,
 read in S41). The Go driver `plc4go/internal/opcua` (manifest `inventory.go_opcua`, read in
 S42) is a partial second implementation; its rows are in the section "Go implementation" and
@@ -484,6 +486,58 @@ rows in "Go implementation" (`OPCUA-GO-*`), all deferred and none owed.
 | --- | --- | --- | --- | --- |
 | OPCUA-BACKLOG-NONE | No `[[backlog]]` row names `opcua` or `go_opcua`. | Nothing to track. A future backlog row for OPC UA is added here with its own id. | deferred (no backlog rows exist) | none |
 
+## Slice assignment (S75)
+Slice S75 (2026-10-29) sliced milestone M3 into S76 to S123; the slice table is in the "Phase H" section of `docs/POST_ALPHA_PLAN.md`. This section maps every `planned (M3)` row to the slice whose exit check closes it. It changes no row, id or status. A row is closed by the last slice that has one of its planned tests, so a row whose tests span two slices is listed in the later one. The 33 `deferred` rows are in no slice. A script reads this table and the tables above and checks that all 195 planned ids appear exactly once, and no deferred or unknown id appears.
+
+| Slice | Planned rows closed by the slice |
+| --- | --- |
+| S83 | OPCUA-ADDR-NAMESPACE, OPCUA-ADDR-IDENTIFIER-TYPES, OPCUA-ADDR-IDENTIFIER, OPCUA-ADDR-ATTRIBUTE, OPCUA-ADDR-INDEX-RANGE, OPCUA-ADDR-DATATYPE, OPCUA-ADDR-CONFIG, OPCUA-ADDR-QUERY, OPCUA-ADDR-ROUND-TRIP, OPCUA-QUIRK-BINARY-ID, OPCUA-DIV-NAMESPACE-RANGE |
+| S84 | OPCUA-CFG-SECURITY-POLICY, OPCUA-CFG-MESSAGE-SECURITY, OPCUA-CFG-FRAMEWORK, OPCUA-CFG-UNKNOWN, OPCUA-DIV-UNKNOWN-KEYS, OPCUA-TRANSPORT-TCP, OPCUA-TRANSPORT-ENDPOINT-URL, OPCUA-TRANSPORT-PORT, OPCUA-QUIRK-INET-PATTERN, OPCUA-QUIRK-TLS-NAMES |
+| S87 | OPCUA-WIRE-HEADER, OPCUA-WIRE-MESSAGE-TYPES, OPCUA-WIRE-OPEN-HEADER, OPCUA-QUIRK-CODEC-RHE |
+| S89 | OPCUA-WIRE-ERR, OPCUA-DIV-ERR-MESSAGE, OPCUA-QUIRK-ERR-UNHANDLED, OPCUA-WIRE-SEQUENCE, OPCUA-WIRE-REQUEST-MATCH, OPCUA-WIRE-REQUEST-HEADER, OPCUA-WIRE-SERVICE-FAULT, OPCUA-CFG-REQUEST-TIMEOUT |
+| S90 | OPCUA-LIFE-HELLO, OPCUA-LIFE-OPEN, OPCUA-POLICY-NONE, OPCUA-MODE-POLICY-NONE, OPCUA-LIMIT-RECEIVE-BUFFER |
+| S91 | OPCUA-OP-CONNECT, OPCUA-LIFE-CREATE-SESSION, OPCUA-LIFE-CLOSE-SESSION, OPCUA-CFG-HANDSHAKE-TIMEOUT, OPCUA-CFG-SESSION-TIMEOUT, OPCUA-LIMIT-CLOSE-HINT, OPCUA-MODE-NONE |
+| S92 | OPCUA-OP-READ, OPCUA-OP-CLOSE, OPCUA-READ-REQUEST, OPCUA-READ-ATTRIBUTE-ID, OPCUA-READ-STATUS, OPCUA-DIV-STATUS-CODE, OPCUA-QUIRK-STATUS-COLLAPSE, OPCUA-TYPE-BOOLEAN, OPCUA-TYPE-INTEGERS, OPCUA-TYPE-FLOATS, OPCUA-TYPE-STRING, OPCUA-TYPE-NULL |
+| S93 | OPCUA-WIRE-HELLO-ACK (its upstream-vector test needs the vendored suites of decision E13 part B; the first-party half lands in S87) |
+| S94 | OPCUA-CHUNK-SEND, OPCUA-CHUNK-RECEIVE, OPCUA-CHUNK-SEND-LIMITS, OPCUA-CHUNK-SIZE, OPCUA-LIMIT-SEND-BUFFER, OPCUA-LIMIT-MAX-MESSAGE, OPCUA-LIMIT-MAX-CHUNKS, OPCUA-CFG-ENCODING, OPCUA-QUIRK-SEND-LIMITS, OPCUA-DIV-SEND-LIMITS |
+| S95 | OPCUA-TYPE-DATETIME, OPCUA-TYPE-GUID, OPCUA-TYPE-QUALIFIED-NAME, OPCUA-TYPE-NODE-ID, OPCUA-TYPE-STATUS-CODE, OPCUA-TYPE-UNMAPPED, OPCUA-TYPE-SCALAR-ARRAY, OPCUA-QUIRK-ONE-ELEMENT-ARRAY, OPCUA-DIV-ONE-ELEMENT-ARRAY, OPCUA-QUIRK-GUID-TEXT, OPCUA-DIV-GUID-TEXT, OPCUA-READ-VALUE-MAPPING, OPCUA-READ-TYPE-OVERRIDE |
+| S96 | OPCUA-LIFE-ACTIVATE, OPCUA-AUTH-ANONYMOUS, OPCUA-CFG-DISCOVERY, OPCUA-DISC-DISABLED, OPCUA-ENDPOINT-MATCH, OPCUA-ENDPOINT-TOKEN-COMPAT, OPCUA-POLICY-ENDPOINT-URI, OPCUA-CFG-ENDPOINT-HOST, OPCUA-CFG-ENDPOINT-PORT |
+| S98 | OPCUA-TYPE-BYTE-STRING, OPCUA-TYPE-LOCALIZED-TEXT, OPCUA-QUIRK-LOCALIZED-TEXT, OPCUA-DIV-LOCALIZED-TEXT, OPCUA-READ-METADATA |
+| S99 | OPCUA-CFG-USERNAME, OPCUA-CFG-PASSWORD, OPCUA-AUTH-RESOLVE, OPCUA-AUTH-TYPES, OPCUA-AUTH-INSECURE, OPCUA-AUTH-TOKEN-POLICY, OPCUA-CFG-ALLOW-INSECURE-CREDENTIALS |
+| S100 | OPCUA-OP-WRITE, OPCUA-WRITE-REQUEST, OPCUA-WRITE-TYPE-SELECT, OPCUA-WRITE-TYPES, OPCUA-WRITE-TIME, OPCUA-WRITE-DATETIME, OPCUA-WRITE-STATUS, OPCUA-WRITE-UNSUPPORTED, OPCUA-QUIRK-DATETIME-WRITE, OPCUA-DIV-DATETIME-WRITE |
+| S101 | OPCUA-CRYPTO-KEYDERIVATION, OPCUA-CRYPTO-NONCE |
+| S102 | OPCUA-CRYPTO-SYMMETRIC |
+| S103 | OPCUA-CFG-KEYSTORE, OPCUA-CFG-KEYSTORE-TYPE, OPCUA-CERT-KEYSTORE, OPCUA-CERT-CHAIN, OPCUA-CERT-APPLICATION-URI, OPCUA-DIV-JVM-KEYSTORES, OPCUA-CERT-GENERATED, OPCUA-CFG-GENERATED-KEY-SIZE, OPCUA-QUIRK-GENERATED-CERT-URI |
+| S104 | OPCUA-CFG-SERVER-CERTIFICATE-FILE, OPCUA-CFG-TRUST-STORE, OPCUA-CFG-VERIFY, OPCUA-CERT-VERIFY-ORDER, OPCUA-CERT-VERIFY-PERMISSIVE, OPCUA-CERT-VERIFY-TRUSTSTORE, OPCUA-CERT-VERIFY-PINNED, OPCUA-POLICY-DEFAULT, OPCUA-QUIRK-NONE-FALLBACK, OPCUA-DIV-FAIL-CLOSED |
+| S105 | OPCUA-CRYPTO-ASYMMETRIC, OPCUA-CRYPTO-PADDING (the asymmetric block sizes and the two-byte overhead above 256 bytes, with the AES half tested in S102), OPCUA-MODE-OPN-PROTECTED |
+| S106 | OPCUA-MODE-SIGN, OPCUA-MODE-SIGN-ENCRYPT, OPCUA-POLICY-BASIC256SHA256, OPCUA-DISC-GETENDPOINTS, OPCUA-DISC-NONE-POLICY, OPCUA-MODE-DETERMINE, OPCUA-CERT-VERIFY-DEFAULT, OPCUA-CERT-VERIFY-POINTS, OPCUA-CERT-VERIFY-DISCOVERY |
+| S107 | OPCUA-POLICY-AES128-SHA256-RSAOAEP, OPCUA-POLICY-AES256-SHA256-RSAPSS, OPCUA-POLICY-BASIC128RSA15, OPCUA-POLICY-BASIC256 |
+| S108 | OPCUA-AUTH-USERNAME, OPCUA-AUTH-X509, OPCUA-AUTH-CLIENT-SIGNATURE (the CreateSession and ActivateSession signature is sent from S106; the row's user-token test closes here) |
+| S109 | OPCUA-LIFE-RENEWAL, OPCUA-CFG-CHANNEL-LIFETIME, OPCUA-CFG-MIN-CHANNEL-LIFETIME, OPCUA-QUIRK-SHARED-SCHEDULER |
+| S110 | OPCUA-LIFE-NO-REACTIVATE |
+| S112 | OPCUA-OP-BROWSE, OPCUA-BROWSE-ENTRY, OPCUA-BROWSE-WALK, OPCUA-BROWSE-REFERENCES, OPCUA-CFG-BROWSE-MAX-REFERENCES, OPCUA-CFG-BROWSE-MAX-NODES, OPCUA-CFG-BROWSE-MAX-DEPTH, OPCUA-LIMIT-BROWSE |
+| S113 | OPCUA-BROWSE-ITEM, OPCUA-BROWSE-ATTRIBUTES, OPCUA-BROWSE-INTERCEPTOR |
+| S115 | OPCUA-OP-SUBSCRIBE-CHANGE, OPCUA-SUB-CREATE, OPCUA-SUB-MONITORED-ITEM, OPCUA-LIMIT-SUBSCRIPTION, OPCUA-CFG-SUBSCRIPTION-QUEUE |
+| S116 | OPCUA-SUB-PUBLISH, OPCUA-LIFE-TIMEOUTS (its Publish time-out hint test needs the publish path) |
+| S117 | OPCUA-OP-UNSUBSCRIBE, OPCUA-SUB-STOP, OPCUA-SUB-ITEM-FAILURE, OPCUA-QUIRK-ITEM-LOG-ONLY, OPCUA-DIV-ITEM-FAILURE, OPCUA-OP-RECONNECT, OPCUA-DIV-RECONNECT (the handshake half is tested in S110; subscriptions ending with Disconnected need S114 to S116) |
+| S118 | OPCUA-OP-SUBSCRIBE-CYCLIC, OPCUA-SUB-CYCLIC-EMIT, OPCUA-OP-SUBSCRIBE-EVENT, OPCUA-SUB-EVENT-MAPPING, OPCUA-DIV-NO-BACKGROUND-TASKS (it also qualifies publish and cyclic emission, which exist only from S116 and S118) |
+| S119 | OPCUA-TYPE-EXTENSION-OBJECT, OPCUA-READ-STRUCT-RESOLVE, OPCUA-READ-STRUCT-DECODE |
+| S120 | OPCUA-WRITE-STRUCT |
+| S123 | OPCUA-CAPS, OPCUA-QUIRK-TEST-SERVER, OPCUA-WIRE-SERVICES-USED |
+
+Rows that may change status. These are proposals awaiting the maintainer (`docs/POST_ALPHA_PLAN.md`, "Proposed decisions"), not decisions, and no status above has changed:
+
+- Decision E16 recommends deferring `OPCUA-POLICY-BASIC128RSA15` and `OPCUA-POLICY-BASIC256` (deprecated) and `OPCUA-CERT-GENERATED`, `OPCUA-CFG-GENERATED-KEY-SIZE` and `OPCUA-QUIRK-GENERATED-CERT-URI`, and renaming the PKCS#12 and JKS planned tests of `OPCUA-CFG-KEYSTORE-TYPE`, `OPCUA-CFG-TRUST-STORE`, `OPCUA-CERT-VERIFY-TRUSTSTORE` and `OPCUA-DIV-JVM-KEYSTORES` to PEM and DER.
+- Decision E13 option 2 turns the upstream-vector tests of `OPCUA-WIRE-HELLO-ACK` and `OPCUA-WIRE-SERVICES-USED` into first-party tests.
+- Decision E22 recommends refusing the URI keys `username` and `password` (`OPCUA-CFG-USERNAME`, `OPCUA-CFG-PASSWORD`), requiring the port (`OPCUA-TRANSPORT-PORT`) and fixing the `tls.verify=false` opt-in (`OPCUA-CFG-VERIFY`).
+
+Corrections that slice S76 applies to this record before any row is implemented. They come from re-reading the pinned sources in S75; S76 makes them as text changes and new divergence rows, with no id renumbered:
+
+- Discovery runs on the secure channel and only when `server-certificate-file` is set (`Conversation.java:554-562`, `OpcuaConnection.java:191-243`). The rows `OPCUA-CFG-DISCOVERY` ("always conducted with the NONE policy"), `OPCUA-DISC-GETENDPOINTS` (planned text "the same sequence on a NONE channel"), `OPCUA-DISC-NONE-POLICY`, `OPCUA-MODE-DETERMINE` and `OPCUA-POLICY-DEFAULT` (which implies a trust store or `tls.verify=false` alone is enough) state the old rule. Decision E21 asks the maintainer to accept the rule.
+- Policy NONE has block size 1 and nonce length 0 (`SecurityPolicy.java:30-36`).
+- An ABORT chunk times the request out upstream (`Conversation.java:499-503`); Stonecrab fails it at once (new divergence row, owner S94). A failed renewal is only logged upstream (`SecureChannel.java:549-577`); Stonecrab fails the channel (S109).
+- New divergence rows, each with its owning slice: read metadata (S98); `b=` as a base64 ByteString (S83); the CreateSession certificate verified before a token is encrypted to it even on a NONE channel (S108); endpoint URLs matched on a parsed URL (S96); browse keeping same-name siblings, GUID and ByteString nodes and per-node status (S112, S113); publish routed by subscription id and acknowledging only what was received (S116); two events of one tag in one Publish both kept (S118); a password without a user name an error (S99).
+
 ## UNVERIFIED
 - The OPC UA specification (Parts 4, 6 and 7) is not retained here; every statement about
   required algorithm sizes, the TwoByte NodeId, the minimum buffer size, sequence-number
@@ -492,6 +546,11 @@ rows in "Go implementation" (`OPCUA-GO-*`), all deferred and none owed.
   but was not analysed.
 - Whether the `b` identifier letter matches the specification's TwoByte NodeId; upstream
   parses it with `Short.parseShort` (Conn:461-481).
+  S75 narrowed this: open62541 v1.5.9 reads and prints `b=` in the standard node-id text
+  form as a base64 ByteString (`src/ua_types.c:1004-1012`, `src/util/ua_types_lex.re:136-144`;
+  base64url when percent-escaping is on), so upstream's reading is not that form. Whether the
+  binary TwoByte encoding is what upstream means remains unchecked; slice S83 carries the
+  divergence.
 - Whether Basic128Rsa15 and Basic256 should require an explicit opt-in in Stonecrab; the
   rows plan them as upstream has them (`OPCUA-POLICY-BASIC128RSA15`,
   `OPCUA-POLICY-BASIC256`).
