@@ -130,6 +130,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
         with:
           toolchain: "1.99.1"
@@ -140,9 +142,7 @@ jobs:
       - name: cargo deny, root deny.toml
         run: cargo deny --manifest-path spikes/opcua-crypto-probe/Cargo.toml --locked --config deny.toml check 2>&1 | tee deny-output.txt
       - name: deny.toml is unchanged from the base commit
-        run: |
-          git fetch --depth=1 origin d14ffa9
-          git diff --exit-code d14ffa9 -- deny.toml Cargo.toml Cargo.lock crates
+        run: git diff --exit-code d14ffa9daf38c2368d1f653b89907095e784c6cf -- deny.toml Cargo.toml Cargo.lock crates
       # D23: none of these may appear in the probe's graph, with no wrapper to excuse them.
       # cargo tree -i exits 101 ("did not match any packages") when the package is absent.
       - name: D23, banned crates in the probe graph
