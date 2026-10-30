@@ -18,9 +18,48 @@ use crate::naming::{is_keyword, snake, upper_camel};
 
 mod enums;
 mod fields;
+mod structs;
 mod switch;
 
+#[cfg(test)]
+mod fixtures;
+
 use fields::Part;
+
+/// The byte order of every multi-byte read and write of a protocol: the `byteOrder` an
+/// mspec attribute names. Upstream's default (that of its buffers) is `BIG_ENDIAN`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Endianness {
+    /// `BIG_ENDIAN`, the default.
+    Big,
+    /// `LITTLE_ENDIAN`, as OPC UA writes (`opc-manual.mspec` line 29 names it on `OpcuaAPU`).
+    Little,
+}
+
+impl Endianness {
+    /// The `byteOrder` value as an mspec attribute and an options file write it.
+    pub(crate) const fn keyword(self) -> &'static str {
+        match self {
+            Self::Big => "BIG_ENDIAN",
+            Self::Little => "LITTLE_ENDIAN",
+        }
+    }
+
+    /// The `stonecrab::ByteOrder` variant the output passes to every multi-byte access.
+    const fn rust(self) -> &'static str {
+        match self {
+            Self::Big => "ByteOrder::BigEndian",
+            Self::Little => "ByteOrder::LittleEndian",
+        }
+    }
+
+    /// The order named by `keyword`, when it names one.
+    pub(crate) fn from_keyword(keyword: &str) -> Option<Self> {
+        [Self::Big, Self::Little]
+            .into_iter()
+            .find(|order| order.keyword() == keyword)
+    }
+}
 
 /// The options of one protocol (ADR-0019 decision 6): what is enabled, and where the
 /// hand-written support module is.
@@ -28,6 +67,9 @@ use fields::Part;
 pub(crate) struct Options {
     /// The Rust path of the hand-written support module the output imports.
     pub(crate) support_module: String,
+    /// The protocol's byte order when the options file names one; `BIG_ENDIAN` otherwise.
+    /// A `byteOrder` attribute in the mspec must agree with it.
+    pub(crate) byte_order: Option<Endianness>,
     /// The enabled top-level types, by mspec name.
     pub(crate) types: BTreeSet<String>,
     /// The enabled cases of each enabled `discriminatedType` and `dataIo`, by mspec name.
@@ -56,8 +98,8 @@ impl fmt::Display for GenError {
 }
 
 /// The attribute values the emitter implements; any other value is a generation error.
-const ATTRIBUTES: [(&str, &[&str]); 5] = [
-    ("byteOrder", &["BIG_ENDIAN"]),
+/// `byteOrder` is checked against the protocol's byte order instead (`check_attributes`).
+const ATTRIBUTES: [(&str, &[&str]); 4] = [
     ("unsignedIntegerEncoding", &["unsigned-binary"]),
     ("signedIntegerEncoding", &["twos-complement"]),
     ("floatEncoding", &["IEEE754"]),
@@ -90,13 +132,7 @@ pub(crate) fn generate(
             TypeForm::Enum => ctx.emit_enum(def)?,
             TypeForm::Discriminated => ctx.emit_discriminated(def)?,
             TypeForm::DataIo => ctx.emit_data_io(def)?,
-            TypeForm::Type => {
-                return Err(gen_error(
-                    def,
-                    def.line,
-                    "the `type` form (a struct) is parsed but not emitted yet",
-                ));
-            }
+            TypeForm::Type => ctx.emit_struct(def)?,
         };
         let module = snake(name);
         if modules.insert(module.clone(), body).is_some() {
@@ -274,6 +310,8 @@ struct Imports {
 
 struct Ctx<'a> {
     types: BTreeMap<&'a str, &'a TypeDef>,
+    /// Names defined more than once, with the lines of the first two definitions.
+    duplicates: BTreeMap<&'a str, (usize, usize)>,
     constants: BTreeSet<&'a str>,
     options: &'a Options,
     /// Enums read from and written to the wire, which get `parse` and `serialize`.
@@ -284,7 +322,8 @@ struct Ctx<'a> {
 
 impl<'a> Ctx<'a> {
     fn new(specs: &'a [Spec], options: &'a Options) -> Result<Self, GenError> {
-        let mut types = BTreeMap::new();
+        let mut types: BTreeMap<&str, &TypeDef> = BTreeMap::new();
+        let mut duplicates = BTreeMap::new();
         let mut constants = BTreeSet::new();
         for spec in specs {
             if let Some(block) = spec.globals.as_ref().or(spec.context.as_ref()) {
@@ -300,11 +339,16 @@ impl<'a> Ctx<'a> {
                 }
             }
             for def in &spec.types {
-                types.insert(def.name.as_str(), def);
+                if let Some(first) = types.insert(def.name.as_str(), def) {
+                    duplicates
+                        .entry(def.name.as_str())
+                        .or_insert((first.line, def.line));
+                }
             }
         }
         Ok(Self {
             types,
+            duplicates,
             constants,
             options,
             wire_enums: BTreeSet::new(),
@@ -312,7 +356,15 @@ impl<'a> Ctx<'a> {
         })
     }
 
-    /// The definition of `name`, which must be enabled.
+    /// The byte order of every multi-byte read and write: the protocol's, `BIG_ENDIAN`
+    /// unless its options say otherwise.
+    fn order(&self) -> &'static str {
+        self.options.byte_order.unwrap_or(Endianness::Big).rust()
+    }
+
+    /// The definition of `name`, which must be enabled and defined once. Two
+    /// definitions of a name are ambiguous, and the generator will not pick one, so only a
+    /// duplicate the output would use is an error.
     fn def(&self, name: &str, line: usize, from: &str) -> Result<&'a TypeDef, GenError> {
         let Some(def) = self.types.get(name).copied() else {
             return Err(GenError {
@@ -321,6 +373,15 @@ impl<'a> Ctx<'a> {
                 message: format!("type `{name}` is not defined"),
             });
         };
+        if let Some((first, second)) = self.duplicates.get(name) {
+            return Err(GenError {
+                line: *second,
+                type_name: name.to_owned(),
+                message: format!(
+                    "type `{name}` is defined twice (lines {first} and {second}); the generator does not pick one"
+                ),
+            });
+        }
         if !self.options.types.contains(name) {
             return Err(GenError {
                 line,
@@ -369,15 +430,20 @@ impl<'a> Ctx<'a> {
         let mut nested: BTreeMap<String, Vec<(String, usize)>> = BTreeMap::new();
         for name in &self.options.types {
             let def = self.def(name, 0, name)?;
-            check_attributes(def)?;
-            if !matches!(def.form, TypeForm::Discriminated | TypeForm::DataIo) {
-                continue;
-            }
-            for (case, on) in self.enabled_cases(def)? {
-                if !on {
-                    continue;
-                }
-                for field in fields_of(&case.fields) {
+            check_attributes(def, self.options.byte_order.unwrap_or(Endianness::Big))?;
+            // The field lists the output reads: a struct's own, or those of enabled cases.
+            let lists: Vec<&[Item]> = match def.form {
+                TypeForm::Type => vec![def.fields.as_slice()],
+                TypeForm::Discriminated | TypeForm::DataIo => self
+                    .enabled_cases(def)?
+                    .into_iter()
+                    .filter(|(_, on)| *on)
+                    .map(|(case, _)| case.fields.as_slice())
+                    .collect(),
+                TypeForm::Enum => continue,
+            };
+            for items in lists {
+                for field in fields_of(items) {
                     if let FieldKind::Simple {
                         ty: TypeRef::Complex { name, .. },
                         ..
@@ -393,7 +459,7 @@ impl<'a> Ctx<'a> {
                         }
                     }
                     for expr in field_exprs(&field.kind) {
-                        collect_sized(expr, &case.fields, &mut sized);
+                        collect_sized(expr, items, &mut sized);
                     }
                 }
             }
@@ -522,7 +588,8 @@ fn collect_sized(expr: &Expr, fields: &[Item], sized: &mut BTreeSet<String>) {
     }
 }
 
-fn check_attributes(def: &TypeDef) -> Result<(), GenError> {
+fn check_attributes(def: &TypeDef, order: Endianness) -> Result<(), GenError> {
+    check_batch_sets(def, &def.fields)?;
     for attribute in &def.attributes {
         let value = if let MExpr::Expr(Expr::Str(text, indexes), _) = &attribute.value
             && indexes.is_empty()
@@ -531,6 +598,28 @@ fn check_attributes(def: &TypeDef) -> Result<(), GenError> {
         } else {
             ""
         };
+        if attribute.name == "byteOrder" {
+            // A per-type byte order waits for a protocol that needs one: the protocol's
+            // order is the only one the output uses.
+            if Endianness::from_keyword(value).is_none() {
+                return Err(gen_error(
+                    def,
+                    def.line,
+                    &format!("attribute byteOrder='{value}' is not a byte order"),
+                ));
+            }
+            if value != order.keyword() {
+                return Err(gen_error(
+                    def,
+                    def.line,
+                    &format!(
+                        "attribute byteOrder='{value}' differs from the protocol's byte order {}; a per-type byte order is not emitted (feature matrix)",
+                        order.keyword()
+                    ),
+                ));
+            }
+            continue;
+        }
         let known = ATTRIBUTES
             .iter()
             .find(|(name, _)| *name == attribute.name)
@@ -549,10 +638,31 @@ fn check_attributes(def: &TypeDef) -> Result<(), GenError> {
     Ok(())
 }
 
-/// The byte order of every multi-byte read and write: the mspec default, and the only
-/// `byteOrder` attribute value emitted so far (`LITTLE_ENDIAN` waits for a protocol whose
-/// vectors validate it).
-const BYTE_ORDER: &str = "ByteOrder::BigEndian";
+/// Fails on a `batchSet` that carries attributes, in the type's fields or in any case:
+/// the emitter flattens batch sets, so a `byteOrder` there would be dropped silently.
+fn check_batch_sets(def: &TypeDef, items: &[Item]) -> Result<(), GenError> {
+    for item in items {
+        if let Item::BatchSet {
+            line, attributes, ..
+        } = item
+            && !attributes.is_empty()
+        {
+            return Err(gen_error(
+                def,
+                *line,
+                "batchSet attributes are not emitted (feature matrix)",
+            ));
+        }
+    }
+    for field in fields_of(items) {
+        if let FieldKind::TypeSwitch { cases, .. } = &field.kind {
+            for case in cases {
+                check_batch_sets(def, &case.fields)?;
+            }
+        }
+    }
+    Ok(())
+}
 
 fn check_name(def: &TypeDef, line_no: usize, rust: &str, original: &str) -> Result<(), GenError> {
     if rust.is_empty()
@@ -693,6 +803,7 @@ mod tests {
     fn options(types: &[&str], cases: &[(&str, &[&str])]) -> Options {
         Options {
             support_module: "crate::support".to_owned(),
+            byte_order: None,
             types: types.iter().map(|name| (*name).to_owned()).collect(),
             cases: cases
                 .iter()

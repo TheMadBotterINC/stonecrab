@@ -30,7 +30,7 @@ use std::process::ExitCode;
 
 use sha2::{Digest as _, Sha256};
 
-use crate::emit::Options;
+use crate::emit::{Endianness, Options};
 
 /// A failure of the tool: what it was doing and why.
 #[derive(Debug)]
@@ -121,7 +121,16 @@ fn load_options(path: &Path) -> Result<ProtocolOptions, Failure> {
     let origin = path.display().to_string();
     let table = table(path)?;
     for key in table.keys() {
-        if !["protocol", "output", "support_module", "types", "cases"].contains(&key.as_str()) {
+        if ![
+            "protocol",
+            "output",
+            "support_module",
+            "byte_order",
+            "types",
+            "cases",
+        ]
+        .contains(&key.as_str())
+        {
             return fail(format!("{origin}: unknown key `{key}`"));
         }
     }
@@ -137,11 +146,25 @@ fn load_options(path: &Path) -> Result<ProtocolOptions, Failure> {
             );
         }
     }
+    let byte_order = if table.contains_key("byte_order") {
+        let keyword = string(&table, "byte_order", &origin)?;
+        match Endianness::from_keyword(&keyword) {
+            Some(order) => Some(order),
+            None => {
+                return fail(format!(
+                    "{origin}: `byte_order` must be \"BIG_ENDIAN\" or \"LITTLE_ENDIAN\", not \"{keyword}\""
+                ));
+            }
+        }
+    } else {
+        None
+    };
     Ok(ProtocolOptions {
         protocol: string(&table, "protocol", &origin)?,
         output: PathBuf::from(string(&table, "output", &origin)?),
         options: Options {
             support_module: string(&table, "support_module", &origin)?,
+            byte_order,
             types: strings(table.get("types"), &format!("{origin}: types"))?,
             cases,
         },
@@ -358,7 +381,8 @@ fn collect_mspecs(directory: &Path, files: &mut Vec<PathBuf>) -> Result<(), Fail
 
 #[cfg(test)]
 mod tests {
-    use super::{check, sha256_hex};
+    use super::{Baseline, check, load_options, output, sha256_hex};
+    use crate::emit::Endianness;
 
     #[test]
     fn sha256_matches_a_known_digest() {
@@ -390,5 +414,70 @@ mod tests {
         let text = String::from_utf8(report).expect("UTF-8");
         assert!(text.contains("FAIL protocols/demo/bad.mspec"), "{text}");
         std::fs::remove_dir_all(&root).expect("clean up");
+    }
+
+    fn options_file(name: &str, byte_order: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "stonecrab-codegen-options-{name}-{}.toml",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            format!(
+                "protocol = \"demo\"\noutput = \"out\"\nsupport_module = \"crate::support\"\n{byte_order}types = []\n"
+            ),
+        )
+        .expect("write");
+        path
+    }
+
+    #[test]
+    fn the_byte_order_option_is_big_or_little_endian_and_recorded_when_set() {
+        let baseline = Baseline {
+            project: "Demo".to_owned(),
+            tag: "v1".to_owned(),
+            commit: "0".repeat(40),
+            files: Vec::new(),
+        };
+        for (name, line, expected) in [
+            ("absent", "", None),
+            (
+                "big",
+                "byte_order = \"BIG_ENDIAN\"\n",
+                Some(Endianness::Big),
+            ),
+            (
+                "little",
+                "byte_order = \"LITTLE_ENDIAN\"\n",
+                Some(Endianness::Little),
+            ),
+        ] {
+            let path = options_file(name, line);
+            let loaded = load_options(&path).expect("loads");
+            std::fs::remove_file(&path).expect("clean up");
+            assert_eq!(loaded.options.byte_order, expected, "{name}");
+            let manifest = output::manifest(&baseline, &loaded.options, &path);
+            assert_eq!(
+                manifest.contains("byte_order"),
+                expected.is_some(),
+                "{name}: recorded when the options set it\n{manifest}"
+            );
+            if let Some(order) = expected {
+                assert!(
+                    manifest.contains(&format!("byte_order = \"{}\"", order.keyword())),
+                    "{name}\n{manifest}"
+                );
+            }
+        }
+        for (name, line) in [
+            ("middle", "byte_order = \"MIDDLE_ENDIAN\"\n"),
+            ("lowercase", "byte_order = \"little_endian\"\n"),
+            ("number", "byte_order = 1\n"),
+        ] {
+            let path = options_file(name, line);
+            let error = load_options(&path).expect_err(name);
+            std::fs::remove_file(&path).expect("clean up");
+            assert!(error.0.contains("byte_order"), "{name}: {}", error.0);
+        }
     }
 }

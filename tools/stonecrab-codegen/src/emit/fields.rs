@@ -5,8 +5,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    BYTE_ORDER, Binding, Ctx, DiscValue, GenError, Imports, Ty, check_fits, check_name, describe,
-    gen_error, line, parse_integer, scalar,
+    Binding, Ctx, DiscValue, GenError, Imports, Ty, check_fits, check_name, describe, gen_error,
+    line, parse_integer, scalar,
 };
 use crate::expression::{BinaryOp, Expr, Variable};
 use crate::mspec::{
@@ -214,12 +214,12 @@ impl Ctx<'_> {
                                 bits,
                             }
                         }
-                        TypeForm::Discriminated => Part::Complex {
+                        TypeForm::Discriminated | TypeForm::Type => Part::Complex {
                             name: named(name)?,
                             type_name: type_name.clone(),
                             args: args.iter().collect(),
                         },
-                        TypeForm::Type | TypeForm::DataIo => {
+                        TypeForm::DataIo => {
                             return Err(unsupported(&format!(
                                 "of the {} `{type_name}`",
                                 target.form.keyword()
@@ -297,7 +297,7 @@ impl Ctx<'_> {
         imports: &mut Imports,
         used_params: &mut BTreeSet<String>,
     ) -> Result<(), GenError> {
-        let order = BYTE_ORDER.to_owned();
+        let order = self.order().to_owned();
         for part in parts {
             match part {
                 Part::Run(members) => {
@@ -480,7 +480,7 @@ impl Ctx<'_> {
         scope: &BTreeMap<String, Binding>,
         imports: &mut Imports,
     ) -> Result<(), GenError> {
-        let order = BYTE_ORDER.to_owned();
+        let order = self.order().to_owned();
         let mut unused = BTreeSet::new();
         for part in parts {
             match part {
@@ -560,6 +560,47 @@ impl Ctx<'_> {
                 Part::Bytes { name, .. } => line(out, &format!("writer.write_bytes({name})?;")),
                 Part::Enum { name, .. } | Part::Complex { name, .. } => {
                     line(out, &format!("{name}.serialize(writer)?;"));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Once a case or struct is read, compares each `implicit` field with its expression
+    /// over the parsed values (ADR-0019 addendum, decision 5). `items` are the fields the
+    /// parts were planned from, which name the field in the error.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the emission state of one function body"
+    )]
+    pub(super) fn emit_implicit_checks(
+        &self,
+        def: &TypeDef,
+        line_no: usize,
+        parts: &[Part<'_>],
+        items: &[Item],
+        scope: &BTreeMap<String, Binding>,
+        out: &mut String,
+        used_params: &mut BTreeSet<String>,
+    ) -> Result<(), GenError> {
+        for part in parts {
+            if let Part::Implicit {
+                name: field,
+                ty,
+                expr,
+                ..
+            } = part
+            {
+                let value = self.expr(def, line_no, expr, scope, used_params)?;
+                line(
+                    out,
+                    &format!(
+                        "if usize::from({field}) != {value} {{ return Err(ParseError::InvalidDiscriminator {{ field: \"{}\", value: u64::from({field}) }}); }}",
+                        original_name(items, field),
+                    ),
+                );
+                if !ty.widens_to_usize() {
+                    return Err(gen_error(def, line_no, "implicit field type not emitted"));
                 }
             }
         }

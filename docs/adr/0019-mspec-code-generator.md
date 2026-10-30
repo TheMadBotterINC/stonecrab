@@ -574,3 +574,94 @@ codec to refuse wherever the framer refuses.
   above and the `packaging/stonecrab.txt` update.
 - S67: `scripts/regen.sh`, the `regen` and `generate` tasks in `mise.toml` and the blocking
   `regen` job in `.github/workflows/ci.yml` with its self-test.
+
+## Addendum (S77, 2026-10-30): type structs, the protocol byte order and duplicate type names
+### Status
+Accepted (2026-10-30), as slice S77 of docs/POST_ALPHA_PLAN.md (Phase H, M3 OPC UA), after the
+maintainer accepted decisions E13 to E22 on 2026-10-30. The decisions and the addendum above
+stand. S75 listed the gaps between the generator and the OPC UA model; this closes the first
+three, G1, G2 and G10. G3 to G7 follow in S78 and S79.
+
+### Context
+Decision 4 says "A `type` becomes a struct", and the feature matrix of the S66 addendum marked
+the form parsed and not emitted: `emit.rs` refused it. The byte order was a constant of the
+emitter (`ByteOrder::BigEndian`), and a `byteOrder` attribute of `LITTLE_ENDIAN` was refused;
+OPC UA is little-endian (`opc-manual.mspec` line 29 names `LITTLE_ENDIAN` on its `OpcuaAPU`
+type; the Part 6 section is UNVERIFIED), so a protocol needs to choose it once, not per type. The emitter put each type in a map that kept the last of two definitions of a name,
+and `opc-manual.mspec` defines `NodeIdType` twice, so an input could silently change meaning.
+No OPC UA mspec is vendored before S88 (decision E13), so these are proven on first-party
+synthetic mspec text.
+
+### Decision
+1. **`type` structs (G1).** A `type` becomes a struct of its stored fields, each
+   `pub(crate)` (an enum variant's fields are public, a struct's are not), with `parse`,
+   `serialize` and, when an expression reads its `lengthInBytes`, `length_in_bytes`. Its fields
+   are planned and emitted by the code a case of a `discriminatedType` uses, so the construct
+   set is the same: runs of sub-byte fields, byte-aligned numbers, `const` and `implicit`
+   fields (checked on parse, decision 5 of the S66 addendum; neither is stored), `byte` arrays
+   with a `count`, enums, and nested `type` and `discriminatedType` fields with name
+   arguments. Parameters are arguments of `parse`, as for a `discriminatedType`. A `type` that
+   stores no field, or has a `discriminator` field, is a generation error. The struct derives
+   `Eq` unless a field is a float. A fixed length is a `const fn length_in_bytes(&self) ->
+   Result<usize, ParseError>` under an item-level `#[expect(clippy::unused_self,
+   clippy::unnecessary_wraps, ...)]`: callers ask the value and add the result to a fallible
+   sum, whatever the type. The generator also emits `#[expect(clippy::struct_field_names,
+   ...)]` where clippy's rule fires on the mspec's field names, with the predicate in
+   `naming.rs` as for `enum_variant_names`. A nested type's length is asked only of a type
+   whose `lengthInBytes` an expression reads (decision 4); a length that reaches a nested
+   type that is not itself read is a generation error, as before.
+2. **The byte order is a protocol option (G2).** `protocols/<protocol>.toml` takes
+   `byte_order = "BIG_ENDIAN" | "LITTLE_ENDIAN"`, `BIG_ENDIAN` when absent (the mspec default).
+   Every multi-byte read and write of the protocol's output, enums and `dataIo` included, uses
+   it. A `byteOrder` attribute on a type must name the protocol's order; a different value is
+   a generation error (a per-type byte order waits for a protocol that needs one), as is a
+   value that is not a byte order. `generated/MANIFEST.toml` records `byte_order` when the
+   options file sets it and says nothing otherwise, so the Modbus manifest and files are
+   unchanged. A `batchSet` with attributes is a generation error: the emitter flattens batch
+   sets, and a `byteOrder` on one would have been dropped silently.
+3. **A duplicate type name is a generation error when the output uses it (G10).** Two
+   definitions of a name, in one file or across the files of a protocol, fail with the name and
+   both lines when the name is an enabled type or one an enabled type refers to. A duplicate
+   that nothing generated refers to changes no output and is not reported, so a vendored mspec
+   with a duplicate (`NodeIdType` of `opc-manual.mspec`) still generates the types that do not
+   touch it. The generator does not pick one. (Which definition upstream's loader keeps is UNVERIFIED, the
+   sparse checkout holds no code-generation sources; `NodeIdTypeDefinition`, `opc-manual.mspec`
+   lines 2788-2794, uses case values that exist only in the second `NodeIdType`, line 2942,
+   which suggests the last wins.) The message names both lines but not the file, as every
+   `GenError` does.
+4. **Fixtures validate what no protocol uses yet.** The matrix rule of decision 3 and the S66
+   addendum is that a row is emitted only when validated. For a construct no protocol in the
+   tree uses, the tool's own tests are the validation: `src/emit/fixtures.rs` generates
+   synthetic mspec text, compiles the modules with `rustc` next to a small stand-in for
+   `stonecrab::codec`, runs a parse, a serialize and the refusals, under both byte orders. The
+   stand-in is not the shipped codec; the first protocol that uses a construct adds its own
+   vectors in the crate (S88 for OPC UA), where the output is linted and tested under the
+   module's lints. The matrix names the fixtures as `S77 fixtures`.
+5. **The tool version moves to 0.2.0.** Decision 7 bumps it "whenever its output changes for an
+   unchanged input"; the slice row also asks for the version to follow the feature set. The
+   version is in the header of every generated file and in `MANIFEST.toml`, so the bump
+   rewrites the eight Modbus files by their header line and manifest version only. They are
+   committed as a separate `gen` commit after the generator commit (consequences of decision
+   7), and `mise run regen` then reproduces the committed tree byte for byte. The generator
+   commit alone leaves `regen` red on the stale headers, as any generator change that alters
+   output does; the two commits land together.
+
+### Consequences
+- The generator can emit the structs and the little-endian default the OPC UA service layer
+  needs. Recursion through structs is refused as it is for discriminated types (decision 5);
+  literal type arguments, `reserved` fields, `[external]` types and the remaining gaps are
+  S78 and S79.
+- Not done: a struct that derives `Eq` over a nested type with a float field (the derive looks
+  only at the struct's own fields); a transitive `lengthInBytes` (a type read through another
+  type's length must itself be read by an expression); `type` as a `dataIo` field. Each is a
+  generation or compile error, never a wrong value, and a protocol that needs one adds it with
+  vectors.
+
+### Compliance
+- S77: `tools/stonecrab-codegen` (`src/emit/structs.rs`, `src/emit/fixtures.rs`, the byte
+  order in `src/emit.rs`, `src/main.rs` and `src/output.rs`, the duplicate check in
+  `src/emit.rs`, `naming.rs`) and its README (options, semantics, matrix). Tests
+  `generator_emits_type_structs`, `generator_little_endian_protocol_default_round_trips` and
+  `generator_rejects_duplicate_type_names`. `mise run regen` passes twice. The only change
+  under `crates/` is the version in the header of the eight Modbus generated files and in their
+  manifest (the `gen` commit of item 5).

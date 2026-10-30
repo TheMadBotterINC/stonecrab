@@ -3,11 +3,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::fields::original_name;
 use super::{
-    BYTE_ORDER, Binding, Ctx, DiscValue, Discriminator, GenError, Imports, Part, Ty,
-    VISIBILITY_EXPECT, check_name, describe, emit_match, fields_of, gen_error, integer_literal,
-    integer_text, line, merge_arms, module, scalar,
+    Binding, Ctx, DiscValue, Discriminator, GenError, Imports, Part, Ty, VISIBILITY_EXPECT,
+    check_name, describe, emit_match, fields_of, gen_error, integer_literal, integer_text, line,
+    merge_arms, module, scalar,
 };
 use crate::expression::Expr;
 use crate::mspec::{Case, Field, FieldKind, MExpr, TypeDef, TypeForm, TypeRef};
@@ -214,27 +213,15 @@ impl Ctx<'_> {
                 &mut imports,
                 &mut used_params,
             )?;
-            for part in parts {
-                if let Part::Implicit {
-                    name: field,
-                    ty,
-                    expr,
-                    ..
-                } = part
-                {
-                    let value = self.expr(def, case.line, expr, &scope, &mut used_params)?;
-                    line(
-                        &mut body,
-                        &format!(
-                            "if usize::from({field}) != {value} {{ return Err(ParseError::InvalidDiscriminator {{ field: \"{}\", value: u64::from({field}) }}); }}",
-                            original_name(&case.fields, field),
-                        ),
-                    );
-                    if !ty.widens_to_usize() {
-                        return Err(gen_error(def, case.line, "implicit field type not emitted"));
-                    }
-                }
-            }
+            self.emit_implicit_checks(
+                def,
+                case.line,
+                parts,
+                &case.fields,
+                &scope,
+                &mut body,
+                &mut used_params,
+            )?;
             line(&mut body, &format!("Ok({})", construct(variant, stored)));
             line(&mut body, "}");
         }
@@ -408,47 +395,60 @@ impl Ctx<'_> {
         line(out, "match self {");
         let mut arms = Vec::new();
         for (case, variant, _, parts, stored) in planned {
-            let mut bits = 0_u32;
-            let mut dynamic: Vec<String> = Vec::new();
-            let mut used: BTreeSet<String> = BTreeSet::new();
-            for part in parent_parts.iter().chain(parts) {
-                let (fixed, term) = self.part_length(def, case.line, part)?;
-                bits = bits
-                    .checked_add(fixed)
-                    .ok_or_else(|| gen_error(def, case.line, "length overflows"))?;
-                if let Some((field, term)) = term {
-                    used.insert(field);
-                    dynamic.push(term);
-                }
-            }
-            if !bits.is_multiple_of(8) {
-                return Err(gen_error(
-                    def,
-                    case.line,
-                    "the case is not a whole number of bytes",
-                ));
-            }
-            let bytes = bits.checked_div(8).unwrap_or(0);
-            let body = match dynamic.as_slice() {
-                [] => format!("Ok({bytes})"),
-                [one] => format!("{bytes}_usize.checked_add({one}).ok_or(ParseError::Overflow)"),
-                many => {
-                    let mut text = format!("{{ let mut size = {bytes}_usize;");
-                    for term in many {
-                        text.push_str("size = size.checked_add(");
-                        text.push_str(term);
-                        text.push_str(").ok_or(ParseError::Overflow)?;");
-                    }
-                    text.push_str("Ok(size) }");
-                    text
-                }
-            };
+            let all: Vec<&Part<'_>> = parent_parts.iter().chain(parts).collect();
+            let (body, used) = self.length_body(def, case.line, &all)?;
             arms.push((bind(variant, stored, Some(&used)), body));
         }
         emit_match(out, "", &merge_arms(arms));
         line(out, "}");
         line(out, "");
         Ok(())
+    }
+
+    /// The length of a case or struct made of `parts`, as the body of `length_in_bytes`,
+    /// and the stored fields that body reads.
+    pub(super) fn length_body(
+        &self,
+        def: &TypeDef,
+        line_no: usize,
+        parts: &[&Part<'_>],
+    ) -> Result<(String, BTreeSet<String>), GenError> {
+        let mut bits = 0_u32;
+        let mut dynamic: Vec<String> = Vec::new();
+        let mut used: BTreeSet<String> = BTreeSet::new();
+        for part in parts {
+            let (fixed, term) = self.part_length(def, line_no, part)?;
+            bits = bits
+                .checked_add(fixed)
+                .ok_or_else(|| gen_error(def, line_no, "length overflows"))?;
+            if let Some((field, term)) = term {
+                used.insert(field);
+                dynamic.push(term);
+            }
+        }
+        if !bits.is_multiple_of(8) {
+            return Err(gen_error(
+                def,
+                line_no,
+                "the case is not a whole number of bytes",
+            ));
+        }
+        let bytes = bits.checked_div(8).unwrap_or(0);
+        let body = match dynamic.as_slice() {
+            [] => format!("Ok({bytes})"),
+            [one] => format!("{bytes}_usize.checked_add({one}).ok_or(ParseError::Overflow)"),
+            many => {
+                let mut text = format!("{{ let mut size = {bytes}_usize;");
+                for term in many {
+                    text.push_str("size = size.checked_add(");
+                    text.push_str(term);
+                    text.push_str(").ok_or(ParseError::Overflow)?;");
+                }
+                text.push_str("Ok(size) }");
+                text
+            }
+        };
+        Ok((body, used))
     }
 
     /// The fixed bits of a part, and its variable length as a stored field and a term.
@@ -530,7 +530,7 @@ impl Ctx<'_> {
         // (value pattern, parse body, PlcValue pattern, serialize body) per case.
         let mut entries: Vec<(String, String, String, String)> = Vec::new();
         let mut covered = BTreeSet::new();
-        let order = BYTE_ORDER.to_owned();
+        let order = self.order().to_owned();
         for (case, on) in self.enabled_cases(def)? {
             let values = self.case_values(def, case, &discs)?;
             let pattern = pattern(&discs, &values);
@@ -970,7 +970,7 @@ fn pattern(discs: &[Discriminator], values: &[DiscValue]) -> String {
 
 /// Statements that end in a fallible write, with the last write as the block's value
 /// (an arm of `Ok(())` after every write would trip clippy's `branches_sharing_code`).
-fn tail(statements: &str) -> String {
+pub(super) fn tail(statements: &str) -> String {
     let trimmed = statements.trim_end();
     match trimmed.strip_suffix("?;") {
         Some(head)
@@ -1012,5 +1012,20 @@ fn bind(variant: &str, stored: &[(String, Ty)], used: Option<&BTreeSet<String>>)
         format!("Self::{variant} {{ .. }}")
     } else {
         format!("Self::{variant} {{ {}, .. }}", names.join(", "))
+    }
+}
+
+/// `let Self { fields }` binding `used` fields of a struct (all of them when `used` is
+/// `None`); the caller adds ` = self;`.
+pub(super) fn bind_struct(stored: &[(String, Ty)], used: Option<&BTreeSet<String>>) -> String {
+    let names: Vec<&str> = stored
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .filter(|name| used.is_none_or(|used| used.contains(*name)))
+        .collect();
+    if names.len() == stored.len() {
+        format!("let Self {{ {} }}", names.join(", "))
+    } else {
+        format!("let Self {{ {}, .. }}", names.join(", "))
     }
 }

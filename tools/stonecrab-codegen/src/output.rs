@@ -116,8 +116,12 @@ pub(crate) fn manifest(baseline: &Baseline, options: &Options, options_path: &Pa
         ));
     }
     let path = options_path.to_string_lossy().replace('\\', "/");
+    // The byte order is recorded when the options file sets it; absent means `BIG_ENDIAN`.
+    let byte_order = options.byte_order.map_or_else(String::new, |order| {
+        format!("byte_order = {}\n", quoted(order.keyword()))
+    });
     parts.push(format!(
-        "\n[options]\nfile = {}\nsupport_module = {}\ntypes = {}\n\n[options.cases]\n",
+        "\n[options]\nfile = {}\nsupport_module = {}\n{byte_order}types = {}\n\n[options.cases]\n",
         quoted(&path),
         quoted(&options.support_module),
         list(options.types.iter().cloned()),

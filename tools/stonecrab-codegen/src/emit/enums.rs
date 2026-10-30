@@ -2,8 +2,8 @@
 //! `serialize` for an enum read from the wire.
 
 use super::{
-    BYTE_ORDER, Ctx, GenError, Imports, Ty, VISIBILITY_EXPECT, check_fits, check_name, describe,
-    emit_match, gen_error, integer_text, line, merge_arms, module, scalar,
+    Ctx, GenError, Imports, Ty, VISIBILITY_EXPECT, check_fits, check_name, describe, emit_match,
+    gen_error, integer_text, line, merge_arms, module, scalar,
 };
 use crate::mspec::{TypeDef, TypeRef};
 use crate::naming::{snake, upper_camel, variant_names_lint_fires};
@@ -92,7 +92,7 @@ impl Ctx<'_> {
             line(&mut methods, "}");
             line(&mut methods, "");
             if self.wire_enums.contains(&def.name) {
-                emit_enum_wire(def, &mut methods, ty, *bits, &wire_values, &mut imports)?;
+                self.emit_enum_wire(def, &mut methods, ty, *bits, &wire_values, &mut imports)?;
             }
         }
         emit_enum_constants(def, &mut methods, &variants)?;
@@ -104,63 +104,64 @@ impl Ctx<'_> {
         }
         Ok(module(&imports, &self.options.support_module, &out))
     }
-}
 
-fn emit_enum_wire(
-    def: &TypeDef,
-    out: &mut String,
-    ty: &Ty,
-    bits: u32,
-    values: &[(String, u128, String)],
-    imports: &mut Imports,
-) -> Result<(), GenError> {
-    let Some((suffix, ordered)) = ty.accessor().filter(|_| bits.is_multiple_of(8)) else {
-        return Err(gen_error(
-            def,
-            def.line,
-            "an enum read from the wire must have a byte-aligned base type",
-        ));
-    };
-    let order = if ordered {
-        imports.byte_order = true;
-        BYTE_ORDER.to_owned()
-    } else {
-        String::new()
-    };
-    imports
-        .codec
-        .extend(["BoundedReader", "BoundedWriter", "ParseError"]);
-    line(
-        out,
-        "pub(crate) fn parse(reader: &mut BoundedReader<'_>) -> Result<Self, ParseError> {",
-    );
-    line(out, &format!("let value = reader.read_{suffix}({order})?;"));
-    line(out, "match value {");
-    for (variant, _, text) in values {
-        line(out, &format!("{text} => Ok(Self::{variant}),"));
+    fn emit_enum_wire(
+        &self,
+        def: &TypeDef,
+        out: &mut String,
+        ty: &Ty,
+        bits: u32,
+        values: &[(String, u128, String)],
+        imports: &mut Imports,
+    ) -> Result<(), GenError> {
+        let Some((suffix, ordered)) = ty.accessor().filter(|_| bits.is_multiple_of(8)) else {
+            return Err(gen_error(
+                def,
+                def.line,
+                "an enum read from the wire must have a byte-aligned base type",
+            ));
+        };
+        let order = if ordered {
+            imports.byte_order = true;
+            self.order().to_owned()
+        } else {
+            String::new()
+        };
+        imports
+            .codec
+            .extend(["BoundedReader", "BoundedWriter", "ParseError"]);
+        line(
+            out,
+            "pub(crate) fn parse(reader: &mut BoundedReader<'_>) -> Result<Self, ParseError> {",
+        );
+        line(out, &format!("let value = reader.read_{suffix}({order})?;"));
+        line(out, "match value {");
+        for (variant, _, text) in values {
+            line(out, &format!("{text} => Ok(Self::{variant}),"));
+        }
+        line(
+            out,
+            &format!(
+                "_ => Err(ParseError::InvalidDiscriminator {{ field: \"{}\", value: u64::from(value) }}),",
+                def.name
+            ),
+        );
+        line(out, "}");
+        line(out, "}");
+        line(out, "");
+        line(
+            out,
+            "pub(crate) fn serialize(self, writer: &mut BoundedWriter) -> Result<(), ParseError> {",
+        );
+        let separator = if order.is_empty() { "" } else { ", " };
+        line(
+            out,
+            &format!("writer.write_{suffix}(self.value(){separator}{order})"),
+        );
+        line(out, "}");
+        line(out, "");
+        Ok(())
     }
-    line(
-        out,
-        &format!(
-            "_ => Err(ParseError::InvalidDiscriminator {{ field: \"{}\", value: u64::from(value) }}),",
-            def.name
-        ),
-    );
-    line(out, "}");
-    line(out, "}");
-    line(out, "");
-    line(
-        out,
-        "pub(crate) fn serialize(self, writer: &mut BoundedWriter) -> Result<(), ParseError> {",
-    );
-    let separator = if order.is_empty() { "" } else { ", " };
-    line(
-        out,
-        &format!("writer.write_{suffix}(self.value(){separator}{order})"),
-    );
-    line(out, "}");
-    line(out, "");
-    Ok(())
 }
 
 /// One `const fn` per enum parameter, returning each value's constant.

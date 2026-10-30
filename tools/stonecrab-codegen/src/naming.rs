@@ -186,9 +186,60 @@ pub(crate) fn variant_names_lint_fires(item: &str, variants: &[String]) -> bool 
     shared(false) || shared(true)
 }
 
+/// Whether clippy's `struct_field_names` (pedantic) fires for a struct named `item` with
+/// these snake-case fields: at least three fields, and either a field that starts or ends
+/// with the struct's words or a word prefix or suffix that every field shares while every
+/// field has more than one word. The generator then emits an `#[expect]` for it.
+pub(crate) fn struct_field_names_lint_fires(item: &str, fields: &[String]) -> bool {
+    const THRESHOLD: usize = 3;
+    if fields.len() < THRESHOLD {
+        return false;
+    }
+    let item_snake = snake(item);
+    let item_words: Vec<&str> = item_snake.split('_').collect();
+    let split: Vec<Vec<&str>> = fields
+        .iter()
+        .map(|field| field.split('_').collect())
+        .collect();
+    let repeats_item = split.iter().any(|words| {
+        words.len() >= item_words.len()
+            && (words.iter().zip(&item_words).all(|(a, b)| a == b)
+                || words
+                    .iter()
+                    .rev()
+                    .zip(item_words.iter().rev())
+                    .all(|(a, b)| a == b))
+    });
+    if repeats_item {
+        return true;
+    }
+    if split.iter().any(|words| words.len() == 1) {
+        return false;
+    }
+    let Some(first) = split.first() else {
+        return false;
+    };
+    let shared = |reverse: bool| {
+        let mut count = first.len();
+        for words in &split {
+            let pairs: Box<dyn Iterator<Item = (&&str, &&str)>> = if reverse {
+                Box::new(first.iter().rev().zip(words.iter().rev()))
+            } else {
+                Box::new(first.iter().zip(words.iter()))
+            };
+            count = count.min(pairs.take_while(|(a, b)| a == b).count());
+        }
+        count > 0
+    };
+    shared(false) || shared(true)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{is_keyword, snake, upper_camel, variant_names_lint_fires, words};
+    use super::{
+        is_keyword, snake, struct_field_names_lint_fires, upper_camel, variant_names_lint_fires,
+        words,
+    };
 
     #[test]
     fn mspec_names_map_to_rust_case_conventions() {
@@ -257,6 +308,39 @@ mod tests {
                 &names(&["BasicStream", "RegularStream", "ExtendedStream"])
             ),
             "shared suffix"
+        );
+    }
+
+    #[test]
+    fn the_struct_field_rule_follows_clippy() {
+        let names = |list: &[&str]| {
+            list.iter()
+                .map(|name| (*name).to_owned())
+                .collect::<Vec<_>>()
+        };
+        assert!(
+            struct_field_names_lint_fires("Triple", &names(&["triple_a", "triple_b", "triple_c"])),
+            "fields start with the struct's name"
+        );
+        assert!(
+            struct_field_names_lint_fires("Pair", &names(&["left_x", "left_y", "left_z"])),
+            "a shared prefix"
+        );
+        assert!(
+            struct_field_names_lint_fires("Pair", &names(&["x_id", "y_id", "z_id"])),
+            "a shared suffix"
+        );
+        assert!(
+            !struct_field_names_lint_fires("Pair", &names(&["left_x", "left_y"])),
+            "below the threshold"
+        );
+        assert!(
+            !struct_field_names_lint_fires("Pair", &names(&["left_x", "y", "left_z"])),
+            "a one-word field ends the shared affix"
+        );
+        assert!(
+            !struct_field_names_lint_fires("Plain", &names(&["one", "two", "three"])),
+            "nothing shared"
         );
     }
 }
