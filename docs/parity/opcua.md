@@ -525,7 +525,7 @@ Slice S75 (2026-10-29) sliced milestone M3 into S76 to S123; the slice table is 
 | S120 | OPCUA-WRITE-STRUCT |
 | S123 | OPCUA-CAPS, OPCUA-QUIRK-TEST-SERVER, OPCUA-WIRE-SERVICES-USED |
 
-Rows that may change status. These are proposals awaiting the maintainer (`docs/POST_ALPHA_PLAN.md`, "Proposed decisions"), not decisions, and no status above has changed:
+Rows that change status under the decisions the maintainer accepted on 2026-10-30 (`docs/POST_ALPHA_PLAN.md`, "Decisions E13 to E22"). Slice S76 applies them; until it lands no status above has changed:
 
 - Decision E16 recommends deferring `OPCUA-POLICY-BASIC128RSA15` and `OPCUA-POLICY-BASIC256` (deprecated) and `OPCUA-CERT-GENERATED`, `OPCUA-CFG-GENERATED-KEY-SIZE` and `OPCUA-QUIRK-GENERATED-CERT-URI`, and renaming the PKCS#12 and JKS planned tests of `OPCUA-CFG-KEYSTORE-TYPE`, `OPCUA-CFG-TRUST-STORE`, `OPCUA-CERT-VERIFY-TRUSTSTORE` and `OPCUA-DIV-JVM-KEYSTORES` to PEM and DER.
 - Decision E13 option 2 turns the upstream-vector tests of `OPCUA-WIRE-HELLO-ACK` and `OPCUA-WIRE-SERVICES-USED` into first-party tests.

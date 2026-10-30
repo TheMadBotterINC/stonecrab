@@ -847,15 +847,10 @@ waits for the maintainer: test hardware (E4; HW2, the SOLO SLM1-C on RS-485, fir
 24-hour soak and the 8-hour fuzz run (E9), and the later phases (OPC UA in M3, then
 EtherNet/IP or S7 in M4) in the order the plan gives.
 
-M3 (OPC UA) is sliced (S75): the slices S76 to S123 are in Phase H of the plan. S76 to S81 need no
-decision and can start now; S82 (the crypto probe) needs the maintainer's go-ahead to push a spike
-branch; S83 waits for E17. Proposed decisions E13 to E22 await the maintainer and none is
-accepted: E13 (vendoring the OPC UA mspec and test suites), E14 (generated code in the
-published crate), E15 (the cryptography dependency, `aws-lc-rs` proposed), E16 (deprecated
-policies, key-store formats, generated certificate), E17 (feature shape and version), E18 (new public
-APIs), E19 (who drives Publish and renewal, and what a lost transport does to subscriptions),
-E20 (asyncua as a second peer), E21 (a secure connect needs `server-certificate-file`) and E22
-(port, URI credentials, `tls.verify=false`). Ask E17 and E13 first.
+M3 (OPC UA) is sliced (S75): the slices S76 to S123 are in Phase H of the plan. The
+maintainer accepted E13 to E22 and the S82 spike-branch push on 2026-10-30 ("Maintainer
+decisions (2026-10-30)" below), so the slices follow their dependencies: S76 to S82 first,
+then S83 and the generator track. E14 and E15 are confirmed by the S80 and S82 evidence.
 
 Maintainer-only steps, which no automated run does: P1 to P3 above (P1, the private
 vulnerability-reporting channel, is a release prerequisite in `SECURITY.md` that neither
@@ -898,6 +893,42 @@ whether to file the six drafted upstream issues under `docs/evidence/upstream-is
 - **E12** release 0.3.0 after this run, with G06 (E7) in it. This is the separate approval
   the line below asks for, for 0.3.0 only. Used: 0.3.0 was published and tagged on
   2026-10-29, so another version needs a new approval.
+
+
+### Maintainer decisions (2026-10-30)
+
+The maintainer accepted the ten M3 (OPC UA) decisions that S75 proposed, each as
+recommended (option 1), and approved pushing the S82 spike branch. The full options are in
+`docs/POST_ALPHA_PLAN.md`, "Decisions E13 to E22".
+
+- **E13** vendoring `opc-manual.mspec`, `opc-status.mspec` and `opc-attribute.mspec`
+  under `upstream/mspec/opcua/` and redistributing PLC4X's two OPC UA test suites under
+  `fixtures/opcua/upstream/` are approved, with NOTICE carrying the ASF paragraph, the OPC
+  Foundation MIT notice of the UA-Nodeset schemas (as a precaution) and a trademark line.
+- **E14** the hybrid codec: the service-message layer is generated and ships `pub(crate)`
+  under `opcua`; built-ins, the ExtensionObject envelope, framing, chunking and crypto are
+  hand-written. Confirmed by the S80 numbers; hand-written structs are the fallback.
+- **E15** `aws-lc-rs` with `rustls-webpki` carries the security policies, optional behind
+  `opcua`, provided the S82 probe is green on all five targets with `cargo deny` unchanged.
+- **E16** Basic128Rsa15 and Basic256 are refused with a typed `InvalidConfig` and their rows
+  become deferred (deprecated); key and trust stores are PEM or DER only (no PKCS#12, no
+  passwords); the runtime-generated client certificate is deferred.
+- **E17** one opt-in `opcua` feature outside `default` and `full`; every M3 change is
+  additive; the release number is a separate approval when M3 is done.
+- **E18** the additive public APIs: `Connection::browse` with flat browse types,
+  `PlcValue::Bytes`, a bounded `PlcValue::Struct`, `ReadItem::server_time`, an X.509 variant
+  of `Credentials` with `DriverRegistry::connect_with` and a cache credential provider, and
+  the native-subscription plumbing.
+- **E19** the caller's operations drive Publish and renewal (no spawned task); after a
+  transport loss a native subscription ends with a typed `Disconnected` and the caller
+  re-subscribes. The maintainer accepts this as SPEC's "subscription recovery".
+- **E20** python asyncua 2.1.0 is the second independent peer, pip-pinned with hashes in its
+  own process and never vendored.
+- **E21** a secure connect requires `server-certificate-file`, as upstream; the two-phase
+  discovery flow is a later extension.
+- **E22** the port is required (no 4840 default), the URI keys `username` and `password` are
+  refused, and `tls.verify=false` is accepted only as that explicit key and is recorded in
+  diagnostics.
 
 Keep changes reviewable, commit tested slices one signed-off commit per green slice, and
 maintain the per-module coverage gates. No first-party unsafe, panics on input, unbounded
