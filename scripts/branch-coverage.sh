@@ -74,7 +74,7 @@ cargo llvm-cov report --branch --lcov --ignore-filename-regex "$EXCLUDE" --outpu
   printf 'branch-coverage: report only, nightly %s, all features\n' "$nightly"
   printf '%-10s %8s %8s %8s\n' component branches hit percent
   awk -v SRC="$SRC" '
-    BEGIN { split("codec transport sim modbus sensors testkit", m, " "); for (k in m) MODULE[m[k]] = 1 }
+    BEGIN { split("codec transport sim modbus sensors boards opcua testkit", m, " "); for (k in m) MODULE[m[k]] = 1 }
     function component(path,   rel, seg, i) {
       i = index(path, "/" SRC "/")
       if (i == 0) return "other"
@@ -94,7 +94,7 @@ cargo llvm-cov report --branch --lcov --ignore-filename-regex "$EXCLUDE" --outpu
       else printf "%-10s %8d %8d %7.2f%%\n", name, f, h, 100 * h / f
     }
     END {
-      n = split("core codec transport sim modbus sensors testkit other", order, " ")
+      n = split("core codec transport sim modbus sensors boards opcua testkit other", order, " ")
       for (i = 1; i <= n; i++) row(order[i], found[order[i]], hit[order[i]])
       row("all", total_found, total_hit)
     }' "$LCOV"

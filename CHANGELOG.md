@@ -6,6 +6,20 @@ specification-stage placeholder.
 
 ## Unreleased
 
+- **Added (opt-in `opcua` feature; slice S83 of milestone M3):** the new `opcua` feature, in
+  neither `default` nor `full` (as `tls` is, decision E17) and enabling only `transport`, adds
+  the module `stonecrab::opcua` and its first type, `OpcuaAddress`, a `ProtocolAddress` for
+  the OPC UA tag text `ns=<n>;<i|s|g|b>=<id>[range][;a=<attribute>][;TYPE][|key=value,...]`
+  with `OpcuaIdentifier`, `OpcuaAttribute` and `OpcuaDataType`, and `OpcuaAddress::parse_query`
+  for browse queries (empty and `**` mean `ns=0;i=85`). The namespace is bounded to 16 bits,
+  `b=` is a base64 `ByteString` identifier, a backslash escapes `;`, `[`, `|` and itself in a
+  string identifier, an array suffix becomes an OPC UA `IndexRange`, and the key-value tail
+  carries event field names in written order. Parsing opens no socket; there is no driver,
+  connection string or connection yet. No dependency is added and a build without the feature
+  is unchanged. Gates: coverage floor of 100 for the module, the lint promotions of the
+  driver modules, `mutants.toml`, the fuzz target `fuzz_opcua_address` and a property test.
+  Parity: 12 planned rows of `docs/parity/opcua.md` and the new divergence
+  `OPCUA-DIV-ADDRESS-ESCAPES` are implemented.
 - **Dependencies:** `toml` 0.9 to 1.1 (resolved 1.1.8, with `toml_parser` 1.1.5,
   `toml_datetime` 1.1.2 and `winnow` 1.0.4) for the crate, the fuzz workspace and the code
   generator. There is no API or behavior change: no `toml` type is public, and profiles load

@@ -31,6 +31,10 @@ transport = ["dep:tokio"]
 # rustls on the ring provider, TLS 1.3 and 1.2, trust anchors from the caller (ADR-0032). Off by
 # default; needs the transport.
 tls = ["transport", "dep:rustls", "dep:tokio-rustls"]
+# The OPC UA client (`stonecrab::opcua`, ADR-0034): the tag address grammar so far. Off by
+# default and not part of `full`, as `tls` is (decision E17); needs the transport. The
+# cryptography dependencies of the security policies join it with their slices (ADR-0035).
+opcua = ["transport"]
 # The serial transport on a blocking worker thread (`stonecrab::transport::SerialTransport`).
 # Needs the transport. `modbus` enables it for Modbus RTU (ADR-0024).
 serial = ["transport", "dep:serial2"]
@@ -279,6 +283,14 @@ required-features = ["modbus", "testkit"]
 [[test]]
 name = "modbus_text"
 required-features = ["modbus", "testkit"]
+
+[[test]]
+name = "opcua_address"
+required-features = ["opcua"]
+
+[[test]]
+name = "opcua_properties"
+required-features = ["opcua"]
 
 [[test]]
 name = "sensors_acquisition"

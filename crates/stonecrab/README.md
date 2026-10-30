@@ -25,9 +25,10 @@ for the contracts. Upstream compatibility is claimed only where a parity row say
 | `modbus` | `stonecrab::modbus`, the Modbus TCP (over TCP, UDP and, with `tls`, TLS), RTU and ASCII drivers (reads and writes) | `transport`, `serial`, `tracing` | yes |
 | `sensors` | `stonecrab::sensors`, sensor profiles and the TOML loader | `serde`, `toml` | yes |
 | `full` | the same set as the defaults, spelled out; the `profile_read` example requires it | `sim`, `modbus`, `sensors` | no |
-| `transport` | `stonecrab::transport`, deadline-bounded transports and the Tokio TCP and UDP transports | `tokio` | no (on through `modbus`, `serial`, `tls`, `adapters-linux` and `testkit`) |
+| `transport` | `stonecrab::transport`, deadline-bounded transports and the Tokio TCP and UDP transports | `tokio` | no (on through `modbus`, `serial`, `tls`, `opcua`, `adapters-linux` and `testkit`) |
 | `serial` | the serial transport in `stonecrab::transport` (`SerialFactory`, `SerialTransport`) | `transport`, `serial2` | no (on through `modbus`) |
 | `tls` | the TLS transport in `stonecrab::transport` (`TlsFactory`, `TlsSettings`) and, with `modbus`, `modbus-tcp:tls` | `transport`, `rustls` and `tokio-rustls` on the `ring` provider (C code: needs a C compiler) | no |
+| `opcua` | `stonecrab::opcua`, the OPC UA client in progress: so far the tag address grammar (`OpcuaAddress`), no driver and no connection yet | `transport` | no |
 | `boards` | `stonecrab::boards`, direct board adapters: the MAX31855 thermocouple converter over an `SpiBus` and the ADXL345 accelerometer over an `I2cBus` | `sensors` | no |
 | `adapters-linux` | `LinuxSpiDev`, a `/dev/spidev` node read on a worker thread | `boards`, `transport` | no |
 | `testkit` | `stonecrab::testkit`, fakes, scripted peers, golden-vector loader and the driver contract suite | `transport`, `serde`, `serde_json`, `toml`, Tokio `macros` | no |

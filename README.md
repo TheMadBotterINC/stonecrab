@@ -32,11 +32,11 @@ its APIs may change before 1.0.
 cargo add stonecrab
 ```
 That one line gives you the simulator, the Modbus drivers (TCP, UDP, RTU and ASCII) and
-the sensor profiles; TLS and the board adapters are the opt-in `tls` and `boards`
-features. `stonecrab` 0.3.0 is published on crates.io (2026-10-29), so it fetches 0.3.0;
-the alpha, 0.2.0 (2026-10-27), and the specification-stage placeholder 0.1.0 stay listed
-as old versions. Releases are tagged `v<version>` from `v0.3.0` on; 0.2.0 has no tag, and
-there is no GitHub release.
+the sensor profiles; TLS, the board adapters and the OPC UA module are the opt-in `tls`,
+`boards` and `opcua` features. `stonecrab` 0.3.0 is published on crates.io (2026-10-29), so
+it fetches 0.3.0; the alpha, 0.2.0 (2026-10-27), and the specification-stage placeholder
+0.1.0 stay listed as old versions. Releases are tagged `v<version>` from `v0.3.0` on; 0.2.0
+has no tag, and there is no GitHub release.
 
 Programmers use it through one object-safe boundary (`DriverRegistry`, `Driver`,
 `Connection`): register a driver, connect with a connection string such as
@@ -53,6 +53,7 @@ Everything is in the one crate; the features only decide what is compiled in.
 | `transport` | `stonecrab::transport`, deadline-bounded transports; the only thing that needs Tokio, and on whenever `modbus` is | no |
 | `serial` | the serial transport in `stonecrab::transport` (`SerialFactory`, one worker thread per port); on whenever `modbus` is | no |
 | `tls` | the TLS transport in `stonecrab::transport` (`TlsFactory`: rustls with the ring provider, TLS 1.3 and 1.2, trust anchors you give) and `modbus-tcp:tls`; brings in `transport`, rustls and ring, which needs a C compiler | no |
+| `opcua` | `stonecrab::opcua`, the OPC UA client in progress: so far the tag address grammar (`OpcuaAddress`), no driver and no connection yet; needs `transport` | no |
 | `boards` | `stonecrab::boards`, direct board adapters: the MAX31855 thermocouple converter over an `SpiBus` and the ADXL345 accelerometer over an `I2cBus`; needs `sensors`, no Tokio | no |
 | `adapters-linux` | `LinuxSpiDev`, which reads a `/dev/spidev` node on a worker thread; brings in `boards` and `transport` | no |
 | `testkit` | `stonecrab::testkit`, fakes and the driver contract suite for tests; not for applications | no |
@@ -98,7 +99,7 @@ changes no level). Nothing is `hardware-verified`.
 | Modbus ASCII | read, write and ping over ASCII framing on a serial-to-IP gateway (`modbus-ascii:tcp://`) or a serial port (`modbus-ascii:///dev/ttyUSB0`): every area, writes read back, a range selection, frames of 511 characters, an exception, a unit the slave does not serve | interoperability-tested (job `interop-ascii`, diagslave 3.6 as `-m ascii -a 1` on a serial device behind socat; first hosted run 40843548924, 9 of 9, on 2026-10-29; and through the driver's own serial port, job `interop-serial-port`, diagslave 3.6 and socat on a pseudo-terminal pair of a Linux host at 19200 8N1, 11 of 11 in its first hosted run, 40849466167, on 2026-10-29: no electrical line, no serial device, and a pseudo-terminal cannot show the 7E1 of the line) | `MBS-OP-READ`, `MBS-OP-WRITE`, `MBS-OP-PING`, `MBS-TRANS-TCP`, `MBS-TRANS-SERIAL`, `MBS-ASCII-SEND`, `MBS-ASCII-LRC`, `MBS-ASCII-WIRE-MODEL`, `MBS-ASCII-TIMING`; `interop_ascii_holding_registers_are_written_and_read_back`, `interop_serial_the_silence_before_a_request_is_kept_on_the_line`; ADR-0024 |
 | Modbus ASCII | LRC errors, bad digits, a missing CR or LF, noise before the colon, a late reply after a timeout, a lost serial link and its reopen, replies from another unit | simulator-tested; the inter-frame delay before a request and a lost serial link and its reopen are also interoperability-tested on a pseudo-terminal pair (job `interop-serial-port`, first hosted run 40849466167) | `MBS-ASCII-LRC`, `MBS-ASCII-PARSE`, `MBS-ASCII-RESYNC`, `MBS-ASCII-TIMING`, `MBS-BUS-LATE-REPLY`, `MBS-BUS-CORRELATION`; `interop_serial_the_silence_before_a_request_is_kept_on_the_line`, `interop_serial_a_lost_port_is_disconnected_and_the_next_request_reopens_it` |
 | Modbus ASCII | a serial device; broadcast and shared ports | planned; broadcast and shared ports not supported | no hardware record yet (HW2); `MBS-CFG-UNIT-ID`, `MBS-BUS-SHARED-PORT` |
-| OPC UA (M3, feature `opcua`) | a client: the secure channel and session, read, write, browse and native subscriptions | planned; nothing is implemented | `docs/parity/opcua.md` (203 planned rows, slices S76 to S123 of `docs/POST_ALPHA_PLAN.md`); the client design is [ADR-0034](docs/adr/0034-opcua-client-design.md) (proposed) |
+| OPC UA (M3, feature `opcua`) | a client: the secure channel and session, read, write, browse and native subscriptions | planned; only the tag address grammar (`OpcuaAddress`, slice S83) exists, nothing connects | `docs/parity/opcua.md` (191 planned rows of 242, slices S76 to S123 of `docs/POST_ALPHA_PLAN.md`); the client design is [ADR-0034](docs/adr/0034-opcua-client-design.md) (proposed) |
 | Simulator (`sim`) | read, write, scripted failures, bounded read retry | simulator-tested | driver contract suite; `docs/parity/sim.md` |
 | Connection cache (`ConnectionCache`, core) | one lease at a time per connection string, waiters in arrival order, the lease, wait, idle, ping and close bounds, eviction and close; subscription restore not supported | simulator-tested | the simulator and Modbus TCP over the fake transport, on the fake clock; `TOOL-CC-*` in `docs/parity/tools.md`; ADR-0030 |
 | Event pump (`EventPump`, core) | named batches read at an interval after an initial delay, on a connection or a lease from the connection cache; a tick during a running fetch skipped and counted, a pause after failed fetches, start, stop and close, one consumer with at most one queued event per batch; subscription trigger, configuration files and value transformations not supported | simulator-tested | the simulator and Modbus TCP over the fake transport, on the fake clock; `TOOL-EP-*` in `docs/parity/tools.md`; ADR-0031 |

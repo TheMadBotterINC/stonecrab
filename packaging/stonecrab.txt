@@ -9,6 +9,7 @@ docs/components/boards.md
 docs/components/codec.md
 docs/components/core.md
 docs/components/modbus.md
+docs/components/opcua.md
 docs/components/sensors.md
 docs/components/sim.md
 docs/components/testkit.md
@@ -69,6 +70,8 @@ src/modbus/rtu/pace.rs
 src/modbus/rtu.rs
 src/modbus/session.rs
 src/modbus.rs
+src/opcua/address.rs
+src/opcua.rs
 src/order.rs
 src/polling.rs
 src/read_response.rs

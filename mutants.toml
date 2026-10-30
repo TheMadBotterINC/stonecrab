@@ -23,6 +23,8 @@ examine_globs = [
   "crates/stonecrab/src/modbus/batch.rs",
   "crates/stonecrab/src/modbus/driver.rs",
   "crates/stonecrab/src/modbus/options.rs",
+  # opcua: the tag address grammar (the codec and framing join with their slices).
+  "crates/stonecrab/src/opcua/address.rs",
   # sensors: the measurement scaling module.
   "crates/stonecrab/src/sensors/measurement/scale.rs",
 ]
@@ -65,4 +67,8 @@ exclude_re = [
   # Equivalent mutant. In `bits_of` the value 0 takes the negative branch under `<=`, and
   # `i64::try_from(0)` then yields the same pattern (0) as `u64::try_from(0)` does.
   'scale\.rs:\d+:\d+: replace < with <= in bits_of',
+  # Equivalent mutants. In `base64_encode` and `base64_decode` the two operands of each `|`
+  # fill disjoint bits of the byte (a shifted field above, an unshifted one below), so `|` and
+  # `^` produce the same byte for every input.
+  'address\.rs:\d+:\d+: replace \| with \^ in base64_(en|de)code',
 ]

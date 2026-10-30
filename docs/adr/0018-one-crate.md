@@ -201,3 +201,11 @@ ADR-0032 adds a `tls` feature to the feature table of decision 2: it pulls in `t
 default build and its lock-file closure are unchanged and a user opts in with
 `features = ["tls"]`. It is still one crate with one version (decision 1); the new crates and
 their licenses are in `docs/DEPENDENCY_AUDIT.md`.
+
+## Addendum (S83, 2026-10-30): the opt-in `opcua` feature
+ADR-0034 decision 1 adds an `opcua` feature to the feature table of decision 2: it enables
+`transport` and nothing else, so it adds no crate to the lock file (the cryptography
+dependencies join it with their slices, ADR-0035). It is in neither the default set nor
+`full`, so the default build is unchanged and a user opts in with `features = ["opcua"]`. It
+is still one crate with one version (decision 1). `stonecrab::opcua` takes the lint
+promotions of the driver modules, a coverage floor of 100 and a row in `mutants.toml`.

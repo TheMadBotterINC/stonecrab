@@ -296,3 +296,33 @@ through `SubscriptionSender`, and dropping the sender ends the stream.
   divergence rows `OPCUA-DIV-*` name the slice that implements each difference.
 - S97 accepts this ADR and corrects the stale contract text (`ARCHITECTURE.md` and
   `connection.rs:15-17`) to agree with decisions 6 and 7.
+
+## Addendum (S83, 2026-10-30): the address grammar
+Slice S83 added the `opcua` feature, `crate::opcua` and `OpcuaAddress` (decisions 1 and 10),
+and fixed the points the parity record left to it. The status of this ADR is unchanged.
+- **Escapes.** A backslash before `\`, `;`, `[` or `|` makes that character part of a string
+  identifier; a backslash before anything else is itself, so identifiers such as `C:\temp`
+  read as upstream reads them. An unescaped `|` ends the identifier (and the attribute), so
+  the key-value tail needs no `;TYPE` before it. `canonical()` always escapes the four
+  characters. A string identifier with an unescaped `|` was valid upstream (upstream reads
+  `s=a|b=c` as one identifier) and is not now: when the text after the `|` is a well-formed
+  key-value list the address is re-read as the identifier `a` with the field `b=c`, a
+  different node from upstream's, and otherwise it is `InvalidAddress`
+  (`OPCUA-DIV-ADDRESS-ESCAPES`).
+- **Array suffix.** The trailing run of numeric bracket groups of an identifier is the array
+  selection and becomes an OPC UA `IndexRange`; other brackets stay in a string identifier,
+  as upstream's `ArrayNotationParser.expressionPart` leaves them. Bounds are those of a Java
+  `int`, as upstream reads them.
+- **Identifier types.** `i` is an unsigned 32-bit number, `g` is 8-4-4-4-12 hexadecimal
+  digits kept as the 16 bytes of the binary encoding, `b` is padded standard base64
+  (`OPCUA-DIV-BINARY-ID`). The namespace is 0 to 65535 and the `ns=` group is required.
+- **Bounds.** An address text, and the canonical text it parses to, is at most 8192 bytes
+  and has no control character (the canonical text can be longer than the input, and it
+  must parse back); messages echo at most 32 characters. A `b` identifier with non-zero
+  bits before its pad is refused, so each byte string has one text.
+- **Surface.** `OpcuaAddress`, `OpcuaIdentifier`, `OpcuaAttribute` and `OpcuaDataType` are
+  public and the types of its accessors (decision 9 names only the address type; S97, which
+  accepts this ADR, ratifies the three accessor enums and `OpcuaAddress::MAX_TEXT_BYTES`);
+  `OpcuaAddress::parse_query` reads a browse query
+  (empty and `**` mean `ns=0;i=85`). The driver's `parse_address` over it arrives with
+  the connection string (S84) and stays crate-private until S91.

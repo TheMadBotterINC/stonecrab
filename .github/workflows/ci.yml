@@ -146,10 +146,10 @@ jobs:
         with:
           tool: cargo-hack@0.6.45
       # The powerset of the one crate's features (default, full, transport, modbus, sim,
-      # sensors, testkit) at depth 2: every feature alone and every pair, so each module
-      # builds with only the features it needs (modbus brings transport; testkit brings
-      # transport). --no-dev-deps edits Cargo.toml while it runs, so this pass cannot use
-      # --locked.
+      # sensors, opcua, testkit and the rest) at depth 2: every feature alone and every pair,
+      # so each module builds with only the features it needs (modbus brings transport; opcua
+      # and testkit bring transport). --no-dev-deps edits Cargo.toml while it runs, so this
+      # pass cannot use --locked.
       - run: cargo hack check --workspace --feature-powerset --depth 2 --no-dev-deps
       # The crate without default features: the core contracts and the codec only.
       - run: cargo hack check --locked --workspace --no-default-features

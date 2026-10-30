@@ -24,8 +24,8 @@ libfuzzer-sys = "0.4"
 arbitrary = "1.5"
 bytes = "1.10"
 # The core contracts and the codec are always part of the crate; the features add the
-# Modbus driver (with its transport) and the sensor profile loader.
-stonecrab = { path = "../crates/stonecrab", default-features = false, features = ["modbus", "sensors"] }
+# Modbus driver (with its transport), the OPC UA module and the sensor profile loader.
+stonecrab = { path = "../crates/stonecrab", default-features = false, features = ["modbus", "opcua", "sensors"] }
 # Later slices add path dependencies on the crate each new target exercises.
 
 # Fuzz targets are added as [[bin]] sections by the slice that adds each target, named
@@ -82,6 +82,13 @@ bench = false
 [[bin]]
 name = "fuzz_modbus_pdu"
 path = "fuzz_targets/fuzz_modbus_pdu.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_opcua_address"
+path = "fuzz_targets/fuzz_opcua_address.rs"
 test = false
 doc = false
 bench = false

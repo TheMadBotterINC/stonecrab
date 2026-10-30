@@ -67,6 +67,14 @@ pub mod codec;
 )]
 #[cfg_attr(docsrs, doc(cfg(feature = "modbus")))]
 pub mod modbus;
+#[cfg(feature = "opcua")]
+#[deny(
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions
+)]
+#[cfg_attr(docsrs, doc(cfg(feature = "opcua")))]
+pub mod opcua;
 #[cfg(feature = "sensors")]
 #[deny(clippy::indexing_slicing)]
 #[cfg_attr(docsrs, doc(cfg(feature = "sensors")))]

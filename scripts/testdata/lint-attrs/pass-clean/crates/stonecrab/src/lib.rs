@@ -11,6 +11,14 @@
 )]
 #[cfg_attr(docsrs, doc(cfg(feature = "modbus")))]
 pub mod modbus;
+#[cfg(feature = "opcua")]
+#[deny(
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions
+)]
+#[cfg_attr(docsrs, doc(cfg(feature = "opcua")))]
+pub mod opcua;
 #[cfg(feature = "transport")]
 #[deny(clippy::indexing_slicing, clippy::as_conversions)]
 pub mod transport;

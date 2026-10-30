@@ -132,6 +132,7 @@ it, with the exceptions listed after the table.
 | `sim` | `stonecrab::sim` | `sim` (default) | the core, `tracing` | Tokio-free; depends on neither transport nor codec (D9) |
 | `modbus` | `stonecrab::modbus` | `modbus` (default) | the core, `codec`, `transport`, `tracing` | Modbus TCP reads and writes |
 | `sensors` | `stonecrab::sensors` | `sensors` (default) | the core, `serde`, `toml` | depends on no driver |
+| `opcua` | `stonecrab::opcua` | `opcua` (off) | the core, `transport` | the OPC UA client (milestone M3); since S83 only the tag address grammar |
 | `testkit` | `stonecrab::testkit` | `testkit` (off) | the core, `transport`, `serde`, `serde_json`, `toml`, `tokio` (`macros`, task spawning for scripted peers) | test fixtures and the contract suite; not a runtime feature |
 
 Where the alpha differs from the graph and the original brief:
@@ -147,7 +148,7 @@ Where the alpha differs from the graph and the original brief:
   maintainer decided on 2026-10-27 that Stonecrab ships as one crate that is simple to
   explain and to version. The module edges above are the former crate edges, and the
   lint promotions and coverage thresholds that were per crate are per module.
-- **Deferred modules.** `opcua` (milestone M3), `eip` and `s7` (M4), the remaining
+- **Deferred modules.** `eip` and `s7` (M4), the remaining
   baseline drivers (M5), the MSpec code generator (M5) and the
   differential runner (M5) do not exist. `xtask` does not exist either: its jobs are shell
   scripts under `scripts/` and mise tasks (ADR-0005). The serial transport (S58) and Modbus
@@ -2397,6 +2398,7 @@ opens no socket).
 | `sensors` | `stonecrab::sensors`, profiles and the TOML loader | `serde` and `toml` | yes |
 | `full` | the same set as the defaults, spelled out; the `profile_read` example requires it | `sim`, `modbus` and `sensors` | no |
 | `transport` | `stonecrab::transport`, deadline-bounded transports and `TcpTransport` | Tokio (`rt`, `net`, `time`, `sync`, `io-util`) | no (on through `modbus`) |
+| `opcua` | `stonecrab::opcua`, the OPC UA client (S83: the tag address grammar so far; ADR-0034) | `transport` (so Tokio) | no |
 | `testkit` | `stonecrab::testkit`, fixtures and the driver contract suite; not a runtime feature | `transport`, `serde`, `serde_json`, `toml`, Tokio `macros` | no |
 
 `cargo add stonecrab` therefore gives the simulator, Modbus TCP and the sensor profiles.
@@ -2407,9 +2409,11 @@ every combination builds and exposes its traits and types. The quality gates run
 `--all-features`; a plain `cargo test` runs the reduced suite without the `testkit`
 tests (ADR-0018).
 
-**Deferred (not declared):** the features `opcua`, `eip`, `s7`, `ads` and `slmp`, and the
-transport feature `udp`. They arrive with their modules (OPC UA in M3, EtherNet/IP and S7
-in M4, UDP with S61). Declared since the alpha: `serial` (S58; `modbus` enables it since
+**Deferred (not declared):** the features `eip`, `s7`, `ads` and `slmp`, and the
+transport feature `udp`. They arrive with their modules (EtherNet/IP and S7 in M4, UDP with
+S61). `opcua` is declared since S83 (decision E17): off by default and not part of `full`,
+as `tls` is; the cryptography dependencies of its security policies join it with their
+slices (ADR-0035). Declared since the alpha: `serial` (S58; `modbus` enables it since
 S59, which ships RTU inside `modbus` rather than behind a `modbus-rtu` feature), and
 `boards` and `adapters-linux` (S63).
 

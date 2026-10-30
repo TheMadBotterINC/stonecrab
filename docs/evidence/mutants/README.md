@@ -38,6 +38,20 @@ and produce no mutants; the code is in their submodules. `sim/driver.rs` and
 `modbus/options.rs` go beyond the files the plan names: the release checklist asks for the
 two configuration parsers (simulator and Modbus) to be in the evidence.
 
+Slice S83 (2026-10-30) added `opcua/address.rs` (the OPC UA tag address grammar) to
+`mutants.toml`. `outcomes.json` is the S33 run and predates it. A run over that file alone
+(the same configuration with the one glob, `--jobs 1`, and the tests limited to the two test
+binaries that cover it, `opcua_address` and `opcua_properties`) tested 190 mutants in 77
+minutes: 163 caught, 22 unviable, 0 timeouts and 5 missed. The five are equivalent: the
+`|` of `base64_encode` (two) and `base64_decode` (three) joins two fields of disjoint bits,
+so `^` gives the same byte; they are listed in `exclude_re`. That run is not stored here.
+After the review of S83 changed `OpcuaAddress::parse` (the canonical text obeys the bound) and
+`base64_decode` (the decoded bytes must encode back to the input), the mutants of those two
+functions and `base64_encode` were run again in the same way: 42 mutants, 40 caught, 2
+unviable, none missed or timed out, in 17 minutes. (`base64_decode` lost its padding check,
+which the re-encoding made redundant: a first run of the old check showed it as a missed
+`||` to `&&`.)
+
 ## Final run
 
 574 mutants run (577 listed; three equivalent mutants are excluded by `exclude_re`):

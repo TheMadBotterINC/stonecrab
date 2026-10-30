@@ -15,7 +15,7 @@
 # other outer allow/warn/expect/forbid attribute in lib.rs is reported.
 #
 # Scans <root>/crates/*/src/lib.rs. Stonecrab is one crate, so there is one real lib.rs. The
-# module root files (src/{codec,transport,modbus,sim,sensors,boards,testkit}.rs) must carry no
+# module root files (src/{codec,transport,modbus,sim,sensors,boards,opcua,testkit}.rs) must carry no
 # inner lint-level attribute at all; that is checked too.
 # A crate directory that is absent is simply not scanned; a crate that is present but missing
 # from the table fails, so a new crate must be added here in the PR that creates it.
@@ -42,10 +42,11 @@ sim|clippy::indexing_slicing clippy::arithmetic_side_effects clippy::as_conversi
 transport|clippy::indexing_slicing clippy::as_conversions
 sensors|clippy::indexing_slicing
 boards|clippy::indexing_slicing clippy::arithmetic_side_effects clippy::as_conversions
+opcua|clippy::indexing_slicing clippy::arithmetic_side_effects clippy::as_conversions
 testkit|
 "
 
-MODULE_ROOTS="codec transport modbus sim sensors boards testkit"
+MODULE_ROOTS="codec transport modbus sim sensors boards opcua testkit"
 
 LEVEL_WORDS='(allow|warn|deny|forbid|expect)[[:space:]]*\('
 
