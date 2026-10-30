@@ -34,6 +34,11 @@
 #   mise run interop-ascii = CI "interop-ascii" job alone (slice S60b)
 #   mise run interop-rtu-pty = CI "interop-rtu-pty" job alone (slice S60b)
 #   mise run interop-tls   = CI "interop-tls" job alone (slice S71; pymodbus over mutual TLS)
+#   mise run interop-opcua = CI "interop-opcua" job alone (slice S81; open62541 v1.5.9 in
+#                            Docker, built from the pinned tag commit; evidence under
+#                            target/interop-evidence/open62541/; not part of `mise run
+#                            interop`, which stays the Modbus TCP peers until the OPC UA peer
+#                            has proved stable)
 #   mise run interop-serial-port = CI "interop-serial-port" job (slice S59c; Linux only: diagslave
 #                            and socat on a pseudo-terminal pair of the host, the drivers' serial
 #                            carrier; not part of `mise run interop`, which also runs on macOS)
@@ -231,6 +236,10 @@ run = "INTEROP_DIAGSLAVE_MODE=rtu-pty interop/diagslave/interop.sh run"
 [tasks.interop-tls]
 description = "Build the pymodbus 3.8.6 image, make a throwaway PKI with openssl in it, run the server in its mutual-TLS mode in Docker, run the modbus-tcp:tls interop tests against it (reads, a write read back and ping, an untrusted server, a client without a certificate), keep the evidence (never a key) in target/interop-evidence/tls/ and remove the PKI (slice S71, ADR-0032)"
 run = "interop/pymodbus/tls.sh run"
+
+[tasks.interop-opcua]
+description = "Build open62541 v1.5.9 from the pinned tag commit with OpenSSL encryption in Docker, run its OPC UA test server and, with the image's own open62541 client, check None and Basic256Sha256 SignAndEncrypt reads of the counter, the other policies and identities, refusals by trust list and the session and subscription behavior the README states, keep the evidence in target/interop-evidence/open62541/ and, while the run lasts, the run-time PKI's client side (never committed, removed by stop) in target/interop-pki/open62541/ (slice S81)"
+run = "interop/open62541/interop.sh run"
 
 [tasks.interop-serial-port]
 description = "Run diagslave 3.6 (the pinned archive, checked against its SHA-256, no container) as a Modbus RTU and then a Modbus ASCII slave on one end of a pseudo-terminal pair that socat makes on this Linux host, and run the modbus-rtu and modbus-ascii interop tests against the other end through the drivers' serial carrier, with the line silence and a lost port reopened, keeping the evidence in target/interop-evidence/diagslave-serial-rtu/ and diagslave-serial-ascii/ (slice S59c, ADR-0024)"

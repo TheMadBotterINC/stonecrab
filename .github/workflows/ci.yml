@@ -287,6 +287,44 @@ jobs:
           path: target/interop-evidence/libmodbus/
       - run: interop/libmodbus/interop.sh stop
         if: ${{ always() }}
+  interop-opcua:
+    # The OPC UA peer: open62541 v1.5.9 in Docker, built from the source at the pinned tag
+    # commit with its OpenSSL backend on a Debian trixie image pinned by digest (slice S81).
+    # Its server (interop/open62541/main.c) serves a test namespace under policies None,
+    # Basic256Sha256, Aes128Sha256RsaOaep and Aes256Sha256RsaPss with anonymous, user name and
+    # X.509 identities; its PKI is made at run time inside the container and never stored. No
+    # Stonecrab OPC UA code exists yet: the job runs open62541's own client from the image
+    # against it (slice S90 adds the driver's tests). Its own job, apart from the TCP peers
+    # and not part of `mise run interop`. The steps are the subcommands of
+    # interop/open62541/interop.sh, which `mise run interop-opcua` also runs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # docker build -f interop/open62541/Dockerfile -t stonecrab-interop-open62541:local .
+      # Fails if the v1.5.9 tag names any commit but the pinned one.
+      - run: interop/open62541/interop.sh build
+      # docker run -d on 127.0.0.1:4840, advertising 127.0.0.1:4840
+      - run: interop/open62541/interop.sh start
+      # Probe until 60 s have elapsed (a real OPC UA Hello, answered with an Acknowledge).
+      - run: interop/open62541/interop.sh wait
+      # docker run --rm <image> check: the in-image client against servers started there
+      # (None and Basic256Sha256 SignAndEncrypt reads of the counter, a refusal with an empty
+      # trust list, the other policies and identities, the facts of the README). Fails on
+      # any check that does not hold.
+      - run: interop/open62541/interop.sh check
+      # The client side of the running container's PKI to target/interop-pki/open62541/
+      # (never uploaded; `stop` removes it).
+      - run: interop/open62541/interop.sh pki
+      # Image id, versions, the check output and the server log; never a key.
+      - run: interop/open62541/interop.sh evidence
+        if: ${{ always() }}
+      - uses: actions/upload-artifact@v7
+        if: ${{ always() }}
+        with:
+          name: interop-opcua-evidence
+          path: target/interop-evidence/open62541/
+      - run: interop/open62541/interop.sh stop
+        if: ${{ always() }}
   interop-modbus-tk:
     # The driver against a scripted multi-unit server: modbus-tk 1.1.5 in Docker, a first-party
     # script built from interop/modbus-tk/ on the python:3.12-slim image pinned by digest (slice

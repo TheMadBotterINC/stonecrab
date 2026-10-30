@@ -11,6 +11,17 @@ specification-stage placeholder.
   generator. There is no API or behavior change: no `toml` type is public, and profiles load
   and report errors as before. The locks no longer pin `toml_parser` to keep one `winnow`
   (ADR-0016 addendum).
+- Interop (no crate API change; slice S81 of milestone M3): the independent OPC UA peer,
+  open62541 v1.5.9 built in Docker from the commit of its tag with the OpenSSL backend
+  (`interop/open62541/`, the new `interop-opcua` CI job and `mise run interop-opcua`, outside
+  `mise run interop`). A first-party server serves four security policies (None,
+  Basic256Sha256, Aes128Sha256RsaOaep, Aes256Sha256RsaPss), anonymous, user name and X.509
+  identities, a test namespace, switchable small chunk limits and a short session timeout,
+  with a PKI made at run time inside the container and never stored. The image's own
+  open62541 client proves None and Basic256Sha256 SignAndEncrypt reads and the refusal by an
+  empty trust list, and its README records, with source citations, that the peer has no
+  minimum session timeout, supports TransferSubscriptions and Republish, and runs
+  Aes256Sha256RsaPss under OpenSSL. No Stonecrab OPC UA code exists yet.
 
 ## stonecrab 0.3.0 (2026-10-29)
 The second pre-release, one crate (ADR-0018), released under maintainer decision E12. It

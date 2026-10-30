@@ -1,0 +1,86 @@
+# Provenance of the first-party files under interop/open62541 (CODING_STANDARDS 13.6).
+#
+# A separate file for the reason given in interop/pymodbus/PROVENANCE.toml: the loader
+# (stonecrab::testkit::load_provenance) reads only files below the directory of the provenance
+# file, and these files are outside fixtures/. Same schema, no [[vector]].
+#
+# The peer is not in this repository. The Dockerfile fetches and builds it inside the image:
+#
+#   base image   debian:trixie-slim, the multi-architecture index digest
+#                sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4
+#                (the digest interop/libmodbus/Dockerfile pins, pulled on 2026-10-28; Debian 13.7)
+#   source       open62541 v1.5.9, https://github.com/open62541/open62541, the commit of the
+#                lightweight tag v1.5.9, 05c2b389b65cc35884eb40d800301af1f3d130cf (resolved with
+#                git ls-remote on 2026-10-30; "Bump version to v1.5.9", 2026-10-04). The
+#                Dockerfile refuses a tag that names another commit. License: MPL-2.0, with some
+#                plugins and examples under CC0. The plugins the build enables (default
+#                configuration, access control, certificate groups, the OpenSSL security
+#                policies) are compiled into the static library and linked into both programs
+#                below. None of the source and none of the examples is copied here.
+#                Built as a static library with the OpenSSL backend (UA_ENABLE_ENCRYPTION=OPENSSL)
+#                and linked into the two programs below.
+#   packages     openssl, libssl3t64 and (build stage only) libssl-dev, Debian 13's OpenSSL 3.5
+#                series (3.5.7-1~deb13u3 on 2026-10-30), not pinned by version: the security
+#                archive keeps only the newest, so an exact pin would stop the weekly run. The
+#                versions of a run are in its evidence. OpenSSL: Apache-2.0. The build stage also
+#                installs git, cmake, make, gcc, libc6-dev and python3, none of which is in the
+#                final image.
+#
+# main.c and client_check.c are written from the public API of open62541 v1.5.9 (the headers
+# the build installs). Nothing of open62541's source or examples and nothing of Apache PLC4X
+# is copied into them. No key, certificate or password is stored in the repository: pki.sh makes
+# all of them when a container starts.
+
+[[file]]
+path = "Dockerfile"
+origin = "Authored for S81 from the pinned base image debian:trixie-slim and the upstream tag v1.5.9 of open62541, in the shape of interop/libmodbus/Dockerfile (docs/POST_ALPHA_PLAN.md, Phase H, S81)"
+license = "Apache-2.0"
+note = "First-party recipe. The base image is pinned by digest and the source by commit; the library is built inside the image and is not stored here."
+
+[[file]]
+path = "Dockerfile.dockerignore"
+origin = "Authored for S81"
+license = "Apache-2.0"
+note = "First-party. Keeps the build context to the files the Dockerfile copies."
+
+[[file]]
+path = "main.c"
+origin = "Authored for S81 from the public API of open62541 v1.5.9 (UA_ServerConfig_*, UA_CertificateGroup_Memorystore, UA_AccessControl_default, UA_Server_add*Node, UA_Server_createEvent) and the node list in its header"
+license = "Apache-2.0"
+note = "First-party. The OPC UA test server: four security policies, three identity tokens, switchable chunk limits, a short session timeout, trust lists read from the run-time PKI, and the test namespace. Supports interoperability-tested at most."
+
+[[file]]
+path = "client_check.c"
+origin = "Authored for S81 from the public API of open62541 v1.5.9 (UA_Client_*, UA_ClientConfig_setDefaultEncryption, UA_ClientConfig_setAuthentication*)"
+license = "Apache-2.0"
+note = "First-party. The check client of the image; it also calls the library's exported but undeclared __UA_Client_Service for TransferSubscriptions and Republish."
+
+[[file]]
+path = "pki.sh"
+origin = "Authored for S81; the leaf-certificate rules it follows are read from plugins/crypto/openssl/certificategroup.c of open62541 v1.5.9"
+license = "Apache-2.0"
+note = "First-party. Makes the server, client, untrusted-client and user certificates and keys with the openssl command, when a container starts."
+
+[[file]]
+path = "serve.sh"
+origin = "Authored for S81, in the shape of interop/libmodbus/serve.sh"
+license = "Apache-2.0"
+note = "First-party. The container's entry point: make the PKI, then run the server or the checks."
+
+[[file]]
+path = "check.sh"
+origin = "Authored for S81"
+license = "Apache-2.0"
+note = "First-party. The in-image checks: open62541's client against servers started from the fresh PKI."
+
+[[file]]
+path = "interop.sh"
+origin = "Authored for S81, in the shape of interop/libmodbus/interop.sh"
+license = "Apache-2.0"
+note = "First-party. Build, run, probe, check and collect evidence; shared by the CI job and mise run interop-opcua."
+
+[[file]]
+path = "README.md"
+origin = "Authored for S81"
+license = "Apache-2.0"
+note = "First-party."

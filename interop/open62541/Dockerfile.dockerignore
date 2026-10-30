@@ -1,0 +1,7 @@
+# Only what the Dockerfile copies reaches the build context.
+*
+!interop/open62541/main.c
+!interop/open62541/client_check.c
+!interop/open62541/pki.sh
+!interop/open62541/check.sh
+!interop/open62541/serve.sh
