@@ -662,3 +662,119 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
   fences, which is its purpose).
 - Features: `zeroize` with `alloc`; `subtle` with none. No build script in either.
 - Review date: 2026-10-29.
+
+## Drafts for S101 (OPC UA cryptography, ADR-0035): not adopted
+
+The four entries below were written by slice S82 from the probe on the unmerged branch
+`spike/s82-crypto-probe` (ADR-0035, status Proposed). None of these crates is in `Cargo.toml`
+or `Cargo.lock` of this repository for the `opcua` feature: that happens in slice S101, which
+turns each draft into a dated entry (or corrects it) in the same change that adds the
+dependency. Until then they are drafts, review dates are the probe's, and nothing here
+changes the entries above.
+
+### aws-lc-rs 1.19.0 (DRAFT for S101: stonecrab, feature `opcua`)
+- Purpose: the cryptography of the OPC UA security policies (decision E15, ADR-0035): RSA-OAEP
+  with SHA-1 and SHA-256, RSA PKCS #1 v1.5 and PSS signatures with SHA-256, AES-CBC with a
+  caller IV and no padding, HMAC-SHA1 and HMAC-SHA256, SHA-1 and SHA-256 digests, and the RSA
+  signature verification `rustls-webpki` needs for certificate chains. `ring` 0.17 has no RSA
+  encryption and no AES-CBC, and the standard library has none of this.
+- License: ISC AND (Apache-2.0 OR ISC). Both in the `deny.toml` allow list.
+- Features: `default-features = false` with `aws-lc-sys` and `alloc`. The defaults `ring-io` and
+  `ring-sig-verify` (which pull `untrusted`), `fips`, `bindgen`, `asan`, `prebuilt-nasm` and
+  `legacy-des` stay off.
+- Unsafe: not `forbid(unsafe_code)`. 381 lines with the keyword in `src` on 2026-10-30 (FFI
+  calls into AWS-LC, `Send` and `Sync` implementations for `EVP_PKEY` holders). First-party
+  code keeps `forbid(unsafe_code)`; the probe forbids it too.
+- Build script: `build.rs` only declares `cfg` checks and two test switches
+  (`AWS_LC_RS_DISABLE_SLOW_TESTS`, `AWS_LC_RS_DEV_TESTS_ONLY`); it compiles no native code. The
+  native build is `aws-lc-sys`'s. `links = "aws_lc_rs_1_19_0_sys"`.
+- Transitive crates: `aws-lc-sys` (next entry) and `zeroize` 1.9.1, which `rustls` already
+  brings under `tls`.
+- API facts that shape the design (all from the 1.19.0 sources, tested in the probe): RSA
+  signing encodings are PKCS #1 SHA-256, SHA-384, SHA-512 and PSS with the same hashes; SHA-1
+  exists only for verification (`..._SHA1_FOR_LEGACY_USE_ONLY`), and `RsaEncoding` is sealed, so
+  SHA1withRSA cannot be signed (E16); `PrivateDecryptingKey` loads PKCS #8 only
+  (`from_pkcs8`), while `RsaKeyPair::from_der` reads PKCS #1 and can re-export PKCS #8; AES-CBC
+  without padding is `EncryptingKey::cbc` with `less_safe_encrypt` and a caller
+  `EncryptionContext::Iv128`.
+- Alternatives: RustCrypto `rsa` with `aes`, `cbc`, `hmac`, `sha1` and `sha2` (pure Rust, but
+  RUSTSEC-2023-0071 has no patched version and would need a `deny.toml` ignore); the `openssl`
+  crate (banned, ADR-0032); policy None only.
+- Maintenance: 1.19.0 was published 2026-10-28; 1.18.2 (2026-10-12, with `aws-lc-sys` 0.46.0)
+  is the recorded fallback. `cargo deny` with the root `deny.toml` reports no advisory for the
+  probe's graph on 2026-10-30.
+- Review date: 2026-10-30 (draft).
+
+### aws-lc-sys 0.47.0 (DRAFT for S101: stonecrab, feature `opcua`, native code)
+- Purpose: the FFI bindings and the build of AWS-LC, the C cryptographic library under
+  `aws-lc-rs`. A direct dependency is declared only to set the feature `disable-prebuilt-nasm`.
+- License: `ISC AND (Apache-2.0 OR ISC) AND Apache-2.0 AND MIT AND BSD-3-Clause AND
+  (Apache-2.0 OR ISC OR MIT) AND (Apache-2.0 OR ISC OR MIT-0)`. Every term can be satisfied
+  from the allow list; the `OpenSSL` licence does not appear.
+- Features: `default-features = false` and `disable-prebuilt-nasm`, so the Windows x86_64
+  build assembles with NASM and never with prebuilt objects. `prebuilt-nasm` (which
+  `rustls-webpki`'s own `aws-lc-rs` feature would switch on), `bindgen`, `fips`, `ssl`, `asan`
+  and `unstable` stay off, and so does its default `all-bindings` (`default-features = false`).
+- Native code: the crate package is 9.7 MB (53 MB of AWS-LC C source unpacked), `links =
+  "aws_lc_0_47_0"`. Its build script (`builder/main.rs`) compiles AWS-LC with the `cc` crate
+  and falls back to CMake when the `cc` builder's dependency check fails. A build needs a C
+  compiler; Windows x86_64 also needs NASM (the probe used NASM 2.16.03). The script adopts a
+  system AWS-LC found through `OPENSSL_DIR`, `OPENSSL_INCLUDE_DIR`, `OPENSSL_LIB_DIR` or
+  pkg-config unless `AWS_LC_SYS_USE_SYSTEM=0`; CI sets that for every job, and downstream users
+  need it documented (it never adopts plain OpenSSL, `builder/system_detect.rs`). The clean
+  release build of the library took 29 s on a CI runner and the static archive is 7.3 MB
+  (`libaws_lc_0_47_0_crypto.a`); the probe's release example is 3.2 MB (2.9 MB stripped).
+- Unsafe: not `forbid(unsafe_code)`; 11,254 lines with the keyword in `src` on 2026-10-30,
+  mostly generated `unsafe extern` declarations, plus 31 in `builder`. That is the surface of
+  a C-library binding and the reason the dependency sits behind an opt-in feature.
+- Build dependencies: `cc` 1.10.0 (already in `Cargo.lock` for `ring`; with `shlex`,
+  `find-msvc-tools`, `jobserver` and `libc`, and on non-host targets the `jobserver` crates
+  `cfg-if` 1.0.5, `getrandom` 0.4.3 and `r-efi` 6.0.0, whose licence has an
+  `LGPL-2.1-or-later` alternative that `deny.toml` does not need), `cmake` 0.1.58, `dunce` 1.0.5, `fs_extra`
+  1.3.0 and, on Unix, `pkg-config` 0.3.34, all MIT or Apache-2.0 (`dunce`: CC0-1.0 OR MIT-0
+  OR Apache-2.0).
+- Banned crates: the D23 check (`cargo tree --locked --all-features --target all -e
+  normal,dev,build -i <name>`) matches no package for `once_cell`, `lazy_static`, `log`, `time`
+  and `chrono` in the probe's graph, with no new `deny.toml` wrapper. S101 repeats it on
+  `-p stonecrab --all-features` and pastes the output.
+- Advisories: RUSTSEC-2026-0044 to 0048 exist for `aws-lc-sys` (checked in the cargo-deny
+  advisory database on 2026-10-30): 0045 (AES-CCM tag timing), 0046 and 0047 (`PKCS7_verify`
+  bypasses) are patched from 0.38.0, 0044 (name constraints) and 0048 (CRL scope) from 0.39.0.
+  0.47.0 is past every patched version, and `cargo deny` reports none for it.
+- Alternatives: as for `aws-lc-rs`; the `aws-lc-fips-sys` FIPS build (needs Go and CMake,
+  out of scope).
+- Review date: 2026-10-30 (draft).
+
+### rustls-webpki 0.103.16 (DRAFT for S101: addendum for feature `opcua`; entry above stands)
+- Purpose under `opcua`: validating the server's application certificate against the operator's
+  trust list (S104), and verifying a signature with a certificate's public key
+  (`EndEntityCert::verify_signature`), with no TLS involved.
+- Features: `alloc` and, when `tls` is also on, rustls's `ring` and `std`. No provider feature
+  of its own under `opcua`: `rustls-webpki`'s `aws-lc-rs` feature depends on
+  `aws-lc-rs/prebuilt-nasm`, which the Windows build must not turn on, so the signature
+  algorithms are first-party: one `SignatureVerificationAlgorithm` implementation for RSA
+  PKCS #1 SHA-256 over `aws_lc_rs::signature::UnparsedPublicKey` (about 25 lines in the
+  probe), more as S104 needs them. Without any algorithm in the list webpki validates nothing.
+- Details found by the probe: the library is named `webpki` (not `rustls_webpki`);
+  `AlgorithmIdentifier::from_slice` takes the contents of the DER SEQUENCE, not the header; a
+  self-signed certificate without the CA flag validates against itself as its own trust anchor
+  in 0.103.16 although the documentation of `anchor_from_trusted_cert` says self-signed
+  certificates are unsupported, so S104 keeps the probe's test; `cargo machete` needs
+  `rustls-webpki` in `ignored` where the package is imported as `webpki`.
+- Maintenance: 0.103.16 was published 2026-10-20. RUSTSEC-2026-0382 (distrusted intermediates
+  may be accepted; dated 2026-10-20, checked in the cargo-deny advisory database on 2026-10-30)
+  is patched from 0.103.16, so this is the first release without it and the pin must not go
+  lower.
+- Review date: 2026-10-30 (draft).
+
+### rustls-pki-types 1.15.1 (DRAFT for S101: addendum for feature `opcua`; entry above stands)
+- Purpose under `opcua`: the `CertificateDer`, `TrustAnchor`, `UnixTime` and `AlgorithmIdentifier`
+  types webpki takes, `SignatureVerificationAlgorithm` (the trait the first-party algorithm
+  implements), and the PEM parser that classifies a key store by label (`PRIVATE KEY` to
+  PKCS #8, `RSA PRIVATE KEY` to PKCS #1; `ENCRYPTED PRIVATE KEY` is not accepted), replacing the
+  deprecated `rustls-pemfile`.
+- Features: `alloc` is enough for the in-memory PEM parsing the probe tests; `std` adds the
+  file-reading helpers that `tls` already enables.
+- Unsafe: one line with the keyword on 2026-10-30; the `Zeroize` implementations of its key
+  types clear them only when the owner calls `zeroize` (see the `tls` entry).
+- Review date: 2026-10-30 (draft).
