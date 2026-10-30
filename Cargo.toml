@@ -47,6 +47,8 @@ let_underscore_drop           = "warn"
 macro_use_extern_crate        = "warn"
 meta_variable_misuse          = "warn"
 variant_size_differences      = "warn"
+# `fuzzing` is set by cargo-fuzz (the opcua connection string entry point of the fuzz target).
+unexpected_cfgs               = { level = "warn", check-cfg = ["cfg(fuzzing)"] }
 
 [workspace.lints.clippy]
 all      = { level = "warn", priority = -1 }

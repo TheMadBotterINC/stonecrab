@@ -1,0 +1,1 @@
+opcua://host:4840?security-policy=Aes128_Sha256_RsaOaep&message-security=SIGN

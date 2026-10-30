@@ -1,0 +1,1 @@
+opcua://plc.example:48010/OPCUA/SimulationServer?security-policy=NONE

@@ -71,6 +71,9 @@ src/modbus/rtu.rs
 src/modbus/session.rs
 src/modbus.rs
 src/opcua/address.rs
+src/opcua/driver.rs
+src/opcua/fuzzing.rs
+src/opcua/options.rs
 src/opcua.rs
 src/order.rs
 src/polling.rs

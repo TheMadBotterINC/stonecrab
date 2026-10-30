@@ -1,0 +1,1 @@
+opcua://host:4840?message-security=SIGN_ENCRYPT&security-policy=Aes256_Sha256_RsaPss

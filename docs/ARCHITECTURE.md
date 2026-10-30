@@ -132,7 +132,7 @@ it, with the exceptions listed after the table.
 | `sim` | `stonecrab::sim` | `sim` (default) | the core, `tracing` | Tokio-free; depends on neither transport nor codec (D9) |
 | `modbus` | `stonecrab::modbus` | `modbus` (default) | the core, `codec`, `transport`, `tracing` | Modbus TCP reads and writes |
 | `sensors` | `stonecrab::sensors` | `sensors` (default) | the core, `serde`, `toml` | depends on no driver |
-| `opcua` | `stonecrab::opcua` | `opcua` (off) | the core, `transport` | the OPC UA client (milestone M3); since S83 only the tag address grammar |
+| `opcua` | `stonecrab::opcua` | `opcua` (off) | the core, `transport` | the OPC UA client (milestone M3); since S83 the tag address grammar and since S84 a crate-private connection string parser |
 | `testkit` | `stonecrab::testkit` | `testkit` (off) | the core, `transport`, `serde`, `serde_json`, `toml`, `tokio` (`macros`, task spawning for scripted peers) | test fixtures and the contract suite; not a runtime feature |
 
 Where the alpha differs from the graph and the original brief:
@@ -2398,7 +2398,7 @@ opens no socket).
 | `sensors` | `stonecrab::sensors`, profiles and the TOML loader | `serde` and `toml` | yes |
 | `full` | the same set as the defaults, spelled out; the `profile_read` example requires it | `sim`, `modbus` and `sensors` | no |
 | `transport` | `stonecrab::transport`, deadline-bounded transports and `TcpTransport` | Tokio (`rt`, `net`, `time`, `sync`, `io-util`) | no (on through `modbus`) |
-| `opcua` | `stonecrab::opcua`, the OPC UA client (S83: the tag address grammar so far; ADR-0034) | `transport` (so Tokio) | no |
+| `opcua` | `stonecrab::opcua`, the OPC UA client (S83 and S84: the tag address grammar and a crate-private connection string parser so far; ADR-0034) | `transport` (so Tokio) | no |
 | `testkit` | `stonecrab::testkit`, fixtures and the driver contract suite; not a runtime feature | `transport`, `serde`, `serde_json`, `toml`, Tokio `macros` | no |
 
 `cargo add stonecrab` therefore gives the simulator, Modbus TCP and the sensor profiles.

@@ -326,3 +326,33 @@ and fixed the points the parity record left to it. The status of this ADR is unc
   `OpcuaAddress::parse_query` reads a browse query
   (empty and `**` mean `ns=0;i=85`). The driver's `parse_address` over it arrives with
   the connection string (S84) and stays crate-private until S91.
+
+## Addendum (S84, 2026-10-30): the connection string
+Slice S84 added the connection string and the driver-owned options (`opcua/options.rs`) and
+a crate-private `OpcuaDriver` in `opcua/driver.rs`, whose `parse_config` and `parse_address`
+take the parameters and return the result of the `Driver` trait methods, without the
+receiver, so that S91, which adds the public driver and the connection, only wraps them (the
+inherent and the trait method then share a name). The status of this ADR is unchanged.
+- **Keys.** Only `security-policy` and `message-security` are accepted; every other key is
+  `InvalidConfig` (D12), including the ones later slices implement (`discovery`, the
+  timeouts, `encoding.*`, the browse and subscription bounds, `server-certificate-file`, the
+  `tls.*` names), which each slice adds with its behavior. `username` and `password`, the
+  framework keys and the legacy `insecure-certificate-verification` get a hint in the error.
+- **Port and path.** The port is required (E22). The path is everything after the first `/`
+  of the authority, verbatim, and the endpoint URL is `opc.tcp://host:port<path>`, refused
+  over 4096 bytes (the Hello field limit; the core grammar's 4096-byte string limit would
+  otherwise let a 4098-byte URL through).
+- **Policy and mode.** `Basic128Rsa15` and `Basic256` are recognised and refused as
+  deprecated (E16), so `SecurityPolicy` has four values. `message-security` is stored as
+  configured; a secure policy, the default included, with mode `NONE` is refused, a pair that
+  upstream accepts. With policy `NONE` the channel ignores the mode (`OPCUA-MODE-POLICY-NONE`,
+  S90).
+- **Visibility.** The options, the two enums and the driver are `pub(super)` and carry an
+  expected `dead_code` until S91 calls them; S91 removes the expectation. The fuzz workspace
+  reaches the parser through `stonecrab::opcua::fuzzing`, a public module that exists only
+  under cargo-fuzz's `--cfg fuzzing` (declared in the workspace `unexpected_cfgs`), so no
+  public API is added to a normal build and the semver job sees none.
+- **Shared code.** The host and port parsing is a copy of the Modbus driver's (the `opcua`
+  feature does not enable `modbus`), with a required port and a path; moving both to a shared
+  module is a possible later cleanup.
+

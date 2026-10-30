@@ -20,6 +20,22 @@ specification-stage placeholder.
   driver modules, `mutants.toml`, the fuzz target `fuzz_opcua_address` and a property test.
   Parity: 12 planned rows of `docs/parity/opcua.md` and the new divergence
   `OPCUA-DIV-ADDRESS-ESCAPES` are implemented.
+- **Added (opt-in `opcua` feature; slice S84 of milestone M3):** the connection string of the
+  `opcua` scheme and its typed options, parsed by a crate-private `OpcuaDriver::parse_config`
+  (and `parse_address` over `OpcuaAddress`) that the driver of slice S91 will wrap, so the
+  public API is unchanged. `opcua[:tcp]://host:port[/path]`: the port is required (decision
+  E22, 4840 is not defaulted), the path is kept verbatim in the `opc.tcp://host:port<path>`
+  URL that Hello will carry, and `tls`, `https` and every other transport code are refused.
+  `security-policy` (`NONE`, `Basic256Sha256` by default, `Aes128_Sha256_RsaOaep`,
+  `Aes256_Sha256_RsaPss`; `Basic128Rsa15` and `Basic256` refused as deprecated) and
+  `message-security` (`NONE`, `SIGN`, `SIGN_ENCRYPT` by default) are case-sensitive, and a
+  secure policy with mode `NONE` is `InvalidConfig`. Every other key is `InvalidConfig`: the
+  keys the framework fills, `username` and `password` (credentials never travel in the
+  string), the `tls.*` names (reserved for later slices) and the legacy
+  `insecure-certificate-verification`. Gates: the fuzz target
+  `fuzz_opcua_connection_string` (26 seeds, reached through a `cfg(fuzzing)` entry point) and
+  `unexpected_cfgs` knowing `cfg(fuzzing)`. Parity: 10 planned rows of
+  `docs/parity/opcua.md` are implemented.
 - **Dependencies:** `toml` 0.9 to 1.1 (resolved 1.1.8, with `toml_parser` 1.1.5,
   `toml_datetime` 1.1.2 and `winnow` 1.0.4) for the crate, the fuzz workspace and the code
   generator. There is no API or behavior change: no `toml` type is public, and profiles load

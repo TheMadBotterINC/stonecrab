@@ -94,6 +94,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "fuzz_opcua_connection_string"
+path = "fuzz_targets/fuzz_opcua_connection_string.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "fuzz_sensors_profile_toml"
 path = "fuzz_targets/fuzz_sensors_profile_toml.rs"
 test = false
