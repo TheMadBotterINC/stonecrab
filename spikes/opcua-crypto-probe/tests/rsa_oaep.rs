@@ -1,5 +1,6 @@
-//! RSA-OAEP with SHA-1 (Basic256) and SHA-256 (Aes128_Sha256_RsaOaep, Basic256Sha256's
-//! successors), encrypt with the public key of a certificate and decrypt with the private key.
+//! RSA-OAEP with SHA-1 (Basic256Sha256 and Aes128_Sha256_RsaOaep) and SHA-256
+//! (Aes256_Sha256_RsaPss), encrypted with the public key of a certificate and decrypted with
+//! the private key.
 
 mod common;
 

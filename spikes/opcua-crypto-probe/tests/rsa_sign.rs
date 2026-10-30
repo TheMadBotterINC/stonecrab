@@ -1,6 +1,6 @@
-//! RSA signatures: PKCS #1 v1.5 with SHA-256 (Basic256Sha256) and PSS with SHA-256
-//! (Aes128_Sha256_RsaOaep is PKCS #1 SHA-256; Aes256_Sha256_RsaPss is PSS), signed with the
-//! key pair and verified with the public key bytes of the peer's certificate.
+//! RSA signatures: PKCS #1 v1.5 with SHA-256 (Basic256Sha256 and Aes128_Sha256_RsaOaep) and
+//! PSS with SHA-256 (Aes256_Sha256_RsaPss), signed with the key pair and verified with the
+//! public key bytes of the peer's certificate.
 
 mod common;
 
