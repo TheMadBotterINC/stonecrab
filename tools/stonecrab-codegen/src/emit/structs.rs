@@ -53,15 +53,13 @@ impl Ctx<'_> {
                     &format!("field name `{field}` collides"),
                 ));
             }
-            if let Ty::Enum(other) | Ty::Complex(other) = ty {
-                imports.siblings.insert(other.clone());
+            if let Some(other) = ty.sibling() {
+                imports.siblings.insert(other.to_owned());
             }
         }
 
         let mut out = String::new();
-        let eq = stored
-            .iter()
-            .all(|(_, ty)| !matches!(ty, Ty::F32 | Ty::F64));
+        let eq = stored.iter().all(|(_, ty)| !ty.has_float());
         line(
             &mut out,
             if eq {

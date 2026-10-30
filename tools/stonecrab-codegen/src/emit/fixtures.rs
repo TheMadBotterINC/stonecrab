@@ -14,9 +14,9 @@ use super::{Endianness, Options, generate};
 use crate::mspec::{parse, resolve, type_names};
 
 /// A stand-in for the parts of the crate the generated modules import: `ByteOrder`, the
-/// bounded reader and writer and `ParseError` of `crate::codec`, and the bit-run helpers of
-/// the support module.
-const STAND_IN: &str = r"
+/// bounded reader and writer and `ParseError` of `crate::codec` (with the `CountLimit` that
+/// slice S86 adds to the shipped one), and the bit-run helpers of the support module.
+pub(super) const STAND_IN: &str = r"
 #![allow(dead_code, unused)]
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +32,7 @@ pub mod codec {
     pub enum ParseError {
         Truncated { needed: usize, available: usize },
         InvalidDiscriminator { field: &'static str, value: u64 },
+        CountLimit { field: &'static str, count: usize, max: usize },
         Overflow,
     }
 
@@ -77,6 +78,14 @@ pub mod codec {
                 ByteOrder::LittleEndian => u32::from_le_bytes(bytes),
             })
         }
+
+        pub fn read_i32(&mut self, order: ByteOrder) -> Result<i32, ParseError> {
+            let bytes: [u8; 4] = self.read_bytes(4, usize::MAX)?.try_into().unwrap();
+            Ok(match order {
+                ByteOrder::BigEndian => i32::from_be_bytes(bytes),
+                ByteOrder::LittleEndian => i32::from_le_bytes(bytes),
+            })
+        }
     }
 
     pub struct BoundedWriter {
@@ -109,6 +118,13 @@ pub mod codec {
         }
 
         pub fn write_u32(&mut self, value: u32, order: ByteOrder) -> Result<(), ParseError> {
+            self.write_bytes(&match order {
+                ByteOrder::BigEndian => value.to_be_bytes(),
+                ByteOrder::LittleEndian => value.to_le_bytes(),
+            })
+        }
+
+        pub fn write_i32(&mut self, value: i32, order: ByteOrder) -> Result<(), ParseError> {
             self.write_bytes(&match order {
                 ByteOrder::BigEndian => value.to_be_bytes(),
                 ByteOrder::LittleEndian => value.to_le_bytes(),
@@ -172,7 +188,11 @@ const SHAPES: &str = "
 
 const SHAPES_TYPES: [&str; 5] = ["Kind", "Message", "Packet", "Pair", "Wrapper"];
 
-fn options(types: &[&str], cases: &[(&str, &[&str])], byte_order: Option<Endianness>) -> Options {
+pub(super) fn options(
+    types: &[&str],
+    cases: &[(&str, &[&str])],
+    byte_order: Option<Endianness>,
+) -> Options {
     Options {
         support_module: "crate::support".to_owned(),
         byte_order,
@@ -200,7 +220,7 @@ fn shapes(byte_order: Option<Endianness>) -> Options {
 }
 
 /// Generates `text` with `options`, or returns the generation error as text.
-fn run(text: &str, options: &Options) -> Result<BTreeMap<String, String>, String> {
+pub(super) fn run(text: &str, options: &Options) -> Result<BTreeMap<String, String>, String> {
     let spec = parse(text).map_err(|error| format!("parse: {error}"))?;
     resolve(&spec, &type_names(&[&spec])).map_err(|error| format!("resolve: {error}"))?;
     generate(&[spec], options).map_err(|error| error.to_string())
@@ -208,7 +228,7 @@ fn run(text: &str, options: &Options) -> Result<BTreeMap<String, String>, String
 
 /// Compiles the generated `modules` (each a module of the crate root) with the stand-in
 /// and `main`, runs the program and returns its standard error when either step fails.
-fn compile_and_run(
+pub(super) fn compile_and_run(
     test: &str,
     modules: &BTreeMap<String, String>,
     main: &str,

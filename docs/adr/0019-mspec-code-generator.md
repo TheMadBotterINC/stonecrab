@@ -665,3 +665,113 @@ synthetic mspec text.
   `generator_rejects_duplicate_type_names`. `mise run regen` passes twice. The only change
   under `crates/` is the version in the header of the eight Modbus generated files and in their
   manifest (the `gen` commit of item 5).
+
+## Addendum (S78, 2026-10-30): count arrays, int 32 and uint 32 counts, null arrays
+### Status
+Accepted (2026-10-30), as slice S78 of docs/POST_ALPHA_PLAN.md (Phase H, M3 OPC UA), after the
+maintainer accepted decisions E13 to E22 on 2026-10-30. The decisions and the addenda above
+stand. This closes gaps G3 and G4 of the list S75 made; G5 to G7 follow in S79.
+
+### Context
+Decision 4 allowed one array: a `byte` array with a `count`, read with `read_bytes`, whose
+bytes present bound the allocation. OPC UA arrays are of numbers, enums and structures, their
+counts are `int 32` fields where -1 means null and 0 means empty
+(`opc-manual.mspec` lines 217 to 381: `[implicit int 32 noOfParameters 'parameters == null ? -1
+: COUNT(parameters)']` before `[array KeyValuePair('14535') parameters count
+'noOfParameters']`), and the count is chosen by the peer. ADR-0034 decision 4 and 5 ask for
+null and empty to stay apart and for every count to be checked before it allocates. No OPC UA
+mspec is vendored before S88 (decision E13), so this is proven on first-party synthetic mspec
+text, as in S77.
+
+### Decision
+1. **`count` arrays of any emitted element (G3).** A `count` array's element is a `byte`, a
+   byte-aligned number (`uint`, `int` or `float` of 8, 16, 32 or 64 bits), an enum with a base
+   type, or a `type` or `discriminatedType` with name arguments. A `bit` array and the
+   `length` and `terminated` loops stay generation errors. A `byte` array with an unsigned
+   count is emitted as before (`Vec<u8>` from `read_bytes`), so the Modbus output is
+   unchanged. Any other array is read behind a check of its count against the remaining input,
+   and the vector is reserved only after it:
+   - an element of a fixed width needs `count * width` bytes; the product is computed with
+     `checked_mul` and compared with `reader.remaining()`;
+   - an element of no fixed width needs at least one byte, so the count is compared with the
+     remaining bytes, and the vector grows one parsed element at a time (an element's own
+     failure, `Truncated` included, is that element's);
+   - either failure is `ParseError::CountLimit { field, count, max }`: the mspec field name,
+     the declared count and the most elements the input could hold. The variant is what
+     ADR-0034 decision 5 names; S86 adds it to the shipped `ParseError` with these fields
+     (`&'static str`, `usize`, `usize`), additively on the `#[non_exhaustive]` enum, and maps
+     it to `ErrorKind::ResourceLimit`. Until then no shipped module uses it, and the fixtures'
+     stand-in defines it.
+2. **Null and empty stay apart (G4).** An array is nullable when an `implicit` field of its
+   field list writes it as null (that field's expression contains `name == null`), or when
+   its count is the bare name of a `simple int 32` field of the list
+   (`[simple int 32 arrayLength] [array uint 8 value count 'arrayLength']`, the
+   `ByteStringArray` of `opc-manual.mspec` line 136, where a null ByteString is legal on the
+   wire and upstream reads any negative count as null). A nullable array is `Option<Vec<T>>`
+   (also for `byte`), `None` is count -1 and `Some(vec![])` count 0; every other array is
+   `Vec<T>`. Where the count is a stored field, `serialize` checks the value against it
+   (`None` needs -1, `Some` its length) and refuses a disagreement as `InvalidDiscriminator`,
+   because the bytes would not parse back to the value. This matches ADR-0034 decision 4
+   (generated arrays are `Option<Vec<T>>`, -1 is `None`) for every count that is a field; a
+   count that is an expression (`stringLength == -1 ? 0 : stringLength`) is the author's own
+   mapping of -1 and stays a `Vec<T>`. A nullable array's count must be signed (a generation error
+   otherwise: -1 would not fit). A count that is any other negative value is
+   `ParseError::InvalidDiscriminator { field: "<array>", value: <magnitude> }`, which maps to
+   `ErrorKind::MalformedData` as ADR-0034 decision 5 asks for "no valid encoding"; a count of
+   -1 for an array that is not nullable is the same refusal, unless the count expression maps
+   it to a count (`stringLength == -1 ? 0 : stringLength`, as `PascalByteString` does).
+3. **`implicit` fields of `uint 32` and `int 32`.** An `implicit` field is `uint 8`, `uint 16`,
+   `uint 32` or `int 32`. It is read and written with the protocol's byte order, computed on
+   serialize with `try_from` (so a count that does not fit is `Overflow`) and checked on parse
+   as decision 5 of the S66 addendum says. A `uint 8` or `uint 16` field with an unsigned
+   expression is compared as a `usize` exactly as before; any other combination is compared as
+   an `i64`, and the `value` of the `InvalidDiscriminator` is the field's magnitude
+   (`unsigned_abs`) when it is signed.
+4. **The expression subset grows to `==`, `?:`, `null` and the prefix `-`.** An expression is
+   typed as a `usize`, an `i64` or a `bool`; a mix of the first two is an `i64` (a literal
+   takes the type of its context, any other `usize` converts with `try_from` and `Overflow`).
+   `a == b` compares two numbers; `name == null` (either way round) is `name.is_none()` and is
+   accepted only for a nullable array; a prefix `-` takes an integer literal (`-1_i64`) or
+   negates with `checked_neg`; `c ? a : b` takes a comparison for `c` and two numbers.
+   `COUNT(x)` of a nullable array is 0 when it is `None`. `!`, `!=`, `-` as a binary operator
+   and the remaining operators stay generation errors naming the operator. An integer literal above `i64::MAX` is a
+   generation error, not a compile error of the output.
+5. **Fixtures and the property.** `src/emit/array_fixtures.rs` generates synthetic mspec text,
+   compiles it with `rustc` next to the stand-in of S77 (little-endian) and runs programs
+   that check the wire layout, the bounds, the refusals and a property loop over random
+   tables and mutated bytes (`generator_null_array_is_distinct_from_an_empty_array`). The loop
+   is a fixed-seed xorshift inside the compiled program, not the `proptest` crate: the tool
+   has two dependencies by decision 1, the program is built with `rustc` alone, and a new
+   dependency of the tool workspace would be a decision of its own. The output was compiled
+   and linted once under the tool workspace's lint table in a scratch crate.
+6. **The tool version stays 0.2.0.** Decision 7 bumps it when the output changes for an
+   unchanged input. No input of the tree changed: the Modbus output is byte for byte what
+   S77 committed, and the inputs this addendum accepts were generation errors. Hence no
+   `gen` commit follows.
+
+### Consequences
+- The generator can emit the arrays and counts of the OPC UA service layer (S88). The first
+  use of a generated array in the crate waits for S86's `CountLimit`; a slice that generates
+  into the crate before that fails to compile on the missing variant, which is the signal.
+- Not done: an array of `bit` (`isCertificateAssigned` of `opc-manual.mspec` line 319), the
+  `length` and `terminated` loops, a length that reaches an array of structs whose type no
+  expression reads the `lengthInBytes` of (a transitive length is still refused), a count
+  expression outside the subset, and arguments that are not names (S79). A fixed-count
+  array (`count '2'`) is not checked against its length on serialize, as a `byte` array never
+  was; the callers build the value.
+- A nullable array with `COUNT(name)` as an `implicit` expression and no `== null` is not
+  nullable: `bodyLength 'COUNT(rawBody)'` gives `Vec<u8>`, and a wire count of -1 is the
+  negative-count refusal.
+
+### Compliance
+- S78: `tools/stonecrab-codegen` (`src/emit/fields.rs`: the array part, the typed expressions,
+  the array reads and writes; `src/emit.rs`: `Ty::Array`; `src/emit/switch.rs`,
+  `src/emit/structs.rs`) and its README (semantics, matrix, fixtures). Tests
+  `generator_complex_array_count_is_checked_before_allocation`,
+  `generator_null_array_is_distinct_from_an_empty_array` and
+  `generator_implicit_int32_count_round_trips`, and the refusals
+  `generator_array_gaps_are_refused_with_the_construct_the_type_and_the_line`,
+  `generator_array_gaps_name_the_line_of_the_field`,
+  `generator_array_of_its_own_type_is_refused_as_recursive` and
+  `generator_integer_literals_outside_i64_are_refused`. `mise run regen` passes; the Modbus
+  generated files are unchanged.

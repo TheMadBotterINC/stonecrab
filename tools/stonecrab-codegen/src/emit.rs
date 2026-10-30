@@ -22,9 +22,11 @@ mod structs;
 mod switch;
 
 #[cfg(test)]
+mod array_fixtures;
+#[cfg(test)]
 mod fixtures;
 
-use fields::Part;
+use fields::{Elem, Part};
 
 /// The byte order of every multi-byte read and write of a protocol: the `byteOrder` an
 /// mspec attribute names. Upstream's default (that of its buffers) is `BIG_ENDIAN`.
@@ -107,7 +109,16 @@ const ATTRIBUTES: [(&str, &[&str]); 4] = [
 ];
 
 /// Names the emitted code uses for itself, which no field or parameter may take.
-const RESERVED: [&str; 4] = ["reader", "writer", "plc_value", "size"];
+const RESERVED: [&str; 8] = [
+    "reader",
+    "writer",
+    "plc_value",
+    "size",
+    "array_count",
+    "array_needed",
+    "array_items",
+    "array_item",
+];
 
 /// The suppression every top-level item carries: the generated module is private, so
 /// `pub` would trip `unreachable_pub` and `pub(crate)` trips `redundant_pub_crate`
@@ -174,6 +185,12 @@ enum Ty {
     Complex(String),
     /// A byte array.
     Bytes,
+    /// An array of any other element: `Vec<T>`, or `Option<Vec<T>>` when its count can be -1
+    /// (null), which is distinct from an empty array.
+    Array {
+        elem: Box<Self>,
+        nullable: bool,
+    },
 }
 
 impl Ty {
@@ -192,6 +209,55 @@ impl Ty {
             Self::F64 => "f64".to_owned(),
             Self::Enum(name) | Self::Complex(name) => upper_camel(name),
             Self::Bytes => "Vec<u8>".to_owned(),
+            Self::Array {
+                elem,
+                nullable: false,
+            } => format!("Vec<{}>", elem.rust()),
+            Self::Array {
+                elem,
+                nullable: true,
+            } => format!("Option<Vec<{}>>", elem.rust()),
+        }
+    }
+
+    /// The generated type this type names, through the elements of an array: what the module
+    /// imports from its siblings.
+    fn sibling(&self) -> Option<&str> {
+        match self {
+            Self::Enum(name) | Self::Complex(name) => Some(name),
+            Self::Array { elem, .. } => elem.sibling(),
+            Self::Bool
+            | Self::U8
+            | Self::U16
+            | Self::U32
+            | Self::U64
+            | Self::I8
+            | Self::I16
+            | Self::I32
+            | Self::I64
+            | Self::F32
+            | Self::F64
+            | Self::Bytes => None,
+        }
+    }
+
+    /// Whether a float is stored, directly or as an element: the type is not `Eq`.
+    fn has_float(&self) -> bool {
+        match self {
+            Self::F32 | Self::F64 => true,
+            Self::Array { elem, .. } => elem.has_float(),
+            Self::Bool
+            | Self::U8
+            | Self::U16
+            | Self::U32
+            | Self::U64
+            | Self::I8
+            | Self::I16
+            | Self::I32
+            | Self::I64
+            | Self::Enum(_)
+            | Self::Complex(_)
+            | Self::Bytes => false,
         }
     }
 
@@ -209,7 +275,9 @@ impl Ty {
             Self::I64 => Some(("i64", true)),
             Self::F32 => Some(("f32", true)),
             Self::F64 => Some(("f64", true)),
-            Self::Bool | Self::Enum(_) | Self::Complex(_) | Self::Bytes => None,
+            Self::Bool | Self::Enum(_) | Self::Complex(_) | Self::Bytes | Self::Array { .. } => {
+                None
+            }
         }
     }
 
@@ -226,7 +294,9 @@ impl Ty {
             Self::I64 => Some("I64"),
             Self::F32 => Some("F32"),
             Self::F64 => Some("F64"),
-            Self::Bool | Self::Enum(_) | Self::Complex(_) | Self::Bytes => None,
+            Self::Bool | Self::Enum(_) | Self::Complex(_) | Self::Bytes | Self::Array { .. } => {
+                None
+            }
         }
     }
 
@@ -241,6 +311,12 @@ impl Ty {
     /// Whether the value converts to `usize` with `From` (for expressions).
     const fn widens_to_usize(&self) -> bool {
         matches!(self, Self::U8 | Self::U16)
+    }
+
+    /// Whether an `implicit` field may have this type: an unsigned number up to 32 bits, or
+    /// `int 32` (an OPC UA array count, where -1 is null).
+    const fn is_implicit_count(&self) -> bool {
+        matches!(self, Self::U8 | Self::U16 | Self::U32 | Self::I32)
     }
 }
 
@@ -445,6 +521,10 @@ impl<'a> Ctx<'a> {
             for items in lists {
                 for field in fields_of(items) {
                     if let FieldKind::Simple {
+                        ty: TypeRef::Complex { name, .. },
+                        ..
+                    }
+                    | FieldKind::Array {
                         ty: TypeRef::Complex { name, .. },
                         ..
                     } = &field.kind
@@ -729,7 +809,8 @@ fn check_fits(
             | Ty::F64
             | Ty::Enum(_)
             | Ty::Complex(_)
-            | Ty::Bytes => 0,
+            | Ty::Bytes
+            | Ty::Array { .. } => 0,
         });
     let limit = 1_u128.checked_shl(bits).unwrap_or(0);
     if value >= limit {

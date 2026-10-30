@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    Binding, Ctx, DiscValue, Discriminator, GenError, Imports, Part, Ty, VISIBILITY_EXPECT,
+    Binding, Ctx, DiscValue, Discriminator, Elem, GenError, Imports, Part, Ty, VISIBILITY_EXPECT,
     check_name, describe, emit_match, fields_of, gen_error, integer_literal, integer_text, line,
     merge_arms, module, scalar,
 };
@@ -102,11 +102,9 @@ impl Ctx<'_> {
         }
 
         let mut out = String::new();
-        let eq = planned.iter().all(|(_, _, _, _, stored)| {
-            stored
-                .iter()
-                .all(|(_, ty)| !matches!(ty, Ty::F32 | Ty::F64))
-        });
+        let eq = planned
+            .iter()
+            .all(|(_, _, _, _, stored)| stored.iter().all(|(_, ty)| !ty.has_float()));
         line(
             &mut out,
             if eq {
@@ -134,8 +132,8 @@ impl Ctx<'_> {
                 line(&mut out, &format!("{variant} {{ {} }},", fields.join(", ")));
             }
             for (_, ty) in stored {
-                if let Ty::Enum(other) | Ty::Complex(other) = ty {
-                    imports.siblings.insert(other.clone());
+                if let Some(other) = ty.sibling() {
+                    imports.siblings.insert(other.to_owned());
                 }
             }
         }
@@ -258,7 +256,8 @@ impl Ctx<'_> {
                 | Ty::F32
                 | Ty::F64
                 | Ty::Complex(_)
-                | Ty::Bytes => Some("_".to_owned()),
+                | Ty::Bytes
+                | Ty::Array { .. } => Some("_".to_owned()),
             },
             many => {
                 if !many.iter().any(|disc| {
@@ -464,7 +463,47 @@ impl Ctx<'_> {
             | Part::Const { bits, .. }
             | Part::Implicit { bits, .. }
             | Part::Enum { bits, .. } => (*bits, None),
-            Part::Bytes { name, .. } => (0, Some((name.clone(), format!("{name}.len()")))),
+            Part::Array {
+                name,
+                elem,
+                nullable,
+                ..
+            } => {
+                let count = if *nullable {
+                    format!("{name}.as_ref().map_or(0, Vec::len)")
+                } else {
+                    format!("{name}.len()")
+                };
+                let term = match elem {
+                    Elem::Byte => count,
+                    Elem::Number { bits, .. } | Elem::Enum { bits, .. } => {
+                        match bits.checked_div(8).unwrap_or(0) {
+                            1 => count,
+                            width => {
+                                format!("{count}.checked_mul({width}).ok_or(ParseError::Overflow)?")
+                            }
+                        }
+                    }
+                    Elem::Complex { type_name, .. } => {
+                        if !self.sized.contains(type_name) {
+                            return Err(gen_error(
+                                def,
+                                line_no,
+                                &format!("the length of `{type_name}` is not emitted"),
+                            ));
+                        }
+                        let items = if *nullable {
+                            format!("{name}.iter().flatten()")
+                        } else {
+                            format!("{name}.iter()")
+                        };
+                        format!(
+                            "{items}.try_fold(0_usize, |size, array_item| array_item.length_in_bytes().and_then(|length| size.checked_add(length).ok_or(ParseError::Overflow)))?"
+                        )
+                    }
+                };
+                (0, Some((name.clone(), term)))
+            }
             Part::Complex {
                 name, type_name, ..
             } => {
@@ -747,7 +786,8 @@ impl Ctx<'_> {
             | Ty::F32
             | Ty::F64
             | Ty::Complex(_)
-            | Ty::Bytes => Err(gen_error(
+            | Ty::Bytes
+            | Ty::Array { .. } => Err(gen_error(
                 def,
                 line_no,
                 "the switch's error value is not emitted",

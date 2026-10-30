@@ -77,8 +77,45 @@ Semantics, beyond ADR-0019 decision 4:
   parse check cannot fail: `read_bytes` returns exactly that many bytes or `Truncated`. The
   check stays, as the one rule for every `implicit` field; generated code is outside the
   coverage gate, so the unreachable branch costs nothing there.
-- A `byte` array is `reader.read_bytes(count, usize::MAX)`: the bytes present bound it, a
-  short input is `Truncated` before anything is copied.
+- A `byte` array with an unsigned count is `reader.read_bytes(count, usize::MAX)`: the bytes
+  present bound it, a short input is `Truncated` before anything is copied.
+- Every other `count` array is checked against the input before anything is allocated. An
+  element of a fixed width (a byte-aligned number, an enum with a base type) needs
+  `count * width` bytes; the product is checked and compared with `reader.remaining()`, and
+  only then is the vector reserved. An element of no fixed width (a `type` or
+  `discriminatedType`) needs at least one byte, so the count is compared with the remaining
+  bytes and the vector grows one parsed element at a time. Either failure is
+  `ParseError::CountLimit { field, count, max }`, with the mspec field name, the declared count
+  and the most elements the input could hold (`CountLimit` is added to the shipped
+  `ParseError` by S86; the fixtures' stand-in has it).
+- The count is any expression of the subset. Its value is a `usize` when it is made of
+  `uint` fields, parameters and literals, and an `i64` when an `int 32` takes part (an
+  `int 32` field converts with `i64::from`). An `i64` count of -1 means null only for a
+  nullable array (below); any other negative count is
+  `InvalidDiscriminator { field: "<array>", value: <magnitude> }`, and `-1` for a
+  non-nullable array is the same refusal unless the expression maps it to a count itself
+  (`stringLength == -1 ? 0 : stringLength`).
+- An array is nullable when an `implicit` field of the same field list writes it as null
+  (its expression contains `name == null`), or when its count is the bare name of a
+  `simple int 32` field of the list (`[simple int 32 arrayLength] [array uint 8 value count
+  'arrayLength']`, the `ByteStringArray` of OPC UA). A nullable array is `Option<Vec<T>>`
+  (`None` is count -1, `Some(vec![])` is count 0, and the two are distinct on the wire and as
+  values), its count must be signed, and `COUNT(name)` of a `None` is 0. Where the count is a
+  stored field, `serialize` refuses a value that disagrees with it (`None` with a count other
+  than -1, `Some` with a count other than its length) as
+  `InvalidDiscriminator { field: "<array>", value: <magnitude of the length or -1> }`. Every
+  other array, including one whose count is an expression such as
+  `length == -1 ? 0 : length`, is `Vec<T>`.
+- An `implicit` field is `uint 8`, `uint 16`, `uint 32` or `int 32`. It is compared with its
+  expression on parse and computed on serialize with `try_from` as before; when the field is
+  an `int 32` or `uint 32`, or the expression is signed, both sides are compared as `i64`,
+  and the `value` of the error is the field's magnitude.
+- The expression subset of the output is: integer literals (up to `i64::MAX`; a larger one
+  is a generation error), names of fields and parameters
+  of the types above, `COUNT(array)`, `name.lengthInBytes` of a nested type, `+` (checked),
+  `==` of two numbers or of a nullable array and `null` (`name.is_none()`), a prefix `-` and
+  `condition ? a : b` (whose two arms are the same kind of number). Every other operator is a
+  generation error naming it.
 - An `enum` is a Rust enum with `value()` (when it has a base type), one `const fn` per
   constant parameter and, when an enabled type reads it from the wire, `parse` and
   `serialize`; an unknown wire value is `InvalidDiscriminator`. Enum values and constants are
@@ -88,7 +125,7 @@ Semantics, beyond ADR-0019 decision 4:
 - A `type` is a struct with a `pub(crate)` field for each stored field, in source order
   (`const` and `implicit` fields are not stored), and `parse`, `serialize` and, when an
   expression reads its `lengthInBytes`, `length_in_bytes`. Its fields are the ones a case of a
-  `discriminatedType` takes: runs of sub-byte fields, byte-aligned numbers, an enum, a `byte`
+  `discriminatedType` takes: runs of sub-byte fields, byte-aligned numbers, an enum, an
   array with a `count`, and a nested `type` or `discriminatedType` with name arguments. A
   fixed length is a `const fn` that keeps the `&self` and `Result` of every other length. The
   struct derives `Eq` unless a field is a float. A `type` that stores no field, or has a
@@ -146,13 +183,13 @@ fixtures" below); the first protocol that uses it adds its own vectors (ADR-0019
 | Type form: `dataIo` | yes | yes: one enum parameter switch, one byte-aligned number per case | Modbus (`DataItem`) |
 | `batchSet` | yes | no: one with attributes is a generation error (its fields would be flattened and the attributes lost) | S77 fixtures |
 | Field: `abstract` | yes | no | - |
-| Field: `array` | yes | `byte` elements with a `count` loop only | Modbus (read responses) |
+| Field: `array` | yes | `count` loops of `byte`, byte-aligned numbers, enums and `type` or `discriminatedType` elements (name arguments); `Vec<T>`, or `Option<Vec<T>>` when an `implicit` writes it as null; not `bit`, `length` or `terminated` loops | Modbus (`byte` read responses); S78 fixtures |
 | Field: `assert` | yes | no | - |
 | Field: `checksum` | yes | no | - |
 | Field: `const` | yes | unsigned, byte-aligned, integer value | Modbus (`protocolIdentifier`) |
 | Field: `discriminator` | yes | `bit` and `uint 1` to `uint 7` in one-byte runs, byte-aligned unsigned | Modbus (`errorFlag`, `functionFlag`) |
 | Field: `enum` | yes | no | - |
-| Field: `implicit` | yes | `uint 8` and `uint 16`, checked on parse | Modbus (`length`, `byteCount`) |
+| Field: `implicit` | yes | `uint 8`, `uint 16`, `uint 32` and `int 32`, checked on parse | Modbus (`uint 8`, `uint 16`: `length`, `byteCount`); S78 fixtures (`uint 32`, `int 32`) |
 | Field: `manualArray` | yes | no | - |
 | Field: `manual` | yes | no | - |
 | Field: `optional` | yes | no | - |
@@ -178,16 +215,20 @@ fixtures" below); the first protocol that uses it adds its own vectors (ADR-0019
 | Attribute `byteOrder` | yes | the protocol's byte order (`BIG_ENDIAN` unless its options say `byte_order = "LITTLE_ENDIAN"`); a different value on a type is a generation error | Modbus (`BIG_ENDIAN`); S77 fixtures (`LITTLE_ENDIAN`) |
 | Attributes `unsignedIntegerEncoding`, `signedIntegerEncoding`, `floatEncoding`, `stringEncoding` | yes | their defaults only (`unsigned-binary`, `twos-complement`, `IEEE754`, `UTF8`) | Modbus |
 | Field attributes | yes | no | - |
-| Built-in `COUNT` | yes | of a `byte` array | Modbus (`byteCount`) |
+| Built-in `COUNT` | yes | of an array (a nullable one counts 0 when null) | Modbus (`byteCount`, a `byte` array); S78 fixtures |
 | Built-in `ARRAY_SIZE_IN_BYTES` | yes | no | - |
 | Built-in `STATIC_CALL` | yes | no: no protocol lists a support function yet | - |
 | Built-ins `STR_LEN`, `CAST`, `CEIL` and other calls | yes | no | - |
 | Property `lengthInBytes` | yes | of a nested `discriminatedType` | Modbus (`ModbusTcpADU` `length`) |
 | Other properties (`lengthInBits`, field paths) | yes | no | - |
 | Operator `+` | yes | `checked_add`, `Overflow` on overflow | Modbus (`pdu.lengthInBytes + 1`) |
-| Operators `-`, `*`, `/`, `%`, `^`, `<<`, `>>`, comparisons, `==`, `!=`, `&&`, `\|\|`, `&`, `\|`, `!`, unary `-`, `?:`, indexes | yes | no | - |
+| Operator `==` | yes | of two numbers, and `name == null` of a nullable array | S78 fixtures |
+| Operator prefix `-` | yes | of an integer literal (`-1`) or a number, checked | S78 fixtures |
+| Operator `?:` | yes | `condition ? a : b` with a comparison for the condition and two numbers | S78 fixtures |
+| Operators `-`, `*`, `/`, `%`, `^`, `<<`, `>>`, `<`, `<=`, `>`, `>=`, `!=`, `&&`, `\|\|`, `&`, `\|`, `!`, indexes | yes | no | - |
 | Literals: decimal and hex integers | yes | yes | Modbus |
-| Literals: decimal fractions, strings, `true`/`false` in expressions, `null` | yes | `true`/`false` as case values only | Modbus (`errorFlag`, `response`) |
+| Literals: decimal fractions, strings, `true`/`false` in expressions | yes | `true`/`false` as case values only | Modbus (`errorFlag`, `response`) |
+| Literal `null` | yes | only as `name == null` of a nullable array | S78 fixtures |
 | Enum values without a wire value (upstream counts) | yes | no | - |
 | Recursive types | yes | no: generation error | - |
 | Duplicate type names | yes | no: generation error when the output uses the name | S77 fixtures |
@@ -209,6 +250,43 @@ by field, serialized back to the same bytes and refused on a wrong `implicit`, a
 under `LITTLE_ENDIAN`. The stand-in has the signatures the output calls and is not the shipped
 codec. Generated code meets the shipped codec, and the crate's lints, in the crate: the S77
 output was also compiled and linted there once, in a scratch copy of the tree.
+
+## S78 fixtures
+
+`src/emit/array_fixtures.rs` holds first-party mspec text for the arrays OPC UA is made of:
+a nullable array of numbers, of enums, of structs (with a parameter passed on) and of bytes,
+counted by an `implicit` `int 32` or `uint 32`; an array counted by a literal, a parameter and
+a plain field (a plain `int 32` field makes it nullable); a count that maps -1 to empty; an `implicit` that disagrees with its array; a
+struct whose `lengthInBytes` adds up arrays; and a nullable array in a case of a
+`discriminatedType`. It is compiled with `rustc` next to the same stand-in as the S77
+fixtures, little-endian, and the programs check:
+
+- `generator_complex_array_count_is_checked_before_allocation`: the wire layout and the
+  refusals. A count of `i32::MAX` or `u32::MAX` over a few bytes, and a count one element above
+  the bound, are `CountLimit` with the field, the count and the bound, for numbers, enums and
+  structs alike; the generated text reserves capacity only on the line after its check; a
+  count of -2 and `i32::MIN` are `InvalidDiscriminator`.
+- `generator_null_array_is_distinct_from_an_empty_array`: a property loop (a fixed-seed
+  xorshift; the tool has no dependency for a property-testing crate, and the program is built
+  with `rustc` alone) over 600 random tables: serialize then parse is the identity; the same
+  table with its arrays null or empty has different bytes (-1 against 0) and parses back to
+  each; and 7200 mutated, truncated and random byte strings never panic, and whatever parses
+  serializes back to exactly the bytes it was read from.
+- `generator_implicit_int32_count_round_trips`: the little-endian bytes of every count width,
+  an `implicit` `int 32` that disagrees with the array it counts (the error value is the
+  magnitude), -1 as empty, a literal count and the lengths of a struct made of arrays.
+- The same test covers a count that is a plain `simple int 32` field: -1 is `None`, 0 is
+  `Some(vec![])`, -2 is refused, and `serialize` refuses a stored count that disagrees with
+  the value.
+- `generator_array_gaps_are_refused_with_the_construct_the_type_and_the_line`,
+  `generator_array_gaps_name_the_line_of_the_field` (a count error names the field's line,
+  not the type's), `generator_array_of_its_own_type_is_refused_as_recursive`,
+  `generator_integer_literals_outside_i64_are_refused` and
+  `generator_float_arrays_leave_out_eq`.
+
+The S78 output was also compiled and linted under this workspace's lint table (which is the
+root's) in a scratch crate: no finding. Generated code meets the shipped codec in the crate
+when the first protocol that uses arrays adds its own vectors (S88 for OPC UA).
 
 ## The parser against the pinned baseline
 
