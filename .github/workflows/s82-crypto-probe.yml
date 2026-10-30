@@ -1,0 +1,159 @@
+name: S82 crypto probe
+# Slice S82 of docs/POST_ALPHA_PLAN.md: evidence for decision E15 (aws-lc-rs for the OPC UA
+# security policies). This workflow exists only on the unmerged branch spike/s82-crypto-probe
+# and runs on pushes to it; it never runs on master. The probe is spikes/opcua-crypto-probe/,
+# its own Cargo workspace; the root workspace, crates/stonecrab, Cargo.toml, Cargo.lock and
+# deny.toml are untouched. Action pins follow ci.yml.
+on:
+  push:
+    branches:
+      - spike/s82-crypto-probe
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  # Never adopt a system AWS-LC or OpenSSL-compatible library found on the runner (E15).
+  AWS_LC_SYS_USE_SYSTEM: "0"
+  CARGO_TERM_COLOR: never
+defaults:
+  run:
+    shell: bash
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
+        with:
+          toolchain: "1.99.1"
+      # aws-lc-sys with disable-prebuilt-nasm assembles its x86_64 Windows code with NASM.
+      - uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b # v1.5.2
+        if: runner.os == 'Windows'
+        with:
+          version: 2.16.03
+      - name: Tool versions
+        run: |
+          rustc -vV
+          cargo -V
+          cmake --version || echo "cmake: not found"
+          nasm -version || echo "nasm: not found"
+          cc --version || true
+      - name: Build the tests (clean target directory)
+        working-directory: spikes/opcua-crypto-probe
+        run: |
+          start=$(date +%s)
+          cargo test --locked --no-run
+          end=$(date +%s)
+          echo "build-seconds ${{ matrix.os }}: $((end - start))" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Run the tests
+        working-directory: spikes/opcua-crypto-probe
+        run: cargo test --locked
+      - name: Sizes
+        working-directory: spikes/opcua-crypto-probe
+        run: |
+          {
+            echo "sizes ${{ matrix.os }} (bytes, debug profile)"
+            find target/debug \( -name 'libaws_lc_*.a' -o -name 'aws_lc_*.lib' -o -name '*.rlib' \) -type f -exec wc -c {} + | sort -n | tail -12
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+  footprint:
+    # Release build time and size, against the ring build the `tls` feature already has.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
+        with:
+          toolchain: "1.99.1"
+      - name: Baseline, stonecrab with feature tls (ring), clean release build
+        run: |
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/target-baseline"
+          start=$(date +%s)
+          cargo build --locked --release -p stonecrab --features tls --lib
+          end=$(date +%s)
+          {
+            echo "baseline (stonecrab --features tls, release lib) build-seconds: $((end - start))"
+            find "$CARGO_TARGET_DIR/release" \( -name 'libring*.rlib' -o -name 'libstonecrab*.rlib' -o -name 'libring_core*.a' -o -name 'libring*.a' -o -name 'librustls-*.rlib' -o -name 'librustls*.rlib' -o -name 'libwebpki*.rlib' \) -type f -exec wc -c {} + | sort -n
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Probe, clean release build of the library and the size example
+        working-directory: spikes/opcua-crypto-probe
+        run: |
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/target-probe"
+          start=$(date +%s)
+          cargo build --locked --release --lib
+          mid=$(date +%s)
+          cargo build --locked --release --example sizeprobe
+          end=$(date +%s)
+          cp "$CARGO_TARGET_DIR/release/examples/sizeprobe" "$RUNNER_TEMP/sizeprobe-stripped"
+          strip "$RUNNER_TEMP/sizeprobe-stripped"
+          "$CARGO_TARGET_DIR/release/examples/sizeprobe"
+          {
+            echo "probe (aws-lc-rs 1.19.0, aws-lc-sys 0.47.0) build-seconds lib: $((mid - start)), example: $((end - mid))"
+            find "$CARGO_TARGET_DIR/release" \( -name 'libaws_lc_*.a' -o -name 'libopcua_crypto_probe.rlib' -o -name 'libaws_lc_rs*.rlib' -o -name 'librustls_webpki*.rlib' \) -type f -exec wc -c {} + | sort -n
+            echo "sizeprobe release binary, bytes:"
+            wc -c "$CARGO_TARGET_DIR/release/examples/sizeprobe" "$RUNNER_TEMP/sizeprobe-stripped"
+            echo "unique packages in the probe graph (normal, build):"
+            cargo tree --locked --target all -e normal,build --prefix none | sort -u | wc -l
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+  cross:
+    # The compiler and C library headers of ci.yml's cross job: aws-lc-sys compiles C in its
+    # build script, so even cargo check of these targets needs the target's C toolchain.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [aarch64-unknown-linux-gnu, armv7-unknown-linux-gnueabihf]
+    steps:
+      - uses: actions/checkout@v7
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu libc6-dev-arm64-cross gcc-arm-linux-gnueabihf libc6-dev-armhf-cross
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
+        with:
+          toolchain: "1.99.1"
+          targets: aarch64-unknown-linux-gnu, armv7-unknown-linux-gnueabihf
+      - name: Tool versions
+        run: |
+          cmake --version || echo "cmake: not found"
+          aarch64-linux-gnu-gcc --version | head -1
+          arm-linux-gnueabihf-gcc --version | head -1
+      - name: cargo check
+        working-directory: spikes/opcua-crypto-probe
+        run: |
+          start=$(date +%s)
+          cargo check --locked --all-targets --target ${{ matrix.target }}
+          end=$(date +%s)
+          echo "check-seconds ${{ matrix.target }}: $((end - start))" | tee -a "$GITHUB_STEP_SUMMARY"
+  dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
+        with:
+          toolchain: "1.99.1"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.20.2
+      # The ROOT deny.toml, unchanged, against the probe's graph.
+      - name: cargo deny, root deny.toml
+        run: cargo deny --manifest-path spikes/opcua-crypto-probe/Cargo.toml --locked --config deny.toml check 2>&1 | tee deny-output.txt
+      - name: deny.toml is unchanged from the base commit
+        run: |
+          git fetch --depth=1 origin d14ffa9
+          git diff --exit-code d14ffa9 -- deny.toml Cargo.toml Cargo.lock crates
+      # D23: none of these may appear in the probe's graph, with no wrapper to excuse them.
+      # cargo tree -i exits 101 ("did not match any packages") when the package is absent.
+      - name: D23, banned crates in the probe graph
+        working-directory: spikes/opcua-crypto-probe
+        run: |
+          status=0
+          for name in once_cell lazy_static log time chrono; do
+            if out=$(cargo tree --locked --all-features --target all -e normal,dev,build -i "$name" 2>&1); then
+              echo "FOUND $name:"; echo "$out"; status=1
+            else
+              echo "$name: $out" | head -1
+            fi
+          done
+          exit $status

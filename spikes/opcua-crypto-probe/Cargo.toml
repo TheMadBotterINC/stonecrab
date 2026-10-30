@@ -1,0 +1,20 @@
+# Stonecrab slice S82: the cryptography probe behind decision E15 (OPC UA security policies).
+# An out-of-tree spike on the unmerged branch spike/s82-crypto-probe. It is its own workspace,
+# is not a member of the root workspace, and no stonecrab crate depends on it.
+[package]
+name = "opcua-crypto-probe"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.97"
+license = "Apache-2.0"
+publish = false
+
+[workspace]
+
+[dependencies]
+# Default features off: no fips, no bindgen, no prebuilt NASM objects, no asan.
+aws-lc-rs = { version = "=1.19.0", default-features = false, features = ["aws-lc-sys", "alloc"] }
+# Named only to set the NASM feature on the sys crate that aws-lc-rs selects.
+aws-lc-sys = { version = "=0.47.0", default-features = false, features = ["disable-prebuilt-nasm"] }
+rustls-webpki = { version = "=0.103.16", default-features = false, features = ["alloc"] }
+rustls-pki-types = { version = "=1.15.1", default-features = false, features = ["alloc"] }
