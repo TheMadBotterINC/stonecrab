@@ -18,3 +18,9 @@ aws-lc-rs = { version = "=1.19.0", default-features = false, features = ["aws-lc
 aws-lc-sys = { version = "=0.47.0", default-features = false, features = ["disable-prebuilt-nasm"] }
 rustls-webpki = { version = "=0.103.16", default-features = false, features = ["alloc"] }
 rustls-pki-types = { version = "=1.15.1", default-features = false, features = ["alloc"] }
+
+# cargo machete runs from the repository root in ci.yml and reads this manifest too.
+# aws-lc-sys is named only to set its disable-prebuilt-nasm feature, and rustls-webpki is
+# imported as `webpki` (its library name), which machete does not map back to the package.
+[package.metadata.cargo-machete]
+ignored = ["aws-lc-sys", "rustls-webpki"]
