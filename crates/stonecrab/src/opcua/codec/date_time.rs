@@ -182,13 +182,13 @@ mod tests {
             DateTime::from_system_time(UNIX_EPOCH - Duration::from_nanos(199)),
             Some(DateTime(EPOCH - 1))
         );
-        // Before 1601 there are negative ticks.
-        let before = DateTime::from_system_time(UNIX_EPOCH - Duration::new(12_000_000_000, 0));
-        assert_eq!(before, Some(DateTime(EPOCH - 120_000_000_000_000_000)));
-        assert_eq!(
-            before.and_then(DateTime::to_system_time),
-            Some(UNIX_EPOCH - Duration::new(12_000_000_000, 0))
-        );
+        // Before 1601 there are negative ticks, on a platform whose clock reaches that far
+        // (Windows counts from 1601 and cannot).
+        if let Some(early) = UNIX_EPOCH.checked_sub(Duration::new(12_000_000_000, 0)) {
+            let before = DateTime::from_system_time(early);
+            assert_eq!(before, Some(DateTime(EPOCH - 120_000_000_000_000_000)));
+            assert_eq!(before.and_then(DateTime::to_system_time), Some(early));
+        }
     }
 
     #[test]
