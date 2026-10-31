@@ -901,3 +901,278 @@ written in S85 and S86; the generator needed the other end of it. Case parameter
   `generator_missing_external_type_is_an_error`, with the refusals named in the README and the
   options-file tests in `src/main.rs`. `mise run regen` passes; the Modbus generated files
   and manifest are unchanged.
+
+## Addendum (S80, 2026-10-30): the dry run on the real OPC UA model, and recursion through external types
+### Status
+Proposed (2026-10-30), as slice S80 of docs/POST_ALPHA_PLAN.md (Phase H, M3 OPC UA): the
+evidence for decision E14 and the amendment of decision 5 that the S79 addendum left to this
+slice. The decisions and the addenda above stand. Nothing generated is committed and no
+mspec is vendored (`git ls-files upstream/mspec` still shows only
+`upstream/mspec/modbus/modbus.mspec`); every number below was produced in a scratch directory
+outside the repository, and this text is where they are kept. Slice S88 accepts or revises this
+addendum when it vendors the mspec, and S97 records E14 in `STATUS.md`.
+
+### Context
+S79 gave the generator the constructs of the connect-and-read subset. Before S88 commits to
+generating the service layer of the hybrid codec (E14, ADR-0034 decision 2), S80 ran the grown
+generator (0.2.0, as of slice S79) on the real model and measured what comes out.
+
+Inputs. The pinned PLC4X v1.0.0 sparse checkout (commit `ea229918`), files under
+`protocols/opcua/src/main/generated/protocols/opcua/`: `opc-manual.mspec` (3,813 lines, git blob
+`a8cfc6fc`, sha256 `3c0a04d5daa72089df32316463d8421d8d9b9aee49d6eeaab991545ceaf937e4`),
+`opc-status.mspec` (blob `ac49b8b2`, sha256 `f90c951f6ee5479863f84b8a96b92a4e59173eb06aefccd6091b4d32d07fad8e`)
+and `opc-attribute.mspec` (blob `6cfa588e`, sha256 `c3235ae79bf27669f1a6583095dd0982c1d5faf36bef87dec81a5eaa4f908177`).
+Copies sat in a scratch directory with a scratch `upstream/manifest.toml`; the generator's own
+sha256 check ran. The options file set `byte_order = "LITTLE_ENDIAN"`, `depth`, and an
+`[external]` table for the eleven types ADR-0034 keeps hand-written: `PascalString`,
+`PascalByteString`, `NodeId`, `ExpandedNodeId`, `QualifiedName`, `LocalizedText`, `StatusCode`,
+`DiagnosticInfo`, `DataValue`, `Variant`, and `ExtensionObject` pinned to `true`. The generated
+type is `ExtensionObjectDefinition` (the one switch of 354 cases that carries every service
+message), plus the enums the enabled cases name. Each external was a stub with the S79 signature
+(`parse`, `serialize`, `length_in_bytes`, all taking the budget) that reads and writes nothing.
+
+The scratch crate (edition 2024, rustc 1.99.1, Apple silicon macOS, no dependencies) held a copy
+of `stonecrab::codec` (the shipped reader, writer and bit helpers, with the `CountLimit` and
+`RecursionLimit` variants that S86 adds to `ParseError`), the support module of Modbus for the
+bit-run helpers, and the stubs. Its lints were the workspace's (`clippy::pedantic`, the rust
+lints of the root `Cargo.toml`) with `indexing_slicing`, `arithmetic_side_effects` and
+`as_conversions` denied on the module, as `pub mod opcua` has them. Timings are the median of
+three clean builds (the mean of two for release) with `CARGO_INCREMENTAL=0`; the larger builds
+varied by up to a factor of two between runs, so the ranges are given. A public function that
+calls `ExtensionObjectDefinition::parse` and `serialize` was added, so that a release build
+generates code for every arm, as the S88 wiring of the ExtensionObject envelope will.
+
+The three lists. The plan's figures (22, 56 and 72) are estimates; the lists below are derived
+from the slice rows S88 to S123 and `docs/parity/opcua.md`, and the counts they give differ
+from the estimates in two places, which is stated rather than adjusted. A case is in a list with
+every case its fields name (a closure over the case references of `opc-manual.mspec`; the
+enums are added to `types`, the externals are not cases).
+1. **Connect and read, 22 cases** (S88): `RequestHeader`, `ResponseHeader`, `ServiceFault`,
+   `ChannelSecurityToken`, `OpenSecureChannelRequest`, `OpenSecureChannelResponse`,
+   `CloseSecureChannelRequest`, `ApplicationDescription`, `UserTokenPolicy`,
+   `EndpointDescription`, `SignedSoftwareCertificate`, `SignatureData`, `CreateSessionRequest`,
+   `CreateSessionResponse`, `AnonymousIdentityToken`, `ActivateSessionRequest`,
+   `ActivateSessionResponse`, `CloseSessionRequest`, `CloseSessionResponse`, `ReadValueId`,
+   `ReadRequest`, `ReadResponse`. Five enums: `ApplicationType`, `MessageSecurityMode`,
+   `SecurityTokenRequestType`, `TimestampsToReturn`, `UserTokenType`. The closure adds nothing.
+   (`CloseSecureChannelResponse` is not in it: Stonecrab expects no reply to a
+   CloseSecureChannel, `OPCUA-LIFE-CLOSE-SESSION`.)
+2. **Java-parity closure, 61 cases** (the plan says 56): the 22 above and 39 more. The
+   requests and responses of the fourteen services of `OPCUA-WIRE-SERVICES-USED`, the three
+   identity tokens (`OPCUA-AUTH-TYPES`), `DataChangeNotification` and `EventNotificationList`
+   (the two notifications Java handles, `OPCUA-SUB-PUBLISH`), the event filter of S118 and the
+   structure definition of S119, with the closure. Added: `GetEndpointsRequest`,
+   `GetEndpointsResponse`, `CloseSecureChannelResponse`, `UserNameIdentityToken`,
+   `X509IdentityToken`, `WriteRequest`, `WriteResponse`, `WriteValue`, `BrowseRequest`,
+   `BrowseResponse`, `BrowseNextRequest`, `BrowseNextResponse`, `BrowseDescription`,
+   `ViewDescription`, `ReferenceDescription`, `BrowseResult`, `CreateSubscriptionRequest`,
+   `CreateSubscriptionResponse`, `CreateMonitoredItemsRequest`, `CreateMonitoredItemsResponse`,
+   `MonitoringParameters`, `MonitoredItemCreateRequest`, `MonitoredItemCreateResult`,
+   `PublishRequest`, `PublishResponse`, `NotificationMessage`, `SubscriptionAcknowledgement`,
+   `DataChangeNotification`, `MonitoredItemNotification`, `EventNotificationList`,
+   `EventFieldList`, `DeleteSubscriptionsRequest`, `DeleteSubscriptionsResponse`,
+   `EventFilter`, `ContentFilter`, `ContentFilterElement`, `SimpleAttributeOperand`,
+   `StructureDefinition`, `StructureField`. Five more enums: `BrowseDirection`,
+   `FilterOperator`, `MonitoringMode`, `NodeClass`, `StructureType`. Without the unread
+   `CloseSecureChannelResponse` it is 60. The plan's 56 does not follow from these rows by any
+   rule S80 could find; the count is a measurement of the rule above, not a correction of the
+   plan.
+3. **Wish list, 78 cases** (the plan says 72): the 61 and 17 more. The six services that
+   upstream builds nowhere and that `OPCUA-SUB-UNUSED-SERVICES` and E19 name (ModifySubscription,
+   SetPublishingMode, Republish, TransferSubscriptions, ModifyMonitoredItems,
+   DeleteMonitoredItems, each as request and response), `IssuedIdentityToken`
+   (`OPCUA-AUTH-ISSUED`), `StatusChangeNotification` (S116) and, by closure,
+   `MonitoredItemModifyRequest`, `MonitoredItemModifyResult` and `TransferResult`. No new enum.
+A fourth run, for scale only: 352 cases, all of the model but the two that finding 6 names.
+
+### Findings
+1. **The generator as it stands completes none of the three generations.** Every one of the 354
+   cases fails the same way, run one case at a time: `case value '310' does not fit its
+   discriminator`. `ExtensionObjectDefinition(int 32 extensionId)` switches on a signed
+   `int 32`, and `disc_literal` (`src/emit/switch.rs`) takes unsigned discriminators only; the
+   S79 addendum listed it. After it, `error_value` refuses the same type ("the switch's error
+   value is not emitted"). The scratch fix is one arm in each: an integer literal for `Ty::I32`,
+   and `u64::from(x.unsigned_abs())` as the reported value, as the count error of S78 reports a
+   negative count. This is the only refusal that the three lists meet.
+2. **A miscompile that the Modbus proof could not reach.** With the first fix, the 22 cases
+   generate and `cargo check` passes, and the 61 and the 78 do not: rustc E0308 (four errors,
+   then eight). The enum's `serialize` merges the arms whose bodies are the same text so that
+   `clippy::match_same_arms` stays quiet (`merge_arms`), and `BrowseResponse { results:
+   Option<Vec<BrowseResult>>, .. } | ReadResponse { results: Option<Vec<DataValue>>, .. }`
+   has the same body and different binding types. Modbus merges only variants of one shape.
+   The scratch fix keys the merge on the stored fields' names and types as well as the body
+   (three lines). With it all three lists generate, compile and pass the lints below. This is
+   a defect of the existing generator, not a missing construct.
+3. **Lints.** The generated modules draw one clippy warning, `too_many_lines`, on `parse`
+   and on `serialize` of the enum (2,067 and 400 lines at 22 cases; the same two at 22, 61 and
+   78 cases), and nothing else under `pedantic`, `indexing_slicing`, `arithmetic_side_effects`
+   and `as_conversions`. The output needs either the per-case functions of finding 5 or an
+   `#[expect(clippy::too_many_lines)]` the generator emits where the function is long.
+4. **Size and time**, with the two fixes (one dispatcher function per direction, as the
+   generator writes it today). Lines are `wc -l` of every `.rs` file after the repository's
+   `rustfmt`, headers included. The delta is against the baseline crate with the codec and
+   the stubs only.
+
+   | | Cases | Enums | Files | Lines | Check | Dev build | Release build | rlib | Stripped exe |
+   | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+   | Baseline | 0 | 0 | 0 | 0 | 0.31 s | 0.42 s | 0.51 s | 168 KB | 342,208 B |
+   | 22 cases | 22 | 5 | 16 | 3,805 | 0.41 s (+0.10) | 0.56 s (+0.14) | 0.88 s (+0.37) | 547 KB | 408,800 B (+66,592) |
+   | 61 cases | 61 | 10 | 37 | 8,150 | 0.59 s (+0.28) | 0.85 s (+0.43) | 1.54 s (+1.03) | 1,058 KB | 442,832 B (+100,624) |
+   | 78 cases | 78 | 10 | 40 | 9,356 | 0.66 s (+0.35) | 1.78 s (+1.36, 0.94 to 2.61) | 2.42 s (+1.91, 1.96 to 2.88) | 1,184 KB | 443,040 B (+100,832) |
+   | 352 cases | 352 | 35 | 131 | 35,635 | 2.04 s (+1.73) | 3.39 s (+2.97) | 10.41 s (+9.90, 8.12 to 12.69) | 4,386 KB | 661,616 B (+319,408) |
+
+   The stripped-executable column is a file size, and on this target (arm64 Mach-O) the `__TEXT`
+   segment is padded to 16 KiB pages, so every delta in it can be off by up to 16 KiB. The
+   plateau from 61 to 78 cases (+100,624 against +100,832) is an artifact of that padding: the
+   `__text` section of a rebuild of both models grew from 276,668 to 285,244 bytes (+8.6 KB of
+   code) while `__TEXT` stayed at 376,832 bytes for both. Read the per-list binary figures as
+   +66 to +101 KB within a page or two, not as exact.
+
+   The 8,000 to 12,000 line estimate of the plan, which no measurement backed, is replaced by
+   these: about 3,800 lines for the 22 cases, 8,150 for the Java-parity closure and 9,350 for
+   the wish list. They sit in the estimate's lower half at 61 and 78 cases and below it at 22.
+   Over a third of the 22-case output is not the 22 cases: every case of the switch that is
+   not enabled is an arm that refuses it by name (4 lines each: 332, 293 and 276 arms, which is
+   1,328, 1,172 and 1,104 lines of 3,805, 8,150 and 9,356), so `parse` carries the size of the
+   model, not only of the enabled set. Per enabled case the marginal cost is about 115 lines
+   from 22 to 61 cases and 75 from 61 to 78. The scratch crate has no dependency and the build
+   time of the real crate was not measured here, so the deltas are absolute, not shares of a
+   build. `OpcuaStatusCode` (274 entries) generates to 576 lines and `AttributeId` to 82, and
+   both compile; the enum refuses a number it does not know, so the S88 test
+   `opcua_unknown_status_code_keeps_its_number` needs the hand-written `StatusCode` to carry the
+   number and this enum only for the name table.
+5. **A stack finding that the line counts hide.** In a dev build (opt-level 0) every arm's
+   locals live in the one frame of the dispatcher, so the frame grows with the number of
+   cases: the `parse` of `ExtensionObjectDefinition` takes 45,056 bytes at 22 cases, 139,264
+   at 78 and 700,416 at the 352-case model, and `serialize` 20,480, 77,824 and 393,216 (the
+   stack allocation of the prologue, read from the assembly; the large ones are probed in
+   whole 4 KiB pages, so each is a lower bound rounded to a page). In a release build the
+   frame is 432, 1,136 and 4,096 bytes.
+   The depth budget does not help if one hop already costs that. To test it the stub
+   ExtensionObject spent one unit and re-entered the dispatcher; the input is a `ReadRequest`
+   whose request header carries another `ReadRequest` as its additional header, 24 bytes a
+   hop; it ran on a thread of a given stack size. At the 78 cases and the limit of 64 that
+   ADR-0034 proposes:
+
+   | Build | Stack | Smallest budget that overflows | Budget 64 |
+   | --- | --- | --- | --- |
+   | Dev | 2 MiB (test and Tokio worker threads) | 14 | crashes (SIGABRT) |
+   | Dev | 8 MiB (main thread of Linux and macOS; Windows gives 1 MiB) | 57 | crashes (SIGABRT) |
+   | Release | 2 MiB | 1,481 | `RecursionLimit` |
+   | Release | 8 MiB | 5,899 | `RecursionLimit` |
+
+   So a hostile or corrupted reply that nests 14 ExtensionObjects aborts a debug build, and
+   a negative vector at the budget cannot even be run by `cargo test`. The scratch generator
+   was then changed to emit the body of each case in its own function (a closure called in
+   place, which costs a frame of its own at opt-level 0); the dispatcher frame stopped
+   growing (the same page-rounded 4,096 bytes in a dev build at 22, 78 and 352 cases), and
+   the table became 121 hops (2 MiB) and 483 (8 MiB) in a dev build and
+   2,804 and 11,170 in a release build, so 64 hops use about 1.1 MiB in a dev build with the
+   stubs: room, with a margin of about 1.9 on a 2 MiB thread, but not more, and the real
+   externals add frames of their own (UNVERIFIED until S86 measures them). That variant is
+   about 430 bytes of code per case larger: 9,358 lines and +133,968 bytes stripped at 78
+   cases, +468,752 at the 352-case model, check 0.87 s and 2.19 s; a closure is not what the
+   generator should emit (`clippy::redundant_closure_call`), a function is.
+6. **Refused constructs, by construct.** In the lists: only finding 1. Outside them, running
+   the generator on each of the types ADR-0034 keeps hand-written names why, and confirms the
+   hybrid split rather than undermining it: `Variant` ("fields after the typeSwitch are not
+   emitted yet"), `DataValue`, `DiagnosticInfo` and `LocalizedText` (`optional`), `PascalString`
+   (`virtual`), `NodeId` and `NodeIdTypeDefinition` (`abstract`), `ExtensionObject` (`abstract`),
+   `MessagePDU` and `Payload` (a `simple` field of the parent before the switch),
+   `OpenChannelMessage` (a `typeSwitch` in a `type`), `XmlElement` (a `string 8` array), the
+   enums `ChunkType`, `MessageType`, `OpcuaDataType` and `OpcuaIdentifierType` (string base
+   types), `NodeIdType` (defined twice, the S77 rule) and `OpcuaConstants` (stores no field).
+   `OpcuaProtocolLimits`, `SecurityHeader`, `SequenceHeader`, `ByteStringArray`, `GuidValue`,
+   `PascalByteString`, `QualifiedName` and the `StatusCode` type do generate and are not
+   needed. In the model itself, two of the 354 cases are refused after finding 1:
+   `CertificateGroupDataType`, whose `isCertificateAssigned` is an `array bit` after a
+   `reserved uint 7` ("a run of sub-byte fields does not end on a byte boundary"), and
+   `ApplicationConfigurationDataType`, which holds it. Neither is in any list.
+7. **A round trip, as a smoke test only.** With the stubs, a `ReadRequest` vector of two
+   nodes parses and serializes byte for byte; a node count of 1,000,000 over 8 bytes is
+   `CountLimit` before any reservation; a disabled case, an unknown id and a truncated input
+   are named errors. That proves the shape, not the OPC UA bytes: the stubs read nothing, and
+   the vectors of S88 are the proof.
+
+### Decision
+1. **E14.** The numbers confirm option 1, the hybrid, and do not point to option 2, on one
+   condition. On size and time they are small: 3,800 to 9,400 lines for the three lists,
+   +0.1 to +0.35 s of `cargo check`, +66 to +101 KB of stripped executable in a release build,
+   and the whole model minus two cases is 35,600 lines and +1.7 s. The condition of E14
+   ("2 is the fallback if S80 shows constructs still refused") is met in the letter by the
+   generator of S79, which completes none of the generations, so it is stated plainly: the
+   refusals are one construct (the signed `int 32` switch), one defect (the arm merge) and
+   one structural gap (the frame of the dispatcher, finding 5), each fixed in the scratch copy
+   with a handful of lines (ten changed lines for the first two) and none a new construct of
+   the model. Option 1 stands if a generator slice makes the three changes of decision 3
+   before S88; if it does not land, S88 takes option 2 (the same structures hand-written in
+   `src/opcua/service`, the generator kept as the `cfg(test)` cross-check). The plan has no
+   such slice, and this addendum does not add it to the table.
+2. **Amendment of decision 5, recursion through external types.** The last sentences of
+   decision 5 ("A recursive type is a generation error until the first protocol that has one
+   adds a depth argument and `ParseError::RecursionLimit`") are replaced by these rules, which
+   are what OPC UA is the first protocol to need:
+   - A cycle made of generated types alone is a generation error, as before.
+   - A cycle that passes through an `[external]` type is allowed when the options set `depth`
+     (S79). The generator passes the budget unchanged and never spends it. It cannot see into
+     an external, so the bound is a property of the generator and the external together.
+   - Every external that can reach generated code again (`ExtensionObject`, `Variant` and
+     `DataValue` in OPC UA) spends one unit on entry, before reading, and fails with
+     `ParseError::RecursionLimit` at zero. An external that only recurses into itself inside
+     hand-written code (`DiagnosticInfo`, through its `innerDiagnosticInfo`, which holds no
+     generated type) spends the same unit for the bound on its own depth (S86). Each has a
+     negative vector nested to one level past the budget in the same module, and the
+     Known-body dispatch has a fuzz target (E14); a missing spend is not caught at compile
+     time.
+   - The stack bound is the budget times the longest chain of generated frames between two
+     external re-entries, and a generated dispatch function must not grow with the number of
+     cases: the body of each case of a `discriminatedType` is a function of its own and the
+     `match` only calls it (finding 5). The chain in the lists is three generated types (a
+     variant, then up to two structs: `CreateSessionResponse`, `EndpointDescription`,
+     `ApplicationDescription`) and eight in the whole model. A test nests one level past
+     the budget on a 2 MiB thread in a dev build and expects `RecursionLimit`.
+   - Allocation stays bounded as in decision 5: a count is checked against the remaining input
+     before any reservation (`CountLimit`, S78), and the budget bounds depth, not length.
+3. **The generator changes S80 recommends before S88** (a slice of its own, S size, tool
+   0.2.0 or 0.3.0 by decision 7: the first two change no output for Modbus; the third changes
+   it unless it is limited to large switches, and a change to existing output bumps the
+   version and is committed as a following `gen` commit): (a) a
+   signed `int 32` (and `int 8`, `int 16`, `int 64`) discriminator and its error value (the
+   scratch fix reports `u64::from(x.unsigned_abs())`, which drops the sign as the count error of
+   S78 does, so an id of -310 reads as the value 310, the number of a real case; the generator
+   slice should pick a representation that keeps the sign for a discriminator); (b)
+   the arm merge compares the bound fields' names and types; (c) one function per case for
+   `parse` and `serialize` of a `discriminatedType`, with the lint expectation or the
+   function split that satisfies `too_many_lines`. Proof: first-party synthetic fixtures in
+   the S77 pattern (a signed switch, two variants of one body with different element types, a
+   dispatcher with 300 cases nested through a stub external to the budget on a small stack),
+   and a rerun of this dry run, whose steps are listed in the Compliance section.
+4. **What this addendum does not decide.** Whether to compress the disabled arms (a range
+   or a single or-pattern would cut 1,100 to 1,300 lines but lose the case name in the error);
+   the value of the limit (ADR-0034 says 64 unless S86 measures a reason, and the measurement
+   above is the reason to measure again with the real externals); the E13 vendoring.
+
+### Consequences
+- E14 is confirmed for option 1 with a precondition, not unconditionally. S88 cannot start
+  from the generator as it is: it would generate nothing.
+- The generated layer is small and cheap to build; the cost of option 1 is the review of a
+  generator change and of regenerated output, not compile time or binary size.
+- Everything in finding 5 is a debug-build hazard that a release-only test run would miss, so
+  the stack test must run in the dev profile.
+- The figures are one machine, one toolchain and the stubs. The Linux targets of the CI matrix
+  (x86_64, aarch64, armv7) and Windows were not measured; frame sizes and the hops-to-overflow
+  differ by target, and the real externals change the per-hop cost. The numbers in this
+  addendum are UNVERIFIED for those until S86 and S88 measure them where the gates run.
+
+### Compliance
+- S80 changed no file of the tool or the crate and added no vendored file. The scratch
+  directory (`round-m3c/s80/` of the session scratchpad) held: a copy of the three mspec files
+  and a scratch manifest, the options files of the three lists and of the whole model, the
+  generator built twice from a scratch copy of `tools/stonecrab-codegen` (the fixes of
+  decision 3 (a) and (b), then the closure experiment of finding 5), the scratch crate and
+  its benchmark scripts. It was not committed; the numbers above are its record.
+- To rerun: copy the three files and the S88 manifest layout to a scratch root, generate each
+  list with `stonecrab-codegen generate`, copy the output beside the codec stand-in, and
+  time `cargo check`, `cargo build` and `cargo build --release` from clean; take the
+  frame size from `cargo rustc --lib -- --emit asm -C codegen-units=1` and the overflow
+  point from a bisection on the budget in a thread of 2 and of 8 MiB.
