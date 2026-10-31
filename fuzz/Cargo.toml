@@ -108,6 +108,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "fuzz_opcua_frame"
+path = "fuzz_targets/fuzz_opcua_frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "fuzz_sensors_profile_toml"
 path = "fuzz_targets/fuzz_sensors_profile_toml.rs"
 test = false

@@ -86,6 +86,8 @@ src/opcua/codec/variant.rs
 src/opcua/codec/vectors.rs
 src/opcua/codec.rs
 src/opcua/driver.rs
+src/opcua/frame/properties.rs
+src/opcua/frame.rs
 src/opcua/fuzzing.rs
 src/opcua/options.rs
 src/opcua.rs

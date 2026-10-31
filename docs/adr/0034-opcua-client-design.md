@@ -589,3 +589,85 @@ Compliance: `crates/stonecrab/src/codec/error.rs`; `crates/stonecrab/src/opcua/c
 `opcua_codec_variant_dimensions_inconsistent_with_the_count_are_refused` and
 `plc_error_mapping_is_malformed_data_except_the_three_limits`;
 `fuzz/fuzz_targets/fuzz_opcua_decode.rs`; `mutants.toml` lists the files.
+
+## Addendum (S87, 2026-10-31): the TCP framing
+Slice S87 adds `opcua/frame.rs` (decision 10), crate-private and called by nothing until the
+secure channel of S90 (the module carries a `dead_code` expectation, as `codec` does). The
+generator is untouched and there is no gen commit. Choices the decisions left open:
+
+- **Bodies.** `Frame { chunk, body }` with `Body::{Hello, Acknowledge, Error, Open, Close,
+  Message}`. Hello is the version, `TransportLimits` (receive buffer, send buffer, maximum
+  message size, maximum chunk count) and the endpoint URL as a String; Acknowledge the version
+  and the limits; Error a `StatusCode` and a String that may be null. OPN is the secure channel
+  id, an `AsymmetricHeader` (policy URI String, sender certificate and receiver thumbprint
+  `ByteString`s), the `SequenceHeader` and the payload; CLO and MSG are the channel id, the
+  token id, the sequence header and the payload. The payload is `Bytes` as received: S88 reads
+  it, S94 reassembles it, and the security slices will encrypt and sign around it. The `Debug`
+  of the two chunk types shows its length only.
+- **The security header.** Part 6 puts the secure channel id in the 12-byte message header and
+  the token id (symmetric) or the three fields above (asymmetric) in the security header; the
+  mspec instead groups the channel id with the token id. The wire order is the same, so the
+  channel id is the first field of an OPN, CLO or MSG body and the symmetric security header
+  is the token id alone, 4 bytes, as upstream's `SYMMETRIC_SECURITY_HEADER_SIZE`. For the
+  policy None the asymmetric header is the 47-byte URI, a null certificate and a null
+  thumbprint: 4 + 47 + 4 + 4 = 59 bytes (`AsymmetricHeader::none()`), upstream's
+  `ASYMMETRIC_SECURITY_HEADER_SIZE`; otherwise `12 + URI + certificate + thumbprint`.
+  The sequence number and request id are `UInt32`s (the mspec says `int 32`).
+- **The size.** The framer is `OpcuaFramer::new(receive_buffer_size, ResourceLimits)`; its
+  maximum is the smaller of the two and `Int32::MAX` (a `u32`), so `encode` never writes a
+  size that `decode` refuses. One maximum serves both directions: it bounds what is read
+  (the client's own receive buffer, sent in Hello) and what is written. S90 must bound sends
+  by the server's receive buffer from Acknowledge, which can be smaller, either by building
+  the framer from the smaller of the two buffers or by checking the size before `encode`. The header is parsed as soon as 8 bytes are
+  buffered. A size below 8 or above `Int32::MAX` is refused by `FrameHeader::parse`
+  (`InvalidDiscriminator`, field `message size`, so `FrameError::Malformed`): the Java reader
+  takes the field as a signed number, where the upper half is negative. A size over the
+  maximum is `FrameError::Oversized` (`ErrorKind::ResourceLimit`), as the `Framer` contract
+  and the Modbus framer have it, and the buffer is untouched, so no body is waited for. The
+  S87 row of the plan says "`MalformedData`" for a negative or oversized size; this addendum
+  reads the oversized half as the trait's `Oversized`, a bound being exceeded and not a claim
+  about what the peer meant, as decision 5 says of the other two limit errors. A body that is
+  complete but invalid is `Malformed`, and so is a String or `ByteString` length that the
+  message does not hold, a length over `MAX_STRING_BYTES` included: the frame is already
+  within the limit, so `Oversized` (which names a frame size) would misreport it. `decode`
+  maps every codec error of the header and the body to `Malformed`; `frame_error`, which
+  turns `OversizedLength` into `Oversized`, serves `encode` only, where the length is the
+  value's own. HEL, ACK and ERR must use every byte of their body; OPN, CLO and MSG take the
+  rest as the payload.
+- **Types and flags.** The type (`HEL`, `ACK`, `ERR`, `OPN`, `CLO`, `MSG`) and the flag (`C`,
+  `F`, `A`) are case-sensitive and anything else, RHE included, is refused when the header
+  is read, before the size is compared. The flag is not tied to the type: upstream's mspec reads
+  it for every type, and UNVERIFIED against Part 6 (which gives `F` for HEL, ACK and ERR) is
+  whether a server ever sends another. The framer returns `C` and `A` messages as they are;
+  S94 joins and drops them.
+- **Encoding.** `encode` measures the frame first (`length_in_bytes`, checked arithmetic),
+  refuses a total over the maximum as `Oversized` before writing, writes into a
+  `BoundedWriter` of exactly that size and appends it, so a failed encode appends nothing.
+- **Fuzz.** `fuzz_opcua_frame` (27 seeds under `fuzz/corpus/fuzz_opcua_frame`, reached through
+  `stonecrab::opcua::fuzzing::frame`, which exists only under `--cfg fuzzing`): the first byte
+  selects a receive buffer of 65535, 4096, 256 or 24 bytes and the rest is the stream. A
+  message that decodes is 8 bytes up to the receive buffer, comes off the front of the buffer,
+  and is written back as exactly the bytes it consumed; waiting and an error leave the buffer
+  as it was; an `Oversized` names a size over the receive buffer. The chunk reassembly target
+  of decision 5 waits for S94.
+- **Vectors.** As in the S86 addendum, the wire vectors are written out in the unit tests
+  (a Hello and a Message as plain byte arrays; the others assembled from numbers and text),
+  not as files under `fixtures/opcua`; the upstream corpus of S93 will cover Hello and
+  Acknowledge from outside. Property tests: `opcua_prop_frame_round_trips_and_measures_as_it_is_written`,
+  `opcua_prop_frame_decode_never_panics_and_what_it_takes_it_writes_back` and
+  `opcua_prop_frame_survives_a_cut_or_flipped_byte`.
+- **Coverage note.** A closure that no test runs is a function group of its own with one
+  uncovered line, even when it sits on a line that runs, so a `map_err(|error| ...)` on an
+  error that cannot occur fails the floor of 100. `encode` therefore maps with `frame_error`,
+  a named function that a test calls for each error; the two closures of `decode` both run.
+
+Compliance: `crates/stonecrab/src/opcua/frame.rs` and `frame/properties.rs`;
+`crates/stonecrab/src/opcua/fuzzing.rs` (`frame`, `frame_limit`); tests
+`opcua_framer_reads_the_eight_byte_header_and_the_body`,
+`opcua_framer_rejects_a_size_below_eight`,
+`opcua_frame_size_above_the_receive_buffer_fails_before_buffering`,
+`opcua_message_type_hel_ack_err_opn_clo_msg_round_trip`,
+`opcua_hello_and_acknowledge_round_trip_with_all_limits`,
+`opcua_asymmetric_header_is_59_bytes_for_policy_none` and
+`opcua_unknown_message_type_is_a_protocol_error`;
+`fuzz/fuzz_targets/fuzz_opcua_frame.rs`; `mutants.toml` lists the files.

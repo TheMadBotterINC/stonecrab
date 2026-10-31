@@ -23,12 +23,14 @@ examine_globs = [
   "crates/stonecrab/src/modbus/batch.rs",
   "crates/stonecrab/src/modbus/driver.rs",
   "crates/stonecrab/src/modbus/options.rs",
-  # opcua: the tag address grammar, the connection string and the types of the binary
-  # encoding, the built-ins and the recursive ones (framing joins with its slice).
+  # opcua: the tag address grammar, the connection string, the types of the binary
+  # encoding (the built-ins and the recursive ones) and the TCP framing.
   "crates/stonecrab/src/opcua/address.rs",
   "crates/stonecrab/src/opcua/codec.rs",
   "crates/stonecrab/src/opcua/codec/*.rs",
   "crates/stonecrab/src/opcua/driver.rs",
+  "crates/stonecrab/src/opcua/frame.rs",
+  "crates/stonecrab/src/opcua/frame/*.rs",
   "crates/stonecrab/src/opcua/options.rs",
   # sensors: the measurement scaling module.
   "crates/stonecrab/src/sensors/measurement/scale.rs",

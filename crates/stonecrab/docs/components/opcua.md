@@ -4,9 +4,10 @@ in neither `default` nor `full`, as `tls` is (decision E17, ADR-0034), and it ne
 `transport` feature. The module is being built in slices (milestone M3, ADR-0034): so far it
 has the tag address grammar and, crate-private, the connection string parser and the
 types of the binary encoding (the built-ins and the recursive Variant, `DataValue`,
-`DiagnosticInfo` and `ExtensionObject` envelope), and nothing that opens a socket. There is no
-public driver, no connection, no secure channel, no session and no message codec yet, and the
-`opcua` scheme is not registered anywhere.
+`DiagnosticInfo` and `ExtensionObject` envelope) and the TCP framing (the message header and
+the six message types), and nothing that opens a socket. There is no public driver, no
+connection, no secure channel and no session yet, and the `opcua` scheme is not registered
+anywhere.
 
 This module offers `OpcuaAddress`, a validated `ProtocolAddress` for the tag text
 `ns=<n>;<i|s|g|b>=<id>[range][;a=<attribute>][;TYPE][|key=value,...]`, with the types its
@@ -20,6 +21,7 @@ socket and starts no discovery.
 | Connection string and driver options (crate-private until the driver) | build-tested |
 | Built-in types of the binary encoding: String, `ByteString`, Guid, `DateTime`, `StatusCode`, `NodeId`, `ExpandedNodeId`, `QualifiedName`, `LocalizedText` (crate-private) | build-tested |
 | Recursive and open types of the binary encoding: Variant (25 types, arrays, dimensions), `DataValue`, `DiagnosticInfo`, the `ExtensionObject` envelope with Raw, Xml and Null bodies, bounded in depth and in array counts (crate-private) | build-tested |
+| TCP framing: the 8-byte header, HEL, ACK, ERR, OPN, CLO and MSG bodies, the asymmetric header of policy None, the symmetric and sequence headers, and a single-chunk `Framer` (crate-private) | build-tested |
 | Driver, connection, secure channel, session | planned |
 | Read, write, browse, subscriptions | planned |
 | Security policies and certificates | planned |
@@ -31,6 +33,9 @@ fuzz target on the connection string and, for the built-in types, first-party by
 written from OPC UA Part 6 (`fixtures/opcua/codec`) with a property test. The recursive types
 have hand-written byte vectors in their unit tests, property tests and the fuzz target
 `fuzz_opcua_decode`; their nesting and array-count bounds are tested at the limit and beyond it.
+The framing has hand-written byte vectors for each message type, property tests and the fuzz
+target `fuzz_opcua_frame`; the size of a message is tested at the receive buffer and one byte
+past it.
 No parity claim above `planned` is made for the rest of the OPC UA record,
 [`docs/parity/opcua.md`](https://github.com/TheMadBotterINC/stonecrab/blob/master/docs/parity/opcua.md);
 the rows marked `implemented` there (the `OPCUA-ADDR-*` rows, `OPCUA-QUIRK-BINARY-ID`, the
@@ -38,8 +43,9 @@ divergences `OPCUA-DIV-NAMESPACE-RANGE`, `OPCUA-DIV-BINARY-ID` and
 `OPCUA-DIV-ADDRESS-ESCAPES`, and the connection string rows `OPCUA-CFG-SECURITY-POLICY`,
 `OPCUA-CFG-MESSAGE-SECURITY`, `OPCUA-CFG-FRAMEWORK`, `OPCUA-CFG-UNKNOWN`,
 `OPCUA-DIV-UNKNOWN-KEYS`, `OPCUA-TRANSPORT-TCP`, `OPCUA-TRANSPORT-ENDPOINT-URL`,
-`OPCUA-TRANSPORT-PORT`, `OPCUA-QUIRK-INET-PATTERN` and `OPCUA-QUIRK-TLS-NAMES`) are the ones
-that have a claim.
+`OPCUA-TRANSPORT-PORT`, `OPCUA-QUIRK-INET-PATTERN` and `OPCUA-QUIRK-TLS-NAMES`, and the
+framing rows `OPCUA-WIRE-HEADER`, `OPCUA-WIRE-MESSAGE-TYPES`, `OPCUA-WIRE-OPEN-HEADER` and
+`OPCUA-QUIRK-CODEC-RHE`) are the ones that have a claim.
 
 ## Address syntax
 ```rust
@@ -184,3 +190,26 @@ three-function signature as the built-ins, and the first three are the ones a se
 Not checked against a server yet (UNVERIFIED, see the ADR-0034 addendum of S86): the order of
 the locale and the localized text in a `DiagnosticInfo`, a dimensions flag on a scalar, and
 whether servers set the unused bits of the `ExtensionObject` encoding byte.
+
+## Framing
+Crate-private since slice S87 and called by nothing yet: the OPC UA TCP framing (Part 6, 6.7
+and 7.1) that the secure channel of slice S90 will drive through a `FramedTransport`.
+
+- Every message starts with an 8-byte header: a three-character type (`HEL`, `ACK`, `ERR`,
+  `OPN`, `CLO` or `MSG`), a chunk flag (`C`, `F` or `A`) and the little-endian `UInt32` size of
+  the message, the header included. An unknown type (RHE too) or flag is refused when the
+  header is read.
+- The framer compares the size with the receive buffer that Hello declares and with
+  `ResourceLimits::max_frame_bytes`, the smaller of the two, as soon as the 8 bytes are in,
+  before it waits for or copies the body. A size below 8, or above `Int32::MAX` (negative to
+  upstream's Java reader, which reads the size unchecked), is `MalformedData`; a size over the
+  limit is `ResourceLimit`; both leave the buffer untouched.
+- Hello carries the protocol version, the four limits (receive buffer, send buffer, maximum
+  message size, maximum chunk count) and the endpoint URL; Acknowledge the version and the
+  limits; Error a status code and a reason. `OpenSecureChannel` carries the secure channel id,
+  the asymmetric header (the policy URI, the sender certificate and the receiver certificate
+  thumbprint: 59 bytes for the policy None), the sequence header and the payload.
+  `CloseSecureChannel` and Message carry the channel id, the token id, the sequence header and the
+  payload. The payload stays bytes: the generated service layer reads it.
+- The framer reads whole messages and keeps the chunk flag; joining the chunks of one message
+  is slice S94's. It writes a message back as the bytes it read, so it keeps no state.

@@ -44,7 +44,7 @@ use crate::ByteOrder;
 use crate::codec::ParseError;
 
 /// Every multi-byte number of the OPC UA binary encoding is little-endian.
-const LITTLE: ByteOrder = ByteOrder::LittleEndian;
+pub(super) const LITTLE: ByteOrder = ByteOrder::LittleEndian;
 
 /// The longest String or `ByteString` this codec reads or writes, in bytes.
 ///

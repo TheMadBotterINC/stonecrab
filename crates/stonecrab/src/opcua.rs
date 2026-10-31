@@ -19,6 +19,13 @@ mod codec;
     expect(dead_code, reason = "the driver of slice S91 is the first caller")
 )]
 mod driver;
+// The framing is written and tested here; the secure channel of slice S90 is its first caller.
+// The fuzz entry point reaches the framer but not the constructors the channel will call.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "the channel of slice S90 is the first caller")
+)]
+mod frame;
 #[cfg(fuzzing)]
 pub mod fuzzing;
 // The fuzz entry point reaches all of it, so under `fuzzing` nothing here is dead.

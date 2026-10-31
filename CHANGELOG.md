@@ -65,6 +65,22 @@ specification-stage placeholder.
   (35 seeds, reached through the `cfg(fuzzing)` entry point), unit tests with hand-written
   byte vectors, three property tests, the coverage floor of 100 and the module in
   `mutants.toml`. No parity row changes status.
+- **Added (opt-in `opcua` feature; slice S87 of milestone M3):** the OPC UA TCP framing,
+  crate-private under `opcua/frame.rs` and called by nothing until the secure channel (S90),
+  so there is no public API change. The 8-byte message header (the three-character type, the
+  chunk flag and the size), the six message bodies (Hello and Acknowledge with the version and
+  the four limits, Error, OpenSecureChannel with the asymmetric header, CloseSecureChannel and
+  Message with the symmetric header, and the sequence header) and an `OpcuaFramer` that is a
+  `Framer` for `FramedTransport`. The size is compared with the receive buffer of Hello and
+  with `ResourceLimits::max_frame_bytes` as soon as the header is in, before anything is
+  buffered (upstream's `OpcuaMessageCodec` reads it unchecked): below 8 or above `Int32::MAX`
+  is `MalformedData`, over the limit is `ResourceLimit`. An unknown type, RHE included, or
+  chunk flag is `MalformedData`. The policy None's asymmetric header is 59 bytes. Gates: the
+  fuzz target `fuzz_opcua_frame` (27 seeds, reached through the `cfg(fuzzing)` entry point),
+  unit tests with hand-written byte vectors, three property tests, the coverage floor of 100
+  and the module in `mutants.toml`. Parity: `OPCUA-WIRE-HEADER`, `OPCUA-WIRE-MESSAGE-TYPES`,
+  `OPCUA-WIRE-OPEN-HEADER` and `OPCUA-QUIRK-CODEC-RHE` are `implemented`, and the first-party
+  half of `OPCUA-WIRE-HELLO-ACK` has its test.
 - **Dependencies:** `toml` 0.9 to 1.1 (resolved 1.1.8, with `toml_parser` 1.1.5,
   `toml_datetime` 1.1.2 and `winnow` 1.0.4) for the crate, the fuzz workspace and the code
   generator. There is no API or behavior change: no `toml` type is public, and profiles load
