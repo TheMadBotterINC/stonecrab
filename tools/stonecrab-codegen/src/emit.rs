@@ -31,6 +31,8 @@ mod external_fixtures;
 mod fixtures;
 #[cfg(test)]
 mod reserved_fixtures;
+#[cfg(test)]
+mod switch_fixtures;
 
 use fields::{Elem, Part};
 
@@ -959,17 +961,32 @@ fn check_recursion(
 /// `match_same_arms` has nothing to report. The callers' patterns never overlap (enum
 /// variants, or one enum value per arm), so merging keeps the meaning.
 fn merge_arms(arms: Vec<(String, String)>) -> Vec<(String, String)> {
-    let mut merged: Vec<(Vec<String>, String)> = Vec::new();
-    for (pattern, body) in arms {
-        if let Some((patterns, _)) = merged.iter_mut().find(|(_, existing)| *existing == body) {
+    merge_bound_arms(
+        arms.into_iter()
+            .map(|(pattern, body)| (pattern, String::new(), body))
+            .collect(),
+    )
+}
+
+/// [`merge_arms`] for arms that bind fields: `bound` is what the pattern binds, as the names
+/// and the types of the fields. Only arms that agree on it share a pattern, as an or-pattern
+/// binds each name once, to one type (`A { results: Vec<X> } | B { results: Vec<Y> }` does
+/// not compile, even when the bodies are the same text).
+fn merge_bound_arms(arms: Vec<(String, String, String)>) -> Vec<(String, String)> {
+    let mut merged: Vec<(Vec<String>, String, String)> = Vec::new();
+    for (pattern, bound, body) in arms {
+        if let Some((patterns, ..)) = merged
+            .iter_mut()
+            .find(|(_, existing_bound, existing)| *existing_bound == bound && *existing == body)
+        {
             patterns.push(pattern);
         } else {
-            merged.push((vec![pattern], body));
+            merged.push((vec![pattern], bound, body));
         }
     }
     merged
         .into_iter()
-        .map(|(patterns, body)| (patterns.join(" | "), body))
+        .map(|(patterns, _, body)| (patterns.join(" | "), body))
         .collect()
 }
 

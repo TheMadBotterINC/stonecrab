@@ -1176,3 +1176,125 @@ A fourth run, for scale only: 352 cases, all of the model but the two that findi
   time `cargo check`, `cargo build` and `cargo build --release` from clean; take the
   frame size from `cargo rustc --lib -- --emit asm -C codegen-units=1` and the overflow
   point from a bisection on the budget in a thread of 2 and of 8 MiB.
+
+## Addendum (S80a, 2026-10-30): the three generator changes of the S80 dry run
+### Status
+Accepted (2026-10-30), as slice S80a of docs/POST_ALPHA_PLAN.md (Phase H, M3 OPC UA). It makes
+the three changes that decision 3 of the S80 addendum asks for before S88, and nothing else:
+the decisions and the addenda above stand. No mspec is vendored and nothing generated is
+committed; the figures below come from a scratch crate outside the repository.
+
+### Decision
+1. **A signed discriminator of every width (3a).** A `typeSwitch` may be over `int 8`,
+   `int 16`, `int 32` or `int 64`, as a discriminator field or as a parameter. A case value is
+   an integer literal that fits the width, negative ones included (`'-310'` is a negation of
+   the literal 310 in the expression grammar); one that does not fit, or is not an integer, is
+   a generation error naming the value. The error value of `InvalidDiscriminator` keeps the
+   sign, which the scratch fix of S80 (`unsigned_abs`) lost: it is the number widened to
+   `i64` and reinterpreted as `u64` (`i64::from(id).cast_unsigned()`, `id.cast_unsigned()` for
+   `int 64`; no `as`), so an id of -310 is `0xFFFF_FFFF_FFFF_FECA` and not 310, the number of a
+   real case. The field stays a `u64`; a consumer that wants the number back reads it as an
+   `i64`.
+2. **The arm merge compares what the arms bind (3b).** `serialize` and `length_in_bytes` of a
+   `discriminatedType` still merge arms with the same body so that `match_same_arms` stays
+   quiet, but only arms that bind the same field names of the same Rust types (the bound
+   fields, after the unused ones of a length arm are dropped). `ReadResponse { results:
+   Vec<DataValue> }` and `BrowseResponse { results: Vec<BrowseResult> }` are two arms. Enums
+   merge as before (they bind nothing).
+3. **A function per case above 16 enabled cases (3c).** A `discriminatedType` with more than
+   16 enabled cases emits `parse_<case>` and `serialize_<case>` for each case that reads or
+   writes something; `parse` and `serialize` become a `match` that calls them. The call
+   passes the reader or writer, the budget when the case body uses it, and, for `parse`, the
+   parameters and the fields read before the switch that the case uses or stores (the
+   case's own list, in name order). `serialize_<case>` of a case that stores fields takes
+   `&self` and binds them with `let Self::<Case> { .. } = self else { return Err(..) }`: the
+   `match` never sends another variant, and the branch is an `InvalidDiscriminator` naming
+   the case rather than a panic. The alternative, passing the fields as references, trips
+   `ptr_arg`, `ref_option` and `trivially_copy_pass_by_ref` depending on their types. The
+   limit is 16 because Modbus has nine and a small switch needs no split; it is a constant of
+   the generator (`CASE_FUNCTIONS_ABOVE`). `length_in_bytes` stays one `match`: its arms are
+   expressions and the S80 lists generate none (nothing asks for the length of
+   `ExtensionObjectDefinition`); S88 measures it if its wiring does.
+4. **The `too_many_lines` expectation is not emitted.** The dispatcher of a large switch
+   keeps one arm for each disabled case, 4 lines each, so its `parse` is over the 120 lines of
+   the repository's `clippy.toml` however the enabled cases are written, and a case with
+   many fields (`PublishResponse`) is over it on its own. An expectation that the generator
+   adds after `rustfmt` for a body over 120 lines was written and removed again: it changed
+   `modbus_pdu.rs` (its `parse` is 225 lines, in a module that is `cfg(test)`, where the lint
+   does not fire), and this slice leaves the Modbus output as it is. The module that holds
+   the OPC UA output (S88) carries `#[expect(clippy::too_many_lines, reason = ...)]` on
+   `mod generated`, which is fulfilled by the dispatcher in every list.
+5. **The tool version stays 0.2.0.** Decision 7 bumps it when the output changes for an
+   unchanged input. The Modbus output is byte for byte what S79 left (`mise run regen`
+   twice identical and the tree unchanged), the signed switch was a generation error, and the
+   merge key and the split change no text a switch of 16 cases or fewer, with matching
+   bindings, had. Hence no `gen` commit follows.
+6. **Fixtures.** `src/emit/switch_fixtures.rs`, first-party mspec compiled with `rustc` (a
+   debug build) next to the stand-in of S77: `generator_signed_int32_discriminator_selects_its_case`
+   (four widths, field and parameter, signs, the disabled and unknown negatives),
+   `generator_signed_discriminator_literals_are_checked_against_the_width`,
+   `generator_arms_with_equal_names_and_different_types_are_not_merged`,
+   `generator_large_switch_gets_a_function_per_case` (17 split, 16 do not) and
+   `generator_dispatch_frame_does_not_grow_with_case_count` (300 cases nested through an
+   external to a budget of 40 on 1 MiB). With the cases inline the last overflows the stack;
+   with a function per case it runs on 128 KiB and fails on 64 KiB.
+
+### Rerun of the S80 dry run
+The three lists of the S80 addendum (22, 61 and 78 cases, and the whole model but two cases
+for scale) were generated again from the same pinned `opc-manual.mspec` with the same
+options, the externals as the stubs of S80, into a scratch crate of the same shape. The
+tool was the one of this slice, edition 2024, rustc 1.99.1, Apple silicon macOS.
+
+| | Cases | Enums | Files | Lines (S80) | Lines (S80a) | `cargo check` | clippy, workspace lints |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 22 cases | 22 | 5 | 16 | 3,805 | 4,217 (+11%) | passes | `too_many_lines`: 1 (the `parse` dispatcher, 1,356 lines) |
+| 61 cases | 61 | 10 | 37 | 8,150 | 9,348 (+15%) | passes | `too_many_lines`: 3 (dispatcher 1,239, two functions of 123 and 132 lines) |
+| 78 cases | 78 | 10 | 40 | 9,356 | 10,939 (+17%) | passes | `too_many_lines`: 3 (dispatcher 1,188, `serialize` 166, `parse_publish_response` 132) |
+| 352 cases | 352 | 35 | 131 | 35,635 | 41,863 (+17%) | passes | `too_many_lines`: 30 (the dispatcher among them), nothing else |
+
+Lines are `wc -l` of every `.rs` file after the repository's `rustfmt`, headers included. The
+clippy column is `cargo clippy` under `pedantic` with the root's lint table, `indexing_slicing`,
+`arithmetic_side_effects` and `as_conversions` denied on the module and the repository's
+`clippy.toml`; no other lint fires, and `rustfmt --check` finds the output formatted. The
+growth is the price of a signature and a call for each case (about 19 lines more for each).
+
+The dispatcher frame no longer grows with the cases. In a dev build the stack allocation of
+the prologue of `ExtensionObjectDefinition::parse` is 4,096 bytes (page-rounded, a lower
+bound) at 22, 78 and 352 cases, against 45,056, 139,264 and 700,416; `serialize` is 64 bytes
+against 20,480, 77,824 and 393,216. The largest case function is also 4,096 bytes.
+
+The hop test of S80 (a `ReadRequest` whose additional header holds another, a stub
+ExtensionObject that spends one unit and re-enters, a budget bisected on a thread of a
+given stack) gave, as the smallest budget that overflows:
+
+| Build | Stack | 22 cases | 78 cases (S80: before) | 352 cases |
+| --- | --- | --- | --- | --- |
+| Dev | 2 MiB | 117 | **130** (14) | 111 |
+| Dev | 8 MiB | 466 | **521** (57) | 446 |
+| Release | 2 MiB | 3,379 | 2,804 (1,481) | 1,647 |
+| Release | 8 MiB | 13,462 | 11,170 (5,899) | 6,563 |
+
+A budget of 64 is `RecursionLimit` in all twelve. In a dev build 64 hops use about half of a
+2 MiB thread (a hop costs about 16 KiB), a margin of 2.0, as the closure experiment of S80
+estimated (121 and 483); the real externals add frames of their own, so the figure is still
+UNVERIFIED until S86 and S88 measure them. One machine, one toolchain, the stubs, as in S80.
+
+### Consequences
+- S88 can generate the connect-and-read subset with option 1 of E14: the generator completes
+  all three lists, the output compiles, and a hostile chain of 64 ExtensionObjects no longer
+  aborts a debug build on a 2 MiB thread. S88 owns the `too_many_lines` expectation on the
+  module and the stack test through the real externals.
+- The output is 11 to 17% longer than S80 reported, for 22 to 352 cases.
+- The disabled arms are not compressed (S80 decision 4 stands); the split does not remove
+  them from the dispatcher.
+- A case that stores no field and reads nothing stays an arm of the `match`
+  (`Ok(Self::Empty)`), as it has no locals.
+
+### Compliance
+- S80a: `tools/stonecrab-codegen` (`src/emit/switch.rs`: the signed literal, the error value,
+  the case functions and the bound key; `src/emit.rs`: `merge_bound_arms`;
+  `src/emit/fixtures.rs`: the stand-in reads and writes `int 8`, `int 16` and `int 64`;
+  `src/emit/switch_fixtures.rs`) and its README (semantics, matrix, fixtures). `mise run regen`
+  passes and the Modbus generated files are unchanged. The scratch directory (`round-m3d/s80a/`
+  of the session scratchpad) held the S80 scratch tooling (the options of the three lists, the
+  stub externals, the hop test) and was not committed.

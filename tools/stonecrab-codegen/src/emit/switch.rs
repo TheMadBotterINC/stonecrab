@@ -5,12 +5,19 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
     Binding, Ctx, DiscValue, Discriminator, Elem, GenError, Imports, Part, Ty, VISIBILITY_EXPECT,
-    check_name, describe, emit_match, fields_of, gen_error, integer_literal, integer_text, line,
-    mentions_depth, merge_arms, module, scalar,
+    check_name, decimal, describe, emit_match, fields_of, gen_error, integer_literal, integer_text,
+    line, mentions_depth, merge_bound_arms, module, scalar,
 };
-use crate::expression::Expr;
+use crate::expression::{Expr, UnaryOp};
 use crate::mspec::{Case, Field, FieldKind, MExpr, Param, TypeDef, TypeForm, TypeRef};
 use crate::naming::{snake, upper_camel, variant_names_lint_fires};
+
+/// The number of enabled cases from which a `discriminatedType` gets a function per case for
+/// `parse` and `serialize` (ADR-0019, S80a addendum). Below it the cases stay in the one
+/// `match`, which keeps the output of a small switch as it was (Modbus has nine); above it
+/// the locals of every arm would share the one stack frame of the dispatcher, which in a debug
+/// build grows with the number of cases.
+const CASE_FUNCTIONS_ABOVE: usize = 16;
 
 impl Ctx<'_> {
     pub(super) fn emit_discriminated(&self, def: &TypeDef) -> Result<String, GenError> {
@@ -174,6 +181,8 @@ impl Ctx<'_> {
             &mut imports,
             &mut used_params,
         )?;
+        let split = planned.len() > CASE_FUNCTIONS_ABOVE;
+        let mut case_functions = String::new();
         let scrutinee = match discs.as_slice() {
             [one] => one.name.clone(),
             many => format!(
@@ -209,17 +218,18 @@ impl Ctx<'_> {
             else {
                 continue;
             };
-            line(&mut body, &format!("{pattern} => {{"));
             let mut scope = parse_scope.clone();
             self.check_case_params(def, case, &scope)?;
+            let mut statements = String::new();
+            let mut case_used = BTreeSet::new();
             self.emit_parse_parts(
                 def,
                 parts,
-                &mut body,
+                &mut statements,
                 &mut scope,
                 &mut run_index,
                 &mut imports,
-                &mut used_params,
+                &mut case_used,
             )?;
             self.emit_implicit_checks(
                 def,
@@ -227,11 +237,61 @@ impl Ctx<'_> {
                 parts,
                 &case.fields,
                 &scope,
-                &mut body,
-                &mut used_params,
+                &mut statements,
+                &mut case_used,
             )?;
-            line(&mut body, &format!("Ok({})", construct(variant, stored)));
-            line(&mut body, "}");
+            line(
+                &mut statements,
+                &format!("Ok({})", construct(variant, stored)),
+            );
+            if split && !parts.is_empty() {
+                // What the case takes from the parent: the parameters and the fields read
+                // before the switch that it uses, and the discriminators it stores.
+                let stored_discs: Vec<&str> = discs
+                    .iter()
+                    .zip(&values)
+                    .filter(|(disc, value)| disc.is_field && **value == DiscValue::Stored)
+                    .map(|(disc, _)| disc.name.as_str())
+                    .collect();
+                let taken: Vec<(&String, &Binding)> = parse_scope
+                    .iter()
+                    .filter(|(name, _)| {
+                        case_used.contains(*name) || stored_discs.contains(&name.as_str())
+                    })
+                    .collect();
+                let function = format!("parse_{}", snake(variant));
+                let depth = self.options.depth.is_some() && mentions_depth(&statements);
+                let mut signature = vec!["reader: &mut BoundedReader<'_>".to_owned()];
+                let mut arguments = vec!["reader"];
+                if depth {
+                    signature.push("depth: Depth".to_owned());
+                    arguments.push("depth");
+                }
+                for (name, binding) in taken {
+                    signature.push(format!("{name}: {}", binding.ty.rust()));
+                    arguments.push(name);
+                }
+                line(
+                    &mut case_functions,
+                    &format!(
+                        "fn {function}({}) -> Result<Self, ParseError> {{",
+                        signature.join(", ")
+                    ),
+                );
+                case_functions.push_str(&statements);
+                line(&mut case_functions, "}");
+                line(&mut case_functions, "");
+                let call = arguments.join(", ");
+                line(
+                    &mut body,
+                    &format!("{pattern} => Self::{function}({call}),"),
+                );
+            } else {
+                line(&mut body, &format!("{pattern} => {{"));
+                body.push_str(&statements);
+                line(&mut body, "}");
+            }
+            used_params.extend(case_used);
         }
         let needs_rest = match discs.as_slice() {
             [one] => match &one.ty {
@@ -322,9 +382,11 @@ impl Ctx<'_> {
         out.push_str(&body);
         line(&mut out, "}");
         line(&mut out, "");
+        out.push_str(&case_functions);
 
         // serialize
         let mut arms = Vec::new();
+        let mut case_functions = String::new();
         for (case, variant, values, parts, stored) in &planned {
             let mut arm = String::new();
             let scope: BTreeMap<String, Binding> = stored
@@ -363,9 +425,69 @@ impl Ctx<'_> {
                 &scope,
                 &mut imports,
             )?;
-            arms.push((bind(variant, stored, None), format!("{{\n{}}}", tail(&arm))));
+            if split && !parts.is_empty() {
+                let function = format!("serialize_{}", snake(variant));
+                let depth = self.options.depth.is_some() && mentions_depth(&arm);
+                let mut signature = vec!["writer: &mut BoundedWriter"];
+                let mut arguments = vec!["writer"];
+                if depth {
+                    signature.push("depth: Depth");
+                    arguments.push("depth");
+                }
+                let call = arguments.join(", ");
+                if stored.is_empty() {
+                    line(
+                        &mut case_functions,
+                        &format!(
+                            "fn {function}({}) -> Result<(), ParseError> {{",
+                            signature.join(", ")
+                        ),
+                    );
+                    arms.push((
+                        bind(variant, stored, None),
+                        String::new(),
+                        format!("Self::{function}({call})"),
+                    ));
+                } else {
+                    // The case reads its fields from `self`; the other variants, which the
+                    // dispatcher never sends, are refused.
+                    line(
+                        &mut case_functions,
+                        &format!(
+                            "fn {function}(&self, {}) -> Result<(), ParseError> {{",
+                            signature.join(", ")
+                        ),
+                    );
+                    line(
+                        &mut case_functions,
+                        &format!("let {} = self else {{", bind(variant, stored, None)),
+                    );
+                    line(
+                        &mut case_functions,
+                        &format!(
+                            "return Err(ParseError::InvalidDiscriminator {{ field: \"{}.{}\", value: 0 }});",
+                            def.name, case.name
+                        ),
+                    );
+                    line(&mut case_functions, "};");
+                    arms.push((
+                        bind(variant, stored, Some(&BTreeSet::new())),
+                        String::new(),
+                        format!("self.{function}({call})"),
+                    ));
+                }
+                case_functions.push_str(&tail(&arm));
+                line(&mut case_functions, "}");
+                line(&mut case_functions, "");
+                continue;
+            }
+            arms.push((
+                bind(variant, stored, None),
+                bound(stored, None),
+                format!("{{\n{}}}", tail(&arm)),
+            ));
         }
-        let uses_depth = arms.iter().any(|(_, arm)| mentions_depth(arm));
+        let uses_depth = arms.iter().any(|(_, _, arm)| mentions_depth(arm));
         line(
             &mut out,
             &format!(
@@ -374,9 +496,10 @@ impl Ctx<'_> {
             ),
         );
         line(&mut out, "match self {");
-        emit_match(&mut out, "", &merge_arms(arms));
+        emit_match(&mut out, "", &merge_bound_arms(arms));
         line(&mut out, "}");
         line(&mut out, "");
+        out.push_str(&case_functions);
 
         if self.sized.contains(&def.name) {
             self.emit_length(def, &mut out, &parent_parts, &planned)?;
@@ -433,9 +556,13 @@ impl Ctx<'_> {
         for (case, variant, _, parts, stored) in planned {
             let all: Vec<&Part<'_>> = parent_parts.iter().chain(parts).collect();
             let (body, used) = self.length_body(def, case.line, &all)?;
-            arms.push((bind(variant, stored, Some(&used)), body));
+            arms.push((
+                bind(variant, stored, Some(&used)),
+                bound(stored, Some(&used)),
+                body,
+            ));
         }
-        let uses_depth = arms.iter().any(|(_, arm)| mentions_depth(arm));
+        let uses_depth = arms.iter().any(|(_, _, arm)| mentions_depth(arm));
         line(
             out,
             &format!(
@@ -444,7 +571,7 @@ impl Ctx<'_> {
             ),
         );
         line(out, "match self {");
-        emit_match(out, "", &merge_arms(arms));
+        emit_match(out, "", &merge_bound_arms(arms));
         line(out, "}");
         line(out, "");
         Ok(())
@@ -808,6 +935,10 @@ impl Ctx<'_> {
             .ok_or_else(|| gen_error(def, line_no, "a switch without discriminators"))?;
         match &chosen.ty {
             ty if ty.widens_to_u64() => Ok(format!("u64::from({})", chosen.name)),
+            // The two's complement of the value sign-extended to 64 bits, so that -310 is not
+            // reported as 310, the number of a real case.
+            Ty::I8 | Ty::I16 | Ty::I32 => Ok(format!("i64::from({}).cast_unsigned()", chosen.name)),
+            Ty::I64 => Ok(format!("{}.cast_unsigned()", chosen.name)),
             Ty::Enum(enum_name) => {
                 let enum_def = self.def(enum_name, line_no, &def.name)?;
                 if enum_def.enum_type.is_some() {
@@ -836,10 +967,6 @@ impl Ctx<'_> {
             | Ty::U16
             | Ty::U32
             | Ty::U64
-            | Ty::I8
-            | Ty::I16
-            | Ty::I32
-            | Ty::I64
             | Ty::F32
             | Ty::F64
             | Ty::Complex(_)
@@ -1026,6 +1153,19 @@ impl Ctx<'_> {
                     upper_camel(&var.name)
                 ))
             }
+            (Ty::I8 | Ty::I16 | Ty::I32 | Ty::I64, _) => match signed_literal(expr) {
+                Some(value) if ty.holds(value) => Ok(decimal(value)),
+                Some(_) => Err(gen_error(
+                    def,
+                    line_no,
+                    &format!("case value '{text}' does not fit its discriminator"),
+                )),
+                None => Err(gen_error(
+                    def,
+                    line_no,
+                    &format!("case value '{text}' is not an integer"),
+                )),
+            },
             (Ty::U8 | Ty::U16 | Ty::U32 | Ty::U64, _) => {
                 integer_literal(expr).map(|(text, _)| text).ok_or_else(|| {
                     gen_error(
@@ -1041,6 +1181,16 @@ impl Ctx<'_> {
                 &format!("case value '{text}' does not fit its discriminator"),
             )),
         }
+    }
+}
+
+/// An integer literal with the `-` of a negative one: the grammar has no negative literal, so
+/// `'-1'` is a negation of `1`.
+fn signed_literal(expr: &Expr) -> Option<i128> {
+    if let Expr::Unary(UnaryOp::Neg, inner) = expr {
+        signed_literal(inner)?.checked_neg()
+    } else {
+        integer_literal(expr).and_then(|(_, value)| i128::try_from(value).ok())
     }
 }
 
@@ -1126,6 +1276,17 @@ fn bind(variant: &str, stored: &[(String, Ty)], used: Option<&BTreeSet<String>>)
     } else {
         format!("Self::{variant} {{ {}, .. }}", names.join(", "))
     }
+}
+
+/// The names and types of the fields `bind` binds: what two arms must agree on to share a
+/// pattern.
+fn bound(stored: &[(String, Ty)], used: Option<&BTreeSet<String>>) -> String {
+    stored
+        .iter()
+        .filter(|(name, _)| used.is_none_or(|used| used.contains(name)))
+        .map(|(name, ty)| format!("{name}: {}", ty.rust()))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// `let Self { fields }` binding `used` fields of a struct (all of them when `used` is

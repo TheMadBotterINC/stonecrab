@@ -54,7 +54,9 @@ lints of the module it lives in (the `modbus` promotions of `indexing_slicing`,
 item-level `#[expect]`s with reasons: `redundant_pub_crate` on every item (the generated
 module is private, so `pub` would trip `unreachable_pub`) and `enum_variant_names` where
 clippy's rule fires on the mspec's names. Arms with the same body are merged so
-`match_same_arms` has nothing to report.
+`match_same_arms` has nothing to report, but only when they bind the same names of the same
+types (`Reply::A { results: Vec<X> }` and `Reply::B { results: Vec<Y> }` have the same
+body and stay apart).
 
 Semantics, beyond ADR-0019 decision 4:
 
@@ -65,6 +67,23 @@ Semantics, beyond ADR-0019 decision 4:
   `ParseError::InvalidDiscriminator { field: "<Type>.<Case> (disabled)", .. }`; no case at
   all is `InvalidDiscriminator { field: "<Type>", .. }`. The `value` is the last discriminator
   that is not a `bit` (`functionFlag`), or the enum's wire value.
+- A switch may be over a signed number of 8, 16, 32 or 64 bits, a discriminator field or a
+  parameter (`ExtensionObjectDefinition(int 32 extensionId)`). A case value is an integer
+  literal that fits the width, negative ones included (`'-310'`). The `value` of an
+  `InvalidDiscriminator` keeps the sign: it is the two's complement of the number widened to
+  64 bits (`i64::from(id).cast_unsigned()`), so -310 is not reported as 310, the number of a
+  real case.
+- A `discriminatedType` of more than 16 enabled cases gets a function for each case that reads
+  or writes something, `parse_<case>` and `serialize_<case>`, and the `match` only calls it
+  with what the case takes from the parent: the budget, and the parameters and the fields read
+  before the switch that the case uses or stores. A `serialize_<case>` that stores fields takes
+  `&self` and refuses any other variant, which the `match` never sends. Without it the locals
+  of every arm share the one stack frame of the dispatcher, which in a debug build grows with
+  the number of cases (ADR-0019, S80 addendum, finding 5). A switch of 16 cases or fewer, such
+  as the nine of Modbus, stays in one `match` and its output is unchanged. The functions that
+  result may still be longer than `too-many-lines-threshold` of the repository's
+  `clippy.toml` (a dispatcher refuses every disabled case in its own arm); the generator does
+  not add a lint expectation for it, the module that holds the output does.
 - Sub-byte discriminators and fields form runs of exactly one byte, split and joined most
   significant bit first through `split_bits` and `join_bits` of the hand-written support
   module (`crate::modbus::generated_support`); a value that does not fit its bits is
@@ -254,7 +273,7 @@ fixtures" below); the first protocol that uses it adds its own vectors (ADR-0019
 | File: `[globals ...]` | yes | no: generation error | - |
 | File: `[context ...]` | yes | no: generation error | - |
 | Type form: `type` (a struct) | yes | yes: the fields of a case, stored fields `pub(crate)`, `parse`, `serialize` and `length_in_bytes` | S77 fixtures |
-| Type form: `discriminatedType` | yes | yes, when the parent has only discriminators before its `typeSwitch` | Modbus (`ModbusADU`, `ModbusPDU`) |
+| Type form: `discriminatedType` | yes | yes, when the parent has only discriminators before its `typeSwitch`; a function per case above 16 enabled cases | Modbus (`ModbusADU`, `ModbusPDU`); S80a fixtures (the functions) |
 | Type form: `enum` | yes | yes: base type `uint 8` to `uint 64` or none, constant parameters of unsigned types | Modbus (`DriverType`, `ModbusErrorCode`, `ModbusDataType`) |
 | Type form: `dataIo` | yes | yes: one enum parameter switch, one byte-aligned number per case | Modbus (`DataItem`) |
 | `batchSet` | yes | no: one with attributes is a generation error (its fields would be flattened and the attributes lost) | S77 fixtures |
@@ -274,7 +293,7 @@ fixtures" below); the first protocol that uses it adds its own vectors (ADR-0019
 | Field: `reserved` | yes | integer or boolean literal; below a byte in a one-byte run with flags, from a byte up an unsigned 8 to 64 bits; read and ignored, written as its value, not stored | S79 fixtures |
 | Field: `simple` | yes | byte-aligned numbers, an enum, a `discriminatedType` or `type` with name or literal arguments | Modbus; S77 fixtures (a `type`) |
 | Field: `state` | yes | no | - |
-| Field: `typeSwitch` | yes | one or more discriminators (parameters or fields), prefix cases | Modbus |
+| Field: `typeSwitch` | yes | one or more discriminators (parameters or fields), prefix cases; unsigned or signed (`int 8` to `int 64`) numbers, enums and bits | Modbus; S80a fixtures (signed) |
 | Field: `unknown` | yes | no | - |
 | Field: `validation` | yes | no | - |
 | Field: `virtual` | yes | no | - |
@@ -409,6 +428,31 @@ Each compiles the generated modules with `rustc` next to the same stand-in (whic
 The output of the three programs was compiled and linted under the lint table of this
 workspace with the root's module promotions (`indexing_slicing`, `arithmetic_side_effects`,
 `as_conversions`) in a scratch crate: no finding in the generated code.
+
+## S80a fixtures
+
+`src/emit/switch_fixtures.rs` holds first-party mspec text for the three changes that the dry
+run on the OPC UA model asked for (ADR-0019, S80 and S80a addenda). Each compiles the
+generated modules with `rustc` (opt-level 0, a debug build) next to the same stand-in, which
+now reads and writes `int 8`, `int 16` and `int 64`:
+
+- `generator_signed_int32_discriminator_selects_its_case`: four switches, one of each width,
+  two over a discriminator field and two over a parameter, each with a positive, a negative,
+  a disabled negative and an empty case. Every case parses and serializes back to the same
+  bytes; an unknown or disabled negative number is `InvalidDiscriminator` with its sign
+  extended to 64 bits, `i16::MIN`, `i32::MIN` and `i64::MIN` included.
+  `generator_signed_discriminator_literals_are_checked_against_the_width` covers `127` and
+  `-128` for an `int 8` and refuses `128`, `-129`, `0xFF`, a fraction and a boolean.
+- `generator_arms_with_equal_names_and_different_types_are_not_merged`: `FromAlpha` and
+  `FromBeta` hold `results` of two element types with the same text in `serialize` and in
+  `length_in_bytes`, and `FromAlphaToo` repeats the first type. The first and the third
+  share an arm, the second does not, and the program compiles and round-trips all three.
+- `generator_large_switch_gets_a_function_per_case` pins the limit (17 enabled cases split,
+  16 do not) and the signatures of the case functions.
+  `generator_dispatch_frame_does_not_grow_with_case_count` nests 300 cases through an
+  external type to a budget of 40 on a thread of 1 MiB: the 39 levels that fit are parsed and
+  serialized, 41 are `RecursionLimit`. With the cases inline the same program overflows the
+  stack; with a function per case it runs on 128 KiB and fails on 64 KiB.
 
 ## The parser against the pinned baseline
 

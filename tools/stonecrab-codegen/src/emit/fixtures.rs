@@ -88,6 +88,26 @@ pub mod codec {
                 ByteOrder::LittleEndian => i32::from_le_bytes(bytes),
             })
         }
+
+        pub fn read_i8(&mut self) -> Result<i8, ParseError> {
+            Ok(i8::from_be_bytes([self.read_u8()?]))
+        }
+
+        pub fn read_i16(&mut self, order: ByteOrder) -> Result<i16, ParseError> {
+            let bytes: [u8; 2] = self.read_bytes(2, usize::MAX)?.try_into().unwrap();
+            Ok(match order {
+                ByteOrder::BigEndian => i16::from_be_bytes(bytes),
+                ByteOrder::LittleEndian => i16::from_le_bytes(bytes),
+            })
+        }
+
+        pub fn read_i64(&mut self, order: ByteOrder) -> Result<i64, ParseError> {
+            let bytes: [u8; 8] = self.read_bytes(8, usize::MAX)?.try_into().unwrap();
+            Ok(match order {
+                ByteOrder::BigEndian => i64::from_be_bytes(bytes),
+                ByteOrder::LittleEndian => i64::from_le_bytes(bytes),
+            })
+        }
     }
 
     pub struct BoundedWriter {
@@ -127,6 +147,24 @@ pub mod codec {
         }
 
         pub fn write_i32(&mut self, value: i32, order: ByteOrder) -> Result<(), ParseError> {
+            self.write_bytes(&match order {
+                ByteOrder::BigEndian => value.to_be_bytes(),
+                ByteOrder::LittleEndian => value.to_le_bytes(),
+            })
+        }
+
+        pub fn write_i8(&mut self, value: i8) -> Result<(), ParseError> {
+            self.write_bytes(&value.to_be_bytes())
+        }
+
+        pub fn write_i16(&mut self, value: i16, order: ByteOrder) -> Result<(), ParseError> {
+            self.write_bytes(&match order {
+                ByteOrder::BigEndian => value.to_be_bytes(),
+                ByteOrder::LittleEndian => value.to_le_bytes(),
+            })
+        }
+
+        pub fn write_i64(&mut self, value: i64, order: ByteOrder) -> Result<(), ParseError> {
             self.write_bytes(&match order {
                 ByteOrder::BigEndian => value.to_be_bytes(),
                 ByteOrder::LittleEndian => value.to_le_bytes(),
