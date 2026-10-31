@@ -1,0 +1,2 @@
+# Any encoding is accepted for any value; the value is written back in the most compact one (00 55).
+02 00 00 55 00 00 00

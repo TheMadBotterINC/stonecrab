@@ -1,0 +1,2 @@
+# Both flags on a four-byte node id: the URI, then the server index.
+C1 00 41 01 03 00 00 00 75 72 6E 02 00 00 00

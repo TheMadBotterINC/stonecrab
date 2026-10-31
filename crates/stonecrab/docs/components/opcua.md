@@ -2,9 +2,10 @@
 The OPC UA client of Stonecrab (`stonecrab::opcua`), behind the opt-in `opcua` feature. It is
 in neither `default` nor `full`, as `tls` is (decision E17, ADR-0034), and it needs the
 `transport` feature. The module is being built in slices (milestone M3, ADR-0034): so far it
-has the tag address grammar and, crate-private, the connection string parser, and nothing
-that opens a socket. There is no public driver, no connection, no secure channel, no session
-and no codec yet, and the `opcua` scheme is not registered anywhere.
+has the tag address grammar and, crate-private, the connection string parser and the
+built-in types of the binary encoding, and nothing that opens a socket. There is no public
+driver, no connection, no secure channel, no session and no message codec yet, and the
+`opcua` scheme is not registered anywhere.
 
 This module offers `OpcuaAddress`, a validated `ProtocolAddress` for the tag text
 `ns=<n>;<i|s|g|b>=<id>[range][;a=<attribute>][;TYPE][|key=value,...]`, with the types its
@@ -16,14 +17,17 @@ socket and starts no discovery.
 | Tag address parse and canonical text (`OpcuaAddress`) | build-tested |
 | Browse query parse (`OpcuaAddress::parse_query`) | build-tested |
 | Connection string and driver options (crate-private until the driver) | build-tested |
+| Built-in types of the binary encoding: String, `ByteString`, Guid, `DateTime`, `StatusCode`, `NodeId`, `ExpandedNodeId`, `QualifiedName`, `LocalizedText` (crate-private) | build-tested |
 | Driver, connection, secure channel, session | planned |
 | Read, write, browse, subscriptions | planned |
 | Security policies and certificates | planned |
 | Interoperability with an independent server | planned |
 | Hardware verification | planned |
 
-Build-tested here means unit tests, a property test and a fuzz target on the address text and
-a fuzz target on the connection string.
+Build-tested here means unit tests, a property test and a fuzz target on the address text, a
+fuzz target on the connection string and, for the built-in types, first-party byte vectors
+written from OPC UA Part 6 (`fixtures/opcua/codec`) with a property test; the fuzz target on
+the decoder arrives with the recursive types.
 No parity claim above `planned` is made for the rest of the OPC UA record,
 [`docs/parity/opcua.md`](https://github.com/TheMadBotterINC/stonecrab/blob/master/docs/parity/opcua.md);
 the rows marked `implemented` there (the `OPCUA-ADDR-*` rows, `OPCUA-QUIRK-BINARY-ID`, the
@@ -122,3 +126,27 @@ opcua:tcp://[2001:db8::10]:4840/ua/server
   `Credentials`) and the `tls.*` certificate options, which later slices implement.
 - A message names the key (shortened to 32 characters) or a fixed reason; it never repeats a
   value, the host or the path.
+
+## Built-in types
+Crate-private since slice S85 and called by nothing yet: the hand-written scalar types of the
+OPC UA binary encoding (Part 6, 5.2.2) that the recursive types (S86) and the generated service
+layer (S88) are built on. All are little-endian and go through `BoundedReader` and
+`BoundedWriter`, and each has the one signature the generator calls external types through
+(`parse(reader, depth)`, `serialize(&self, writer, depth)` and `length_in_bytes(&self, depth)`).
+
+- A String is the bytes of UTF-8 text and a `ByteString` is bytes, each with an `Int32`
+  length. The length -1 is null and is kept apart from the empty value; any other negative
+  length is refused. A length is checked against the bytes that remain and against 16 MiB
+  before anything is copied, so a declared length never reserves memory. A String keeps the
+  bytes it read, so bytes that are not UTF-8 are not refused here (`text()` says whether they
+  are text) and are written back unchanged; the value layer turns them into an error of that
+  one item.
+- A Guid is `UInt32`, `UInt16`, `UInt16` and eight bytes. A `DateTime` is an `Int64` of 100 ns
+  ticks since 1601-01-01 and keeps every value, `0` and `i64::MAX` included; its conversions
+  to and from `SystemTime` return `None` instead of overflowing.
+- A `NodeId` is read in any of its six encodings (two-byte, four-byte, numeric, String, Guid and
+  `ByteString` identifiers) and written in the most compact one. The top two bits of the first
+  byte are reserved in a `NodeId` and ignored; an `ExpandedNodeId` uses them to say that a
+  namespace URI and a server index follow.
+- A `LocalizedText` has a mask byte; a part that is absent is not a part that is a null String.
+  The six upper bits of the mask are reserved and ignored.

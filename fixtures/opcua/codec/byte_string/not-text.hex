@@ -1,0 +1,2 @@
+# Bytes that are not UTF-8 are fine in a ByteString.
+02 00 00 00 FF C3

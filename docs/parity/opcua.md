@@ -6,7 +6,11 @@ State at slice S43: nothing is implemented. Stonecrab has no OPC UA code, no OPC
 and no OPC UA connection string yet, so every row below is `planned (M3)` or `deferred`.
 (Since slice S83 the opt-in `opcua` feature has the tag address grammar, `OpcuaAddress`, and
 since S84 a crate-private connection string parser, `OpcuaDriver::parse_config`, with its
-typed options; the rows they close say `implemented` and everything else is unchanged. There
+typed options; since S85 the crate-private hand-written built-in types of the binary
+encoding, which close no row of their own (the type rows are closed by S92, S95 and S98
+through the value mapping); the rows the parsers close say `implemented` and everything else
+is unchanged. The per-item rule for invalid UTF-8 of `OPCUA-TYPE-STRING` is kept possible:
+the String built-in keeps the bytes it read and does not refuse them. There
 is still no driver, no connection and no `opcua` scheme registered anywhere.)
 OPC UA is milestone M3 of `docs/POST_ALPHA_PLAN.md` section 4: the secure channel and
 session with the upstream security policies, chunking, read, a browse API with its own
@@ -409,7 +413,7 @@ of `docs/parity/core.md`.
 | OPCUA-TYPE-BOOLEAN | Boolean to `PlcBOOL` (non-zero byte is true) (Conn:1671-1678). | Boolean to BOOL. | planned (M3) | `planned:opcua_boolean_variant_decodes_to_bool` |
 | OPCUA-TYPE-INTEGERS | SByte to SINT, Byte to USINT, Int16 to INT, UInt16 to UINT, Int32 to DINT, UInt32 to UDINT, Int64 to LINT, UInt64 to ULINT (Conn:1679-1742). | The same eight integer widths, exact: no widening or sign change. | planned (M3) | `planned:opcua_each_integer_variant_decodes_to_its_width_and_sign`, `planned:opcua_uint64_above_i64_max_decodes_without_loss` |
 | OPCUA-TYPE-FLOATS | Float to REAL, Double to LREAL (Conn:1743-1758). | Float to REAL, Double to LREAL, bit-exact including NaN payloads. | planned (M3) | `planned:opcua_float_and_double_variants_decode_bit_exact`, `planned:opcua_nan_is_preserved` |
-| OPCUA-TYPE-STRING | String to STRING (Conn:1759-1766); XmlElement to STRING (Conn:1794-1801). A null string is the empty-or-null encoding of the wire. | String to STRING (UTF-8, invalid UTF-8 is a per-item error); XmlElement to STRING. | planned (M3) | `planned:opcua_string_variant_decodes_utf8`, `planned:opcua_a_null_string_decodes_without_panicking`, `planned:opcua_invalid_utf8_is_a_per_item_error` |
+| OPCUA-TYPE-STRING | String to STRING (Conn:1759-1766); XmlElement to STRING (Conn:1794-1801). A null string is the empty-or-null encoding of the wire. The UTF-8 text is decoded by `BaseStringEncoding.decodeString`, lossily, cut at the first NUL, trailing spaces trimmed and U+FEFF removed (`BaseStringEncoding.java:243-250`). | String to STRING (UTF-8, invalid UTF-8 is a per-item error, not a failure of the response; NUL, trailing spaces and U+FEFF are kept, not cut or trimmed); XmlElement to STRING. | planned (M3) | `planned:opcua_string_variant_decodes_utf8`, `planned:opcua_a_null_string_decodes_without_panicking`, `planned:opcua_invalid_utf8_is_a_per_item_error` |
 | OPCUA-TYPE-DATETIME | DateTime converts 100-ns ticks to a UTC `LocalDateTime` through `getDateTime` (Conn:1767-1774). | DateTime to a UTC instant; the minimum (0) and maximum DateTime values are handled without overflow. | planned (M3) | `planned:opcua_date_time_variant_converts_ticks_to_a_utc_instant`, `planned:opcua_date_time_zero_and_max_do_not_overflow` |
 | OPCUA-TYPE-GUID | Guid to a STRING of hex fields `data1-data2-data3-data4-data5` without zero padding, the last two groups assembled big-endian (Conn:1775-1793). | Guid to the canonical 8-4-4-4-12 lower-case string with zero padding. Divergence: `OPCUA-DIV-GUID-TEXT`. | planned (M3) | `planned:opcua_guid_variant_renders_the_canonical_text`, `planned:opcua_guid_fields_use_the_mixed_endian_layout` |
 | OPCUA-TYPE-LOCALIZED-TEXT | LocalizedText to the STRING `locale\|text` when a locale is present, else the text alone (Conn:1802-1812). | LocalizedText to STRING of its text; the locale is kept as a second field when present. | planned (M3) | `planned:opcua_localized_text_decodes_text_and_locale` |

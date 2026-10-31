@@ -385,3 +385,78 @@ of it, and two points the decision left open:
   `Clone` and `PartialEq`; no generated type derives `Eq` beside externals.
 - **Eq and floats.** A Variant holds a float, so the generated structures of the service
   layer are `PartialEq` only.
+
+## Addendum (S85, 2026-10-30): the built-in types
+Slice S85 added the hand-written scalar built-ins under `opcua/codec` (decision 2, decision 10),
+crate-private and called by nothing until the recursive types (S86) and the generated layer
+(S88). The status of this ADR is unchanged, and no public item and no `ParseError` variant is
+added.
+- **Types.** `UaString` and `UaByteString` (the `Ua` prefix keeps them apart from `String`),
+  `Guid`, `DateTime`, `StatusCode`, `NodeId` with `Identifier`, `ExpandedNodeId`,
+  `QualifiedName` and `LocalizedText`, each with the three functions of the S79 signature
+  (`parse(reader, depth)`, `serialize(&self, writer, depth)`, `length_in_bytes(&self, depth)`).
+  Their fields are `pub(in crate::opcua)`: they are plain data and the value layer (S92, S95,
+  S98) reads them. The types are `pub(in crate::opcua)` in private modules because the
+  workspace denies both `unreachable_pub` and `redundant_pub_crate`.
+- **`Depth`.** The signature needs the budget type, so S85 defines `Depth` (one `Copy` value,
+  `Depth::new()` full, 64 entries as decision 3 says) and nothing else: the built-ins have a
+  fixed shape and ignore it. S86 adds the entry that spends one unit, `RecursionLimit` and the
+  recursive types, and may change the representation, as the S79 addendum to ADR-0019 says.
+- **Null and empty.** A String or ByteString of length -1 is null and is kept apart from the
+  empty one (decision 4). A negative length other than -1 is `InvalidDiscriminator` with the
+  field `String length` or `ByteString length` and the magnitude as the value, so it maps to
+  `MalformedData` as decision 5 asks, without a new variant. A LocalizedText part that is
+  absent (flag clear) is `None` and one that is present and null is `Some` of a null String;
+  the same holds for an ExpandedNodeId namespace URI.
+- **The length bound.** The signature carries no frame bound, so the codec bounds a String or
+  ByteString by the bytes that remain (`read_bytes` fails with `Truncated` before any copy) and
+  by one constant, `MAX_STRING_BYTES` of 16 MiB (`OversizedLength`), on read, write and
+  `length_in_bytes` alike. The frame, message and chunk bounds of decision 5 stay with the
+  framing and chunking slices. 16 MiB is a choice (above the 4 MiB message size most servers
+  offer), not a measurement.
+- **UTF-8.** A `UaString` holds the bytes it read (`Option<Vec<u8>>`) and `parse` never
+  refuses them for being invalid UTF-8; `text()` answers `None` for null, `Some(Ok(&str))`
+  for text and `Some(Err(Utf8Error))` for other bytes. A value therefore always writes back to
+  the bytes it was read from, and no lossy `U+FFFD` text is made (CODING_STANDARDS 7.8). The
+  reason is the per-item rule of `OPCUA-TYPE-STRING`: a String that is refused inside a
+  Variant, a BrowseName or a String NodeId would fail the whole response, every item of a
+  read included, so the value layer (S92) turns `Some(Err(_))` into the error of that one item
+  and the rest of the response is read. (The first draft of S85 refused such bytes in the
+  codec; the review found that it contradicted the row, and this is the correction.) Upstream
+  decodes UTF-8 strings in `BaseStringEncoding.decodeString` (`new String(bytes, charset)`,
+  lossy, `BaseStringEncoding.java:243`), cuts the text at the first NUL character, trims
+  trailing spaces and removes U+FEFF (`:244-250`; read in this fix). Stonecrab does none of
+  that: the bytes are kept verbatim, as a NUL or a trailing space is legal text on the wire.
+  Divergence to record with the value mapping (S92): `OPCUA-TYPE-STRING` text keeps NUL,
+  trailing spaces and U+FEFF. A ByteString holds any bytes.
+- **Encodings.** A NodeId is read in any of the six encodings and written in the most compact
+  one it fits (two-byte for namespace 0 and an identifier up to 255, four-byte up to namespace
+  255 and identifier 65535, numeric otherwise), so a value read in a wider encoding than it
+  needs is written back narrower and equal; bytes that must be kept verbatim (a signed or
+  hashed region) are therefore never re-encoded by the caller. The top two bits of the first
+  byte are reserved in a NodeId and the six upper bits of a LocalizedText mask are reserved:
+  read and ignored, written as zero, as the generator treats a reserved field (ADR-0019, S79
+  addendum). An ExpandedNodeId takes the two bits as the namespace-URI and server-index flags.
+- **DateTime.** The codec keeps every `i64` (0 and `i64::MAX` are "not specified" and "end of
+  time" in OPC UA, and negative ticks are before 1601). `to_system_time` and
+  `from_system_time` compute in `i128` with checked operations and return `None` when the
+  platform's `SystemTime` cannot hold the instant or the tick count does not fit an `i64`;
+  `from_system_time` truncates to a whole tick towards 1970.
+- **Vectors.** `fixtures/opcua/codec` holds 65 byte vectors (`protocol_spec` for the valid
+  ones and `adversarial` for the 20 refusals and one String of bytes that are not UTF-8),
+  first-party: written from the Part 6 encoding rules by a script that shares no code with
+  the decoder, with expected files that name the value, or the `ParseError` variant, and
+  `PROVENANCE.toml`. The `source` values are those of
+  the loader (the row's `first_party` is not one of them, so the header comment of
+  `PROVENANCE.toml` carries the first-party claim; every `license` is `Apache-2.0`). The worked examples of the specification and the revision named in every origin (1.05) are
+  written from memory and marked UNVERIFIED there. The fixtures are not packaged. A test that reads them needs the
+  `testkit` feature, like the Modbus equivalence tests; the unit tests cover every line
+  without it.
+
+Compliance: `crates/stonecrab/src/opcua/codec.rs` and `codec/` (`string.rs`, `guid.rs`,
+`date_time.rs`, `status_code.rs`, `node_id.rs`, `name.rs`, and the test-only `support.rs`,
+`vectors.rs`, `properties.rs`); tests `opcua_codec_null_string_is_distinct_from_empty`,
+`opcua_codec_node_id_four_byte_encoding_round_trips`,
+`opcua_codec_expanded_node_id_i321_is_01004101`,
+`opcua_codec_date_time_zero_and_max_do_not_overflow`, `opcua_prop_builtin_round_trip` and
+`opcua_codec_first_party_vectors_parse_and_reencode`; `mutants.toml` lists the module.

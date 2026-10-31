@@ -1,0 +1,2 @@
+# Flag 0x40 on a two-byte node id: the server index follows it.
+40 55 07 00 00 00

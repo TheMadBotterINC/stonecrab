@@ -1,0 +1,8 @@
+{
+  "type": "NodeId",
+  "namespace": 2,
+  "identifier": {
+    "kind": "string",
+    "value": "Hello"
+  }
+}

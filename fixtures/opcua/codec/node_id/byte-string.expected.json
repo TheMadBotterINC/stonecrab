@@ -1,0 +1,12 @@
+{
+  "type": "NodeId",
+  "namespace": 1,
+  "identifier": {
+    "kind": "byte_string",
+    "value": [
+      1,
+      2,
+      3
+    ]
+  }
+}

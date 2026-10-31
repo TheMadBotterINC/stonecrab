@@ -1,0 +1,2 @@
+# The six upper bits of the mask are reserved: read and ignored, written as zero.
+C2 02 00 00 00 68 69

@@ -1,0 +1,2 @@
+# Two bytes cannot hold the Int32 length.
+05 00

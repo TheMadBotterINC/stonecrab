@@ -1,0 +1,440 @@
+# Provenance of every fixture under fixtures/opcua/codec (CODING_STANDARDS 13.6).
+#
+# Schema: as fixtures/modbus/PROVENANCE.toml (stonecrab::testkit::load_dir, feature
+# `testkit`): one [[vector]] per <name>.hex, with its <name>.expected.json beside it.
+#
+# These are the byte vectors of the hand-written built-in types of the OPC UA binary
+# encoding (slice S85, crates/stonecrab/src/opcua/codec): String, ByteString, Guid,
+# DateTime, StatusCode, NodeId in its six encodings, ExpandedNodeId, QualifiedName and
+# LocalizedText. They are first-party: every byte was written out from the encoding rules of
+# OPC UA Part 6 v1.05 (Mappings), "Built-in Types", by a script that shares no code with the
+# decoder, and every expectation was written from the same rules. Nothing is copied from the
+# Apache PLC4X suites or any other implementation. The "protocol_spec" vectors are valid
+# encodings; the "adversarial" ones (must_fail) are cut off, over a limit or invalid, and the
+# expected file names the ParseError variant the decoder must answer with. The one
+# "adversarial" vector that is not must_fail is string/not-utf8-kept: a String of bytes that
+# are not UTF-8 is kept as read, and its expected file lists the bytes.
+#
+# The Part 6 PDF is not retained in this repository, so the section numbers are those of the
+# published table of contents and the worked examples (the Guid 72962B91-FA75-4AE6-8D28-
+# B404DC7DAF63, the String of U+6C34 and "Boy", the four-byte NodeId ns=5;i=1025) are written
+# from the published examples as the author remembers them: UNVERIFIED, a maintainer should
+# check them against the PDF. The bytes follow from the rules in either case. The revision
+# named in every origin is 1.05; the encoding of these built-in types is the same in 1.04, as
+# the author remembers it (UNVERIFIED likewise).
+#
+# Expected files: "type" names the built-in; "error" (a must_fail vector) names the
+# ParseError variant; "reencodes_as" (hex, no spaces) is the canonical form of a vector that
+# the decoder accepts in a wider or flagged form, and is absent when re-encoding must give
+# the input back. See crates/stonecrab/src/opcua/codec/vectors.rs for how each type's fields
+# are written.
+
+[[vector]]
+name = "string/null"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.4 String"
+license = "Apache-2.0"
+
+[[vector]]
+name = "string/empty"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.4 String"
+license = "Apache-2.0"
+
+[[vector]]
+name = "string/hello"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.4 String"
+license = "Apache-2.0"
+
+[[vector]]
+name = "string/utf8-multibyte"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.4 String"
+license = "Apache-2.0"
+
+[[vector]]
+name = "string/length-minus-two"
+source = "adversarial"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.4 String"
+license = "Apache-2.0"
+must_fail = true
+
+[[vector]]
+name = "string/truncated-body"
+source = "adversarial"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.4 String"
+license = "Apache-2.0"
+must_fail = true
+
+[[vector]]
+name = "string/truncated-length"
+source = "adversarial"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.4 String"
+license = "Apache-2.0"
+must_fail = true
+
+[[vector]]
+name = "string/length-over-maximum"
+source = "adversarial"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.4 String"
+license = "Apache-2.0"
+must_fail = true
+
+[[vector]]
+name = "string/not-utf8-kept"
+source = "adversarial"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.4 String"
+license = "Apache-2.0"
+
+[[vector]]
+name = "byte_string/null"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.7 ByteString"
+license = "Apache-2.0"
+
+[[vector]]
+name = "byte_string/empty"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.7 ByteString"
+license = "Apache-2.0"
+
+[[vector]]
+name = "byte_string/three-bytes"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.7 ByteString"
+license = "Apache-2.0"
+
+[[vector]]
+name = "byte_string/not-text"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.7 ByteString"
+license = "Apache-2.0"
+
+[[vector]]
+name = "byte_string/length-minus-two"
+source = "adversarial"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.7 ByteString"
+license = "Apache-2.0"
+must_fail = true
+
+[[vector]]
+name = "byte_string/truncated-body"
+source = "adversarial"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.7 ByteString"
+license = "Apache-2.0"
+must_fail = true
+
+[[vector]]
+name = "byte_string/length-over-maximum"
+source = "adversarial"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.7 ByteString"
+license = "Apache-2.0"
+must_fail = true
+
+[[vector]]
+name = "guid/specification-example"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.6 Guid"
+license = "Apache-2.0"
+
+[[vector]]
+name = "guid/zero"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.6 Guid"
+license = "Apache-2.0"
+
+[[vector]]
+name = "guid/truncated"
+source = "adversarial"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.6 Guid"
+license = "Apache-2.0"
+must_fail = true
+
+[[vector]]
+name = "date_time/zero"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.5 DateTime"
+license = "Apache-2.0"
+
+[[vector]]
+name = "date_time/one-tick"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.5 DateTime"
+license = "Apache-2.0"
+
+[[vector]]
+name = "date_time/unix-epoch"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.5 DateTime"
+license = "Apache-2.0"
+
+[[vector]]
+name = "date_time/maximum"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.5 DateTime"
+license = "Apache-2.0"
+
+[[vector]]
+name = "date_time/minimum"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.5 DateTime"
+license = "Apache-2.0"
+
+[[vector]]
+name = "date_time/truncated"
+source = "adversarial"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.5 DateTime"
+license = "Apache-2.0"
+must_fail = true
+
+[[vector]]
+name = "status_code/good"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.11 StatusCode"
+license = "Apache-2.0"
+
+[[vector]]
+name = "status_code/bad-unexpected-error"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.11 StatusCode"
+license = "Apache-2.0"
+
+[[vector]]
+name = "status_code/bad-node-id-unknown"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.11 StatusCode"
+license = "Apache-2.0"
+
+[[vector]]
+name = "status_code/truncated"
+source = "adversarial"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.11 StatusCode"
+license = "Apache-2.0"
+must_fail = true
+
+[[vector]]
+name = "node_id/two-byte-objects-folder"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.9 NodeId"
+license = "Apache-2.0"
+
+[[vector]]
+name = "node_id/two-byte-maximum"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.9 NodeId"
+license = "Apache-2.0"
+
+[[vector]]
+name = "node_id/four-byte"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.9 NodeId"
+license = "Apache-2.0"
+
+[[vector]]
+name = "node_id/four-byte-maximum"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.9 NodeId"
+license = "Apache-2.0"
+
+[[vector]]
+name = "node_id/numeric"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.9 NodeId"
+license = "Apache-2.0"
+
+[[vector]]
+name = "node_id/numeric-maximum"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.9 NodeId"
+license = "Apache-2.0"
+
+[[vector]]
+name = "node_id/string"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.9 NodeId"
+license = "Apache-2.0"
+
+[[vector]]
+name = "node_id/string-null"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.9 NodeId"
+license = "Apache-2.0"
+
+[[vector]]
+name = "node_id/guid"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.9 NodeId"
+license = "Apache-2.0"
+
+[[vector]]
+name = "node_id/byte-string"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.9 NodeId"
+license = "Apache-2.0"
+
+[[vector]]
+name = "node_id/numeric-encoding-of-a-small-id"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.9 NodeId"
+license = "Apache-2.0"
+
+[[vector]]
+name = "node_id/four-byte-encoding-of-a-small-id"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.9 NodeId"
+license = "Apache-2.0"
+
+[[vector]]
+name = "node_id/reserved-bits-ignored"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.9 NodeId"
+license = "Apache-2.0"
+
+[[vector]]
+name = "node_id/encoding-six"
+source = "adversarial"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.9 NodeId"
+license = "Apache-2.0"
+must_fail = true
+
+[[vector]]
+name = "node_id/encoding-sixty-three"
+source = "adversarial"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.9 NodeId"
+license = "Apache-2.0"
+must_fail = true
+
+[[vector]]
+name = "node_id/truncated-two-byte"
+source = "adversarial"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.9 NodeId"
+license = "Apache-2.0"
+must_fail = true
+
+[[vector]]
+name = "node_id/truncated-four-byte"
+source = "adversarial"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.9 NodeId"
+license = "Apache-2.0"
+must_fail = true
+
+[[vector]]
+name = "node_id/truncated-string"
+source = "adversarial"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.9 NodeId"
+license = "Apache-2.0"
+must_fail = true
+
+[[vector]]
+name = "expanded_node_id/i321"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.10 ExpandedNodeId"
+license = "Apache-2.0"
+
+[[vector]]
+name = "expanded_node_id/namespace-uri"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.10 ExpandedNodeId"
+license = "Apache-2.0"
+
+[[vector]]
+name = "expanded_node_id/server-index"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.10 ExpandedNodeId"
+license = "Apache-2.0"
+
+[[vector]]
+name = "expanded_node_id/both"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.10 ExpandedNodeId"
+license = "Apache-2.0"
+
+[[vector]]
+name = "expanded_node_id/null-namespace-uri"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.10 ExpandedNodeId"
+license = "Apache-2.0"
+
+[[vector]]
+name = "expanded_node_id/truncated-server-index"
+source = "adversarial"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.10 ExpandedNodeId"
+license = "Apache-2.0"
+must_fail = true
+
+[[vector]]
+name = "expanded_node_id/truncated-namespace-uri"
+source = "adversarial"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.10 ExpandedNodeId"
+license = "Apache-2.0"
+must_fail = true
+
+[[vector]]
+name = "expanded_node_id/encoding-six-with-flags"
+source = "adversarial"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.10 ExpandedNodeId"
+license = "Apache-2.0"
+must_fail = true
+
+[[vector]]
+name = "qualified_name/abc"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.13 QualifiedName"
+license = "Apache-2.0"
+
+[[vector]]
+name = "qualified_name/null-name"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.13 QualifiedName"
+license = "Apache-2.0"
+
+[[vector]]
+name = "qualified_name/truncated"
+source = "adversarial"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.13 QualifiedName"
+license = "Apache-2.0"
+must_fail = true
+
+[[vector]]
+name = "localized_text/locale-and-text"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.14 LocalizedText"
+license = "Apache-2.0"
+
+[[vector]]
+name = "localized_text/text-only"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.14 LocalizedText"
+license = "Apache-2.0"
+
+[[vector]]
+name = "localized_text/locale-only"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.14 LocalizedText"
+license = "Apache-2.0"
+
+[[vector]]
+name = "localized_text/none"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.14 LocalizedText"
+license = "Apache-2.0"
+
+[[vector]]
+name = "localized_text/null-text"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.14 LocalizedText"
+license = "Apache-2.0"
+
+[[vector]]
+name = "localized_text/reserved-bits-ignored"
+source = "protocol_spec"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.14 LocalizedText"
+license = "Apache-2.0"
+
+[[vector]]
+name = "localized_text/truncated-locale"
+source = "adversarial"
+origin = "OPC UA Part 6 v1.05 (Mappings), 5.2.2.14 LocalizedText"
+license = "Apache-2.0"
+must_fail = true

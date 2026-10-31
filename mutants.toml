@@ -23,9 +23,11 @@ examine_globs = [
   "crates/stonecrab/src/modbus/batch.rs",
   "crates/stonecrab/src/modbus/driver.rs",
   "crates/stonecrab/src/modbus/options.rs",
-  # opcua: the tag address grammar and the connection string (the codec and framing join with
-  # their slices).
+  # opcua: the tag address grammar, the connection string and the built-in types of the binary
+  # encoding (the recursive types and framing join with their slices).
   "crates/stonecrab/src/opcua/address.rs",
+  "crates/stonecrab/src/opcua/codec.rs",
+  "crates/stonecrab/src/opcua/codec/*.rs",
   "crates/stonecrab/src/opcua/driver.rs",
   "crates/stonecrab/src/opcua/options.rs",
   # sensors: the measurement scaling module.
@@ -74,4 +76,11 @@ exclude_re = [
   # fill disjoint bits of the byte (a shifted field above, an unshifted one below), so `|` and
   # `^` produce the same byte for every input.
   'address\.rs:\d+:\d+: replace \| with \^ in base64_(en|de)code',
+  # Equivalent mutant. In `NodeId::write` the encoding byte is at most 5 and the flags of an
+  # ExpandedNodeId are bits 6 and 7, so the two operands of the `|` are disjoint and `^` gives
+  # the same byte.
+  'node_id\.rs:\d+:\d+: replace \| with \^ in NodeId::write',
+  # Equivalent mutant. In `DateTime::to_system_time` a difference of 0 ticks takes the other
+  # branch under `<=`, which subtracts a zero duration from the epoch instead of adding one.
+  'date_time\.rs:\d+:\d+: replace < with <= in DateTime::to_system_time',
 ]

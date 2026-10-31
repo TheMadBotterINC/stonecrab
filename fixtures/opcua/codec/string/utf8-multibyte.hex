@@ -1,0 +1,2 @@
+# The worked example of the specification: three bytes for the first character, so the length counts bytes (6), not characters (4).
+06 00 00 00 E6 B0 B4 42 6F 79

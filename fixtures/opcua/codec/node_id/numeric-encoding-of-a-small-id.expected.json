@@ -1,0 +1,9 @@
+{
+  "type": "NodeId",
+  "namespace": 0,
+  "identifier": {
+    "kind": "numeric",
+    "value": 85
+  },
+  "reencodes_as": "0055"
+}

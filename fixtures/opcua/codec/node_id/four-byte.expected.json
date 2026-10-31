@@ -1,0 +1,8 @@
+{
+  "type": "NodeId",
+  "namespace": 5,
+  "identifier": {
+    "kind": "numeric",
+    "value": 1025
+  }
+}

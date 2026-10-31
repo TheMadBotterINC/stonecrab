@@ -52,6 +52,27 @@ unviable, none missed or timed out, in 17 minutes. (`base64_decode` lost its pad
 which the re-encoding made redundant: a first run of the old check showed it as a missed
 `||` to `&&`.)
 
+Slice S85 (2026-10-30) added `opcua/codec.rs` and `opcua/codec/*.rs` (the built-in types of the
+OPC UA binary encoding) to `mutants.toml`; `outcomes.json` still predates it. A run over those
+files alone (the same configuration with the two globs, `--jobs 1`, `CARGO_PROFILE_*_DEBUG=0`
+and the whole crate's tests) listed 111 mutants and tested them in 45 minutes: 92 caught, 10
+unviable, 0 timeouts and 9 missed. Nine survivors: the `*` of `16 * 1024 * 1024` in
+`MAX_STRING_BYTES` (two; the tests used the constant itself, and `opcua_codec_string_maximum_is_16_mib`
+now pins its value), the `|` of the encoding byte and the flags in `NodeId::write` (six) and
+`<` in `DateTime::to_system_time` (one). The last seven are equivalent and are listed in
+`exclude_re`: the encoding byte is at most 5 and the flags are bits 6 and 7, so `|` and `^`
+agree (the `write` was then refactored to or the flags in at one place, so one mutant stands
+for what were six); and a difference of 0 ticks gives the epoch whether a zero duration is
+added or subtracted. After those changes the three files that changed (`codec.rs`,
+`node_id.rs`, `date_time.rs`) were run again: 48 mutants, 40 caught, 8 unviable, none missed
+or timed out, in 19 minutes. Together with the first run's results for the other four
+files, the module had 101 mutants listed (two equivalent ones excluded): 91 caught, 10 unviable,
+0 missed and 0 timeouts. The review of S85 then changed `string.rs` (a String keeps its bytes
+and no longer refuses bytes that are not UTF-8), and that file alone was run again: 40
+mutants, 38 caught, 2 unviable, none missed or timed out, in 17 minutes. With that change the
+module lists 106 mutants (`cargo mutants --config mutants.toml --list`), with no survivor in
+any file. Neither run is stored here.
+
 ## Final run
 
 574 mutants run (577 listed; three equivalent mutants are excluded by `exclude_re`):

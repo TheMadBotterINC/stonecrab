@@ -1,0 +1,13 @@
+{
+  "type": "ExpandedNodeId",
+  "node_id": {
+    "namespace": 2,
+    "identifier": {
+      "kind": "string",
+      "value": "Hi"
+    }
+  },
+  "namespace_uri_present": true,
+  "namespace_uri": "urn:a",
+  "server_index": null
+}

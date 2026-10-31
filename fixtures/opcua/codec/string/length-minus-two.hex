@@ -1,0 +1,2 @@
+# Only -1 is null; every other negative length is no encoding.
+FE FF FF FF

@@ -36,6 +36,19 @@ specification-stage placeholder.
   `fuzz_opcua_connection_string` (26 seeds, reached through a `cfg(fuzzing)` entry point) and
   `unexpected_cfgs` knowing `cfg(fuzzing)`. Parity: 10 planned rows of
   `docs/parity/opcua.md` are implemented.
+- **Added (opt-in `opcua` feature; slice S85 of milestone M3):** the hand-written built-in
+  types of the OPC UA binary encoding, crate-private under `opcua/codec` and called by nothing
+  yet, so the public API is unchanged: String and ByteString (length -1 is null and is kept
+  distinct from empty; a length is bounded by the remaining bytes and 16 MiB before any byte is
+  copied; a String keeps its bytes, UTF-8 or not, and the value layer will decide), Guid, DateTime (every `i64` of 100 ns ticks since 1601
+  round-trips, `0` and `i64::MAX` included, and the `SystemTime` conversions return `None`
+  rather than overflow), StatusCode, NodeId (all six encodings read, the most compact written),
+  ExpandedNodeId, QualifiedName and LocalizedText. Each has the external-type signature the
+  generator calls (`parse(reader, depth)`, `serialize`, `length_in_bytes`) with the recursion
+  budget `Depth`, which only the recursive types of slice S86 will spend. Gates: 65 first-party
+  byte vectors under `fixtures/opcua/codec` written from Part 6 (not packaged), unit tests, a
+  property test, the coverage floor of 100 and the module in `mutants.toml`. No parity row
+  changes status.
 - **Dependencies:** `toml` 0.9 to 1.1 (resolved 1.1.8, with `toml_parser` 1.1.5,
   `toml_datetime` 1.1.2 and `winnow` 1.0.4) for the crate, the fuzz workspace and the code
   generator. There is no API or behavior change: no `toml` type is public, and profiles load

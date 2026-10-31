@@ -1,0 +1,2 @@
+# A UTF-8 lead byte followed by a byte that is no continuation.
+02 00 00 00 C3 28

@@ -1,0 +1,8 @@
+{
+  "type": "NodeId",
+  "namespace": 65535,
+  "identifier": {
+    "kind": "numeric",
+    "value": 4294967295
+  }
+}

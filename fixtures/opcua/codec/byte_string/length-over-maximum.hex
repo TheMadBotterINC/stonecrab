@@ -1,0 +1,2 @@
+# The largest Int32 length: refused without looking for the bytes.
+FF FF FF 7F

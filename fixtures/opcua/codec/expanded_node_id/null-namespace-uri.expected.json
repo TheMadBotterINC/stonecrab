@@ -1,0 +1,13 @@
+{
+  "type": "ExpandedNodeId",
+  "node_id": {
+    "namespace": 0,
+    "identifier": {
+      "kind": "numeric",
+      "value": 85
+    }
+  },
+  "namespace_uri_present": true,
+  "namespace_uri": null,
+  "server_index": null
+}
