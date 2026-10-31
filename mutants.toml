@@ -23,8 +23,8 @@ examine_globs = [
   "crates/stonecrab/src/modbus/batch.rs",
   "crates/stonecrab/src/modbus/driver.rs",
   "crates/stonecrab/src/modbus/options.rs",
-  # opcua: the tag address grammar, the connection string and the built-in types of the binary
-  # encoding (the recursive types and framing join with their slices).
+  # opcua: the tag address grammar, the connection string and the types of the binary
+  # encoding, the built-ins and the recursive ones (framing joins with its slice).
   "crates/stonecrab/src/opcua/address.rs",
   "crates/stonecrab/src/opcua/codec.rs",
   "crates/stonecrab/src/opcua/codec/*.rs",
@@ -80,6 +80,14 @@ exclude_re = [
   # ExpandedNodeId are bits 6 and 7, so the two operands of the `|` are disjoint and `^` gives
   # the same byte.
   'node_id\.rs:\d+:\d+: replace \| with \^ in NodeId::write',
+  # Equivalent mutants. In `DataValue::mask` and `DiagnosticInfo::mask` every flag is a distinct
+  # single bit and the fold starts from 0, so `|` and `^` produce the same mask.
+  'data_value\.rs:\d+:\d+: replace \| with \^ in DataValue::mask',
+  'diagnostic_info\.rs:\d+:\d+: replace \| with \^ in DiagnosticInfo::mask',
+  # Equivalent mutants. In `Variant::serialize` the type id is at most 25 (bits 0 to 5) and the
+  # two flags are bits 6 and 7, so the operands of each `|` are disjoint and `^` gives the same
+  # mask byte.
+  'variant\.rs:\d+:\d+: replace \| with \^ in Variant::serialize',
   # Equivalent mutant. In `DateTime::to_system_time` a difference of 0 ticks takes the other
   # branch under `<=`, which subtracts a zero duration from the epoch instead of adding one.
   'date_time\.rs:\d+:\d+: replace < with <= in DateTime::to_system_time',

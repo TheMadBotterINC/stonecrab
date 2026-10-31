@@ -71,7 +71,10 @@ src/modbus/rtu.rs
 src/modbus/session.rs
 src/modbus.rs
 src/opcua/address.rs
+src/opcua/codec/data_value.rs
 src/opcua/codec/date_time.rs
+src/opcua/codec/diagnostic_info.rs
+src/opcua/codec/extension_object.rs
 src/opcua/codec/guid.rs
 src/opcua/codec/name.rs
 src/opcua/codec/node_id.rs
@@ -79,6 +82,7 @@ src/opcua/codec/properties.rs
 src/opcua/codec/status_code.rs
 src/opcua/codec/string.rs
 src/opcua/codec/support.rs
+src/opcua/codec/variant.rs
 src/opcua/codec/vectors.rs
 src/opcua/codec.rs
 src/opcua/driver.rs

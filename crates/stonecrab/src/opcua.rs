@@ -1,14 +1,14 @@
 #![doc = include_str!("../docs/components/opcua.md")]
 
 mod address;
-// The built-in types of the binary encoding are written and tested here, but nothing calls
-// them until the recursive types (slice S86) and the generated service layer (slice S88).
+// The types of the binary encoding (the built-ins and the recursive types) are written and
+// tested here, but nothing calls them until the generated service layer (slice S88).
 #[cfg_attr(
     not(test),
     expect(
         dead_code,
         unused_imports,
-        reason = "the recursive types of slice S86 are the first callers"
+        reason = "the generated service layer of slice S88 is the first caller"
     )
 )]
 mod codec;

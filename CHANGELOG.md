@@ -49,6 +49,22 @@ specification-stage placeholder.
   byte vectors under `fixtures/opcua/codec` written from Part 6 (not packaged), unit tests, a
   property test, the coverage floor of 100 and the module in `mutants.toml`. No parity row
   changes status.
+- **Added (slice S86 of milestone M3; one additive public change):** `ParseError`, the error
+  of `stonecrab::codec`, gains two variants on its `#[non_exhaustive]` enum:
+  `CountLimit { field, count, max }` (a declared element count larger than the remaining input
+  could hold, refused before anything is reserved) and `RecursionLimit { limit }` (a structure
+  nested deeper than the budget). Both map to `ErrorKind::ResourceLimit` in `PlcError`, as
+  `OversizedLength` does; the Modbus framing maps both to `FrameError::Malformed`, which they
+  cannot reach. With the `opcua` feature the crate-private recursive types of the binary
+  encoding join the built-ins, called by nothing yet: Variant (all 25 types, scalars and
+  arrays, null arrays kept apart from empty ones, `arrayDimensions` checked against the number
+  of values), `DataValue`, `DiagnosticInfo` and the `ExtensionObject` envelope with Raw, Xml and
+  Null bodies. Each spends one unit of a 64-entry budget on entry, so a Variant nested 2000 or
+  16000 deep is `RecursionLimit`, not a stack overflow, and an array count is checked against
+  the bytes that remain before an element is read. Gates: the fuzz target `fuzz_opcua_decode`
+  (35 seeds, reached through the `cfg(fuzzing)` entry point), unit tests with hand-written
+  byte vectors, three property tests, the coverage floor of 100 and the module in
+  `mutants.toml`. No parity row changes status.
 - **Dependencies:** `toml` 0.9 to 1.1 (resolved 1.1.8, with `toml_parser` 1.1.5,
   `toml_datetime` 1.1.2 and `winnow` 1.0.4) for the crate, the fuzz workspace and the code
   generator. There is no API or behavior change: no `toml` type is public, and profiles load

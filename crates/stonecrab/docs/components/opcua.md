@@ -3,8 +3,9 @@ The OPC UA client of Stonecrab (`stonecrab::opcua`), behind the opt-in `opcua` f
 in neither `default` nor `full`, as `tls` is (decision E17, ADR-0034), and it needs the
 `transport` feature. The module is being built in slices (milestone M3, ADR-0034): so far it
 has the tag address grammar and, crate-private, the connection string parser and the
-built-in types of the binary encoding, and nothing that opens a socket. There is no public
-driver, no connection, no secure channel, no session and no message codec yet, and the
+types of the binary encoding (the built-ins and the recursive Variant, `DataValue`,
+`DiagnosticInfo` and `ExtensionObject` envelope), and nothing that opens a socket. There is no
+public driver, no connection, no secure channel, no session and no message codec yet, and the
 `opcua` scheme is not registered anywhere.
 
 This module offers `OpcuaAddress`, a validated `ProtocolAddress` for the tag text
@@ -18,6 +19,7 @@ socket and starts no discovery.
 | Browse query parse (`OpcuaAddress::parse_query`) | build-tested |
 | Connection string and driver options (crate-private until the driver) | build-tested |
 | Built-in types of the binary encoding: String, `ByteString`, Guid, `DateTime`, `StatusCode`, `NodeId`, `ExpandedNodeId`, `QualifiedName`, `LocalizedText` (crate-private) | build-tested |
+| Recursive and open types of the binary encoding: Variant (25 types, arrays, dimensions), `DataValue`, `DiagnosticInfo`, the `ExtensionObject` envelope with Raw, Xml and Null bodies, bounded in depth and in array counts (crate-private) | build-tested |
 | Driver, connection, secure channel, session | planned |
 | Read, write, browse, subscriptions | planned |
 | Security policies and certificates | planned |
@@ -26,8 +28,9 @@ socket and starts no discovery.
 
 Build-tested here means unit tests, a property test and a fuzz target on the address text, a
 fuzz target on the connection string and, for the built-in types, first-party byte vectors
-written from OPC UA Part 6 (`fixtures/opcua/codec`) with a property test; the fuzz target on
-the decoder arrives with the recursive types.
+written from OPC UA Part 6 (`fixtures/opcua/codec`) with a property test. The recursive types
+have hand-written byte vectors in their unit tests, property tests and the fuzz target
+`fuzz_opcua_decode`; their nesting and array-count bounds are tested at the limit and beyond it.
 No parity claim above `planned` is made for the rest of the OPC UA record,
 [`docs/parity/opcua.md`](https://github.com/TheMadBotterINC/stonecrab/blob/master/docs/parity/opcua.md);
 the rows marked `implemented` there (the `OPCUA-ADDR-*` rows, `OPCUA-QUIRK-BINARY-ID`, the
@@ -150,3 +153,34 @@ layer (S88) are built on. All are little-endian and go through `BoundedReader` a
   namespace URI and a server index follow.
 - A `LocalizedText` has a mask byte; a part that is absent is not a part that is a null String.
   The six upper bits of the mask are reserved and ignored.
+
+## Recursive types
+Crate-private since slice S86 and called by nothing yet: the Variant, `DataValue`,
+`DiagnosticInfo` and the `ExtensionObject` envelope of the binary encoding. They have the same
+three-function signature as the built-ins, and the first three are the ones a server can nest.
+
+- Variant, `DataValue`, `DiagnosticInfo` and the envelope each spend one of 64 entries of a
+  depth budget on entry, in `parse`, `serialize` and `length_in_bytes`. When none is left the
+  result is `ParseError::RecursionLimit { limit: 64 }`, so a chain of Variants inside Variants
+  (a Variant of type 24, or an array of them) is refused at the 65th and the stack cannot
+  overflow. The limit is far above the 29 contexts of the deepest message in the upstream
+  suites.
+- A Variant has all 25 types, as a scalar or an array. A null array is kept apart from an empty
+  one, and an array of one element keeps its array flag. A type id above 25 is refused.
+- An array count is an `Int32`; -1 is null and any other negative count is refused. A count
+  larger than the remaining bytes divided by the fewest bytes an element takes is
+  `ParseError::CountLimit { field, count, max }` before any element is read, and the elements
+  are pushed one at a time, so a declared count never reserves memory. An array of Variants
+  or `DataValue`s is still larger in memory than on the wire (one byte per null element
+  against 128 or 176 bytes), which the frame and message limits of the connection bound.
+- `arrayDimensions` is checked: the product of the dimensions, computed without overflow,
+  must equal the number of values, and a mismatch is refused on read and on write.
+- A `DataValue` and a `DiagnosticInfo` have a mask byte that selects their parts; the upper
+  bits that Part 6 reserves are ignored on read and written as zero.
+- An `ExtensionObject` keeps its type id and its body as received: Raw (a `ByteString`), Xml
+  (a String) or Null. An encoding byte other than 0, 1 and 2 is refused. The bodies of the
+  standard types are added with the generated layer.
+
+Not checked against a server yet (UNVERIFIED, see the ADR-0034 addendum of S86): the order of
+the locale and the localized text in a `DiagnosticInfo`, a dimensions flag on a scalar, and
+whether servers set the unused bits of the `ExtensionObject` encoding byte.

@@ -23,7 +23,9 @@ const fn frame_error(error: &ParseError) -> FrameError {
         ParseError::OversizedLength { length, .. } => FrameError::Oversized(*length),
         ParseError::InvalidDiscriminator { .. }
         | ParseError::TrailingBytes { .. }
-        | ParseError::Overflow => FrameError::Malformed,
+        | ParseError::Overflow
+        | ParseError::CountLimit { .. }
+        | ParseError::RecursionLimit { .. } => FrameError::Malformed,
     }
 }
 
@@ -574,6 +576,14 @@ mod tests {
         };
         assert_eq!(frame_error(&invalid), FrameError::Malformed);
         assert_eq!(frame_error(&ParseError::Overflow), FrameError::Malformed);
+        let count = ParseError::CountLimit {
+            field: "count",
+            count: 9,
+            max: 4,
+        };
+        assert_eq!(frame_error(&count), FrameError::Malformed);
+        let nested = ParseError::RecursionLimit { limit: 64 };
+        assert_eq!(frame_error(&nested), FrameError::Malformed);
     }
 
     #[test]

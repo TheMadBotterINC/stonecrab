@@ -105,8 +105,8 @@ Semantics, beyond ADR-0019 decision 4:
   `discriminatedType`) needs at least one byte, so the count is compared with the remaining
   bytes and the vector grows one parsed element at a time. Either failure is
   `ParseError::CountLimit { field, count, max }`, with the mspec field name, the declared count
-  and the most elements the input could hold (`CountLimit` is added to the shipped
-  `ParseError` by S86; the fixtures' stand-in has it).
+  and the most elements the input could hold (`CountLimit` was added to the shipped
+  `ParseError` by S86; the fixtures' stand-in has it too).
 - The count is any expression of the subset. Its value is a `usize` when it is made of
   `uint` fields, parameters and literals, and an `i64` when an `int 32` takes part (an
   `int 32` field converts with `i64::from`). An `i64` count of -1 means null only for a
@@ -391,7 +391,7 @@ when the first protocol that uses arrays adds its own vectors (S88 for OPC UA).
 
 Three files hold first-party mspec text for the rest of what the OPC UA service layer needs.
 Each compiles the generated modules with `rustc` next to the same stand-in (which now has
-`ParseError::RecursionLimit` as S86 will add it) and runs a program:
+`ParseError::RecursionLimit` as S86 added it) and runs a program:
 
 - `src/emit/case_fixtures.rs`,
   `generator_case_parameters_receive_literal_arguments`: a `Body(uint 32 kind, uint 8 scale)`

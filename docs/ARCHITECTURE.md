@@ -1084,7 +1084,8 @@ classDiagram
         InvalidChecksum(expected: u32, actual: u32)
         TrailingBytes(count: usize)
         Overflow(field: str)
-        RecursionLimit(depth: u32)
+        CountLimit(field: str, count: usize, max: usize)
+        RecursionLimit(limit: u32)
     }
 
     class MessageCodec {
@@ -1142,7 +1143,10 @@ limit-and-`finish`. `ParseError` has `Truncated`, `OversizedLength`, `InvalidDis
 checked against the caller's maximum and the bytes present before allocation, and no
 function panics on any input.
 
-**Deferred:** `InvalidChecksum` and `RecursionLimit`, the `Checksum` trait and `Crc16Modbus`
+**Added by M3 (S86):** `CountLimit` and `RecursionLimit`, the bounds the OPC UA codec enforces
+on an array count and on nesting (ADR-0034 decision 5).
+
+**Deferred:** `InvalidChecksum`, the `Checksum` trait and `Crc16Modbus`
 (M2, with Modbus RTU); `MessageCodec`, `GenerationManifest` and `MspecFeatureMatrix`
 (M5: nothing is generated, the Modbus PDUs are hand-written from `modbus.mspec`, D6).
 

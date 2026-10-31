@@ -17,7 +17,8 @@ that consume them are tracked in the
 | `BoundedWriter`: capacity-bounded writes of the same types | build-tested |
 | `ParseError` and its conversion to `PlcError` | build-tested |
 | Coil bit packing helpers (least significant bit first) | build-tested |
-| Checksums (`InvalidChecksum`) and nesting limits (`RecursionLimit`) | planned |
+| Count limits (`CountLimit`) and nesting limits (`RecursionLimit`) | build-tested |
+| Checksums (`InvalidChecksum`) | planned |
 | Hardware verification | planned |
 
 The primitives are unit-tested, property-tested and fuzzed, and the Modbus PDU codec built

@@ -461,3 +461,131 @@ Compliance: `crates/stonecrab/src/opcua/codec.rs` and `codec/` (`string.rs`, `gu
 `opcua_codec_expanded_node_id_i321_is_01004101`,
 `opcua_codec_date_time_zero_and_max_do_not_overflow`, `opcua_prop_builtin_round_trip` and
 `opcua_codec_first_party_vectors_parse_and_reencode`; `mutants.toml` lists the module.
+
+## Addendum (S86, 2026-10-30): the recursive and open types
+Slice S86 added the hand-written recursive and open types under `opcua/codec` (decision 2,
+decision 3, decision 5), crate-private and called by nothing until the generated service layer
+(S88). The status of this ADR is unchanged. The one public change is the two `ParseError`
+variants decision 5 names, additive on the `#[non_exhaustive]` enum.
+- **`ParseError`.** `CountLimit { field: &'static str, count: usize, max: usize }` and
+  `RecursionLimit { limit: u32 }`, with the fields the generator already emits (ADR-0019, S78
+  addendum) and the stand-in of its fixtures already defines, so neither the generator nor the
+  stand-in changed. `limit` is the number of nested entries that was allowed (64). Both map to
+  `ErrorKind::ResourceLimit`, as decision 5 says; the only exhaustive match on `ParseError`
+  in the crate, the Modbus framing's `frame_error`, maps both to `FrameError::Malformed`. ADR-0013
+  decision 4 is amended in place. Semver against 0.3.0 stays green (default features and
+  `--all-features`).
+- **`Depth::enter`.** One unit is taken on entry into `Variant`, `DataValue`, `DiagnosticInfo`
+  and `ExtensionObject`, in `parse`, `serialize` and `length_in_bytes` alike, before anything is
+  read or written; at zero the result is `RecursionLimit { limit: 64 }`. The type that holds
+  another passes the reduced budget on, so a `DataValue` that holds a Variant counts two, a
+  Variant that holds a Variant two, and a chain of `DiagnosticInfo` inner causes one per link.
+  64 is kept (decision 3): 63 holders and a Variant of nothing are read, 64 holders are
+  refused (`opcua_codec_variant_nesting_at_the_limit_is_read`), a value built 65 deep is
+  neither written nor measured, and 2000, 3000, 4000 and 16000 levels (`VariantNestingTest`)
+  are `RecursionLimit` where upstream's unbounded parse ran out of stack. The stack check is
+  `opcua_codec_variant_nesting_of_mixed_types_fits_a_small_stack`: Variant and `DataValue`
+  alternating, and arrays of one Variant inside arrays of one Variant, each to the full
+  budget and one past it on a 2 MiB thread in the test (dev) profile. Measured on one machine
+  (macOS, aarch64, rustc 1.99.1, dev profile) with a thread of a chosen size and a 64-entry
+  value: Variants and Variant-DataValue pairs parse in 256 KiB, an array chain needs between
+  256 and 384 KiB and a chain of `DiagnosticInfo` parses in 384 KiB, so about 5 KiB for the
+  deepest level and a margin of five to eight times on 2 MiB. UNVERIFIED on the other targets
+  of the CI matrix (x86_64 and aarch64 Linux, armv7, Windows, whose frames and main-thread
+  stacks differ); the test itself runs on all of them in the dev profile. The generated
+  entries of S88 add frames between two re-entries (ADR-0019, S80 addendum), which this
+  measurement does not include, so the constant stays 64 and S88 repeats the test with the
+  generated dispatch.
+- **Variant.** `Variant { value, dimensions }` with `VariantValue::{Null, Scalar, Array}`;
+  `Scalar` and `Array` have one variant for each of the 25 types, so a value read as an array
+  of one element is written as one (`OPCUA-DIV-ONE-ELEMENT-ARRAY` needs the flag; the value
+  layer of S95 maps it). An array is `Option<Vec<T>>`: -1 is `None`, 0 is `Some(vec![])`. A
+  type id above 25 is `InvalidDiscriminator` (field `VariantType`). A Boolean reads any
+  non-zero byte as true and writes 1. A Variant of type 0 holds nothing and ignores the array
+  flag, as upstream's mspec does; a dimensions flag on it is honoured and the product must
+  then be 0. The recursive element types are boxed in `Scalar` (`Box<Variant>`,
+  `Box<DataValue>`) and held directly in `Array`.
+- **Counts.** An array count is read as an `Int32`, a negative count other than -1 is
+  `InvalidDiscriminator` (field `arrayLength`, the magnitude), and a count larger than the
+  bytes that remain can hold is `CountLimit` before an element is read: the bytes divided by
+  the fewest bytes an element takes (its size for Boolean to Double, DateTime, Guid and
+  StatusCode, one for every other type). The elements are pushed one at a time, so the
+  reservation is bounded by the elements actually parsed
+  (`opcua_codec_variant_array_count_larger_than_the_body_fails_before_allocation`, 2^31 - 1
+  refused for all 25 types). That is bounded by the input, but not by it alone: a Variant
+  array of Variants takes one byte per null element on the wire and
+  `size_of::<Variant>()` of 128 bytes in memory (176 bytes for a `DataValue` that is one byte
+  on the wire, 104 for an `ExtensionObject` of at least three), measured on the same machine,
+  so an array count equal to the remaining bytes costs about 130 to 180 times the bytes in
+  memory. The frame and message bounds of decision 5 (S87, S94) are what limit that product;
+  this slice does not add a second one. `read_array` is the shared helper a structure field
+  array (the `StructFieldArrayCountTest` shape) uses; S86 tests that shape itself, with the
+  four upstream vectors (`opcua_codec_struct_field_array_count_larger_than_the_body_is_refused`).
+  Upstream turns a count of -1 into an empty list where `read_array` returns `None`, and the
+  value mapping of S119 decides what a null field is.
+- **Dimensions.** The product of `arrayDimensions` is computed with `checked_mul` and must
+  equal the number of values (0 for nothing and for a null array, 1 for a scalar). A
+  mismatch, an empty or null list or a negative dimension is `InvalidDiscriminator` (field
+  `arrayDimensions`), an overflowing product is `Overflow`, and a dimension count that the
+  remaining bytes cannot hold is `CountLimit` (field `arrayDimensions`). The check also runs
+  before `serialize` and `length_in_bytes`, so no inconsistent Variant is written. Both are
+  `MalformedData` or `ResourceLimit` as decision 5 asks. A dimension of 0 is accepted with an
+  empty array. UNVERIFIED against Part 6: whether a dimensions flag is legal on a scalar or
+  null Variant, and whether a dimension may be 0; the codec accepts what is consistent.
+- **DataValue.** The mask (value 0x01, status 0x02, source timestamp 0x04, server timestamp
+  0x08, source picoseconds 0x10, server picoseconds 0x20) selects the parts, which follow in the
+  order value, status, source timestamp, source picoseconds, server timestamp, server
+  picoseconds; the two upper bits are read and ignored and written as zero. The picoseconds are
+  kept as read and not checked against the 10,000 of a tick.
+- **DiagnosticInfo.** Mask bits: symbolic id 0x01, namespace URI 0x02, localized text 0x04,
+  locale 0x08, additional info 0x10, inner status code 0x20, inner `DiagnosticInfo` 0x40, bit 7
+  reserved. The four indices are `Int32`s kept as read. The wire order is upstream's mspec
+  (symbolic id, namespace URI, locale, localized text, additional info, inner status, inner
+  info). UNVERIFIED: that the bit order and the field order differ for locale and localized text
+  is from the mspec and from memory of Part 6; check the order against open62541 v1.5.9 in the
+  interop run of S92 (a swap changes which index is which, not the length).
+- **ExtensionObject envelope.** `ExtensionObject { type_id: ExpandedNodeId, body }` with
+  `ExtensionBody::{Null, Raw(UaByteString), Xml(UaString)}`: the type id, an encoding byte
+  (0, 1 or 2) and for 1 and 2 a length-prefixed body, kept as received (a null body stays null,
+  an XML body is not checked for UTF-8). The type id is an `ExpandedNodeId`, as upstream's
+  mspec has it, which reads the plain `NodeId` of Part 6 and also a server that sets the flag
+  bits. An encoding byte other than 0, 1 and 2 is `InvalidDiscriminator` (field
+  `ExtensionObject encoding`): upstream's mspec reads the byte as flags (binary 0x01, XML 0x02,
+  a type-id-specified bit 0x04) and ignores the rest, which Stonecrab does not; UNVERIFIED
+  that a server never sets them. Upstream reads no XML body (an XML object is a null one and
+  the bytes are left in the stream); this envelope reads it. The Known body of a standard type
+  is added by S88 as a third variant; a disabled case maps `InvalidDiscriminator` to `Raw`.
+  The body length is bounded by `read_bytes` against the bytes that remain and by
+  `MAX_STRING_BYTES` before any copy.
+- **Fuzz.** `fuzz_opcua_decode` (35 seeds under `fuzz/corpus/fuzz_opcua_decode`, reached through
+  `stonecrab::opcua::fuzzing`, which exists only under `--cfg fuzzing`): the first byte picks
+  one of the four types and the rest is parsed; what parses must measure as it writes, write
+  in no more bytes than were consumed, and parse back to a value that writes the same bytes
+  (values are not compared, as a float may be NaN). The known-body dispatch target of decision 5
+  waits for S88.
+- **Vectors.** The wire vectors are written out in the unit tests (hex from the Part 6 rules,
+  not produced by the encoder) rather than as files under `fixtures/opcua/codec`, which stay
+  the S85 built-ins; the upstream corpus of S93 will cover these types from outside. This is a
+  departure from CODING_STANDARDS 13.6 for this slice, taken because the expected values of
+  these types are trees and the fixture loader reads flat ones. Property tests:
+  `opcua_prop_recursive_types_round_trip`,
+  `opcua_prop_recursive_types_parse_never_panics_and_is_stable` and
+  `opcua_prop_recursive_types_survive_a_cut_or_flipped_byte`.
+- **Coverage note for later slices.** `scripts/coverage-gate.sh` sums the line counts of the
+  function groups that llvm-cov reports, and a group's covered count is the best single
+  instantiation's: a generic function or a macro expansion of which no one instantiation
+  executes every line counts the lines it misses even if the others execute them. A
+  `match` on a type-dependent value with an arm for each case therefore costs a line;
+  `read_array` computes the bound in one expression for that reason. The same applies to a
+  `matches!` that is never false on a line of its own.
+
+Compliance: `crates/stonecrab/src/codec/error.rs`; `crates/stonecrab/src/opcua/codec.rs`
+(`Depth::enter`) and `codec/` (`variant.rs`, `data_value.rs`, `diagnostic_info.rs`,
+`extension_object.rs`, and the test-only `support.rs` and `properties.rs`); tests
+`opcua_codec_variant_nesting_beyond_the_limit_is_recursion_limit`,
+`opcua_codec_variant_array_count_larger_than_the_body_fails_before_allocation`,
+`opcua_codec_unknown_extension_object_body_is_kept_raw`,
+`opcua_codec_struct_field_array_count_larger_than_the_body_is_refused`,
+`opcua_codec_variant_dimensions_inconsistent_with_the_count_are_refused` and
+`plc_error_mapping_is_malformed_data_except_the_three_limits`;
+`fuzz/fuzz_targets/fuzz_opcua_decode.rs`; `mutants.toml` lists the files.

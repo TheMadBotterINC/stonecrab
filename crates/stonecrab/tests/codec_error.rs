@@ -9,7 +9,7 @@ mod tests {
     use stonecrab::codec::ParseError;
     use stonecrab::{ErrorKind, PlcError};
 
-    fn every_variant() -> [ParseError; 5] {
+    fn every_variant() -> [ParseError; 7] {
         [
             ParseError::Truncated {
                 needed: 4,
@@ -25,6 +25,12 @@ mod tests {
             },
             ParseError::TrailingBytes { remaining: 2 },
             ParseError::Overflow,
+            ParseError::CountLimit {
+                field: "arrayLength",
+                count: 2_147_483_647,
+                max: 1,
+            },
+            ParseError::RecursionLimit { limit: 64 },
         ]
     }
 
@@ -39,6 +45,8 @@ mod tests {
                 "invalid function discriminator 0",
                 "2 trailing bytes after the last field",
                 "length computation overflowed",
+                "arrayLength count 2147483647 exceeds the 1 the input can hold",
+                "nesting is deeper than the limit of 64",
             ]
         );
     }
@@ -53,7 +61,7 @@ mod tests {
             assert_eq!(error.clone(), error, "{error}: clone equals original");
         }
         let distinct: HashSet<ParseError> = every_variant().into_iter().collect();
-        assert_eq!(distinct.len(), 5, "hash agrees with equality");
+        assert_eq!(distinct.len(), 7, "hash agrees with equality");
         assert_ne!(
             ParseError::TrailingBytes { remaining: 1 },
             ParseError::TrailingBytes { remaining: 2 },
@@ -63,13 +71,15 @@ mod tests {
 
     // covers: SPEC mandatory-failure-cases / F1 truncated payloads, oversized lengths
     #[test]
-    fn plc_error_mapping_is_malformed_data_except_oversized_length() {
+    fn plc_error_mapping_is_malformed_data_except_the_three_limits() {
         let expected = [
             ErrorKind::MalformedData,
             ErrorKind::ResourceLimit,
             ErrorKind::MalformedData,
             ErrorKind::MalformedData,
             ErrorKind::MalformedData,
+            ErrorKind::ResourceLimit,
+            ErrorKind::ResourceLimit,
         ];
         for (error, kind) in every_variant().into_iter().zip(expected) {
             let message = error.to_string();

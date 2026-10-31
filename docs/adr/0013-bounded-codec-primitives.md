@@ -48,8 +48,10 @@ and `MbapFramer` in the Modbus crate converts a codec `ParseError` into it.
    `OversizedLength { length, max }`, `InvalidDiscriminator { field, value }`,
    `TrailingBytes { remaining }` and `Overflow`. It implements `Display` and
    `std::error::Error` by hand (no new dependency) and carries sizes and field names only,
-   never payload bytes. `InvalidChecksum` and `RecursionLimit` arrive with RTU framing and
-   nested structures. `InvalidDiscriminator` is defined here and raised by the protocol
+   never payload bytes. `InvalidChecksum` arrives with RTU framing. `CountLimit { field,
+   count, max }` and `RecursionLimit { limit }` were added by slice S86 of milestone M3
+   (ADR-0034 decision 5), additively on the `#[non_exhaustive]` enum; both map to
+   `ErrorKind::ResourceLimit`. `InvalidDiscriminator` is defined here and raised by the protocol
    crates that decode enumerations; no primitive in this crate produces it. `Overflow`
    guards the writer's length addition; it is not reachable with real buffers on 64-bit
    targets, so no test exercises it and its region is reported uncovered. The line gate

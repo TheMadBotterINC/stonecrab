@@ -73,6 +73,25 @@ mutants, 38 caught, 2 unviable, none missed or timed out, in 17 minutes. With th
 module lists 106 mutants (`cargo mutants --config mutants.toml --list`), with no survivor in
 any file. Neither run is stored here.
 
+Slice S86 (2026-10-30) added the recursive types (`variant.rs`, `data_value.rs`,
+`diagnostic_info.rs`, `extension_object.rs`) and `Depth::enter` (`opcua/codec.rs`), and
+`ParseError` (`codec/error.rs`, run for its two new variants only; the file is not in
+`mutants.toml`). A run over those six files with `--jobs 1` (a first run with `--jobs 3`
+was discarded: the jobs share one target directory here, so a job can test a binary another
+job built, and it reported three survivors that a rerun killed) listed 122 mutants and tested
+them in about 100 minutes: 107 caught, 7 unviable, 0 timeouts and 8 missed. The eight: the
+`|` of the flags in `DataValue::mask` and `DiagnosticInfo::mask` and the two `|` of
+`Variant::serialize` (four, equivalent: the operands are disjoint bits, so `^` gives the same
+byte; listed in `exclude_re`), and four `width` functions of the array element trait
+(`Element::width` replaced by `Some(1)`, and the one-byte types' `width` by `None`), which
+only changed whether a vector was reserved before its elements and so were not observable.
+Those were removed by changing the code: `width` became `min_width`, the fewest bytes an
+element takes (one by default), the count bound is the remaining bytes divided by it, and no
+vector is reserved ahead of its elements. The 35 mutants of the changed functions
+(`min_width`, `read_array`, the `Element` impls, `array_size`, `write_array`, `read_count`
+and `Variant::serialize`) were run again: 33 caught, 2 unviable, none missed. Neither run is
+stored here.
+
 ## Final run
 
 574 mutants run (577 listed; three equivalent mutants are excluded by `exclude_re`):

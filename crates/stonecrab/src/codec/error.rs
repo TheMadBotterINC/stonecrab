@@ -11,8 +11,9 @@ use crate::{ErrorKind, PlcError};
 /// logged without leaking device data. Protocol crates convert it into their own error
 /// type or into [`PlcError`] with `From`.
 ///
-/// `InvalidChecksum` and `RecursionLimit` arrive with the serial framing and nested
-/// structures that need them; the enum is `#[non_exhaustive]` for that reason.
+/// `InvalidChecksum` arrives with the serial framing that needs it; the enum is
+/// `#[non_exhaustive]` for that reason, and `CountLimit` and `RecursionLimit` were added the
+/// same way for the nested, counted structures of OPC UA.
 ///
 /// # Examples
 /// ```
@@ -56,6 +57,21 @@ pub enum ParseError {
     },
     /// A length computation overflowed `usize`.
     Overflow,
+    /// A declared element count is larger than the input could hold, so it was refused
+    /// before anything was reserved for it.
+    CountLimit {
+        /// Name of the field that holds the count.
+        field: &'static str,
+        /// The declared count.
+        count: usize,
+        /// The most elements the remaining input could hold.
+        max: usize,
+    },
+    /// A structure nests deeper than the codec allows.
+    RecursionLimit {
+        /// The number of nested entries that was allowed.
+        limit: u32,
+    },
 }
 
 impl fmt::Display for ParseError {
@@ -77,6 +93,15 @@ impl fmt::Display for ParseError {
                 write!(f, "{remaining} trailing bytes after the last field")
             }
             Self::Overflow => f.write_str("length computation overflowed"),
+            Self::CountLimit { field, count, max } => {
+                write!(
+                    f,
+                    "{field} count {count} exceeds the {max} the input can hold"
+                )
+            }
+            Self::RecursionLimit { limit } => {
+                write!(f, "nesting is deeper than the limit of {limit}")
+            }
         }
     }
 }
@@ -84,8 +109,9 @@ impl fmt::Display for ParseError {
 impl Error for ParseError {}
 
 impl From<ParseError> for PlcError {
-    /// Maps [`ParseError::OversizedLength`] to [`ErrorKind::ResourceLimit`] and every
-    /// other variant to [`ErrorKind::MalformedData`]. The message is the `Display` text
+    /// Maps [`ParseError::OversizedLength`], [`ParseError::CountLimit`] and
+    /// [`ParseError::RecursionLimit`] to [`ErrorKind::ResourceLimit`] and every other
+    /// variant to [`ErrorKind::MalformedData`]. The message is the `Display` text
     /// and the `ParseError` is kept as the source.
     ///
     /// # Examples
@@ -103,7 +129,9 @@ impl From<ParseError> for PlcError {
     /// ```
     fn from(error: ParseError) -> Self {
         let kind = match error {
-            ParseError::OversizedLength { .. } => ErrorKind::ResourceLimit,
+            ParseError::OversizedLength { .. }
+            | ParseError::CountLimit { .. }
+            | ParseError::RecursionLimit { .. } => ErrorKind::ResourceLimit,
             ParseError::Truncated { .. }
             | ParseError::InvalidDiscriminator { .. }
             | ParseError::TrailingBytes { .. }
