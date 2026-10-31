@@ -356,3 +356,32 @@ inherent and the trait method then share a name). The status of this ADR is unch
   feature does not enable `modbus`), with a required port and a path; moving both to a shared
   module is a possible later cleanup.
 
+## Addendum (S79, 2026-10-30): the external signature as the generator emits it
+Slice S79 added the `[external]` table and the recursion budget to the generator
+(ADR-0019, S79 addendum). The status of this ADR is unchanged. Decision 3 stands, with one
+amendment, made here because the generator cannot do what the decision's last sentences ask
+of it, and two points the decision left open:
+- **Who spends the budget.** Decision 3 says the budget is spent on entry into "a generated
+  structure on such a cycle" as well as into Variant, DataValue, DiagnosticInfo and an
+  ExtensionObject body. The generator cannot see which of its structures are on a cycle, as
+  the cycle runs through hand-written types it does not read. It passes the budget on
+  unchanged and spends nothing. That is enough: a cycle of generated types alone is still a
+  generation error, so every cycle goes through an external type, and the external types
+  spend. The hand-written Variant, DataValue, DiagnosticInfo and ExtensionObject envelope
+  of S86 each spend one unit on entry, and the constant of 64 counts those entries (a
+  Variant that holds an ExtensionObject whose generated body holds a Variant is two, not
+  three). S86 measures the constant as decision 3 says.
+- **The signature.** Each external type is an inherent `parse(reader: &mut BoundedReader<'_>,
+  depth: Depth) -> Result<Self, ParseError>`, `serialize(&self, writer: &mut BoundedWriter,
+  depth: Depth) -> Result<(), ParseError>` and `length_in_bytes(&self, depth: Depth) ->
+  Result<usize, ParseError>`, the length taking the budget as well because the length of a
+  Variant recurses. `Depth` is one `Copy` type that the options name; the generated code
+  never looks inside it. The generated functions of every struct and `discriminatedType`
+  take the same argument when the protocol has one (`parse(reader, depth, params...)`).
+  Nothing else is passed: an external type that stands for an mspec type with parameters
+  (`ExtensionObject(bit includeEncodingMask)`) is pinned to literal arguments by its entry,
+  so the hand-written envelope is the masked one, and a use with other arguments is a
+  generation error. The types derive nothing for the generated code but must be `Debug`,
+  `Clone` and `PartialEq`; no generated type derives `Eq` beside externals.
+- **Eq and floats.** A Variant holds a float, so the generated structures of the service
+  layer are `PartialEq` only.

@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::switch::{bind_struct, tail};
 use super::{
     Binding, Ctx, GenError, Imports, Part, Ty, VISIBILITY_EXPECT, fields_of, gen_error, line,
-    module,
+    mentions_depth, module,
 };
 use crate::mspec::{FieldKind, TypeDef};
 use crate::naming::{struct_field_names_lint_fires, upper_camel};
@@ -17,6 +17,7 @@ impl Ctx<'_> {
         imports
             .codec
             .extend(["BoundedReader", "BoundedWriter", "ParseError"]);
+        imports.depth = self.options.depth.is_some();
         let name = upper_camel(&def.name);
         let items = fields_of(&def.fields);
         if let Some(field) = items
@@ -59,7 +60,9 @@ impl Ctx<'_> {
         }
 
         let mut out = String::new();
-        let eq = stored.iter().all(|(_, ty)| !ty.has_float());
+        // An external type may hold a float (a Variant does), and a generated type that holds
+        // one inherits it: with externals in play nothing derives `Eq`.
+        let eq = self.options.external.is_empty() && stored.iter().all(|(_, ty)| !ty.has_float());
         line(
             &mut out,
             if eq {
@@ -141,7 +144,8 @@ impl Ctx<'_> {
         line(
             &mut out,
             &format!(
-                "pub(crate) fn parse(reader: &mut BoundedReader<'_>{extra}) -> Result<Self, ParseError> {{"
+                "pub(crate) fn parse(reader: &mut BoundedReader<'_>{}{extra}) -> Result<Self, ParseError> {{",
+                self.depth_parameter(mentions_depth(&body))
             ),
         );
         out.push_str(&body);
@@ -173,7 +177,10 @@ impl Ctx<'_> {
         )?;
         line(
             &mut out,
-            "pub(crate) fn serialize(&self, writer: &mut BoundedWriter) -> Result<(), ParseError> {",
+            &format!(
+                "pub(crate) fn serialize(&self, writer: &mut BoundedWriter{}) -> Result<(), ParseError> {{",
+                self.depth_parameter(mentions_depth(&statements))
+            ),
         );
         line(&mut out, &format!("{} = self;", bind_struct(&stored, None)));
         out.push_str(&tail(&statements));
@@ -197,7 +204,8 @@ impl Ctx<'_> {
             line(
                 &mut out,
                 &format!(
-                    "pub(crate) {keyword} length_in_bytes(&self) -> Result<usize, ParseError> {{"
+                    "pub(crate) {keyword} length_in_bytes(&self{}) -> Result<usize, ParseError> {{",
+                    self.depth_parameter(mentions_depth(&length))
                 ),
             );
             if !used.is_empty() {
@@ -210,6 +218,6 @@ impl Ctx<'_> {
             line(&mut out, "}");
         }
         line(&mut out, "}");
-        Ok(module(&imports, &self.options.support_module, &out))
+        Ok(module(&imports, self.options, &out))
     }
 }

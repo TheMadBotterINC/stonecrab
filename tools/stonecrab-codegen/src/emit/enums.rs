@@ -29,7 +29,7 @@ impl Ctx<'_> {
         let mut wire_values: Vec<(String, u128, String)> = Vec::new();
         for value in &def.values {
             let variant = upper_camel(&value.name);
-            check_name(def, value.line, &variant, &value.name)?;
+            check_name(def, value.line, &variant, &value.name, false)?;
             if variants.contains(&variant) {
                 return Err(gen_error(
                     def,
@@ -102,7 +102,7 @@ impl Ctx<'_> {
             out.push_str(&methods);
             line(&mut out, "}");
         }
-        Ok(module(&imports, &self.options.support_module, &out))
+        Ok(module(&imports, self.options, &out))
     }
 
     fn emit_enum_wire(
@@ -192,7 +192,7 @@ fn emit_enum_constants(
             ));
         };
         let accessor = snake(&param.name);
-        check_name(def, def.line, &accessor, &param.name)?;
+        check_name(def, def.line, &accessor, &param.name, false)?;
         let mut arms = Vec::new();
         for (value, variant) in def.values.iter().zip(variants) {
             let Some(raw) = value.constants.get(index) else {

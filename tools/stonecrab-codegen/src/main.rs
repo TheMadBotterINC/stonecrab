@@ -30,7 +30,7 @@ use std::process::ExitCode;
 
 use sha2::{Digest as _, Sha256};
 
-use crate::emit::{Endianness, Options};
+use crate::emit::{Endianness, External, Options};
 
 /// A failure of the tool: what it was doing and why.
 #[derive(Debug)]
@@ -126,8 +126,10 @@ fn load_options(path: &Path) -> Result<ProtocolOptions, Failure> {
             "output",
             "support_module",
             "byte_order",
+            "depth",
             "types",
             "cases",
+            "external",
         ]
         .contains(&key.as_str())
         {
@@ -159,6 +161,23 @@ fn load_options(path: &Path) -> Result<ProtocolOptions, Failure> {
     } else {
         None
     };
+    let depth = if table.contains_key("depth") {
+        Some(string(&table, "depth", &origin)?)
+    } else {
+        None
+    };
+    let mut external = BTreeMap::new();
+    if let Some(value) = table.get("external") {
+        let Some(entries) = value.as_table() else {
+            return fail(format!("{origin}: `external` must be a table"));
+        };
+        for (type_name, entry) in entries {
+            external.insert(
+                type_name.clone(),
+                external_entry(entry, &format!("{origin}: external.{type_name}"))?,
+            );
+        }
+    }
     Ok(ProtocolOptions {
         protocol: string(&table, "protocol", &origin)?,
         output: PathBuf::from(string(&table, "output", &origin)?),
@@ -167,8 +186,53 @@ fn load_options(path: &Path) -> Result<ProtocolOptions, Failure> {
             byte_order,
             types: strings(table.get("types"), &format!("{origin}: types"))?,
             cases,
+            depth,
+            external,
         },
     })
+}
+
+/// One `[external]` entry: the Rust path of the type, or a table with the `path` and the
+/// `arguments` that pin the mspec type's parameters, as strings in parameter order.
+fn external_entry(entry: &toml::Value, origin: &str) -> Result<External, Failure> {
+    match entry {
+        toml::Value::String(path) => Ok(External {
+            path: path.clone(),
+            arguments: Vec::new(),
+        }),
+        toml::Value::Table(fields) => {
+            for key in fields.keys() {
+                if !["path", "arguments"].contains(&key.as_str()) {
+                    return fail(format!("{origin}: unknown key `{key}`"));
+                }
+            }
+            let arguments = match fields.get("arguments") {
+                None => Vec::new(),
+                Some(value) => {
+                    let message = format!("{origin}: `arguments` must be an array of strings");
+                    let Some(items) = value.as_array() else {
+                        return fail(message);
+                    };
+                    items
+                        .iter()
+                        .map(|item| item.as_str().map(str::to_owned))
+                        .collect::<Option<Vec<_>>>()
+                        .ok_or(Failure(message))?
+                }
+            };
+            Ok(External {
+                path: string(fields, "path", origin)?,
+                arguments,
+            })
+        }
+        toml::Value::Integer(_)
+        | toml::Value::Float(_)
+        | toml::Value::Boolean(_)
+        | toml::Value::Datetime(_)
+        | toml::Value::Array(_) => fail(format!(
+            "{origin} must be a Rust path or a table with `path` and `arguments`"
+        )),
+    }
 }
 
 /// One vendored mspec as `upstream/manifest.toml` lists it.
@@ -429,6 +493,115 @@ mod tests {
         )
         .expect("write");
         path
+    }
+
+    #[test]
+    fn the_external_table_is_read_and_recorded_in_the_manifest() {
+        let baseline = Baseline {
+            project: "Demo".to_owned(),
+            tag: "v1".to_owned(),
+            commit: "0".repeat(40),
+            files: Vec::new(),
+        };
+        let path = std::env::temp_dir().join(format!(
+            "stonecrab-codegen-external-{}.toml",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            "protocol = \"demo\"\noutput = \"out\"\nsupport_module = \"crate::support\"\n\
+             depth = \"crate::codec::Depth\"\ntypes = []\n\n[external]\n\
+             Name = \"crate::codec::OpcString\"\n\
+             Envelope = { path = \"crate::codec::Envelope\", arguments = [\"true\", \"391\"] }\n",
+        )
+        .expect("write");
+        let loaded = load_options(&path).expect("loads");
+        std::fs::remove_file(&path).expect("clean up");
+        assert_eq!(loaded.options.depth.as_deref(), Some("crate::codec::Depth"));
+        assert_eq!(loaded.options.external.len(), 2);
+        let envelope = loaded.options.external.get("Envelope").expect("Envelope");
+        assert_eq!(
+            envelope.arguments,
+            ["true", "391"],
+            "pinned in parameter order"
+        );
+        let manifest = output::manifest(&baseline, &loaded.options, &path);
+        for expected in [
+            "depth = \"crate::codec::Depth\"\n",
+            "\n[options.external]\n",
+            "Name = \"crate::codec::OpcString\"\n",
+            "Envelope = { path = \"crate::codec::Envelope\", arguments = [\"true\", \"391\"] }\n",
+        ] {
+            assert!(manifest.contains(expected), "{expected}\n{manifest}");
+        }
+        // Without the table the manifest says nothing about externals or the budget.
+        let path = options_file("plain", "");
+        let plain = load_options(&path).expect("loads");
+        std::fs::remove_file(&path).expect("clean up");
+        let manifest = output::manifest(&baseline, &plain.options, &path);
+        assert!(
+            !manifest.contains("external") && !manifest.contains("depth"),
+            "{manifest}"
+        );
+    }
+
+    #[test]
+    fn a_malformed_external_table_is_an_error_naming_the_entry() {
+        // The top-level keys, the tables after them and the error each file draws.
+        for (name, keys, tables, expected) in [
+            (
+                "array",
+                "external = [\"x\"]\n",
+                "",
+                "`external` must be a table",
+            ),
+            (
+                "integer",
+                "",
+                "[external]\nName = 3\n",
+                "external.Name must be a Rust path",
+            ),
+            (
+                "key",
+                "",
+                "[external]\nName = { path = \"a::B\", args = [] }\n",
+                "unknown key `args`",
+            ),
+            (
+                "arguments",
+                "",
+                "[external]\nName = { path = \"a::B\", arguments = [1] }\n",
+                "`arguments` must be an array of strings",
+            ),
+            (
+                "scalar",
+                "",
+                "[external]\nName = { path = \"a::B\", arguments = \"true\" }\n",
+                "`arguments` must be an array of strings",
+            ),
+            (
+                "path",
+                "",
+                "[external]\nName = { arguments = [] }\n",
+                "`path` must be a string",
+            ),
+            ("depth", "depth = 5\n", "", "`depth` must be a string"),
+        ] {
+            let path = std::env::temp_dir().join(format!(
+                "stonecrab-codegen-external-{name}-{}.toml",
+                std::process::id()
+            ));
+            std::fs::write(
+                &path,
+                format!(
+                    "protocol = \"demo\"\noutput = \"out\"\nsupport_module = \"crate::support\"\n{keys}types = []\n{tables}"
+                ),
+            )
+            .expect("write");
+            let error = load_options(&path).expect_err(name);
+            std::fs::remove_file(&path).expect("clean up");
+            assert!(error.0.contains(expected), "{name}: {}", error.0);
+        }
     }
 
     #[test]

@@ -120,14 +120,35 @@ pub(crate) fn manifest(baseline: &Baseline, options: &Options, options_path: &Pa
     let byte_order = options.byte_order.map_or_else(String::new, |order| {
         format!("byte_order = {}\n", quoted(order.keyword()))
     });
+    // So is the recursion budget type, and the external types follow the cases; a protocol
+    // without them has a manifest that says nothing about either.
+    let depth = options
+        .depth
+        .as_ref()
+        .map_or_else(String::new, |path| format!("depth = {}\n", quoted(path)));
     parts.push(format!(
-        "\n[options]\nfile = {}\nsupport_module = {}\n{byte_order}types = {}\n\n[options.cases]\n",
+        "\n[options]\nfile = {}\nsupport_module = {}\n{byte_order}{depth}types = {}\n\n[options.cases]\n",
         quoted(&path),
         quoted(&options.support_module),
         list(options.types.iter().cloned()),
     ));
     for (type_name, cases) in &options.cases {
         parts.push(format!("{type_name} = {}\n", list(cases.iter().cloned())));
+    }
+    if !options.external.is_empty() {
+        parts.push("\n[options.external]\n".to_owned());
+    }
+    for (type_name, external) in &options.external {
+        if external.arguments.is_empty() {
+            parts.push(format!("{type_name} = {}\n", quoted(&external.path)));
+        } else {
+            let arguments: Vec<String> = external.arguments.iter().map(|a| quoted(a)).collect();
+            parts.push(format!(
+                "{type_name} = {{ path = {}, arguments = [{}] }}\n",
+                quoted(&external.path),
+                arguments.join(", ")
+            ));
+        }
     }
     parts.concat()
 }

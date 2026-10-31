@@ -10,7 +10,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use crate::expression::Expr;
+use crate::expression::{Expr, UnaryOp};
 use crate::mspec::{
     Base, Case, DataType, FieldKind, Item, MExpr, Spec, TypeDef, TypeForm, TypeRef, fields_of,
 };
@@ -24,7 +24,13 @@ mod switch;
 #[cfg(test)]
 mod array_fixtures;
 #[cfg(test)]
+mod case_fixtures;
+#[cfg(test)]
+mod external_fixtures;
+#[cfg(test)]
 mod fixtures;
+#[cfg(test)]
+mod reserved_fixtures;
 
 use fields::{Elem, Part};
 
@@ -76,6 +82,33 @@ pub(crate) struct Options {
     pub(crate) types: BTreeSet<String>,
     /// The enabled cases of each enabled `discriminatedType` and `dataIo`, by mspec name.
     pub(crate) cases: BTreeMap<String, BTreeSet<String>>,
+    /// The Rust path of the recursion budget type, passed through every generated `parse`,
+    /// `serialize` and `length_in_bytes` and to every external type (ADR-0034 decision 3).
+    /// `None` leaves the signatures as they are; `external` needs it.
+    pub(crate) depth: Option<String>,
+    /// The hand-written types the output calls instead of generating them, by mspec name.
+    pub(crate) external: BTreeMap<String, External>,
+}
+
+/// A hand-written type that stands for an mspec type (the `[external]` table of a protocol's
+/// options). The Rust type has one fixed shape, whatever the mspec type:
+///
+/// ```text
+/// fn parse(reader: &mut BoundedReader<'_>, depth: Depth) -> Result<Self, ParseError>
+/// fn serialize(&self, writer: &mut BoundedWriter, depth: Depth) -> Result<(), ParseError>
+/// fn length_in_bytes(&self, depth: Depth) -> Result<usize, ParseError>
+/// ```
+///
+/// `Depth` is the options' `depth` type, a small `Copy` value. The mspec type's parameters
+/// are not passed: an external type with parameters pins them to literals here, and a use
+/// that passes anything else is a generation error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct External {
+    /// The Rust path of the type.
+    pub(crate) path: String,
+    /// The literal argument of each mspec parameter, as written (`true`, `391`), in
+    /// parameter order; empty for a type without parameters.
+    pub(crate) arguments: Vec<String>,
 }
 
 /// A generation failure: the construct, the type and the mspec line (SPEC requirement 2).
@@ -108,7 +141,8 @@ const ATTRIBUTES: [(&str, &[&str]); 4] = [
     ("stringEncoding", &["UTF8"]),
 ];
 
-/// Names the emitted code uses for itself, which no field or parameter may take.
+/// Names the emitted code uses for itself, which no field or parameter may take. `depth` is
+/// one more when the protocol has a `depth` option ([`BUDGET`]).
 const RESERVED: [&str; 8] = [
     "reader",
     "writer",
@@ -119,6 +153,9 @@ const RESERVED: [&str; 8] = [
     "array_items",
     "array_item",
 ];
+
+/// The recursion budget parameter of the emitted code, taken only with the `depth` option.
+const BUDGET: &str = "depth";
 
 /// The suppression every top-level item carries: the generated module is private, so
 /// `pub` would trip `unreachable_pub` and `pub(crate)` trips `redundant_pub_crate`
@@ -134,10 +171,13 @@ pub(crate) fn generate(
     specs: &[Spec],
     options: &Options,
 ) -> Result<BTreeMap<String, String>, GenError> {
-    let mut ctx = Ctx::new(specs, options)?;
+    let case_structs = case_structs(specs);
+    let mut ctx = Ctx::new(specs, &case_structs, options)?;
     ctx.prepare()?;
+    // The enabled types, and the cases that an enabled field refers to as a type.
+    let names: BTreeSet<&String> = options.types.iter().chain(&ctx.implicit).collect();
     let mut modules = BTreeMap::new();
-    for name in &options.types {
+    for name in names {
         let def = ctx.def(name, 0, name)?;
         let body = match def.form {
             TypeForm::Enum => ctx.emit_enum(def)?,
@@ -155,6 +195,57 @@ pub(crate) fn generate(
         }
     }
     Ok(modules)
+}
+
+/// A case of a `discriminatedType`, as the `type` it becomes when a field refers to it by
+/// name (`[simple RequestHeader('391') requestHeader]`): upstream's case class takes the
+/// parent's parameters, which the reference supplies.
+struct CaseStruct<'a> {
+    /// The type the case belongs to.
+    parent: &'a TypeDef,
+    /// The case.
+    case: &'a Case,
+    /// The case as a `type`: its fields, with the parent's parameters and attributes.
+    def: TypeDef,
+}
+
+/// The cases of the top-level `typeSwitch` of every `discriminatedType`, named as
+/// `type_names` names them (`*Name` takes the parent's name as a prefix).
+fn case_structs(specs: &[Spec]) -> Vec<CaseStruct<'_>> {
+    let mut found = Vec::new();
+    for spec in specs {
+        for parent in &spec.types {
+            if parent.form != TypeForm::Discriminated {
+                continue;
+            }
+            let Ok(cases) = switch_cases(parent) else {
+                continue;
+            };
+            for case in cases {
+                let name = if case.name_wildcard {
+                    format!("{}{}", parent.name, case.name)
+                } else {
+                    case.name.clone()
+                };
+                found.push(CaseStruct {
+                    parent,
+                    case,
+                    def: TypeDef {
+                        form: TypeForm::Type,
+                        name,
+                        params: parent.params.clone(),
+                        attributes: parent.attributes.clone(),
+                        line: case.line,
+                        fields: case.fields.clone(),
+                        enum_type: None,
+                        values: Vec::new(),
+                        data_io_params: Vec::new(),
+                    },
+                });
+            }
+        }
+    }
+    found
 }
 
 fn gen_error(def: &TypeDef, line: usize, message: &str) -> GenError {
@@ -313,6 +404,29 @@ impl Ty {
         matches!(self, Self::U8 | Self::U16)
     }
 
+    /// Whether the integer literal `value` fits this type; `false` for a type that is not an
+    /// integer.
+    fn holds(&self, value: i128) -> bool {
+        let (smallest, largest) = match self {
+            Self::U8 => (0, i128::from(u8::MAX)),
+            Self::U16 => (0, i128::from(u16::MAX)),
+            Self::U32 => (0, i128::from(u32::MAX)),
+            Self::U64 => (0, i128::from(u64::MAX)),
+            Self::I8 => (i128::from(i8::MIN), i128::from(i8::MAX)),
+            Self::I16 => (i128::from(i16::MIN), i128::from(i16::MAX)),
+            Self::I32 => (i128::from(i32::MIN), i128::from(i32::MAX)),
+            Self::I64 => (i128::from(i64::MIN), i128::from(i64::MAX)),
+            Self::Bool
+            | Self::F32
+            | Self::F64
+            | Self::Enum(_)
+            | Self::Complex(_)
+            | Self::Bytes
+            | Self::Array { .. } => return false,
+        };
+        (smallest..=largest).contains(&value)
+    }
+
     /// Whether an `implicit` field may have this type: an unsigned number up to 32 bits, or
     /// `int 32` (an OPC UA array count, where -1 is null).
     const fn is_implicit_count(&self) -> bool {
@@ -380,7 +494,11 @@ struct Imports {
     codec: BTreeSet<&'static str>,
     byte_order: bool,
     plc_value: bool,
+    /// Whether a function of the module takes the recursion budget.
+    depth: bool,
     support: BTreeSet<&'static str>,
+    /// The types of the protocol the module names: generated ones are imported from their
+    /// sibling module, external ones from their path.
     siblings: BTreeSet<String>,
 }
 
@@ -388,16 +506,28 @@ struct Ctx<'a> {
     types: BTreeMap<&'a str, &'a TypeDef>,
     /// Names defined more than once, with the lines of the first two definitions.
     duplicates: BTreeMap<&'a str, (usize, usize)>,
+    /// The cases that no type shares a name with, as the `type` a reference to them makes,
+    /// each with the type it belongs to.
+    case_types: BTreeMap<&'a str, &'a CaseStruct<'a>>,
+    /// Case names that more than one `discriminatedType` defines.
+    ambiguous_cases: BTreeSet<&'a str>,
     constants: BTreeSet<&'a str>,
     options: &'a Options,
     /// Enums read from and written to the wire, which get `parse` and `serialize`.
     wire_enums: BTreeSet<String>,
     /// Types whose `lengthInBytes` an expression reads.
     sized: BTreeSet<String>,
+    /// The cases that an enabled field refers to by name: generated as structs of their own
+    /// whether or not the options enable them as variants of their parent.
+    implicit: BTreeSet<String>,
 }
 
 impl<'a> Ctx<'a> {
-    fn new(specs: &'a [Spec], options: &'a Options) -> Result<Self, GenError> {
+    fn new(
+        specs: &'a [Spec],
+        case_structs: &'a [CaseStruct<'a>],
+        options: &'a Options,
+    ) -> Result<Self, GenError> {
         let mut types: BTreeMap<&str, &TypeDef> = BTreeMap::new();
         let mut duplicates = BTreeMap::new();
         let mut constants = BTreeSet::new();
@@ -422,14 +552,66 @@ impl<'a> Ctx<'a> {
                 }
             }
         }
+        let mut case_types: BTreeMap<&str, &CaseStruct<'_>> = BTreeMap::new();
+        let mut ambiguous_cases = BTreeSet::new();
+        for found in case_structs {
+            let name = found.def.name.as_str();
+            if types.contains_key(name) {
+                continue;
+            }
+            if case_types.insert(name, found).is_some() {
+                ambiguous_cases.insert(name);
+            }
+        }
+        for name in &ambiguous_cases {
+            case_types.remove(name);
+        }
         Ok(Self {
             types,
             duplicates,
+            case_types,
+            ambiguous_cases,
             constants,
             options,
             wire_enums: BTreeSet::new(),
             sized: BTreeSet::new(),
+            implicit: BTreeSet::new(),
         })
+    }
+
+    /// The budget as the extra argument of a nested `parse` or `serialize` call, which is
+    /// `, depth` when the protocol has a budget type and nothing otherwise.
+    const fn depth_arg(&self) -> &'static str {
+        if self.options.depth.is_some() {
+            ", depth"
+        } else {
+            ""
+        }
+    }
+
+    /// The budget as a parameter of a generated function: `, depth: Depth`, or the
+    /// underscored name when the body never passes it on; nothing without a budget type.
+    fn depth_parameter(&self, used: bool) -> String {
+        match (self.options.depth.is_some(), used) {
+            (false, _) => String::new(),
+            (true, true) => ", depth: Depth".to_owned(),
+            (true, false) => ", _depth: Depth".to_owned(),
+        }
+    }
+
+    /// Whether a nested value of this type can say how long it is: a generated type whose
+    /// length an expression reads, or an external type, which always can.
+    fn has_length(&self, type_name: &str) -> bool {
+        self.sized.contains(type_name) || self.options.external.contains_key(type_name)
+    }
+
+    /// The budget as the whole argument list of a `length_in_bytes` call.
+    const fn depth_name(&self) -> &'static str {
+        if self.options.depth.is_some() {
+            "depth"
+        } else {
+            ""
+        }
     }
 
     /// The byte order of every multi-byte read and write: the protocol's, `BIG_ENDIAN`
@@ -438,11 +620,24 @@ impl<'a> Ctx<'a> {
         self.options.byte_order.unwrap_or(Endianness::Big).rust()
     }
 
-    /// The definition of `name`, which must be enabled and defined once. Two
-    /// definitions of a name are ambiguous, and the generator will not pick one, so only a
-    /// duplicate the output would use is an error.
+    /// The definition of `name`, which must be enabled (or external, or a case an enabled
+    /// field refers to) and defined once. Two definitions of a name are ambiguous, and the
+    /// generator will not pick one, so only a duplicate the output would use is an error.
     fn def(&self, name: &str, line: usize, from: &str) -> Result<&'a TypeDef, GenError> {
-        let Some(def) = self.types.get(name).copied() else {
+        let Some(def) = self.types.get(name).copied().or_else(|| {
+            self.case_types
+                .get(name)
+                .map(|found: &&'a CaseStruct<'a>| &found.def)
+        }) else {
+            if self.ambiguous_cases.contains(name) {
+                return Err(GenError {
+                    line,
+                    type_name: from.to_owned(),
+                    message: format!(
+                        "`{name}` is a case of more than one type; the generator does not pick one"
+                    ),
+                });
+            }
             return Err(GenError {
                 line,
                 type_name: from.to_owned(),
@@ -458,11 +653,16 @@ impl<'a> Ctx<'a> {
                 ),
             });
         }
-        if !self.options.types.contains(name) {
+        if !(self.options.types.contains(name)
+            || self.options.external.contains_key(name)
+            || self.implicit.contains(name))
+        {
             return Err(GenError {
                 line,
                 type_name: from.to_owned(),
-                message: format!("refers to type `{name}`, which the options do not enable"),
+                message: format!(
+                    "refers to type `{name}`, which the options do not enable and do not list under [external]"
+                ),
             });
         }
         Ok(def)
@@ -489,6 +689,141 @@ impl<'a> Ctx<'a> {
             .collect())
     }
 
+    /// The field lists the output reads for `def`: a struct's own, or those of the enabled
+    /// cases of a `discriminatedType` or `dataIo`.
+    fn field_lists(&self, def: &'a TypeDef) -> Result<Vec<&'a [Item]>, GenError> {
+        Ok(match def.form {
+            TypeForm::Type => vec![def.fields.as_slice()],
+            TypeForm::Discriminated | TypeForm::DataIo => self
+                .enabled_cases(def)?
+                .into_iter()
+                .filter(|(_, on)| *on)
+                .map(|(case, _)| case.fields.as_slice())
+                .collect(),
+            TypeForm::Enum => Vec::new(),
+        })
+    }
+
+    /// Checks the `[external]` table and the `depth` type against the mspec files.
+    fn check_external(&self) -> Result<(), GenError> {
+        let options_error = |type_name: &str, message: String| GenError {
+            line: 0,
+            type_name: type_name.to_owned(),
+            message,
+        };
+        if let Some(path) = &self.options.depth
+            && !is_rust_path(path)
+        {
+            return Err(options_error(
+                "(options)",
+                format!("`depth` = \"{path}\" is not a Rust path"),
+            ));
+        }
+        if !self.options.external.is_empty() && self.options.depth.is_none() {
+            return Err(options_error(
+                "(options)",
+                "an [external] table needs `depth`, the budget type of the external signature"
+                    .to_owned(),
+            ));
+        }
+        for (name, external) in &self.options.external {
+            let missing =
+                |what: &str| options_error(name, format!("external type `{name}` {what}"));
+            if self.options.types.contains(name) {
+                return Err(missing(
+                    "is also enabled in `types`; it is either generated or external",
+                ));
+            }
+            if !is_rust_path(&external.path) {
+                return Err(missing(&format!(
+                    "maps to `{}`, which is not a Rust path",
+                    external.path
+                )));
+            }
+            let Some(def) = self.types.get(name.as_str()).copied() else {
+                return Err(missing("is not defined by the mspec files"));
+            };
+            if let Some((first, second)) = self.duplicates.get(name.as_str()) {
+                return Err(missing(&format!(
+                    "is defined twice (lines {first} and {second}); the generator does not pick one"
+                )));
+            }
+            if !matches!(def.form, TypeForm::Type | TypeForm::Discriminated) {
+                return Err(missing(&format!(
+                    "is {} `{name}`, which a hand-written type cannot stand for",
+                    def.form.keyword()
+                )));
+            }
+            if external.arguments.len() != def.params.len() {
+                return Err(missing(&format!(
+                    "takes {} parameters in the mspec (line {}) and the table pins {}",
+                    def.params.len(),
+                    def.line,
+                    external.arguments.len()
+                )));
+            }
+            for (param, argument) in def.params.iter().zip(&external.arguments) {
+                let ty = match &param.ty {
+                    TypeRef::Simple(data_type) => scalar(data_type).map(|(ty, _)| ty),
+                    TypeRef::Complex { .. } => None,
+                };
+                let fits = match (ty.as_ref(), argument.as_str()) {
+                    (Some(Ty::Bool), "true" | "false") => true,
+                    (Some(Ty::Bool) | None, _) => false,
+                    (Some(ty), text) => match text_literal(text) {
+                        Some(Lit::Int(value)) => ty.holds(value),
+                        Some(Lit::Bool(_)) | None => false,
+                    },
+                };
+                if !fits {
+                    return Err(missing(&format!(
+                        "pins `{argument}` for the parameter `{}`, which is not a literal of its type",
+                        param.name
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Finds the cases that an enabled field names as a type, and the cases they name in
+    /// turn: each is generated as a struct of its own.
+    fn find_implicit_cases(&mut self) -> Result<(), GenError> {
+        let mut implicit = BTreeSet::new();
+        let mut pending: Vec<&'a TypeDef> = self
+            .options
+            .types
+            .iter()
+            .filter_map(|name| self.types.get(name.as_str()).copied())
+            .collect();
+        while let Some(def) = pending.pop() {
+            for items in self.field_lists(def)? {
+                for field in fields_of(items) {
+                    let (FieldKind::Simple {
+                        ty: TypeRef::Complex { name, .. },
+                        ..
+                    }
+                    | FieldKind::Array {
+                        ty: TypeRef::Complex { name, .. },
+                        ..
+                    }) = &field.kind
+                    else {
+                        continue;
+                    };
+                    let Some(found) = self.case_types.get(name.as_str()).copied() else {
+                        continue;
+                    };
+                    if implicit.insert(name.clone()) {
+                        check_case_reference(found, field.line, &def.name)?;
+                        pending.push(&found.def);
+                    }
+                }
+            }
+        }
+        self.implicit = implicit;
+        Ok(())
+    }
+
     /// Checks the options and finds the enums read from the wire and the types whose
     /// length an expression reads.
     fn prepare(&mut self) -> Result<(), GenError> {
@@ -501,24 +836,22 @@ impl<'a> Ctx<'a> {
                 });
             }
         }
+        self.check_external()?;
+        self.find_implicit_cases()?;
         let mut wire = BTreeSet::new();
         let mut sized = BTreeSet::new();
         let mut nested: BTreeMap<String, Vec<(String, usize)>> = BTreeMap::new();
-        for name in &self.options.types {
+        let names: Vec<String> = self
+            .options
+            .types
+            .iter()
+            .chain(&self.implicit)
+            .cloned()
+            .collect();
+        for name in &names {
             let def = self.def(name, 0, name)?;
             check_attributes(def, self.options.byte_order.unwrap_or(Endianness::Big))?;
-            // The field lists the output reads: a struct's own, or those of enabled cases.
-            let lists: Vec<&[Item]> = match def.form {
-                TypeForm::Type => vec![def.fields.as_slice()],
-                TypeForm::Discriminated | TypeForm::DataIo => self
-                    .enabled_cases(def)?
-                    .into_iter()
-                    .filter(|(_, on)| *on)
-                    .map(|(case, _)| case.fields.as_slice())
-                    .collect(),
-                TypeForm::Enum => continue,
-            };
-            for items in lists {
+            for items in self.field_lists(def)? {
                 for field in fields_of(items) {
                     if let FieldKind::Simple {
                         ty: TypeRef::Complex { name, .. },
@@ -531,7 +864,9 @@ impl<'a> Ctx<'a> {
                     {
                         if self.def(name, field.line, &def.name)?.form == TypeForm::Enum {
                             wire.insert(name.clone());
-                        } else {
+                        } else if !self.options.external.contains_key(name) {
+                            // An external type is a leaf here: a cycle through one is the
+                            // external's to bound, with the budget it is handed.
                             nested
                                 .entry(def.name.clone())
                                 .or_default()
@@ -553,6 +888,47 @@ impl<'a> Ctx<'a> {
     }
 }
 
+/// Fails unless a case that a field names as a type can stand alone: the reference supplies
+/// the parent's parameters and nothing else, so the parent reads nothing before its
+/// `typeSwitch`, and the case has no parameters of its own.
+fn check_case_reference(found: &CaseStruct<'_>, line: usize, from: &str) -> Result<(), GenError> {
+    let refuse = |message: String| GenError {
+        line,
+        type_name: from.to_owned(),
+        message,
+    };
+    let name = &found.def.name;
+    if fields_of(&found.parent.fields).len() != 1 {
+        return Err(refuse(format!(
+            "`{name}` is a case of `{}`, which reads fields before its typeSwitch; a case is a type of its own only when its parent reads none (feature matrix)",
+            found.parent.name
+        )));
+    }
+    if !found.case.params.is_empty() {
+        return Err(refuse(format!(
+            "`{name}` has case parameters and is named as a type; the reference passes only the parent's parameters (feature matrix)"
+        )));
+    }
+    Ok(())
+}
+
+/// Whether `text` is a path of identifiers (`crate::opcua::codec::Variant`) that can be
+/// written in a `use`: at least two segments, none empty, none a keyword except a leading
+/// `crate`, `self` or `super`.
+fn is_rust_path(text: &str) -> bool {
+    let segments: Vec<&str> = text.split("::").collect();
+    segments.len() >= 2
+        && segments.iter().enumerate().all(|(index, segment)| {
+            let mut chars = segment.chars();
+            chars
+                .next()
+                .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+                && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+                && (!is_keyword(segment)
+                    || (index == 0 && ["crate", "self", "super"].contains(segment)))
+        })
+}
+
 /// Fails when a type reaches itself through the nested fields of its enabled cases
 /// (ADR-0019 decision 5): a recursive type needs a depth argument and
 /// `ParseError::RecursionLimit`, which the first protocol that has one adds.
@@ -568,7 +944,7 @@ fn check_recursion(
                 line: *line_no,
                 type_name: name.to_owned(),
                 message: format!(
-                    "recursive type: {} -> {inner}; recursion bounds are not emitted yet",
+                    "recursive type: {} -> {inner}; a cycle must pass through an [external] type",
                     path.join(" -> ")
                 ),
             });
@@ -744,10 +1120,19 @@ fn check_batch_sets(def: &TypeDef, items: &[Item]) -> Result<(), GenError> {
     Ok(())
 }
 
-fn check_name(def: &TypeDef, line_no: usize, rust: &str, original: &str) -> Result<(), GenError> {
+/// Fails on a name the emitted code needs: `budgeted` is whether the protocol has the `depth`
+/// option, which makes `depth` the recursion budget parameter.
+fn check_name(
+    def: &TypeDef,
+    line_no: usize,
+    rust: &str,
+    original: &str,
+    budgeted: bool,
+) -> Result<(), GenError> {
     if rust.is_empty()
         || is_keyword(rust)
         || RESERVED.contains(&rust)
+        || (budgeted && rust == BUDGET)
         || rust == "bits"
         || rust.starts_with("bits_")
     {
@@ -760,7 +1145,50 @@ fn check_name(def: &TypeDef, line_no: usize, rust: &str, original: &str) -> Resu
     Ok(())
 }
 
-/// A decimal or hexadecimal literal as written, and its value.
+/// A literal argument or case value: a boolean or an integer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[expect(
+    variant_size_differences,
+    reason = "an i128 holds every u64 and i64 literal; a bool is the other kind"
+)]
+enum Lit {
+    Bool(bool),
+    Int(i128),
+}
+
+/// The literal an expression is: `true`, `false`, an integer, or a negated one.
+fn literal_value(expr: &Expr) -> Option<Lit> {
+    match expr {
+        Expr::Bool(value) => Some(Lit::Bool(*value)),
+        Expr::Number(text) | Expr::Hex(text) => parse_integer(text)
+            .and_then(|value| i128::try_from(value).ok())
+            .map(Lit::Int),
+        Expr::Unary(UnaryOp::Neg, inner) => match literal_value(inner)? {
+            Lit::Int(value) => value.checked_neg().map(Lit::Int),
+            Lit::Bool(_) => None,
+        },
+        Expr::Group(inner, indexes) if indexes.is_empty() => literal_value(inner),
+        Expr::Null
+        | Expr::Str(..)
+        | Expr::Var(_)
+        | Expr::Unary(..)
+        | Expr::Binary(..)
+        | Expr::Ternary(..)
+        | Expr::Group(..) => None,
+    }
+}
+
+/// The literal a pinned argument of the options is.
+fn text_literal(text: &str) -> Option<Lit> {
+    match text {
+        "true" => Some(Lit::Bool(true)),
+        "false" => Some(Lit::Bool(false)),
+        _ => parse_integer(text)
+            .and_then(|value| i128::try_from(value).ok())
+            .map(Lit::Int),
+    }
+}
+
 /// An integer written as an enum value or constant, and its value.
 fn integer_text(raw: &str) -> Option<(String, u128)> {
     parse_integer(raw).map(|value| (raw.to_owned(), value))
@@ -772,6 +1200,27 @@ fn integer_literal(expr: &Expr) -> Option<(String, u128)> {
     } else {
         None
     }
+}
+
+/// A decimal integer as Rust source with `_` every three digits from six digits up, the form
+/// `clippy::unreadable_literal` accepts (`16_909_060`).
+fn decimal(value: impl fmt::Display) -> String {
+    let text = value.to_string();
+    let (sign, digits) = text
+        .strip_prefix('-')
+        .map_or(("", text.as_str()), |digits| ("-", digits));
+    if digits.len() < 6 {
+        return text;
+    }
+    // Groups of three counted from the right: chunk the reversed digits, then reverse back.
+    let reversed: Vec<char> = digits.chars().rev().collect();
+    let groups: Vec<String> = reversed
+        .chunks(3)
+        .map(|chunk| chunk.iter().rev().collect())
+        .collect();
+    let mut grouped = String::from(sign);
+    grouped.push_str(&groups.into_iter().rev().collect::<Vec<_>>().join("_"));
+    grouped
 }
 
 fn parse_integer(text: &str) -> Option<u128> {
@@ -829,14 +1278,14 @@ fn line(out: &mut String, text: &str) {
 }
 
 /// A module body: its imports, then its items.
-fn module(imports: &Imports, support_module: &str, items: &str) -> String {
-    let mut text = imports.render(support_module);
+fn module(imports: &Imports, options: &Options, items: &str) -> String {
+    let mut text = imports.render(options);
     text.push_str(items);
     text
 }
 
 impl Imports {
-    fn render(&self, support_module: &str) -> String {
+    fn render(&self, options: &Options) -> String {
         let mut out = String::new();
         if self.byte_order {
             line(&mut out, "use crate::ByteOrder;");
@@ -855,13 +1304,28 @@ impl Imports {
             let names: Vec<&str> = self.support.iter().copied().collect();
             line(
                 &mut out,
-                &format!("use {support_module}::{{{}}};", names.join(", ")),
+                &format!("use {}::{{{}}};", options.support_module, names.join(", ")),
             );
         }
-        if !out.is_empty() && !self.siblings.is_empty() {
+        if let (true, Some(path)) = (self.depth, &options.depth) {
+            line(&mut out, &import_line(path, "Depth"));
+        }
+        let mut generated = Vec::new();
+        for sibling in &self.siblings {
+            match options.external.get(sibling) {
+                Some(external) => {
+                    line(
+                        &mut out,
+                        &import_line(&external.path, &upper_camel(sibling)),
+                    );
+                }
+                None => generated.push(sibling),
+            }
+        }
+        if !out.is_empty() && !generated.is_empty() {
             line(&mut out, "");
         }
-        for sibling in &self.siblings {
+        for sibling in generated {
             line(
                 &mut out,
                 &format!("use super::{}::{};", snake(sibling), upper_camel(sibling)),
@@ -872,6 +1336,22 @@ impl Imports {
         }
         out
     }
+}
+
+/// `use path;`, or `use path as name;` when the path does not end in the name the output
+/// uses for the type.
+fn import_line(path: &str, name: &str) -> String {
+    if path.rsplit("::").next() == Some(name) {
+        format!("use {path};")
+    } else {
+        format!("use {path} as {name};")
+    }
+}
+
+/// Whether `text` names the recursion budget (`depth`, which no field may take) anywhere.
+fn mentions_depth(text: &str) -> bool {
+    text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .any(|word| word == "depth")
 }
 
 #[cfg(test)]
@@ -897,6 +1377,8 @@ mod tests {
                     )
                 })
                 .collect::<BTreeMap<_, _>>(),
+            depth: None,
+            external: BTreeMap::new(),
         }
     }
 

@@ -14,8 +14,9 @@ use super::{Endianness, Options, generate};
 use crate::mspec::{parse, resolve, type_names};
 
 /// A stand-in for the parts of the crate the generated modules import: `ByteOrder`, the
-/// bounded reader and writer and `ParseError` of `crate::codec` (with the `CountLimit` that
-/// slice S86 adds to the shipped one), and the bit-run helpers of the support module.
+/// bounded reader and writer and `ParseError` of `crate::codec` (with the `CountLimit` and
+/// `RecursionLimit` that slice S86 adds to the shipped one), and the bit-run helpers of the
+/// support module.
 pub(super) const STAND_IN: &str = r"
 #![allow(dead_code, unused)]
 
@@ -33,6 +34,7 @@ pub mod codec {
         Truncated { needed: usize, available: usize },
         InvalidDiscriminator { field: &'static str, value: u64 },
         CountLimit { field: &'static str, count: usize, max: usize },
+        RecursionLimit { limit: u32 },
         Overflow,
     }
 
@@ -208,6 +210,8 @@ pub(super) fn options(
                 )
             })
             .collect(),
+        depth: None,
+        external: BTreeMap::new(),
     }
 }
 

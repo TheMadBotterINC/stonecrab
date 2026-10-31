@@ -775,3 +775,129 @@ text, as in S77.
   `generator_array_of_its_own_type_is_refused_as_recursive` and
   `generator_integer_literals_outside_i64_are_refused`. `mise run regen` passes; the Modbus
   generated files are unchanged.
+
+## Addendum (S79, 2026-10-30): literal arguments, cases named as types, reserved fields and external types
+### Status
+Accepted (2026-10-30), as slice S79 of docs/POST_ALPHA_PLAN.md (Phase H, M3 OPC UA), after the
+maintainer accepted decisions E13 to E22 on 2026-10-30. The decisions and the addenda above
+stand. This closes gaps G5, G6 and G7 of the list S75 made, and with S77 and S78 the generator
+has the constructs of the connect-and-read subset; whether it generates the real model is
+S80's evidence. Decision 5's amendment for recursion through external types is S80's addendum
+to write: this one adds the mechanism it will describe and records, in item 5, what the
+mechanism guarantees.
+
+### Context
+`opc-manual.mspec` refers to a case of a `discriminatedType` as a type with the parent's
+parameters as arguments (`[simple RequestHeader('391') requestHeader]`, line 1255, where
+`RequestHeader` is the case `'391'` of `ExtensionObjectDefinition(int 32 extensionId)`;
+upstream generates `RequestHeader.staticParse(readBuffer, (int) (391))`, read in
+`ReadRequest.java:94`). It has 50 `[reserved uint 7 '0x00']` fields in a byte with a flag,
+besides `bit`, `int 5`, `int 2`, `uint 6` and `uint 2` ones. And its recursion runs through
+types a generator should not write: a Variant holds Variants and an ExtensionObject whose
+body is generated again. ADR-0034 decision 3 fixes the contract for those types, hand
+written in S85 and S86; the generator needed the other end of it. Case parameters
+(`OpcuaOpenRequest (uint 32 totalLength)`) are the case-level counterpart of the arguments.
+
+### Decision
+1. **Literal arguments (G5).** An argument at a use of a `type` or `discriminatedType` is a
+   name of the caller's scope as before, or a literal: an integer that fits the callee's
+   parameter, negated or not, or `true` and `false` for a `bit`. The call passes it as
+   written (`Block::parse(reader, 2)`). A literal for an enum parameter, a wildcard, and any
+   other expression stay generation errors. Argument errors now name the line of the field.
+2. **A case named as a type (G5).** A field or array element whose type is a case name of a
+   `discriminatedType` (and no `type`) is a reference to the case as a struct. The generator
+   makes each case a `type` of its own, with the parent's parameters and attributes, and
+   generates the ones an enabled field names, and the ones those name in turn, as structs in
+   modules named for the case, whether or not the options enable them as variants of their
+   parent (the `[cases]` list is the list of variants, unchanged; a case that is only
+   referenced needs no entry). The struct's `parse` takes the parent's parameters in their
+   order; a reference passes them, and for each parameter that the parent's `typeSwitch`
+   switches on, where the case's value is a literal, the reference must pass that literal,
+   because `RequestHeader('392')` names no case. The check is made on the literal, so it
+   holds when the parent itself is not generated. It is a generation error when the parent
+   reads a field before its `typeSwitch` (the standalone case would drop it), when the case
+   has parameters of its own (the reference supplies only the parent's), when the name is a
+   case of two types, or when the references form a cycle (decision 5 of the S66 addendum).
+   The variant of the parent, if enabled, still holds its own copy of the fields; the two
+   are generated from the same field list, so they cannot differ.
+3. **Case parameters (G5).** A case parameter of a `discriminatedType` names a value of the
+   same type that its parent has read or was given before the `typeSwitch`: a parameter, or
+   a discriminator or `implicit` field. That was already in scope for the case's fields, so
+   the declaration is checked and nothing is passed; a case parameter that matches nothing
+   is a generation error. A case's `serialize` has no such scope, as before: an expression
+   that needs the value there is a generation error. A `dataIo` case with parameters stays
+   refused.
+4. **`reserved` fields (G6).** `[reserved <type> '<literal>']` takes an integer or boolean
+   literal that fits its width. Below a byte (`bit`, or `uint` or `int` of 1 to 7 bits) it is
+   a member of a sub-byte run like a flag, and counts toward the eight bits, in either
+   position; from a byte up it is an unsigned number of 8, 16, 32 or 64 bits. It is neither
+   stored nor named in the output. Parse reads and ignores it, whatever it holds; serialize
+   writes the literal. A run made only of reserved members is one `read_u8` and one
+   `write_u8` of the constant. That is upstream's behavior: its generated code reads such a
+   field with `readReservedField` and writes the expected value (`ViewAttributes.java:138,171`),
+   and the runtime logs a value other than the expected one at info level and returns it
+   (`FieldReaderReserved.java:33-42`, `FieldWriterReserved.java:33-42`). The generator
+   accepts any value, as a client of a server that sets a reserved bit should. A literal of
+   six digits or more is emitted with `_` separators, for `clippy::unreadable_literal`.
+5. **External types and the recursion budget (G7).** `depth = "<path>"` and an `[external]`
+   table (README, "External types and the recursion budget") are options. With `depth`, every
+   generated `parse`, `serialize` and `length_in_bytes` of a struct and a `discriminatedType`
+   takes the budget by value after the reader, the writer or the receiver, passes it on
+   unchanged and names it `_depth` when it does not; enums and `dataIo` do not take it. An
+   external type is a hand-written type with `parse(reader, depth)`, `serialize(&self, writer,
+   depth)` and `length_in_bytes(&self, depth)`, each returning `Result<_, ParseError>`, which is
+   what ADR-0034 decision 3 asks for with the length taking the budget too, as the length of a
+   Variant recurses. The generator does not spend the budget. A cycle of generated types is
+   a generation error as before, so every cycle that exists goes through an external type,
+   the external type spends one unit on entry (`Depth::enter`, S86) and fails with
+   `ParseError::RecursionLimit` at zero, and the stack depth of any parse, serialize or
+   length is bounded by the budget times the longest chain of generated types between two
+   externals, which the model fixes. The external's mspec parameters are not passed: an entry
+   pins one literal per parameter, and a use with other arguments is a generation error
+   (`ExtensionObject('true')` of OPC UA is pinned to `true`; a hand-written type for the
+   masked and the unmasked envelope would be two types).
+   The mspec type must exist (once) and be a `type` or a `discriminatedType`, is not also in
+   `types`, and the table needs `depth`; a type that is neither generated nor listed is the
+   generation error of `Ctx::def`, which now says so. The options, `depth` and the table
+   included, are recorded in `generated/MANIFEST.toml` (`[options.external]`), and not at
+   all when absent, so the Modbus manifest is unchanged. With any external in the table no
+   generated type derives `Eq` (a Variant holds a float, and the derive of a type that holds
+   one does not compile), and the externals must implement `Debug`, `Clone` and
+   `PartialEq`. The name `depth` is reserved for fields and parameters only when the protocol
+   has the `depth` option; without it a field may be called `depth`, as before.
+6. **The enabled-case list.** The slice row asks for "an enabled-case list for a
+   `typeSwitch`". The options' `[cases]` list is that, since S66, and is unchanged apart from
+   item 2: a case named in it is a variant, and every other case is disabled and refused by
+   the parser by name. A `typeSwitch` nested in a case (`ExtensionObject`, `Variant`) is not
+   emitted; those types are hand-written (ADR-0034 decision 2).
+7. **Fixtures and the tool version.** First-party mspec text, compiled with `rustc` next to
+   the S77 stand-in, as in S77 and S78 (item 4 of the S77 addendum). The tool version stays
+   0.2.0: the Modbus output is byte for byte what it was, and every input this addendum
+   accepts was a generation error, so no `gen` commit follows (decision 7).
+
+### Consequences
+- The generator can emit `RequestHeader('391')`, the reserved bits of the model and the calls
+  into the hand-written built-ins. What it still refuses in the model, by construct, is S80's
+  list: among others the signed `int 32` discriminator of `ExtensionObjectDefinition`
+  (`disc_literal` and the error value take unsigned discriminators only), `virtual` fields,
+  nested `typeSwitch`, `optional`, `bit` arrays and `STATIC_CALL`.
+- The module of a referenced case is generated even when the options never name it, so the
+  set of generated modules is no longer only the options' `types`. A reader of the options
+  sees the extra modules in `generated.rs`.
+- The hand-written types of S85 and S86 implement one signature and one `Depth`; the
+  generator treats `Depth` as opaque (`Copy`), so the choice of the representation, and the
+  limit of 64 of ADR-0034, are theirs.
+- Not done: a per-type byte order, an external type with a different signature per use, and
+  externals for enums and `dataIo`.
+
+### Compliance
+- S79: `tools/stonecrab-codegen` (`src/emit.rs`: options, the case structs, the external
+  checks, imports; `src/emit/fields.rs`: reserved fields, arguments, calls with the budget;
+  `src/emit/switch.rs`, `src/emit/structs.rs`; `src/main.rs`, `src/output.rs`: the options
+  file and the manifest) and its README. Tests
+  `generator_case_parameters_receive_literal_arguments`,
+  `generator_reserved_bits_share_a_byte_with_a_flag`,
+  `generator_external_type_is_called_through_its_signature` and
+  `generator_missing_external_type_is_an_error`, with the refusals named in the README and the
+  options-file tests in `src/main.rs`. `mise run regen` passes; the Modbus generated files
+  and manifest are unchanged.

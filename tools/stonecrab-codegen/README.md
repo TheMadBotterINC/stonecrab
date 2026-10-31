@@ -126,7 +126,7 @@ Semantics, beyond ADR-0019 decision 4:
   (`const` and `implicit` fields are not stored), and `parse`, `serialize` and, when an
   expression reads its `lengthInBytes`, `length_in_bytes`. Its fields are the ones a case of a
   `discriminatedType` takes: runs of sub-byte fields, byte-aligned numbers, an enum, an
-  array with a `count`, and a nested `type` or `discriminatedType` with name arguments. A
+  array with a `count`, and a nested `type` or `discriminatedType` with name or literal arguments. A
   fixed length is a `const fn` that keeps the `&self` and `Result` of every other length. The
   struct derives `Eq` unless a field is a float. A `type` that stores no field, or has a
   `discriminator` field, is a generation error.
@@ -139,8 +139,36 @@ Semantics, beyond ADR-0019 decision 4:
   guess which of two definitions upstream would use; a duplicate nothing refers to
   changes no output and is not reported.
 - Type parameters are arguments of `parse`; one that no enabled case reads is named `_name`.
-- A nested type whose `lengthInBytes` an expression reads gets `length_in_bytes()`.
-- A recursive type is a generation error.
+  An argument at a use is a name of the caller's scope or a literal: an integer that fits
+  the parameter (`Block('2')`, `-1` for a signed one) or `true` and `false` for a `bit`;
+  the callee's parameter list and these are the only checks, so `'300'` for a `uint 8` is a
+  generation error. An enum parameter takes names only.
+- A case that a field of an enabled type names as a type (`[simple RequestHeader('391')
+  requestHeader]`, where `RequestHeader` is a case of `ExtensionObjectDefinition(int 32
+  extensionId)`, as upstream's `RequestHeader.staticParse(readBuffer, 391)` is) is generated
+  as a struct of its own, in a module named for the case, whether or not the options enable the
+  case as a variant of its parent. Its `parse` takes the parent's parameters, which the
+  reference passes: for each parameter the parent's `typeSwitch` switches on, the reference
+  must pass the literal that is the case's value (`391`), otherwise the reference names
+  another type than the case; the other parameters are names or literals as above. It is a
+  generation error when the parent reads a field before its `typeSwitch`, when the case has
+  parameters of its own, or when two types give a case the same name.
+- A case parameter (`['500' Tail (uint 8 scale) ...]`) names a value the parent has already
+  read or was given, of the same type: a parameter of the parent, or a field read before
+  the `typeSwitch`. The case's fields use it by that name. It is a generation error when no
+  such value exists. A `dataIo` case takes no parameters.
+- A `reserved` field is read and ignored, whatever it holds, and written as its value,
+  which is an integer or boolean literal that fits the field (`[reserved uint 7 '0x00']`,
+  `[reserved bit 'false']`, `[reserved int 5 '0x00']`). Below a byte it takes part in a
+  one-byte run with flags (`[reserved uint 7 '0x00'] [simple bit isOnline]`, most significant
+  bit first); from a byte up it is an unsigned number of 8, 16, 32 or 64 bits. It is not
+  stored. Upstream's generated readers read such a field and drop it (`readReservedField`,
+  `ViewAttributes.java:138`); the runtime logs a value other than the expected one at info
+  level and returns it (`FieldReaderReserved.java:33-42`), and the generated writer writes the
+  expected value (`ViewAttributes.java:171`, `FieldWriterReserved.java:33-42`). The generator
+  accepts any value and writes the expected one, the same.
+- A recursive type is a generation error, with one exception the generator cannot see: a
+  cycle through an external type (below), which that type bounds with the budget it is handed.
 
 ## Options
 
@@ -158,6 +186,54 @@ The Modbus options enable the hand codec's domain of decision 8: `ModbusTcpADU`,
 `ModbusErrorCode`, and the numeric `DataItem` cases except `BOOL`, with `DriverType` and
 `ModbusDataType` as parameter types. The write and file record cases the hand codec gained in
 S45 and S50 stay disabled (the ADR-0019 addendum of 2026-10-29).
+
+### External types and the recursion budget
+
+`depth = "<Rust path>"` names a small `Copy` type, the recursion budget (ADR-0034 decision 3),
+and `[external]` maps an mspec type name to a hand-written Rust type that stands in for it.
+With `depth` set, every generated `parse`, `serialize` and `length_in_bytes` of a struct or
+a `discriminatedType` takes it as its first argument after the reader, the writer or the
+receiver (`parse(reader, depth, params...)`, `serialize(&self, writer, depth)`,
+`length_in_bytes(&self, depth)`), passes it on unchanged to every nested generated or
+external value, and names it `_depth` when the body never does. Enums and `dataIo` do not
+take it, and a protocol without `depth` is generated exactly as before. The generator never
+spends the budget: a cycle of generated types alone is still a generation error, so every
+cycle passes through an external type, and the external type spends it.
+
+The external type has one fixed shape, whatever the mspec type is, which a hand-written type
+over `BoundedReader` and `BoundedWriter` implements as inherent functions:
+
+```rust
+pub(crate) fn parse(reader: &mut BoundedReader<'_>, depth: Depth) -> Result<Self, ParseError>
+pub(crate) fn serialize(&self, writer: &mut BoundedWriter, depth: Depth) -> Result<(), ParseError>
+pub(crate) fn length_in_bytes(&self, depth: Depth) -> Result<usize, ParseError>
+```
+
+It also implements `Debug`, `Clone` and `PartialEq`, which the generated structs derive; with
+any external in the table nothing derives `Eq`, because a Variant holds a float and the
+derive of a type that holds one would not compile. A field of an external type is stored as
+that type, an array of them as `Vec<T>` or `Option<Vec<T>>`, and `x.lengthInBytes` of one is
+`x.length_in_bytes(depth)`. The mspec type's parameters are not passed: an entry that
+stands for a type with parameters pins them (`ExtensionObject = { path = "...", arguments =
+["true"] }`, one literal per parameter), and a use with other arguments is a generation
+error. The entry is a path, or a table with `path` and `arguments`:
+
+```toml
+depth = "crate::opcua::codec::Depth"
+
+[external]
+PascalString = "crate::opcua::codec::OpcString"
+ExtensionObject = { path = "crate::opcua::codec::ExtensionObject", arguments = ["true"] }
+```
+
+The mspec type must be defined by the mspec files (and once), be a `type` or a
+`discriminatedType`, and not be in `types`; the table needs `depth`; a path is two or more
+identifiers joined by `::`. A reference to a type that is neither generated nor listed is the
+generation error `refers to type ..., which the options do not enable and do not list under
+[external]`. The module imports each external with `use <path>;`, or `use <path> as <Name>;`
+when the last segment is not the Rust name of the mspec type. `MANIFEST.toml` records `depth`
+and the table (`[options.external]`) when the options have them, so the hand-written
+dependency set is part of what a regeneration reviews; the Modbus manifest says nothing.
 
 ## MSpec feature matrix
 
@@ -195,15 +271,19 @@ fixtures" below); the first protocol that uses it adds its own vectors (ADR-0019
 | Field: `optional` | yes | no | - |
 | Field: `padding` | yes | no | - |
 | Field: `peek` | yes | no | - |
-| Field: `reserved` | yes | no | - |
-| Field: `simple` | yes | byte-aligned numbers, an enum, a `discriminatedType` or `type` with name arguments | Modbus; S77 fixtures (a `type`) |
+| Field: `reserved` | yes | integer or boolean literal; below a byte in a one-byte run with flags, from a byte up an unsigned 8 to 64 bits; read and ignored, written as its value, not stored | S79 fixtures |
+| Field: `simple` | yes | byte-aligned numbers, an enum, a `discriminatedType` or `type` with name or literal arguments | Modbus; S77 fixtures (a `type`) |
 | Field: `state` | yes | no | - |
 | Field: `typeSwitch` | yes | one or more discriminators (parameters or fields), prefix cases | Modbus |
 | Field: `unknown` | yes | no | - |
 | Field: `validation` | yes | no | - |
 | Field: `virtual` | yes | no | - |
 | Case: fewer values than discriminators | yes | yes, unmatched wire discriminators stored | Modbus (`ModbusPDUError`) |
-| Case: `*` value, default case (no values), `*Name`, case parameters | yes | no | - |
+| Case: `*` value, default case (no values), `*Name` | yes | no | - |
+| Case parameters | yes | in a `discriminatedType`: each names a value of its type that the parent has read or was given; not in a `dataIo` | S79 fixtures |
+| Case named as a type: `[simple Case('391') f]`, also as an array element | yes | a struct of its own, `parse` takes the parent's parameters; the discriminator literal is checked; the parent must read nothing before its switch | S79 fixtures |
+| Literal type arguments: integers (`-1` included) and `true`/`false` | yes | for integer and `bit` parameters | S79 fixtures |
+| Options: `depth` and `[external]` | n/a | the budget argument and the fixed external signature (above); pinned literal arguments | S79 fixtures |
 | Data type: `bit` | yes | in a one-byte run and as a parameter; not alone (the `BOOL` case) | Modbus (`errorFlag`, `response`) |
 | Data type: `byte` | yes | yes | Modbus |
 | Data type: `int` | yes | 8, 16, 32 and 64 bits | Modbus (`DataItem`) |
@@ -230,7 +310,7 @@ fixtures" below); the first protocol that uses it adds its own vectors (ADR-0019
 | Literals: decimal fractions, strings, `true`/`false` in expressions | yes | `true`/`false` as case values only | Modbus (`errorFlag`, `response`) |
 | Literal `null` | yes | only as `name == null` of a nullable array | S78 fixtures |
 | Enum values without a wire value (upstream counts) | yes | no | - |
-| Recursive types | yes | no: generation error | - |
+| Recursive types | yes | no: generation error, except through an external type, which the generator cannot see | S79 fixtures |
 | Duplicate type names | yes | no: generation error when the output uses the name | S77 fixtures |
 
 Upstream's precedence differs from Rust's: `&&` binds tighter than `&` and `||` tighter than
@@ -287,6 +367,48 @@ fixtures, little-endian, and the programs check:
 The S78 output was also compiled and linted under this workspace's lint table (which is the
 root's) in a scratch crate: no finding. Generated code meets the shipped codec in the crate
 when the first protocol that uses arrays adds its own vectors (S88 for OPC UA).
+
+## S79 fixtures
+
+Three files hold first-party mspec text for the rest of what the OPC UA service layer needs.
+Each compiles the generated modules with `rustc` next to the same stand-in (which now has
+`ParseError::RecursionLimit` as S86 will add it) and runs a program:
+
+- `src/emit/case_fixtures.rs`,
+  `generator_case_parameters_receive_literal_arguments`: a `Body(uint 32 kind, uint 8 scale)`
+  whose cases refer to a case `Header('391', 'scale')` and `Header('391', '1')`, as a single
+  field and as a `count` array, to a `Block('2')` with a literal for its parameter, and
+  declare a case parameter. `Header` is never enabled as a variant and is a module of its
+  own. The program parses and serializes every case, passes the case's parameters, and checks
+  the disabled-variant and unknown-kind refusals. The refusals are
+  `generator_case_named_as_a_type_must_pass_its_own_discriminator` (another literal, a name
+  where the literal is, a wrong argument count, a literal that does not fit or is not of
+  the type, a name that does not exist; the error names the field's line),
+  `generator_case_parameters_and_named_cases_are_checked_against_what_they_can_hold` and
+  `generator_a_case_named_as_a_type_cannot_reach_itself`.
+- `src/emit/reserved_fixtures.rs`, `generator_reserved_bits_share_a_byte_with_a_flag`:
+  reserved bits at the top, in the middle and at the bottom of a run, a whole reserved
+  `uint 16`, a byte of nothing but two reserved nibbles, and a case of a `discriminatedType`.
+  Noisy reserved bits parse, are not stored and serialize as their value;
+  `generator_reserved_fields_are_refused_when_they_cannot_be_written` covers a value that does
+  not fit, one that does not suit the type, a float, a signed number of a byte or more, a run
+  that does not end on a byte boundary or is longer than one, and a struct of nothing else.
+- `src/emit/external_fixtures.rs`,
+  `generator_external_type_is_called_through_its_signature`: three externals (a `Name`, a
+  recursive `Variant` that spends the budget on every entry, and an `Envelope` pinned to
+  `'true'`) in a struct as a field, as an array element (nullable) and through `lengthInBytes`,
+  in a `discriminatedType`, and in a struct that reads that one's length. The externals check
+  that the generated code hands them the budget unspent; five nested Variants fit a budget of
+  five and six fail, on `parse` and on `serialize`, with the external's own error.
+  `generator_missing_external_type_is_an_error` covers a type that is neither generated nor
+  listed, an entry that the mspec does not define, a missing `depth`, a bad path, a wrong
+  number of pinned arguments, a pinned argument that does not suit its parameter, a use with
+  other arguments, a type that is both generated and external, and an enum. `src/main.rs`
+  tests the options file and the manifest.
+
+The output of the three programs was compiled and linted under the lint table of this
+workspace with the root's module promotions (`indexing_slicing`, `arithmetic_side_effects`,
+`as_conversions`) in a scratch crate: no finding in the generated code.
 
 ## The parser against the pinned baseline
 

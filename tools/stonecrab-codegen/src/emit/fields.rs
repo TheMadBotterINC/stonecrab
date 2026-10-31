@@ -5,8 +5,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    Binding, Ctx, DiscValue, GenError, Imports, Ty, check_fits, check_name, describe, gen_error,
-    line, parse_integer, scalar,
+    Binding, CaseStruct, Ctx, DiscValue, External, GenError, Imports, Lit, Ty, check_fits,
+    check_name, decimal, describe, gen_error, integer_literal, line, literal_value, parse_integer,
+    scalar, text_literal,
 };
 use crate::expression::{BinaryOp, Expr, UnaryOp, Variable};
 use crate::mspec::{
@@ -18,10 +19,13 @@ use crate::naming::{snake, upper_camel};
 /// A member of a sub-byte run.
 #[derive(Debug, Clone)]
 pub(super) struct RunMember {
+    /// The Rust name; empty for a `reserved` member, which nothing names.
     name: String,
     ty: Ty,
     offset: u32,
     width: u32,
+    /// The value of a `reserved` member: ignored when read, written when serialized.
+    reserved: Option<u128>,
 }
 
 /// One planned field.
@@ -31,6 +35,8 @@ pub(super) enum Part<'a> {
     Run(Vec<RunMember>),
     /// A byte-aligned scalar (a `simple` or `discriminator` field).
     Scalar { name: String, ty: Ty, bits: u32 },
+    /// A byte-aligned `reserved` field: read and ignored, written as `literal`.
+    Reserved { ty: Ty, bits: u32, literal: String },
     /// A `const` field and its expected value.
     Const {
         name: String,
@@ -67,6 +73,7 @@ pub(super) enum Part<'a> {
         name: String,
         type_name: String,
         args: Vec<&'a MExpr>,
+        line: usize,
     },
 }
 
@@ -83,6 +90,7 @@ pub(super) enum Elem<'a> {
     Complex {
         type_name: String,
         args: Vec<&'a MExpr>,
+        line: usize,
     },
 }
 
@@ -113,6 +121,7 @@ impl Part<'_> {
         match self {
             Self::Run(members) => members
                 .iter()
+                .filter(|member| member.reserved.is_none())
                 .map(|member| (member.name.clone(), member.ty.clone()))
                 .collect(),
             Self::Scalar { name, ty, .. } => vec![(name.clone(), ty.clone())],
@@ -130,7 +139,7 @@ impl Part<'_> {
             Self::Complex {
                 name, type_name, ..
             } => vec![(name.clone(), Ty::Complex(type_name.clone()))],
-            Self::Const { .. } | Self::Implicit { .. } => Vec::new(),
+            Self::Reserved { .. } | Self::Const { .. } | Self::Implicit { .. } => Vec::new(),
         }
     }
 }
@@ -166,18 +175,27 @@ impl Ctx<'_> {
             {
                 scalar(data_type)
                     .filter(|(ty, bits)| *bits < 8 && matches!(ty, Ty::Bool | Ty::U8))
-                    .map(|(ty, bits)| (name, ty, bits))
+                    .map(|(ty, bits)| (Some(name), ty, bits, None))
+            } else if let FieldKind::Reserved { ty, expected } = &field.kind {
+                let (ty, bits, value) = Self::reserved_field(def, field, ty, expected)?;
+                (bits < 8).then_some((None, ty, bits, Some(value)))
             } else {
                 None
             };
-            if let Some((name, ty, width)) = sub_byte {
-                let rust = snake(name);
-                check_name(def, field.line, &rust, name)?;
+            if let Some((name, ty, width, reserved)) = sub_byte {
+                let rust = if let Some(name) = name {
+                    let rust = snake(name);
+                    check_name(def, field.line, &rust, name, self.options.depth.is_some())?;
+                    rust
+                } else {
+                    String::new()
+                };
                 run.push(RunMember {
                     name: rust,
                     ty,
                     offset: run_bits,
                     width,
+                    reserved,
                 });
                 run_bits = run_bits.saturating_add(width);
                 if run_bits == 8 {
@@ -211,6 +229,56 @@ impl Ctx<'_> {
         Ok(parts)
     }
 
+    /// The type, the width in bits and the value of a `reserved` field: a `bit`, or an
+    /// unsigned (or, below a byte, any) integer of 1 to 7 bits, or a byte-aligned unsigned
+    /// number, holding an integer or boolean literal that fits. Upstream reads such a field
+    /// and writes its value, whatever was read (ADR-0019 addendum S79).
+    fn reserved_field(
+        def: &TypeDef,
+        field: &Field,
+        ty: &DataType,
+        expected: &MExpr,
+    ) -> Result<(Ty, u32, u128), GenError> {
+        let refuse = |what: &str| {
+            gen_error(
+                def,
+                field.line,
+                &format!("a `reserved` field {what} is not emitted (feature matrix)"),
+            )
+        };
+        let MExpr::Expr(expr, _) = expected else {
+            return Err(refuse("with a wildcard value"));
+        };
+        let value = if let Expr::Bool(value) = expr {
+            u128::from(*value)
+        } else {
+            integer_literal(expr)
+                .map(|(_, value)| value)
+                .ok_or_else(|| refuse("with a value that is not an integer or a boolean"))?
+        };
+        let (rust, bits) = match (ty.base, ty.size) {
+            (Base::Bit, _) => (Ty::Bool, 1),
+            (Base::Uint | Base::Int, Some(size @ 1..=7)) => (Ty::U8, size),
+            _ => scalar(ty)
+                .filter(|(rust, bits)| {
+                    bits.is_multiple_of(8) && rust.accessor().is_some() && rust.widens_to_u64()
+                })
+                .ok_or_else(|| refuse(&format!("of type `{}`", describe(ty))))?,
+        };
+        if matches!(expr, Expr::Bool(_)) != (rust == Ty::Bool) {
+            return Err(refuse("whose value does not suit its type"));
+        }
+        let limit = 1_u128.checked_shl(bits).unwrap_or(0);
+        if value >= limit {
+            return Err(gen_error(
+                def,
+                field.line,
+                &format!("value {value} does not fit {bits} bits"),
+            ));
+        }
+        Ok((rust, bits, value))
+    }
+
     #[expect(
         clippy::wildcard_enum_match_arm,
         reason = "the emitted subset; every other field kind is one generation error"
@@ -239,7 +307,7 @@ impl Ctx<'_> {
         };
         let named = |name: &str| {
             let rust = snake(name);
-            check_name(def, field.line, &rust, name).map(|()| rust)
+            check_name(def, field.line, &rust, name, self.options.depth.is_some()).map(|()| rust)
         };
         Ok(match &field.kind {
             FieldKind::Simple { ty, name } | FieldKind::Discriminator { ty, name } => match ty {
@@ -277,6 +345,7 @@ impl Ctx<'_> {
                             name: named(name)?,
                             type_name: type_name.clone(),
                             args: args.iter().collect(),
+                            line: field.line,
                         },
                         TypeForm::DataIo => {
                             return Err(unsupported(&format!(
@@ -287,6 +356,14 @@ impl Ctx<'_> {
                     }
                 }
             },
+            FieldKind::Reserved { ty, expected } => {
+                let (ty, bits, value) = Self::reserved_field(def, field, ty, expected)?;
+                Part::Reserved {
+                    ty,
+                    bits,
+                    literal: decimal(value),
+                }
+            }
             FieldKind::Const {
                 ty: TypeRef::Simple(data_type),
                 name,
@@ -363,6 +440,7 @@ impl Ctx<'_> {
                             TypeForm::Discriminated | TypeForm::Type => Elem::Complex {
                                 type_name: type_name.clone(),
                                 args: args.iter().collect(),
+                                line: field.line,
                             },
                             TypeForm::DataIo => {
                                 return Err(unsupported(&format!(
@@ -407,6 +485,10 @@ impl Ctx<'_> {
         for part in parts {
             match part {
                 Part::Run(members) => {
+                    if members.iter().all(|member| member.reserved.is_some()) {
+                        line(out, "reader.read_u8()?;");
+                        continue;
+                    }
                     let bits = if *run_index == 0 {
                         "bits".to_owned()
                     } else {
@@ -416,6 +498,9 @@ impl Ctx<'_> {
                     line(out, &format!("let {bits} = reader.read_u8()?;"));
                     imports.support.insert("split_bits");
                     for member in members {
+                        if member.reserved.is_some() {
+                            continue;
+                        }
                         let read =
                             format!("split_bits({bits}, {}, {})?", member.offset, member.width);
                         if member.ty == Ty::Bool {
@@ -431,6 +516,18 @@ impl Ctx<'_> {
                             },
                         );
                     }
+                }
+                Part::Reserved { ty, .. } => {
+                    let Some((suffix, ordered)) = ty.accessor() else {
+                        return Err(gen_error(def, def.line, "reserved without an accessor"));
+                    };
+                    let argument = if ordered {
+                        imports.byte_order = true;
+                        order.clone()
+                    } else {
+                        String::new()
+                    };
+                    line(out, &format!("reader.read_{suffix}({argument})?;"));
                 }
                 Part::Scalar { name, ty, .. }
                 | Part::Const { name, ty, .. }
@@ -508,13 +605,15 @@ impl Ctx<'_> {
                     name,
                     type_name,
                     args,
+                    line: line_no,
                 } => {
-                    let args = self.args(def, type_name, args, scope, used_params)?;
+                    let args = self.args(def, *line_no, type_name, args, scope, used_params)?;
                     line(
                         out,
                         &format!(
-                            "let {name} = {}::parse(reader{args})?;",
-                            upper_camel(type_name)
+                            "let {name} = {}::parse(reader{}{args})?;",
+                            upper_camel(type_name),
+                            self.depth_arg()
                         ),
                     );
                     imports.siblings.insert(type_name.clone());
@@ -531,54 +630,180 @@ impl Ctx<'_> {
         Ok(())
     }
 
-    /// The arguments of a nested `parse` call: each a parameter or field of the caller
-    /// with the callee parameter's type.
+    /// The arguments of a nested `parse` call: each a literal, or a parameter or field of the
+    /// caller, with the callee parameter's type. An external type takes none: its mspec
+    /// parameters are pinned by the options and checked against the use. A case named as a
+    /// type must pass its own discriminator values for the parent's switch parameters.
     pub(super) fn args(
         &self,
         def: &TypeDef,
+        line_no: usize,
         type_name: &str,
         args: &[&MExpr],
         scope: &BTreeMap<String, Binding>,
         used_params: &mut BTreeSet<String>,
     ) -> Result<String, GenError> {
-        let target = self.def(type_name, def.line, &def.name)?;
+        let target = self.def(type_name, line_no, &def.name)?;
+        if let Some(external) = self.options.external.get(type_name) {
+            Self::pinned_arguments(def, line_no, type_name, external, args)?;
+            return Ok(String::new());
+        }
         let params = self.params(target)?;
         if params.len() != args.len() {
             return Err(gen_error(
                 def,
-                def.line,
+                line_no,
                 &format!("`{type_name}` takes {} arguments", params.len()),
             ));
         }
+        if let Some(found) = self.case_types.get(type_name) {
+            Self::check_case_pins(def, line_no, found, args)?;
+        }
         let mut text = String::new();
         for ((_, want), arg) in params.iter().zip(args) {
-            let MExpr::Expr(Expr::Var(var), raw) = arg else {
-                return Err(gen_error(
-                    def,
-                    def.line,
-                    "only a name is emitted as a type argument",
-                ));
-            };
-            let rust = snake(&var.name);
-            let found = scope.get(&rust).filter(|binding| {
-                var.args.is_none()
-                    && var.indexes.is_empty()
-                    && var.rest.is_none()
-                    && binding.ty == *want
-                    && !binding.by_ref
-            });
-            if found.is_none() {
-                return Err(gen_error(
-                    def,
-                    def.line,
-                    &format!("argument '{raw}' does not name a value of the parameter's type"),
-                ));
-            }
-            used_params.insert(rust.clone());
+            let argument = Self::argument(def, line_no, want, arg, scope, used_params)?;
             text.push_str(", ");
-            text.push_str(&rust);
+            text.push_str(&argument);
         }
         Ok(text)
+    }
+
+    /// One argument: a literal that fits the parameter, or a name in scope of its type.
+    fn argument(
+        def: &TypeDef,
+        line_no: usize,
+        want: &Ty,
+        arg: &MExpr,
+        scope: &BTreeMap<String, Binding>,
+        used_params: &mut BTreeSet<String>,
+    ) -> Result<String, GenError> {
+        let MExpr::Expr(expr, raw) = arg else {
+            return Err(gen_error(
+                def,
+                line_no,
+                "a wildcard is not emitted as a type argument",
+            ));
+        };
+        if let Some(literal) = literal_value(expr) {
+            return match literal {
+                Lit::Bool(value) if *want == Ty::Bool => Ok(value.to_string()),
+                Lit::Int(value) if *want != Ty::Bool && want.holds(value) => Ok(decimal(value)),
+                Lit::Bool(_) | Lit::Int(_) => Err(gen_error(
+                    def,
+                    line_no,
+                    &format!("argument '{raw}' is not a literal of the parameter's type"),
+                )),
+            };
+        }
+        let found = if let Expr::Var(var) = expr {
+            let rust = snake(&var.name);
+            scope
+                .get(&rust)
+                .filter(|binding| {
+                    var.args.is_none()
+                        && var.indexes.is_empty()
+                        && var.rest.is_none()
+                        && binding.ty == *want
+                        && !binding.by_ref
+                })
+                .map(|_| rust)
+        } else {
+            None
+        };
+        let Some(rust) = found else {
+            return Err(gen_error(
+                def,
+                line_no,
+                &format!(
+                    "argument '{raw}' is neither a literal nor a name of the parameter's type"
+                ),
+            ));
+        };
+        used_params.insert(rust.clone());
+        Ok(rust)
+    }
+
+    /// A case named as a type is only the case it names: for each parameter the parent
+    /// switches on, the reference passes the case's own value.
+    fn check_case_pins(
+        def: &TypeDef,
+        line_no: usize,
+        found: &CaseStruct<'_>,
+        args: &[&MExpr],
+    ) -> Result<(), GenError> {
+        let parent = found.parent;
+        let Some(FieldKind::TypeSwitch { discriminators, .. }) =
+            fields_of(&parent.fields).first().map(|field| &field.kind)
+        else {
+            return Ok(());
+        };
+        for (index, discriminator) in discriminators.iter().enumerate() {
+            let Some(param_index) = parent
+                .params
+                .iter()
+                .position(|param| param.name == *discriminator)
+            else {
+                continue;
+            };
+            let Some(MExpr::Expr(case_expr, case_text)) = found.case.values.get(index) else {
+                continue;
+            };
+            let Some(want) = literal_value(case_expr) else {
+                continue;
+            };
+            let given = args.get(param_index).and_then(|arg| match arg {
+                MExpr::Expr(expr, _) => literal_value(expr),
+                MExpr::Wildcard => None,
+            });
+            if given != Some(want) {
+                return Err(gen_error(
+                    def,
+                    line_no,
+                    &format!(
+                        "`{}` is the case '{case_text}' of `{}`: a reference passes that literal for `{discriminator}`",
+                        found.def.name, parent.name
+                    ),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// The arguments of a use of an external type must be the literals the options pin.
+    fn pinned_arguments(
+        def: &TypeDef,
+        line_no: usize,
+        type_name: &str,
+        external: &External,
+        args: &[&MExpr],
+    ) -> Result<(), GenError> {
+        let same = args.len() == external.arguments.len()
+            && args.iter().zip(&external.arguments).all(|(arg, pinned)| {
+                let given = match arg {
+                    MExpr::Expr(expr, _) => literal_value(expr),
+                    MExpr::Wildcard => None,
+                };
+                given.is_some() && given == text_literal(pinned)
+            });
+        if same {
+            return Ok(());
+        }
+        let shown: Vec<String> = args
+            .iter()
+            .map(|arg| match arg {
+                MExpr::Expr(_, raw) => format!("'{raw}'"),
+                MExpr::Wildcard => "*".to_owned(),
+            })
+            .collect();
+        Err(gen_error(
+            def,
+            line_no,
+            &format!(
+                "`{type_name}` is external, implemented for the arguments ({}); this use passes ({})",
+                external.arguments.join(", "),
+                shown.join(", ")
+            ),
+        ))
     }
 
     #[expect(
@@ -607,7 +832,11 @@ impl Ctx<'_> {
                             .checked_sub(member.offset)
                             .and_then(|rest| rest.checked_sub(member.width))
                             .ok_or_else(|| gen_error(def, line_no, "bad run layout"))?;
-                        match disc_values.get(&member.name) {
+                        // A reserved member is its value, whatever was read.
+                        let fixed = member
+                            .reserved
+                            .map(|value| DiscValue::Literal(value.to_string()));
+                        match fixed.as_ref().or_else(|| disc_values.get(&member.name)) {
                             Some(DiscValue::Literal(literal)) => {
                                 let value = match literal.as_str() {
                                     "true" => 1,
@@ -652,7 +881,7 @@ impl Ctx<'_> {
                     };
                     write_scalar(out, suffix, ordered, &value, &order, imports);
                 }
-                Part::Const { ty, literal, .. } => {
+                Part::Const { ty, literal, .. } | Part::Reserved { ty, literal, .. } => {
                     let Some((suffix, ordered)) = ty.accessor() else {
                         return Err(gen_error(def, line_no, "const without an accessor"));
                     };
@@ -687,10 +916,24 @@ impl Ctx<'_> {
                     if *stored_count {
                         self.emit_stored_count_check(def, *line, name, count, scope, out)?;
                     }
-                    emit_array_serialize(out, name, elem, *nullable, &order, imports);
+                    emit_array_serialize(
+                        out,
+                        name,
+                        elem,
+                        *nullable,
+                        &order,
+                        self.depth_arg(),
+                        imports,
+                    );
                 }
-                Part::Enum { name, .. } | Part::Complex { name, .. } => {
+                Part::Enum { name, .. } => {
                     line(out, &format!("{name}.serialize(writer)?;"));
+                }
+                Part::Complex { name, .. } => {
+                    line(
+                        out,
+                        &format!("{name}.serialize(writer{})?;", self.depth_arg()),
+                    );
                 }
             }
         }
@@ -1018,11 +1261,12 @@ impl Ctx<'_> {
                     && property.indexes.is_empty()
                     && property.rest.is_none() =>
             {
-                if !self.sized.contains(type_name) {
+                if !self.sized.contains(type_name) && !self.options.external.contains_key(type_name)
+                {
                     return Err(fail("lengthInBytes of a type whose length is not emitted"));
                 }
                 Ok(Typed::atom(
-                    format!("{rust}.length_in_bytes()?"),
+                    format!("{rust}.length_in_bytes({})?", self.depth_name()),
                     Kind::Usize,
                 ))
             }
@@ -1217,10 +1461,18 @@ impl Ctx<'_> {
                 imports.siblings.insert(name.clone());
                 format!("{}::parse(reader)?", upper_camel(name))
             }
-            Elem::Complex { type_name, args } => {
-                let args = self.args(def, type_name, args, scope, used_params)?;
+            Elem::Complex {
+                type_name,
+                args,
+                line: elem_line,
+            } => {
+                let args = self.args(def, *elem_line, type_name, args, scope, used_params)?;
                 imports.siblings.insert(type_name.clone());
-                format!("{}::parse(reader{args})?", upper_camel(type_name))
+                format!(
+                    "{}::parse(reader{}{args})?",
+                    upper_camel(type_name),
+                    self.depth_arg()
+                )
             }
         };
         match elem.width() {
@@ -1336,6 +1588,7 @@ fn emit_array_serialize(
     elem: &Elem<'_>,
     nullable: bool,
     order: &str,
+    depth_arg: &str,
     imports: &mut Imports,
 ) {
     if matches!(elem, Elem::Byte) {
@@ -1358,8 +1611,14 @@ fn emit_array_serialize(
                 write_scalar(&mut write, suffix, ordered, "*array_item", order, imports);
             }
         }
-        Elem::Enum { .. } | Elem::Complex { .. } => {
+        Elem::Enum { .. } => {
             line(&mut write, "array_item.serialize(writer)?;");
+        }
+        Elem::Complex { .. } => {
+            line(
+                &mut write,
+                &format!("array_item.serialize(writer{depth_arg})?;"),
+            );
         }
         Elem::Byte => {}
     }

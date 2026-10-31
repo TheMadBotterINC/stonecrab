@@ -6,10 +6,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::{
     Binding, Ctx, DiscValue, Discriminator, Elem, GenError, Imports, Part, Ty, VISIBILITY_EXPECT,
     check_name, describe, emit_match, fields_of, gen_error, integer_literal, integer_text, line,
-    merge_arms, module, scalar,
+    mentions_depth, merge_arms, module, scalar,
 };
 use crate::expression::Expr;
-use crate::mspec::{Case, Field, FieldKind, MExpr, TypeDef, TypeForm, TypeRef};
+use crate::mspec::{Case, Field, FieldKind, MExpr, Param, TypeDef, TypeForm, TypeRef};
 use crate::naming::{snake, upper_camel, variant_names_lint_fires};
 
 impl Ctx<'_> {
@@ -18,6 +18,7 @@ impl Ctx<'_> {
         imports
             .codec
             .extend(["BoundedReader", "BoundedWriter", "ParseError"]);
+        imports.depth = self.options.depth.is_some();
         let name = upper_camel(&def.name);
         let parent_fields = fields_of(&def.fields);
         let (switch_field, own) = parent_fields
@@ -66,8 +67,14 @@ impl Ctx<'_> {
                 continue;
             }
             let variant = upper_camel(&case.name);
-            check_name(def, case.line, &variant, &case.name)?;
-            check_case_form(def, case)?;
+            check_name(
+                def,
+                case.line,
+                &variant,
+                &case.name,
+                self.options.depth.is_some(),
+            )?;
+            check_case_form(def, case, true)?;
             if case.values.len() > discs.len() {
                 return Err(gen_error(
                     def,
@@ -102,9 +109,11 @@ impl Ctx<'_> {
         }
 
         let mut out = String::new();
-        let eq = planned
-            .iter()
-            .all(|(_, _, _, _, stored)| stored.iter().all(|(_, ty)| !ty.has_float()));
+        // With externals in play nothing derives `Eq`: see `emit_struct`.
+        let eq = self.options.external.is_empty()
+            && planned
+                .iter()
+                .all(|(_, _, _, _, stored)| stored.iter().all(|(_, ty)| !ty.has_float()));
         line(
             &mut out,
             if eq {
@@ -202,6 +211,7 @@ impl Ctx<'_> {
             };
             line(&mut body, &format!("{pattern} => {{"));
             let mut scope = parse_scope.clone();
+            self.check_case_params(def, case, &scope)?;
             self.emit_parse_parts(
                 def,
                 parts,
@@ -305,7 +315,8 @@ impl Ctx<'_> {
         line(
             &mut out,
             &format!(
-                "pub(crate) fn parse(reader: &mut BoundedReader<'_>{extra}) -> Result<Self, ParseError> {{"
+                "pub(crate) fn parse(reader: &mut BoundedReader<'_>{}{extra}) -> Result<Self, ParseError> {{",
+                self.depth_parameter(mentions_depth(&body))
             ),
         );
         out.push_str(&body);
@@ -313,11 +324,6 @@ impl Ctx<'_> {
         line(&mut out, "");
 
         // serialize
-        line(
-            &mut out,
-            "pub(crate) fn serialize(&self, writer: &mut BoundedWriter) -> Result<(), ParseError> {",
-        );
-        line(&mut out, "match self {");
         let mut arms = Vec::new();
         for (case, variant, values, parts, stored) in &planned {
             let mut arm = String::new();
@@ -359,6 +365,15 @@ impl Ctx<'_> {
             )?;
             arms.push((bind(variant, stored, None), format!("{{\n{}}}", tail(&arm))));
         }
+        let uses_depth = arms.iter().any(|(_, arm)| mentions_depth(arm));
+        line(
+            &mut out,
+            &format!(
+                "pub(crate) fn serialize(&self, writer: &mut BoundedWriter{}) -> Result<(), ParseError> {{",
+                self.depth_parameter(uses_depth)
+            ),
+        );
+        line(&mut out, "match self {");
         emit_match(&mut out, "", &merge_arms(arms));
         line(&mut out, "}");
         line(&mut out, "");
@@ -367,7 +382,34 @@ impl Ctx<'_> {
             self.emit_length(def, &mut out, &parent_parts, &planned)?;
         }
         line(&mut out, "}");
-        Ok(module(&imports, &self.options.support_module, &out))
+        Ok(module(&imports, self.options, &out))
+    }
+
+    /// The case's own parameters are values the parent has already read or was given:
+    /// each must name one of the same type in the parent's scope (a parameter, or a field
+    /// read before the switch), and the case's fields use it from there.
+    fn check_case_params(
+        &self,
+        def: &TypeDef,
+        case: &Case,
+        scope: &BTreeMap<String, Binding>,
+    ) -> Result<(), GenError> {
+        for (name, ty) in self.param_list(def, &case.params, case.line)? {
+            if !scope
+                .get(&name)
+                .is_some_and(|binding| binding.ty == ty && !binding.by_ref)
+            {
+                return Err(gen_error(
+                    def,
+                    case.line,
+                    &format!(
+                        "the case parameter `{name}` of `{}` names no value of its type that the parent has read or was given",
+                        case.name
+                    ),
+                ));
+            }
+        }
+        Ok(())
     }
 
     #[expect(
@@ -387,17 +429,21 @@ impl Ctx<'_> {
             Vec<(String, Ty)>,
         )],
     ) -> Result<(), GenError> {
-        line(
-            out,
-            "pub(crate) fn length_in_bytes(&self) -> Result<usize, ParseError> {",
-        );
-        line(out, "match self {");
         let mut arms = Vec::new();
         for (case, variant, _, parts, stored) in planned {
             let all: Vec<&Part<'_>> = parent_parts.iter().chain(parts).collect();
             let (body, used) = self.length_body(def, case.line, &all)?;
             arms.push((bind(variant, stored, Some(&used)), body));
         }
+        let uses_depth = arms.iter().any(|(_, arm)| mentions_depth(arm));
+        line(
+            out,
+            &format!(
+                "pub(crate) fn length_in_bytes(&self{}) -> Result<usize, ParseError> {{",
+                self.depth_parameter(uses_depth)
+            ),
+        );
+        line(out, "match self {");
         emit_match(out, "", &merge_arms(arms));
         line(out, "}");
         line(out, "");
@@ -461,6 +507,7 @@ impl Ctx<'_> {
             Part::Run(_) => (8, None),
             Part::Scalar { bits, .. }
             | Part::Const { bits, .. }
+            | Part::Reserved { bits, .. }
             | Part::Implicit { bits, .. }
             | Part::Enum { bits, .. } => (*bits, None),
             Part::Array {
@@ -485,7 +532,7 @@ impl Ctx<'_> {
                         }
                     }
                     Elem::Complex { type_name, .. } => {
-                        if !self.sized.contains(type_name) {
+                        if !self.has_length(type_name) {
                             return Err(gen_error(
                                 def,
                                 line_no,
@@ -498,7 +545,8 @@ impl Ctx<'_> {
                             format!("{name}.iter()")
                         };
                         format!(
-                            "{items}.try_fold(0_usize, |size, array_item| array_item.length_in_bytes().and_then(|length| size.checked_add(length).ok_or(ParseError::Overflow)))?"
+                            "{items}.try_fold(0_usize, |size, array_item| array_item.length_in_bytes({}).and_then(|length| size.checked_add(length).ok_or(ParseError::Overflow)))?",
+                            self.depth_name()
                         )
                     }
                 };
@@ -507,7 +555,7 @@ impl Ctx<'_> {
             Part::Complex {
                 name, type_name, ..
             } => {
-                if !self.sized.contains(type_name) {
+                if !self.has_length(type_name) {
                     return Err(gen_error(
                         def,
                         line_no,
@@ -516,7 +564,10 @@ impl Ctx<'_> {
                 }
                 (
                     0,
-                    Some((name.clone(), format!("{name}.length_in_bytes()?"))),
+                    Some((
+                        name.clone(),
+                        format!("{name}.length_in_bytes({})?", self.depth_name()),
+                    )),
                 )
             }
         })
@@ -582,7 +633,7 @@ impl Ctx<'_> {
                 entries.push((pattern, body.clone(), "_".to_owned(), body));
                 continue;
             }
-            check_case_form(def, case)?;
+            check_case_form(def, case, false)?;
             let case_fields = fields_of(&case.fields);
             let [field] = case_fields.as_slice() else {
                 return Err(gen_error(
@@ -634,7 +685,13 @@ impl Ctx<'_> {
                 return Err(gen_error(def, field.line, "zero-width value"));
             }
             let binding = snake(field_name);
-            check_name(def, field.line, &binding, field_name)?;
+            check_name(
+                def,
+                field.line,
+                &binding,
+                field_name,
+                self.options.depth.is_some(),
+            )?;
             let read_order = if ordered {
                 imports.byte_order = true;
                 order.clone()
@@ -727,7 +784,7 @@ impl Ctx<'_> {
         );
         line(&mut out, "}");
         imports.siblings.insert(enum_name.clone());
-        Ok(module(&imports, &self.options.support_module, &out))
+        Ok(module(&imports, self.options, &out))
     }
 
     /// The `value` of an `InvalidDiscriminator` raised by a switch: the last discriminator
@@ -812,17 +869,33 @@ impl Ctx<'_> {
 
     /// The type parameters as Rust names and types.
     pub(super) fn params(&self, def: &TypeDef) -> Result<Vec<(String, Ty)>, GenError> {
+        self.param_list(def, &def.params, def.line)
+    }
+
+    /// A parameter list (a type's, or a case's) as Rust names and types.
+    pub(super) fn param_list(
+        &self,
+        def: &TypeDef,
+        list: &[Param],
+        line_no: usize,
+    ) -> Result<Vec<(String, Ty)>, GenError> {
         let mut params = Vec::new();
-        for param in &def.params {
+        for param in list {
             let name = snake(&param.name);
-            check_name(def, def.line, &name, &param.name)?;
+            check_name(
+                def,
+                line_no,
+                &name,
+                &param.name,
+                self.options.depth.is_some(),
+            )?;
             let ty = match &param.ty {
                 TypeRef::Simple(data_type) => match scalar(data_type) {
                     Some((ty, bits)) if bits == 1 || bits.is_multiple_of(8) => ty,
                     _ => {
                         return Err(gen_error(
                             def,
-                            def.line,
+                            line_no,
                             &format!("parameter type `{}` is not emitted", describe(data_type)),
                         ));
                     }
@@ -830,11 +903,11 @@ impl Ctx<'_> {
                 TypeRef::Complex {
                     name: type_name, ..
                 } => {
-                    let param_def = self.def(type_name, def.line, &def.name)?;
+                    let param_def = self.def(type_name, line_no, &def.name)?;
                     if param_def.form != TypeForm::Enum {
                         return Err(gen_error(
                             def,
-                            def.line,
+                            line_no,
                             "only enum and base-type parameters are emitted",
                         ));
                     }
@@ -971,10 +1044,10 @@ impl Ctx<'_> {
     }
 }
 
-/// Refuses the case forms the Modbus vectors do not validate: case parameters, a `*Name`
-/// case, a default case without values and a `*` value.
-fn check_case_form(def: &TypeDef, case: &Case) -> Result<(), GenError> {
-    let refused = if !case.params.is_empty() {
+/// Refuses the case forms that no vectors validate: a `*Name` case, a default case without
+/// values, a `*` value and, where `allow_params` is false (a `dataIo`), case parameters.
+fn check_case_form(def: &TypeDef, case: &Case, allow_params: bool) -> Result<(), GenError> {
+    let refused = if !allow_params && !case.params.is_empty() {
         "case parameters are"
     } else if case.name_wildcard {
         "a `*Name` case is"
