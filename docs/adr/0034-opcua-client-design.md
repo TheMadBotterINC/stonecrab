@@ -60,7 +60,8 @@ through `SubscriptionSender`, and dropping the sender ends the stream.
    `opc-status.mspec` and `opc-attribute.mspec` vendored verbatim under
    `upstream/mspec/opcua/` (E13). It lives in `crate::opcua::generated`, ships `pub(crate)`
    in the library (not `cfg(test)`, unlike Modbus under ADR-0019 decision 8) and grows per
-   slice from about 22 enabled cases (S88) toward the 56-case Java-parity set. Hand-written
+   slice from about 22 enabled cases (S88) toward the 61-case Java-parity set (S80's count;
+   S75 estimated 56). Hand-written
    under `crate::opcua::codec`: the built-ins (String, ByteString, Guid, DateTime,
    StatusCode, NodeId in its six encodings, ExpandedNodeId, QualifiedName, LocalizedText),
    the recursive and open types (Variant, DataValue, DiagnosticInfo, the ExtensionObject
