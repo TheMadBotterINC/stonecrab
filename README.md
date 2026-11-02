@@ -163,6 +163,21 @@ smaller examples, `sim_read` and `modbus_tcp_read`, and the
 [Modbus component document](crates/stonecrab/docs/components/modbus.md) has the
 connection-string and address grammars.
 
+## Continuous profile example
+
+From a checkout, run a finite acquisition session against the simulator:
+
+```sh
+STONECRAB_DURATION_MS=5200 cargo run -p stonecrab --example profile_poll --features full -- --expect-good
+```
+
+Set `STONECRAB_URL` and `STONECRAB_PROFILE` for a Modbus TCP server, and
+`STONECRAB_INTERVAL_MS` for the requested cadence. This example uses the existing
+`sensors::Acquisition` API; per-measurement profile minima still apply. It reports
+observations and failures, then closes its connection. See the
+[sensors component](crates/stonecrab/docs/components/sensors.md#finite-continuous-profile-example)
+and [hardware commissioning procedure](docs/hardware/COMMISSIONING.md).
+
 ## Current status
 See [`STATUS.md`](STATUS.md) for the current engineering handoff, verification
 evidence, known gaps and continuation steps, and

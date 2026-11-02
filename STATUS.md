@@ -5,6 +5,22 @@ Implementation baseline: the commit that last modified this file
 (`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
 its own commit; the slice log below records what each one landed.
 
+## Acquisition branch integration (2026-11-02)
+
+The `feat/sensors-continuous-acquisition` branch was reconciled against the newer
+0.3.0 baseline at `0f6eb88`. Its alternate acquisition, freshness and delivery types
+are superseded by the existing ADR-0023/0020/0021/0031 implementations; no published
+library source or contract changes in this integration. The retained additions are the
+finite `profile_poll` example, shared synthetic fixture, a virtual-day test, simulator
+and pymodbus CI smoke runs and a hardware commissioning procedure. See
+[the integration plan](docs/ACQUISITION_PLAN.md) and
+[verification evidence](docs/evidence/acquisition-integration.md).
+
+Local checks: 2115 tests passed, 74 external-peer tests skipped by the normal suite;
+583 merged doctests plus 5 separately run doctests passed. All existing coverage gates
+passed (sensors 1840/1840 lines). The 16 pymodbus tests and three continuous profiles
+passed; all simulator profiles passed. Hardware verification remains pending.
+
 ## Start here
 
 Stonecrab is an independent native Rust port of Apache PLC4X, prioritizing sensor

@@ -190,6 +190,9 @@ run = [
   "STONECRAB_PROFILE=profiles/synthetic/sim/temperature_transmitter.toml cargo run --locked -p stonecrab --example profile_read --features full -- --expect-good",
   "STONECRAB_PROFILE=profiles/synthetic/sim/pressure_flow_level.toml cargo run --locked -p stonecrab --example profile_read --features full -- --expect-good",
   "STONECRAB_PROFILE=profiles/synthetic/sim/discrete_state.toml cargo run --locked -p stonecrab --example profile_read --features full -- --expect-good",
+  "STONECRAB_PROFILE=profiles/synthetic/sim/temperature_transmitter.toml STONECRAB_INTERVAL_MS=1000 STONECRAB_DURATION_MS=2200 cargo run --locked -p stonecrab --example profile_poll --features full -- --expect-good",
+  "STONECRAB_PROFILE=profiles/synthetic/sim/pressure_flow_level.toml STONECRAB_INTERVAL_MS=1000 STONECRAB_DURATION_MS=2200 cargo run --locked -p stonecrab --example profile_poll --features full -- --expect-good",
+  "STONECRAB_PROFILE=profiles/synthetic/sim/discrete_state.toml STONECRAB_INTERVAL_MS=1000 STONECRAB_DURATION_MS=2200 cargo run --locked -p stonecrab --example profile_poll --features full -- --expect-good",
 ]
 
 [tasks.interop]

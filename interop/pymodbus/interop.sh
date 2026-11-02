@@ -11,7 +11,8 @@
 #   tests     cargo nextest run the sixteen interop_ tests against the server
 #   example   cargo run the modbus_tcp_read example against the server (must exit 0)
 #   profiles  cargo run the profile_read example with --expect-good against the server for
-#             each profiles/synthetic/modbus-tcp/*.toml (must exit 0; output in profiles.txt)
+#             each profiles/synthetic/modbus-tcp/*.toml, then profile_poll for 2200 ms
+#             (must exit 0; output in profiles.txt and profiles-poll.txt)
 #   evidence  write the image digest, pip freeze and the server log to the evidence dir
 #   stop      remove the container (no error when it is not there)
 #   run       build, start, wait, tests, example, profiles, evidence, stop; the exit status is the
@@ -136,6 +137,7 @@ run_profiles() {
   [ "${#profiles[@]}" -eq "$EXPECTED_PROFILES" ] ||
     die "expected $EXPECTED_PROFILES modbus-tcp profiles, found ${#profiles[@]}"
   : >"$EVIDENCE/profiles.txt"
+  : >"$EVIDENCE/profiles-poll.txt"
   local profile status=0
   for profile in "${profiles[@]}"; do
     echo "== $profile" | tee -a "$EVIDENCE/profiles.txt"
@@ -145,6 +147,11 @@ run_profiles() {
     STONECRAB_URL="${URL}?address-convention=plc4x" STONECRAB_PROFILE="$profile" \
       cargo run --locked -q -p stonecrab --example profile_read --features full -- --expect-good 2>&1 |
       tee -a "$EVIDENCE/profiles.txt" || status=1
+    echo "== $profile" | tee -a "$EVIDENCE/profiles-poll.txt"
+    STONECRAB_URL="${URL}?address-convention=plc4x" STONECRAB_PROFILE="$profile" \
+      STONECRAB_INTERVAL_MS=1000 STONECRAB_DURATION_MS=2200 \
+      cargo run --locked -q -p stonecrab --example profile_poll --features full -- --expect-good 2>&1 |
+      tee -a "$EVIDENCE/profiles-poll.txt" || status=1
   done
   return "$status"
 }
@@ -170,7 +177,7 @@ run_all() {
   need_docker
   mkdir -p "$EVIDENCE"
   # Remove only the files this script writes, never the directory itself.
-  (cd "$EVIDENCE" && rm -f contract-report.txt example.txt image-digest.txt nextest.txt pip-freeze.txt profiles.txt server.log)
+  (cd "$EVIDENCE" && rm -f contract-report.txt example.txt image-digest.txt nextest.txt pip-freeze.txt profiles.txt profiles-poll.txt server.log)
   trap stop EXIT
   local status=0
   # Subshells, because die exits: a failed step must still reach the evidence step.

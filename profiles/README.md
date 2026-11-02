@@ -219,3 +219,15 @@ that this README lists every file. The `examples` and `interop` CI jobs read eve
 `synthetic/` through `profile_read --expect-good`.
 `crates/stonecrab/tests/modbus_device_replays.rs` validates each documented file against the
 Modbus driver and reads it against the replay of its fixture.
+
+
+## Continuous example
+
+`profile_poll` uses the existing profile acquisition API, a shared sleeping clock and a
+finite deadline. It accepts the same `STONECRAB_URL` and `STONECRAB_PROFILE` as
+`profile_read`, plus positive `STONECRAB_INTERVAL_MS` (default 1000) and
+`STONECRAB_DURATION_MS` (default 5000). Profile minimum intervals still apply.
+`--expect-good` checks that all configured measurements were seen without read errors
+or non-good observations. Both simulator CI and pymodbus run each profile for 2200 ms.
+The profiles remain synthetic. See [commissioning](../docs/hardware/COMMISSIONING.md)
+for the evidence required before adding hardware-verified device profiles.

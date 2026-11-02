@@ -73,6 +73,10 @@ name = "profile_read"
 required-features = ["full"]
 
 [[example]]
+name = "profile_poll"
+required-features = ["full"]
+
+[[example]]
 name = "soak"
 required-features = ["full"]
 

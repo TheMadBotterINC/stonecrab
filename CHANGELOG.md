@@ -5,6 +5,10 @@ Changelog. Stonecrab is one crate, so each release has one section. `stonecrab` 
 specification-stage placeholder.
 
 ## Unreleased
+- Integrate the continuous-acquisition branch with the published 0.3.0 APIs: add the
+  finite `profile_poll` example, simulator/pymodbus CI smoke runs, virtual-day acquisition
+  test and hardware commissioning procedure. Preserve the existing Acquisition,
+  StaleTracker, subscription and event-pump implementations and their contracts.
 
 - **Added (opt-in `opcua` feature; slice S83 of milestone M3):** the new `opcua` feature, in
   neither `default` nor `full` (as `tls` is, decision E17) and enabling only `transport`, adds

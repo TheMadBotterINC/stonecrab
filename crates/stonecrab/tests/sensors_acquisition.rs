@@ -865,4 +865,47 @@ mod tests {
         .expect_err("two tags do not fit a one-item read");
         assert_eq!(error.kind(), ErrorKind::ResourceLimit);
     }
+
+    #[test]
+    fn a_virtual_day_of_acquisition_keeps_reads_and_timers_bounded() {
+        let rig = Rig::new(Duration::ZERO);
+        let profile = sim_profile(
+            "min_interval_ms = 1000\nstale_after_ms = 2000",
+            "min_interval_ms = 1000\nstale_after_ms = 2000",
+        );
+        let mut acquisition = rig.acquisition(&profile, secs(1));
+        for tick in 0..=86_400_u32 {
+            let level = rig.next(&mut acquisition);
+            let pump = rig.next(&mut acquisition);
+            assert_eq!(
+                name_quality(&level),
+                (LEVEL, Quality::Good),
+                "level stays good"
+            );
+            assert_eq!(
+                name_quality(&pump),
+                (PUMP, Quality::Good),
+                "pump stays good"
+            );
+            assert_eq!(
+                rig.elapsed(),
+                secs(u64::from(tick)),
+                "one scheduled read per second"
+            );
+            let expected = tick.saturating_add(1);
+            assert_eq!(
+                rig.reads(),
+                (expected, expected),
+                "no lost or replayed reads"
+            );
+            assert_eq!(
+                rig.clock.sleeper_count(),
+                0,
+                "completed receive retains no timer"
+            );
+        }
+        drop(acquisition);
+        block_on_with(&rig.clock, rig.connection.close()).expect("close after soak");
+        assert_eq!(rig.clock.sleeper_count(), 0, "shutdown leaves no timers");
+    }
 }

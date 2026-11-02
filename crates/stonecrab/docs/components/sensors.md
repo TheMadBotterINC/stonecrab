@@ -295,3 +295,31 @@ assert_eq!(SchemaVersion::new(3), Err(ProfileError::IncompatibleSchema { found: 
 ```
 
 `SensorProfile::from_toml` has a runnable example on its own documentation page.
+
+
+## Finite continuous profile example
+
+`profile_poll` exercises the published `Acquisition::new` / `recv` API using the same
+synthetic bench as `profile_read`. It drives acquisition in the caller task until a
+finite deadline, logs measurements and whole-read errors, and explicitly closes the
+connection even when acquisition fails. No library API or runtime contract is changed.
+
+```sh
+STONECRAB_DURATION_MS=5200 cargo run -p stonecrab --example profile_poll --features full -- --expect-good
+```
+
+`STONECRAB_URL` and `STONECRAB_PROFILE` select a Modbus TCP peer and its profile as in
+`profile_read`; defaults use the simulator and synthetic temperature profile.
+`STONECRAB_INTERVAL_MS` defaults to 1000; `STONECRAB_DURATION_MS` defaults to 5000.
+Both are positive integer milliseconds. The duration includes connection setup.
+The driver and acquisition share a sleeping `transport::SystemClock`.
+The existing acquisition API raises requested rates to each profile's minimum interval.
+`--expect-good` requires every configured measurement to be seen, with no read errors
+or non-good observations. The summary reports observations, seen measurements and errors;
+it does not claim native-subscription loss metrics for demand-driven profile acquisition.
+The finite deadline may abandon a read, with the cancellation consequences of `recv`.
+Connection options in profiles remain documentary and must be applied explicitly in the
+URL. Freshness thresholds, sampling and backpressure follow the published acquisition
+contract above, including waiting for an in-flight read to finish before delivery.
+The simulator and pymodbus example jobs exercise each synthetic profile continuously.
+Hardware verification requires the separate commissioning procedure in the repository.

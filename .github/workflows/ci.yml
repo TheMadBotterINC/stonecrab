@@ -173,6 +173,21 @@ jobs:
       - run: cargo run --locked -p stonecrab --example profile_read --features full -- --expect-good
         env:
           STONECRAB_PROFILE: profiles/synthetic/sim/discrete_state.toml
+      - run: cargo run --locked -p stonecrab --example profile_poll --features full -- --expect-good
+        env:
+          STONECRAB_PROFILE: profiles/synthetic/sim/temperature_transmitter.toml
+          STONECRAB_INTERVAL_MS: "1000"
+          STONECRAB_DURATION_MS: "2200"
+      - run: cargo run --locked -p stonecrab --example profile_poll --features full -- --expect-good
+        env:
+          STONECRAB_PROFILE: profiles/synthetic/sim/pressure_flow_level.toml
+          STONECRAB_INTERVAL_MS: "1000"
+          STONECRAB_DURATION_MS: "2200"
+      - run: cargo run --locked -p stonecrab --example profile_poll --features full -- --expect-good
+        env:
+          STONECRAB_PROFILE: profiles/synthetic/sim/discrete_state.toml
+          STONECRAB_INTERVAL_MS: "1000"
+          STONECRAB_DURATION_MS: "2200"
   interop:
     # The driver against a real server: pymodbus 3.8.6 in Docker, built from
     # interop/pymodbus/ (ADR-0015 decision 16). Every push and pull request on
