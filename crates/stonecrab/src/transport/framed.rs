@@ -186,6 +186,7 @@ impl<F: Send, R: Framer<F>> FramedTransport<F, R> {
     }
 
     /// Apply negotiated framing limits without discarding coalesced or partial input.
+    #[cfg(feature = "opcua")]
     pub(crate) fn replace_framer(&mut self, framer: R) {
         self.framer = framer;
     }
