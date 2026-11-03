@@ -24,8 +24,8 @@ use crate::opcua::generated::read_value_id::ReadValueId;
 use crate::opcua::service::status_error;
 use crate::opcua::{OpcuaAddress, OpcuaDataType, OpcuaIdentifier};
 use crate::{
-    ErrorKind, ItemError, Operation, PlcError, PlcValue, ProtocolStatus, ReadItem, ReadRequest,
-    ReadResponse, Result, Tag, TagId,
+    ErrorKind, ItemError, Operation, PlcError, ProtocolStatus, ReadItem, ReadRequest, ReadResponse,
+    Result, Tag, TagId,
 };
 
 pub(super) fn response(
@@ -157,9 +157,7 @@ fn item(
                 Err(PlcError::new(classify(status), source.to_string()).with_source(source))
             }
         } else {
-            data.value.map_or(Ok(PlcValue::Null), |value| {
-                crate::opcua::value::decode(value, target, budget)
-            })
+            crate::opcua::value::decode(data.value.unwrap_or_default(), target, budget)
         };
     let outcome = outcome.map_err(|error| {
         ItemError::new(error.with_diagnostics(crate::Diagnostics {

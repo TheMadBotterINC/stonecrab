@@ -1109,3 +1109,8 @@ on failed mappings. The first line report flagged only the closing line of the m
 DateTime calendar expression; naming its Unix-nanosecond intermediate made the conversion
 clearer. All i64 tick extrema and checked calendar-override failures already have explicit
 regressions. Full coverage then reaches 100 with unchanged floors/exclusions.
+
+S95 final review also caught the Good absent-value path still constructing Null outside
+the new shared budget. Route both absent and explicit Null through the same decoder;
+a regression checks exact depletion and resource refusal for both forms, while Bad status
+still wins without charging a mapped value. This changes no null-value representation.

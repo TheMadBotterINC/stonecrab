@@ -3,7 +3,7 @@ use crate::opcua::codec::{
     DateTime, DiagnosticInfo, ExpandedNodeId, ExtensionBody, ExtensionObject, LocalizedText,
     Scalar, Variant, XmlElement,
 };
-use crate::{ReadRequest, ResourceLimits, Tag};
+use crate::{PlcValue, ReadRequest, ResourceLimits, Tag};
 use std::sync::Arc;
 
 fn data(scalar: Scalar) -> DataValue {
@@ -266,4 +266,64 @@ fn opcua_read_request_carries_node_id_attribute_and_index_range() {
         nodes.get(3).unwrap().node_id.identifier,
         Identifier::ByteString(UaByteString::new(vec![1, 2, 3]))
     );
+}
+
+#[test]
+fn opcua_good_absent_and_explicit_null_values_share_the_response_node_budget() {
+    let mut budget = 2;
+    for value in [None, Some(Variant::default())] {
+        let data = DataValue {
+            value,
+            ..DataValue::default()
+        };
+        let result = item(
+            TagId::new("null").unwrap(),
+            data,
+            Instant::now(),
+            OpcuaDataType::Time,
+            &mut budget,
+        );
+        assert_eq!(result.outcome().as_ref().unwrap(), &PlcValue::Null);
+    }
+    assert_eq!(budget, 0);
+    for value in [None, Some(Variant::default())] {
+        let data = DataValue {
+            value,
+            ..DataValue::default()
+        };
+        assert_eq!(
+            item(
+                TagId::new("over").unwrap(),
+                data,
+                Instant::now(),
+                OpcuaDataType::Null,
+                &mut budget
+            )
+            .outcome()
+            .as_ref()
+            .unwrap_err()
+            .kind(),
+            ErrorKind::ResourceLimit
+        );
+        assert_eq!(budget, 0);
+    }
+    let bad = DataValue {
+        status: Some(StatusCode(0x8034_0000)),
+        ..DataValue::default()
+    };
+    assert_eq!(
+        item(
+            TagId::new("bad").unwrap(),
+            bad,
+            Instant::now(),
+            OpcuaDataType::Null,
+            &mut budget
+        )
+        .outcome()
+        .as_ref()
+        .unwrap_err()
+        .kind(),
+        ErrorKind::NotFound
+    );
+    assert_eq!(budget, 0);
 }
