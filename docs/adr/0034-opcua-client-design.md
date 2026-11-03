@@ -1030,3 +1030,65 @@ avoiding a second map or a redundant counter to synchronize on drop/failure. The
 send parity regression uses a large Read until Write arrives in S100; the same test checks
 C/F flags, no ABORT, exact NodeIds, chunk bounds and per-chunk sequences. Secure size rows
 and cryptographic transforms remain S101; only policy None is executable here.
+
+## S95 implementation sketch (2026-11-03)
+
+Move pure Variant-to-PlcValue decoding out of read.rs into the planned opcua/value.rs;
+read.rs keeps request/status/item assembly and passes the address's data-type suffix to
+that decoder. Reuse the existing PlcDate/PlcTimeOfDay/PlcDateTime/PlcSignedDuration types,
+address formatter and binary Variant types; remove the old scalar-only decode/text/error
+functions rather than add an alternate path. No public variant, dependency, task, codegen
+or feature change is needed. A shared private address lookup serves request validation
+and response suffix selection. The existing read mutation scope gains value.rs.
+
+Arrays of mapped kinds become Lists (one element remains a List), null arrays become
+Null and empty arrays empty Lists. Array dimensions are checked against materialized
+count before mapping or allocating containers; use row-major nested Lists. Cap rank at
+Depth::LIMIT (64) and total materialized values plus List containers at 1048576. This
+separate value-node bound prevents zero-length axes or long singleton-axis chains from
+amplifying tiny wire arrays into huge trees, and is enforced before container allocation.
+Build iteratively from the innermost axis, moving elements without cloning. Inconsistent
+or negative dimensions are per-item MalformedData, excessive rank/nodes ResourceLimit;
+unsupported kinds remain named per-item Unsupported even for null/empty typed arrays.
+No flattening or scalar collapse loses declared valid shape.
+
+Map DateTime ticks directly with i128 arithmetic into the UTC calendar representation,
+independent of SystemTime/platform range, preserving all 100 ns ticks, including zero
+(1601 epoch), negative ticks and i64::MAX. The source-timestamp null sentinel remains
+unchanged. Guid uses the existing canonical mixed-endian address formatter; add only a
+private typed-node rendering entry point in address.rs so NodeId text reuses the same
+escaping/base64/length/control validation and parses back through S83. Invalid UTF-8 and
+unrepresentable node text fail only the item. QualifiedName uses ns=<n>;s=<name>; null name
+maps Null. StatusCode uses the symbolic name (or unknown) plus full numeric hex code.
+ByteString/LocalizedText remain S98; ExpandedNodeId, DataValue, Variant, DiagnosticInfo
+and ExtensionObject/structure mapping remain explicitly Unsupported here.
+
+Apply only the eight planned temporal suffixes, per leaf. Null and already temporal
+values remain unchanged; other suffixes retain the actual server type. Require exact
+integer counts via the existing lossless as_i64 contract, refusing floats, booleans,
+text and unsigned values beyond i64::MAX rather than truncating/wrapping Java getLong.
+Checked ranges/overflow become per-item InvalidDataType. Record this checked-override
+divergence and the DateTime sub-millisecond precision difference in parity.
+
+Pinned-source review at ea229918f5d07700e04d7d69ab1645da679cb700:
+OpcuaConnection.java variantToPlcValue/applyTypeOverride/getDateTime and the SPI calendar
+constructors establish TIME milliseconds, LTIME nanoseconds, DATE days since 1990,
+LDATE seconds since 1990 (date only), TIME_OF_DAY and LTIME_OF_DAY milliseconds since
+midnight, DATE_AND_TIME seconds since 1990, LDATE_AND_TIME milliseconds since 1990.
+1990 is 7305 days after Unix epoch. LTIME_OF_DAY's millisecond unit follows the actual
+pinned constructor, not an inference from its name. Direct DateTime keeps 100 ns where
+upstream getDateTime divides into milliseconds. Source reference:
+https://github.com/apache/plc4x/blob/ea229918f5d07700e04d7d69ab1645da679cb700/plc4j/drivers/opcua/src/main/java/org/apache/plc4x/java/opcua/OpcuaConnection.java
+
+Tests cover each mapped scalar/array kind and integer/float bits, null/empty/one-element
+shapes, 2D/3D matrices, hostile/zero axes and rank/node bounds, UTC epoch/tick boundaries,
+GUID zero padding/mixed layout, all NodeId forms and escaping, exact status/name strings,
+all eight suffix units/epochs/negative/failure cases and item isolation. Adapt the six
+OpcuaVariantToPlcValueTest cases; map StaticHelperTest's codec-only namespace/discriminator
+cases to existing codec coverage and fill any gaps without changing their dispatch.
+Add a public open62541 all-scalar/array/matrix test with named S98/unmapped refusals and
+extend the exact-count CI filter. Extend the current decode fuzz entry/target to exercise
+value mapping rather than create a new harness/dependency. Run full checks/coverage,
+isolated features, relevant mutations, fuzz, semver, regeneration, dependency/package
+gates and independent peer tests; record self-review/evidence then normal signed-off
+merge and push. No hardware or crate/tag publication.
