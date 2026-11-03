@@ -668,9 +668,10 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
 The S82 drafts below are adopted with the four optional dependencies and their locked
 versions in S101. Source observations were repeated on 2026-11-03: keyword-line counts
 remain aws-lc-rs 381, aws-lc-sys 11254, webpki 0 and pki-types 1. Root and fuzz cargo-deny
-policies are unchanged. Native HMAC and OS entropy back the private foundation; AES/RSA
-and providerless webpki are exercised by adoption tests, with runtime protection/trust
-remaining S102–S108. No new first-party DER or PKCS #1 runtime loader is introduced.
+policies are unchanged. Native HMAC and OS entropy back the foundation; S102 adds production-wrapper AES-CBC
+and provider-backed HMAC verification to the private MSG/CLO primitive. RSA and
+providerless webpki still have adoption tests, with operational protection/trust
+remaining S103–S108. No new first-party DER or PKCS #1 runtime loader is introduced.
 [D23 output](evidence/opcua-s101-dependency-trees.txt) records the actual root graph;
 [validation record](evidence/opcua-s101.md) tracks the current build and gate evidence.
 

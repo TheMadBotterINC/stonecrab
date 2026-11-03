@@ -538,7 +538,7 @@ impl Body {
     }
 
     /// Reads the body of a message of `message_type` from every byte of `bytes`.
-    fn parse(message_type: MessageType, bytes: &[u8]) -> Result<Self, ParseError> {
+    pub(super) fn parse(message_type: MessageType, bytes: &[u8]) -> Result<Self, ParseError> {
         let mut reader = BoundedReader::new(bytes);
         let body = match message_type {
             MessageType::Hello => Self::Hello(Hello::parse(&mut reader)?),
@@ -604,7 +604,11 @@ impl Frame {
     }
 
     /// Writes the header, whose size field is `size`, and the body.
-    fn serialize(&self, size: u32, writer: &mut BoundedWriter) -> Result<(), ParseError> {
+    pub(super) fn serialize(
+        &self,
+        size: u32,
+        writer: &mut BoundedWriter,
+    ) -> Result<(), ParseError> {
         FrameHeader {
             message_type: self.body.message_type(),
             chunk: self.chunk,

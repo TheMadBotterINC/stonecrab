@@ -6,6 +6,8 @@
 mod backend;
 mod derive;
 mod policy;
+mod symmetric;
+pub(super) use symmetric::Symmetric;
 
 #[cfg(test)]
 pub(super) use backend::Hash;

@@ -5,6 +5,35 @@ Implementation baseline: the commit that last modified this file
 (`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
 its own commit; the slice log below records what each one landed.
 
+## OPC UA symmetric chunk protection (S102, 2026-11-03)
+
+The private MSG/CLO engine now protects Sign and SignEncrypt chunks with token-specific
+client/server keys. AWS-LC verifies HMAC; AES-CBC uses the derived IV without implicit
+padding. The final wire header and authenticated padding are covered by MAC; encrypted
+sequence/body bytes are parsed only after verification. Malformed protected input has one
+Authentication error without provider/parser details. Actual input bounds precede copying.
+Each token install re-derives both directions before replacing state, preserving old keys
+on failure; current/previous retention is bounded, with explicit previous-key retirement.
+
+The public driver still refuses secure policies before I/O. Protected OPN/connect and
+renewal timing remain S105/S106/S108. No new dependency, feature, public operation or
+version; opcua remains outside default/full. Secret redacts keys without a zeroization
+claim. Tests verify error shape and provider-backed MAC comparison, not full-path timing.
+
+All 2453 tests and 588+5 doctests pass; core 6978/6978 and OPC UA 8595/8595 line coverage
+are 100%, with all component gates unchanged. Final focused mutations: 56 caught/eight
+unviable, zero survivors/timeouts. All 16 fuzz targets pass 60 seconds each. The isolated
+59-feature matrix, examples, regeneration, dependency/machete, semver, parity/attributes/
+DCO and fresh 220-file package/unpacked builds pass. Nine native None peer cases, fixture
+checks and example pass; peer/temporary PKI cleaned up. [Evidence](docs/evidence/opcua-s102.md).
+
+Hosted run 41678343505 on dca2c09 passes all 32 executed jobs, including all five targets
+and full fuzz smoke. DCO is intentionally skipped on a new branch push and checked
+locally; the scheduled-only job is skipped. One row closes:
+249 OPC UA total, 128 implemented/83 planned/38 deferred. RSA padding remains S105.
+
+Next: S103, client key material and the test PKI. Normal merges retain signed-off commits.
+
 ## OPC UA crypto foundation (S101, 2026-11-03)
 
 E15/ADR-0035 is adopted behind the existing optional opcua feature: AWS-LC, providerless
@@ -783,6 +812,7 @@ commit; gates named were run locally before that commit.
 
 | Slice | Date | Landed | Gates |
 | --- | --- | --- | --- |
+| S102 | 2026-11-03 | Private token-bound MSG/CLO signing and AES-CBC, provider HMAC verification, authenticate-before-parse and uniform protected-data errors; bounded current/previous directional keys and atomic renewal. ADR-0040; independent wire vectors and symmetric fuzz target. [Evidence](docs/evidence/opcua-s102.md) | 2453 tests, core/opcua 100% line coverage, configured mutations 56 caught/eight unviable, all 16 fuzz targets 60 s, 59 feature checks, native None peer regressions, fresh 220-file package/unpacked builds; hosted CI 41678343505: 32 jobs pass, scheduled/new-branch DCO skips expected |
 | S101 | 2026-11-03 | Private crypto backend, policy/size descriptors, bounded P_SHA1/P_SHA256 and directional keys, injected nonce generation; E15/ADR-0035 accepted, ADR-0039. Native CI/source-build requirements and measured E17 costs; Windows time fixtures and colored peer-list gate corrected. [Evidence](docs/evidence/opcua-s101.md) | 2431 tests; core/opcua 100% line coverage; 66 crypto and 15 size-model mutations pass; all 15 fuzz targets 60 s; 59 feature checks; fresh 218-file package; nine native peer cases; hosted CI 41636349368: 33 ordinary jobs pass, scheduled-only skipped |
 | S100 | 2026-11-03 | Staged policy-None writes with explicit access, bounded session metadata and exact scalar/array/matrix encoding; per-item statuses, per-request delivery state, Uncertain/unexpected replies Unknown, no replay. Ranged List hints and iterative owned-request disposal; ADR-0038. [Evidence](docs/evidence/opcua-s100.md) | 2393 tests, core/opcua coverage 100, configured mutations (153 plus final shape/status campaigns) all exit 0, 15 fuzz targets, nine native peer cases, regen/semver/dependencies/parity/attributes; 588+5 doctests, 59 features, 206-file fresh package/unpacked all-feature and opcua-only builds |
 | S99 | 2026-11-03 | Separate registry/cache credential channel, additive X509 identity representation, explicit plain username activation on None, token compatibility, redaction and Authentication source preservation; eight protocol rows, ADR-0037. [Evidence](docs/evidence/opcua-s99.md) | full check (2351 tests, 588+5 doctests), core/opcua coverage 100, mutations 31 caught/23 unviable (54 total, exit 0), strict lint, regen, semver default/all, dependencies/machete, parity/attributes, eight native peer cases, 59 features, 15 fuzz targets, 199-file fresh package and unpacked all-feature/opcua-only builds |
@@ -1246,7 +1276,7 @@ decisions (2026-10-30)" below), so the slices follow their dependencies: S76 to 
 then S83 and the generator track. E14 and E15 are confirmed by the S80 and S82 evidence.
 The client design is ADR-0034
 ([`docs/adr/0034-opcua-client-design.md`](docs/adr/0034-opcua-client-design.md)), proposed
-by S76 and accepted by S97 on 2026-11-03. Current runtime support includes staged writes through S100 and the S101 private crypto foundation;
+by S76 and accepted by S97 on 2026-11-03. Current runtime support includes staged writes through S100 and the S102 private crypto protection layer;
 accepted later-slice lifecycle and subscription contracts are not capability claims.
 
 Maintainer-only steps, which no automated run does: P1 to P3 above (P1, the private
@@ -1331,8 +1361,8 @@ recommended (option 1), and approved pushing the S82 spike branch. The full opti
 
 ADR-0034 is Accepted. This records the existing 2026-10-30 approvals, rather than
 requesting a new choice. E15 is implemented in S101 and ADR-0035 is accepted. E16/E20 retain implementation
-acceptance in S103/S122. Current runtime operations include S100 staged writes; S101
-provides private crypto building blocks, with operational secure policies still planned.
+acceptance in S103/S122. Current runtime operations include S100 staged writes; S101/S102
+provide private crypto building blocks, with operational secure policies still planned.
 
 - **E13 — OPC UA source/test redistribution.** Approved verbatim mspec and both XML suites with the ASF, precautionary OPC Foundation MIT and trademark notices; raw model/test inputs remain repository-only. S88/S93 provide provenance and evidence.
 - **E14 — Hybrid codec.** Confirmed by S80 measurements and S88 generator fixes: ship generated service bodies/enums as pub(crate), hand-write codec/framing/security, require positive/negative vectors, fuzz dispatch and deterministic regeneration. S96 has 24 enabled cases.

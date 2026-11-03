@@ -4,7 +4,7 @@ commit `ea229918f5d07700e04d7d69ab1645da679cb700`.
 
 State at slice S43: nothing is implemented. Stonecrab has no OPC UA code, no OPC UA test
 and no OPC UA connection string yet, so every row below is `planned (M3)` or `deferred`.
-As of S101 (2026-11-03), the opt-in `opcua` feature provides address/configuration parsing,
+As of S102 (2026-11-03), the opt-in `opcua` feature provides address/configuration parsing,
 binary codecs and generated services, framing, a bounded request lane, and public
 `OpcuaDriver` anonymous policy-None session connect/read/close. Applications register it with
 `DriverRegistry`; secure defaults are refused before I/O. The exact-count open62541
@@ -14,7 +14,8 @@ Secure discovery execution and renewal remain their later slices. The built-in S
 UTF-8 bytes for the later per-item mapping rule. S93 adds the pinned 23-vector corpus with explicit canonicalization/refusal boundaries; see [S93 evidence](../evidence/opcua-s93.md) and [S92 Read evidence](../evidence/opcua-s92.md).
 
 S101 adds the private crypto foundation, policy descriptors, bounded directional key derivation
-and injected nonce source; secure channel activation remains a later slice.
+and injected nonce source. S102 adds private token-bound symmetric chunk protection;
+secure channel activation remains a later slice.
 
 OPC UA is milestone M3 of `docs/POST_ALPHA_PLAN.md` section 4: the secure channel and
 session with the upstream security policies, chunking, read, a browse API with its own
@@ -260,7 +261,7 @@ cited classes. Java uses the JCA and BouncyCastle; the Rust dependency is chosen
 | Row id | Upstream behavior (file:line) | Planned Stonecrab behavior | Status | Test ids |
 | --- | --- | --- | --- | --- |
 | OPCUA-CRYPTO-KEYDERIVATION | P_SHA style HMAC key derivation of the signature key, the encryption key and the IV from the two nonces, for both directions (SK:64-129). | The same derivation with the policy's HMAC and sizes; published NIST/OpenSSL PRF and independently generated directional schedule vectors. Secure peer exchange remains S105/S106. | implemented (S101) | `opcua_key_derivation_matches_the_published_vector_for_basic256sha256`, `opcua_key_derivation_yields_distinct_keys_per_direction`, `opcua_key_derivation_uses_the_policy_hmac_and_sizes` |
-| OPCUA-CRYPTO-SYMMETRIC | HMAC verified with `MessageDigest.isEqual` (constant time); AES-CBC with no padding using the policy cipher; keys regenerated when the local nonce changes after a channel renewal (SEH:51-125, 114-125). | MAC compare is constant time; AES-CBC with the padding the chunk layer adds; keys re-derived on every renewal that changes a nonce. | planned (M3) | `planned:opcua_mac_comparison_is_constant_time_by_construction`, `planned:opcua_keys_are_regenerated_after_a_renewal_changes_the_nonce`, `planned:opcua_aes_cbc_chunk_round_trips_with_the_policy_key_sizes` |
+| OPCUA-CRYPTO-SYMMETRIC | HMAC verified with `MessageDigest.isEqual` (constant time); AES-CBC with no padding using the policy cipher; keys regenerated when the local nonce changes after a channel renewal (SEH:51-125, 114-125). | Private MSG/CLO engine: provider-backed constant-time HMAC verification, AES-CBC and authenticated padding, bounded token-specific directional keys re-derived from both renewal nonces. Operational secure-connect/renewal wiring remains S106/S108. | implemented (S102) | `opcua_mac_comparison_is_constant_time_by_construction`, `opcua_keys_are_regenerated_after_a_renewal_changes_the_nonce`, `opcua_aes_cbc_chunk_round_trips_with_the_policy_key_sizes` |
 | OPCUA-CRYPTO-ASYMMETRIC | The OPN chunk is signed with the client private key, encrypted with the server public key block by block, and verified against the remote certificate (AEH:43-106). | The same, per block, with the plaintext block sizes of the policy (`OPCUA-CRYPTO-PADDING`). | planned (M3) | `planned:opcua_opn_chunk_is_signed_and_encrypted_block_by_block`, `planned:opcua_opn_response_with_a_bad_signature_is_rejected`, `planned:opcua_opn_encryption_fails_fast_without_a_server_certificate` |
 | OPCUA-CRYPTO-PADDING | Plaintext block is the RSA key bytes minus 11 (Basic128Rsa15, PKCS1), 42 (Basic256, Basic256Sha256, Aes128_Sha256_RsaOaep, OAEP-SHA1) or 66 (Aes256_Sha256_RsaPss, OAEP-SHA256); an encrypted OPN with no RSA server certificate fails fast (CF:32-149, 75-79). Padding overhead and signature size are subtracted from the chunk body size (Chk:45-60). | The same block sizes and the same fail-fast rule, as a typed error before any I/O. | planned (M3) | `planned:opcua_plaintext_block_sizes_match_the_documented_values`, `planned:opcua_padding_makes_the_chunk_a_multiple_of_the_cipher_block`, `planned:opcua_an_encrypted_open_without_a_server_certificate_fails_before_io` |
 | OPCUA-CRYPTO-NONCE | A 32-byte client nonce in CreateSession (SC:246-324); the OPN client nonce has the policy's nonce length (Pol:29-76; SC:181-244). | Nonces come from the injected random source (so tests are deterministic) and have the policy length. | implemented (S101) | `opcua_open_secure_channel_nonce_has_the_policy_length`, `opcua_create_session_nonce_is_32_bytes`, `opcua_nonces_come_from_the_injected_random_source` |

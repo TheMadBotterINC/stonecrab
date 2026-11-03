@@ -137,3 +137,10 @@ path = "fuzz_targets/fuzz_opcua_chunk_reassembly.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "fuzz_opcua_symmetric"
+path = "fuzz_targets/fuzz_opcua_symmetric.rs"
+test = false
+doc = false
+bench = false

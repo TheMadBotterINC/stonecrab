@@ -579,6 +579,15 @@ mod nonce_tests {
         fn hmac(&self, hash: Hash, secret: &[u8], pieces: &[&[u8]]) -> Result<Vec<u8>> {
             Native.hmac(hash, secret, pieces)
         }
+        fn verify_hmac(&self, hash: Hash, secret: &[u8], message: &[u8], tag: &[u8]) -> Result<()> {
+            Native.verify_hmac(hash, secret, message, tag)
+        }
+        fn encrypt(&self, key: &[u8], iv: &[u8; 16], bytes: &mut [u8]) -> Result<()> {
+            Native.encrypt(key, iv, bytes)
+        }
+        fn decrypt(&self, key: &[u8], iv: &[u8; 16], bytes: &mut [u8]) -> Result<()> {
+            Native.decrypt(key, iv, bytes)
+        }
     }
 
     #[test]
@@ -590,6 +599,14 @@ mod nonce_tests {
             .with_clock(Arc::new(clock.clone()))
             .with_transport_factory(Arc::new(factory.clone()));
         driver.crypto = Arc::<RejectEntropy>::clone(&backend);
+        let tag = backend.hmac(Hash::Sha256, b"secret", &[b"seed"]).unwrap();
+        backend
+            .verify_hmac(Hash::Sha256, b"secret", b"seed", &tag)
+            .unwrap();
+        let mut block = [0; 16];
+        backend.encrypt(&[1; 16], &[2; 16], &mut block).unwrap();
+        backend.decrypt(&[1; 16], &[2; 16], &mut block).unwrap();
+        assert_eq!(block, [0; 16]);
         assert_eq!(OpcuaDriver::default().scheme(), "opcua");
         assert_eq!(
             backend
