@@ -911,3 +911,50 @@ ReadItem boundary, rather than appear as 1601-01-01. Add the sentinel filter and
 assertion while leaving actual DateTime value mapping to S95. The mutation campaign also
 exposed missing assertions for per-item diagnostic state/category; add both. SourceTimestamp
 null semantics: https://reference.opcfoundation.org/specs/OPC-10000-4/7.11.3.
+
+## S93 implementation sketch (2026-11-03)
+
+Retain the two pinned Apache PLC4X XML suites verbatim under fixtures/opcua/upstream,
+then independently serialize their annotated XML leaves into eleven raw-value vectors
+and twelve driver messages. A test-only adapter under tests/support follows the closest
+Modbus suite-adapter precedent and uses existing roxmltree, golden-loader and ring digest
+dev dependencies; it calls no Stonecrab encoder when deriving expected bytes. A second
+pass decodes/re-encodes those bytes through the private built-ins, framer and generated
+service subset. Disabled services must match an exact named refusal list with encoding
+ids and owning future slices, which S123 must empty; opaque ExtensionObject preservation
+is distinguished from generated semantic support.
+
+The adapter packs sub-byte flags across XML wrappers, writes aligned integer/float leaves
+little-endian and copies literal String/ByteString payloads. MessagePDU.totalLength and
+PascalString.sLength are implicit in the pinned mspec and are derived from content, not
+trusted stale annotations. A prototype independently reproduces all eleven upstream raw
+values exactly. Driver XML has three stale totalLength values (ACK 24->28, CreateSession
+request 310->293, response 6450->1867), two stale PascalString lengths (78->61,25->14), and
+their two stale bitLength annotations (624->488,200->112). Record this exact discrepancy
+list and fail on drift; do not edit the originals or feed malformed lengths to production.
+
+Touch opcua.rs only to include the test module; no runtime API, codegen, dependency or
+feature change is planned. Add 23 .hex/.expected.json pairs and PROVENANCE.toml using the
+existing golden-loader schema. Regeneration compares deterministic output and exact file
+sets; an explicit environment variable updates fixtures for deliberate reviewed changes.
+Record source path, commit, git blob and SHA-256 in upstream/manifest.toml and provenance;
+tests verify retained-file fingerprints offline. The original capture attribution to Milo
+stays UNVERIFIED-capture; these are public historical anonymous test exchanges, not proof
+of an independently captured wire session. Retain ASF headers, extend root/crate NOTICE,
+and verify the archive contains no suites, adapter or fixtures. E13 part B is already
+accepted. Keep runtime coverage floors unchanged, frequent signed-off commits and ordinary
+merges; update parity/status/evidence and the S123 refusal-list obligation.
+
+
+S93 equivalence refinement: the upstream Read request encodes namespace-0 numeric NodeId
+2258 in seven bytes; the existing S85 codec chooses its equivalent compact four-byte
+form. Preserve that runtime behavior and independently derive the expected canonical
+frame (131 to 128 bytes), as the first-party codec vectors already do with `reencodes_as`.
+Both frames must parse to the same Read target and the canonical result must be idempotent.
+The exit check is therefore 15 byte-exact round-trips, one named canonical round-trip and
+seven exact disabled-service refusals, rather than a claim that every supported upstream
+encoding is preserved. Record OPCUA-DIV-NUMERIC-NODE-ID-ENCODING. The exact envelope
+round-trip for encoding id 811 remains explicitly Raw; S116/S123 must add semantic coverage.
+The seven refusals belong to Write (S100), MonitoringParameters (S114), and notification /
+Publish (S116, with event content S118). Corpus scope, corrections and reproduction are in
+fixtures/opcua/UPSTREAM.md. No product behavior was changed to satisfy the corpus.

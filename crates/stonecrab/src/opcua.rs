@@ -51,3 +51,8 @@ mod read;
 pub use driver::OpcuaDriver;
 
 pub use address::{OpcuaAddress, OpcuaAttribute, OpcuaDataType, OpcuaIdentifier};
+
+#[cfg(test)]
+#[cfg(feature = "testkit")]
+#[path = "../tests/support/opcua_upstream.rs"]
+mod upstream_vectors;

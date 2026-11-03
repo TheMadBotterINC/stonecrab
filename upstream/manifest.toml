@@ -5621,3 +5621,23 @@ vendored_path = "upstream/mspec/opcua/opc-attribute.mspec"
 git_blob = "6cfa588e8b31e8caf3a00bdeabf6b0f67e6d44ec"
 sha256 = "c3235ae79bf27669f1a6583095dd0982c1d5faf36bef87dec81a5eaa4f908177"
 vendored_on = "2026-11-02"
+
+[[fixture]]
+protocol = "opcua"
+upstream_path = "protocols/opcua/src/test/resources/protocols/opcua/ParserSerializerTestsuite.xml"
+vendored_path = "fixtures/opcua/upstream/ParserSerializerTestsuite.xml"
+commit = "ea229918f5d07700e04d7d69ab1645da679cb700"
+git_blob = "8b6e045af9d12f2b6602935f0aa0055934d74c70"
+sha256 = "78dceebbcc0fa94eee6a7ec0dd14d749ef7f1b843313983ff4f33a18d7ccdde0"
+license = "Apache-2.0"
+note = "E13 part B; verbatim ASF header retained. Original Milo capture origin UNVERIFIED-capture; no live credential or private key identified."
+
+[[fixture]]
+protocol = "opcua"
+upstream_path = "protocols/opcua/src/test/resources/protocols/opcua/DriverTestsuite.xml"
+vendored_path = "fixtures/opcua/upstream/DriverTestsuite.xml"
+commit = "ea229918f5d07700e04d7d69ab1645da679cb700"
+git_blob = "73e62eba94a8190005e48f1a327a5e0eb30da9cf"
+sha256 = "a879927e60a7395af8b5b8316f9c11eb3795f98ee6270f48c90406ba0a119b3f"
+license = "Apache-2.0"
+note = "E13 part B; verbatim ASF header retained. Original Milo capture origin UNVERIFIED-capture; no live credential or private key identified."

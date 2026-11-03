@@ -5,6 +5,11 @@ Changelog. Stonecrab is one crate, so each release has one section. `stonecrab` 
 specification-stage placeholder.
 
 ## Unreleased
+- **Test evidence (S93):** 23 pinned upstream OPC UA vectors with verbatim Apache PLC4X
+  suites, independent XML serialization and provenance checks. The current codec has
+  15 byte-exact round-trips, one documented compact NodeId canonicalization and seven
+  exact disabled-service refusals. No runtime behavior or dependency changes; fixtures
+  and adapter stay outside the crate archive.
 - **Added (opt-in `opcua`; S92):** one-batch scalar Read with ordered partial results,
   exact integer widths/float bits, UTF-8 validation, status preservation and bounded
   cancellation/retry/close behavior. New ErrorKind classifications NotFound,

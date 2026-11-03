@@ -67,3 +67,11 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+OPC UA test suites (S93, maintainer decision E13 part B)
+
+The two XML files under fixtures/opcua/upstream/ are unmodified Apache PLC4X v1.0.0
+files from commit ea229918f5d07700e04d7d69ab1645da679cb700 with their ASF headers retained.
+The eleven raw values and twelve derived driver-message vectors there come from those
+files; PROVENANCE.toml records their paths, hashes and the UNVERIFIED-capture Milo origin.
+The suites, derived fixtures and test adapter are repository test data, not packaged.

@@ -5,6 +5,31 @@ Implementation baseline: the commit that last modified this file
 (`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
 its own commit; the slice log below records what each one landed.
 
+## OPC UA upstream vectors (S93, 2026-11-03)
+
+S93 retains two pinned Apache PLC4X suites verbatim and derives 23 vectors through a
+private test-only XML adapter. Eleven raw values match the upstream literals; twelve
+driver messages derive serializer-computed implicit lengths, with seven stale annotations
+recorded in an exact closed correction list. Files, hashes, provenance and output are
+checked offline. Milo capture attribution remains UNVERIFIED-capture.
+
+The current codec gives 15 byte-exact round-trips, one documented existing compact
+numeric NodeId canonicalization, and seven exact disabled-service refusals. One exact
+ExtensionObject round-trip preserves an opaque notification body. S100/S114/S116 own the
+refusals; S123 must empty them and require semantic notification coverage. HEL/ACK wire
+parity now closes; full fourteen-service parity stays planned. No runtime behavior,
+dependency, feature, version or generated code changes.
+
+Local checks pass: 2239 tests, 584+5 doctests, handwritten OPC UA 6544/6544 and all other
+coverage gates, 59 feature combinations, semver in both configurations, regeneration,
+dependencies, parity/lint self-tests, and the unchanged reviewed 192-file archive plus an
+all-feature unpacked build. Fixtures/XML/adapter are excluded from the archive. Fuzz,
+mutations and native-peer runs were not repeated for this test-only slice. Self-review
+under ADR-0005's waiver records independent expectations and explicit refusal/canonical
+boundaries. Details: [S93 evidence](docs/evidence/opcua-s93.md).
+
+Next: S94, chunking and negotiated message limits. Normal merges preserve all commits.
+
 ## OPC UA scalar Read (S92, 2026-11-03)
 
 S92 makes anonymous policy-None OPC UA useful for reads: one service per batch, caller
@@ -534,6 +559,7 @@ commit; gates named were run locally before that commit.
 
 | Slice | Date | Landed | Gates |
 | --- | --- | --- | --- |
+| S93 | 2026-11-03 | Two verbatim upstream XML suites, 23 independently derived vectors, checked fingerprints/provenance/output/file set, and exact codec equivalence boundaries: 15 byte-exact, one existing compact NodeId canonicalization, seven named disabled-service refusals. HEL/ACK parity closes; opaque notification preservation stays distinct from semantic support. No runtime change. Self-review under ADR-0005 waiver; [evidence](docs/evidence/opcua-s93.md) | check (2239 tests), coverage (opcua 100), 59 features, regen, parity/lint with self-tests, semver default/all, dependencies/machete, 192-file package and unpacked all-feature build |
 | S34 | 2026-10-28 | Documents reconciled with the 0.2.0 publication (H02 to H06): README and SECURITY say 0.2.0 is published and show the crates.io dependency; STATUS.md start, maintainer prerequisites (P1 to P3 open, the "Basic" ruleset targets no branch, P4 approved) and continuation point at `docs/POST_ALPHA_PLAN.md` with the E1 to E7 outcomes; `docs/PROJECT_BRIEF.md` marked historical with corrected badges; CODING_STANDARDS mirrors the real package keys and owner URL; a dated addendum in `docs/evidence/alpha.md`; docs only | check |
 | S38 | 2026-10-28 | `stonecrab::sensors` denies `clippy::indexing_slicing` like codec, modbus, sim and transport (finding G04): the outer attribute on its module declaration, the `sensors` row of `scripts/lint-attrs.sh` and its self-test fixtures, CODING_STANDARDS 5.1 and 5.5, an ADR-0018 addendum. The module had no indexing or slicing, so no code changed and sensors stays at 100% lines; a probe proved the lint is live | check, coverage, lint-attrs, fuzz (fuzz_sensors_profile_toml, 60 s) |
 | S40 | 2026-10-28 | Ping in the core API (finding G07, ping part): `Operation::Ping` appended last, `Capabilities.ping` (default false) read by `supports`, and a provided `Connection::ping(&self) -> OpFuture<'_, ()>` modeled on `close` (no request type, like PLC4J's `ping()`) that does no I/O and returns `Unsupported(Ping)` with diagnostics; neither driver overrides it (Modbus in S47). The contract suite has 24 cases: the new one asserts the error, its diagnostics, no device access and no state change, and runs for the simulator and every Modbus fixture. ADR-0011 addendum; core, sim and Modbus parity rows updated; additive for semver by construction (both types are `#[non_exhaustive]`) | check, coverage, lint-attrs, parity, examples |

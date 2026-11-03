@@ -1,0 +1,177 @@
+# S93: pinned Apache PLC4X suites. ASF headers retained.
+# Original capture origin attributed to Milo: UNVERIFIED-capture.
+# Raw vectors copied verbatim; driver bytes derive implicit lengths independently.
+# No live credentials/private keys identified; anonymous historical test data.
+
+[[file]]
+path = "ParserSerializerTestsuite.xml"
+origin = "protocols/opcua/src/test/resources/protocols/opcua/ParserSerializerTestsuite.xml@ea229918f5d07700e04d7d69ab1645da679cb700"
+license = "Apache-2.0"
+note = "git blob 8b6e045af9d12f2b6602935f0aa0055934d74c70; SHA-256 78dceebbcc0fa94eee6a7ec0dd14d749ef7f1b843313983ff4f33a18d7ccdde0; UNVERIFIED-capture Milo origin"
+
+[[file]]
+path = "DriverTestsuite.xml"
+origin = "protocols/opcua/src/test/resources/protocols/opcua/DriverTestsuite.xml@ea229918f5d07700e04d7d69ab1645da679cb700"
+license = "Apache-2.0"
+note = "git blob 73e62eba94a8190005e48f1a327a5e0eb30da9cf; SHA-256 a879927e60a7395af8b5b8316f9c11eb3795f98ee6270f48c90406ba0a119b3f; UNVERIFIED-capture Milo origin"
+
+[[vector]]
+name = "raw/opc-ua-node-id"
+source = "upstream_fixture"
+origin = "protocols/opcua/src/test/resources/protocols/opcua/ParserSerializerTestsuite.xml@ea229918f5d07700e04d7d69ab1645da679cb700, testcase OPC UA Node Id/raw"
+license = "Apache-2.0"
+note = "UNVERIFIED-capture; derived XML bytes use serializer-computed implicit lengths; inspect expected.json adjustments. Disabled services are listed in opcua_upstream.rs and must be enabled by S123."
+
+[[vector]]
+name = "raw/opc-ua-extension-object-encoding-mask"
+source = "upstream_fixture"
+origin = "protocols/opcua/src/test/resources/protocols/opcua/ParserSerializerTestsuite.xml@ea229918f5d07700e04d7d69ab1645da679cb700, testcase OPC UA Extension Object Encoding Mask/raw"
+license = "Apache-2.0"
+note = "UNVERIFIED-capture; derived XML bytes use serializer-computed implicit lengths; inspect expected.json adjustments. Disabled services are listed in opcua_upstream.rs and must be enabled by S123."
+
+[[vector]]
+name = "raw/opc-ua-anonymous-identity-token"
+source = "upstream_fixture"
+origin = "protocols/opcua/src/test/resources/protocols/opcua/ParserSerializerTestsuite.xml@ea229918f5d07700e04d7d69ab1645da679cb700, testcase OPC UA Anonymous Identity Token/raw"
+license = "Apache-2.0"
+note = "UNVERIFIED-capture; derived XML bytes use serializer-computed implicit lengths; inspect expected.json adjustments. Disabled services are listed in opcua_upstream.rs and must be enabled by S123."
+
+[[vector]]
+name = "raw/opc-ua-extension-object-anonymous-identity-token"
+source = "upstream_fixture"
+origin = "protocols/opcua/src/test/resources/protocols/opcua/ParserSerializerTestsuite.xml@ea229918f5d07700e04d7d69ab1645da679cb700, testcase OPC UA Extension Object Anonymous Identity Token/raw"
+license = "Apache-2.0"
+note = "UNVERIFIED-capture; derived XML bytes use serializer-computed implicit lengths; inspect expected.json adjustments. Disabled services are listed in opcua_upstream.rs and must be enabled by S123."
+
+[[vector]]
+name = "raw/opc-ua-activate-session-request"
+source = "upstream_fixture"
+origin = "protocols/opcua/src/test/resources/protocols/opcua/ParserSerializerTestsuite.xml@ea229918f5d07700e04d7d69ab1645da679cb700, testcase OPC UA Activate Session request/raw"
+license = "Apache-2.0"
+note = "UNVERIFIED-capture; derived XML bytes use serializer-computed implicit lengths; inspect expected.json adjustments. Disabled services are listed in opcua_upstream.rs and must be enabled by S123."
+
+[[vector]]
+name = "raw/opc-ua-publish-response-payload-data-change"
+source = "upstream_fixture"
+origin = "protocols/opcua/src/test/resources/protocols/opcua/ParserSerializerTestsuite.xml@ea229918f5d07700e04d7d69ab1645da679cb700, testcase OPC UA Publish Response Payload (data change)/raw"
+license = "Apache-2.0"
+note = "UNVERIFIED-capture; derived XML bytes use serializer-computed implicit lengths; inspect expected.json adjustments. Disabled services are listed in opcua_upstream.rs and must be enabled by S123."
+
+[[vector]]
+name = "raw/opc-ua-publish-response-payload-event-notification"
+source = "upstream_fixture"
+origin = "protocols/opcua/src/test/resources/protocols/opcua/ParserSerializerTestsuite.xml@ea229918f5d07700e04d7d69ab1645da679cb700, testcase OPC UA Publish Response Payload (event notification)/raw"
+license = "Apache-2.0"
+note = "UNVERIFIED-capture; derived XML bytes use serializer-computed implicit lengths; inspect expected.json adjustments. Disabled services are listed in opcua_upstream.rs and must be enabled by S123."
+
+[[vector]]
+name = "raw/opc-ua-notification-message"
+source = "upstream_fixture"
+origin = "protocols/opcua/src/test/resources/protocols/opcua/ParserSerializerTestsuite.xml@ea229918f5d07700e04d7d69ab1645da679cb700, testcase OPC UA Notification Message/raw"
+license = "Apache-2.0"
+note = "UNVERIFIED-capture; derived XML bytes use serializer-computed implicit lengths; inspect expected.json adjustments. Disabled services are listed in opcua_upstream.rs and must be enabled by S123."
+
+[[vector]]
+name = "raw/opc-ua-extension-object"
+source = "upstream_fixture"
+origin = "protocols/opcua/src/test/resources/protocols/opcua/ParserSerializerTestsuite.xml@ea229918f5d07700e04d7d69ab1645da679cb700, testcase OPC UA Extension Object/raw"
+license = "Apache-2.0"
+note = "UNVERIFIED-capture; derived XML bytes use serializer-computed implicit lengths; inspect expected.json adjustments. Disabled services are listed in opcua_upstream.rs and must be enabled by S123."
+
+[[vector]]
+name = "raw/opc-ua-monitored-item-notification"
+source = "upstream_fixture"
+origin = "protocols/opcua/src/test/resources/protocols/opcua/ParserSerializerTestsuite.xml@ea229918f5d07700e04d7d69ab1645da679cb700, testcase OPC UA Monitored Item Notification/raw"
+license = "Apache-2.0"
+note = "UNVERIFIED-capture; derived XML bytes use serializer-computed implicit lengths; inspect expected.json adjustments. Disabled services are listed in opcua_upstream.rs and must be enabled by S123."
+
+[[vector]]
+name = "raw/opc-ua-monitoring-parameters"
+source = "upstream_fixture"
+origin = "protocols/opcua/src/test/resources/protocols/opcua/ParserSerializerTestsuite.xml@ea229918f5d07700e04d7d69ab1645da679cb700, testcase OPC UA Monitoring Parameters/raw"
+license = "Apache-2.0"
+note = "UNVERIFIED-capture; derived XML bytes use serializer-computed implicit lengths; inspect expected.json adjustments. Disabled services are listed in opcua_upstream.rs and must be enabled by S123."
+
+[[vector]]
+name = "driver/send-opcua-hello-packet"
+source = "upstream_fixture"
+origin = "protocols/opcua/src/test/resources/protocols/opcua/DriverTestsuite.xml@ea229918f5d07700e04d7d69ab1645da679cb700, outgoing-plc-message Send Opcua Hello Packet/MessagePDU"
+license = "Apache-2.0"
+note = "UNVERIFIED-capture; derived XML bytes use serializer-computed implicit lengths; inspect expected.json adjustments. Disabled services are listed in opcua_upstream.rs and must be enabled by S123."
+
+[[vector]]
+name = "driver/receive-acknowledgement-response"
+source = "upstream_fixture"
+origin = "protocols/opcua/src/test/resources/protocols/opcua/DriverTestsuite.xml@ea229918f5d07700e04d7d69ab1645da679cb700, incoming-plc-message Receive Acknowledgement Response/MessagePDU"
+license = "Apache-2.0"
+note = "UNVERIFIED-capture; derived XML bytes use serializer-computed implicit lengths; inspect expected.json adjustments. Disabled services are listed in opcua_upstream.rs and must be enabled by S123."
+
+[[vector]]
+name = "driver/send-opcua-open-secure-channel-request"
+source = "upstream_fixture"
+origin = "protocols/opcua/src/test/resources/protocols/opcua/DriverTestsuite.xml@ea229918f5d07700e04d7d69ab1645da679cb700, outgoing-plc-message Send Opcua Open Secure Channel Request/MessagePDU"
+license = "Apache-2.0"
+note = "UNVERIFIED-capture; derived XML bytes use serializer-computed implicit lengths; inspect expected.json adjustments. Disabled services are listed in opcua_upstream.rs and must be enabled by S123."
+
+[[vector]]
+name = "driver/receive-opcua-open-secure-channel-response"
+source = "upstream_fixture"
+origin = "protocols/opcua/src/test/resources/protocols/opcua/DriverTestsuite.xml@ea229918f5d07700e04d7d69ab1645da679cb700, incoming-plc-message Receive Opcua Open Secure Channel Response/MessagePDU"
+license = "Apache-2.0"
+note = "UNVERIFIED-capture; derived XML bytes use serializer-computed implicit lengths; inspect expected.json adjustments. Disabled services are listed in opcua_upstream.rs and must be enabled by S123."
+
+[[vector]]
+name = "driver/send-create-session-request"
+source = "upstream_fixture"
+origin = "protocols/opcua/src/test/resources/protocols/opcua/DriverTestsuite.xml@ea229918f5d07700e04d7d69ab1645da679cb700, outgoing-plc-message Send Create Session Request/MessagePDU"
+license = "Apache-2.0"
+note = "UNVERIFIED-capture; derived XML bytes use serializer-computed implicit lengths; inspect expected.json adjustments. Disabled services are listed in opcua_upstream.rs and must be enabled by S123."
+
+[[vector]]
+name = "driver/receive-create-session-response"
+source = "upstream_fixture"
+origin = "protocols/opcua/src/test/resources/protocols/opcua/DriverTestsuite.xml@ea229918f5d07700e04d7d69ab1645da679cb700, incoming-plc-message Receive Create Session Response/MessagePDU"
+license = "Apache-2.0"
+note = "UNVERIFIED-capture; derived XML bytes use serializer-computed implicit lengths; inspect expected.json adjustments. Disabled services are listed in opcua_upstream.rs and must be enabled by S123."
+
+[[vector]]
+name = "driver/send-activate-session-request"
+source = "upstream_fixture"
+origin = "protocols/opcua/src/test/resources/protocols/opcua/DriverTestsuite.xml@ea229918f5d07700e04d7d69ab1645da679cb700, outgoing-plc-message Send Activate Session Request/MessagePDU"
+license = "Apache-2.0"
+note = "UNVERIFIED-capture; derived XML bytes use serializer-computed implicit lengths; inspect expected.json adjustments. Disabled services are listed in opcua_upstream.rs and must be enabled by S123."
+
+[[vector]]
+name = "driver/receive-activate-session-response"
+source = "upstream_fixture"
+origin = "protocols/opcua/src/test/resources/protocols/opcua/DriverTestsuite.xml@ea229918f5d07700e04d7d69ab1645da679cb700, incoming-plc-message Receive Activate Session Response/MessagePDU"
+license = "Apache-2.0"
+note = "UNVERIFIED-capture; derived XML bytes use serializer-computed implicit lengths; inspect expected.json adjustments. Disabled services are listed in opcua_upstream.rs and must be enabled by S123."
+
+[[vector]]
+name = "driver/send-read-request"
+source = "upstream_fixture"
+origin = "protocols/opcua/src/test/resources/protocols/opcua/DriverTestsuite.xml@ea229918f5d07700e04d7d69ab1645da679cb700, outgoing-plc-message Send read request/MessagePDU"
+license = "Apache-2.0"
+note = "UNVERIFIED-capture; derived XML bytes use serializer-computed implicit lengths; inspect expected.json adjustments. Disabled services are listed in opcua_upstream.rs and must be enabled by S123."
+
+[[vector]]
+name = "driver/receive-read-response"
+source = "upstream_fixture"
+origin = "protocols/opcua/src/test/resources/protocols/opcua/DriverTestsuite.xml@ea229918f5d07700e04d7d69ab1645da679cb700, incoming-plc-message Receive read response/MessagePDU"
+license = "Apache-2.0"
+note = "UNVERIFIED-capture; derived XML bytes use serializer-computed implicit lengths; inspect expected.json adjustments. Disabled services are listed in opcua_upstream.rs and must be enabled by S123."
+
+[[vector]]
+name = "driver/send-write-request"
+source = "upstream_fixture"
+origin = "protocols/opcua/src/test/resources/protocols/opcua/DriverTestsuite.xml@ea229918f5d07700e04d7d69ab1645da679cb700, outgoing-plc-message Send write request/MessagePDU"
+license = "Apache-2.0"
+note = "UNVERIFIED-capture; derived XML bytes use serializer-computed implicit lengths; inspect expected.json adjustments. Disabled services are listed in opcua_upstream.rs and must be enabled by S123."
+
+[[vector]]
+name = "driver/receive-write-response"
+source = "upstream_fixture"
+origin = "protocols/opcua/src/test/resources/protocols/opcua/DriverTestsuite.xml@ea229918f5d07700e04d7d69ab1645da679cb700, incoming-plc-message Receive write response/MessagePDU"
+license = "Apache-2.0"
+note = "UNVERIFIED-capture; derived XML bytes use serializer-computed implicit lengths; inspect expected.json adjustments. Disabled services are listed in opcua_upstream.rs and must be enabled by S123."
