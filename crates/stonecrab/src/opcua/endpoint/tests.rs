@@ -220,7 +220,7 @@ fn opcua_the_strongest_security_level_wins() {
 fn opcua_ties_prefer_a_token_protecting_policy() {
     let mut plain = endpoint();
     token(&mut plain).policy_id = UaString::new("plain");
-    token(&mut plain).security_policy_uri = UaString::new(NONE_POLICY);
+    token(&mut plain).security_policy_uri = UaString::new(SecurityPolicy::None.uri());
     let mut protected = endpoint();
     token(&mut protected).policy_id = UaString::new("protected");
     token(&mut protected).security_policy_uri = UaString::new(SecurityPolicy::Basic256Sha256.uri());

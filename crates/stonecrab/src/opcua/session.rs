@@ -21,8 +21,6 @@ use crate::opcua::options::OpcuaOptions;
 use crate::opcua::service::status_error;
 use crate::{CancellationToken, Deadline, ErrorKind, PlcError, Result};
 
-pub(super) const NONE_POLICY: &str = "http://opcfoundation.org/UA/SecurityPolicy#None";
-
 pub(super) struct Session {
     pub(super) lane: Lane,
     pub(super) authentication_token: NodeId,

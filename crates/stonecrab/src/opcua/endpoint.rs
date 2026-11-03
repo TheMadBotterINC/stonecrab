@@ -12,9 +12,8 @@ use crate::opcua::generated::message_security_mode::MessageSecurityMode;
 use crate::opcua::generated::user_token_policy::UserTokenPolicy;
 use crate::opcua::generated::user_token_type::UserTokenType;
 use crate::opcua::lane::Lane;
-use crate::opcua::options::{MessageSecurity, OpcuaOptions, authority_parts};
+use crate::opcua::options::{MessageSecurity, OpcuaOptions, SecurityPolicy, authority_parts};
 use crate::opcua::service::status_error;
-use crate::opcua::session::NONE_POLICY;
 use crate::{CancellationToken, Deadline, ErrorKind, PlcError, Result};
 
 const TCP_PROFILE: &str = "http://opcfoundation.org/UA-Profile/Transport/uatcp-uasc-uabinary";
@@ -75,17 +74,26 @@ pub(super) fn select<'a>(
     } else {
         MessageSecurityMode::MessageSecurityModeNone
     };
-    endpoints.iter().filter(|endpoint| {
-        endpoint.security_policy_uri == UaString::new(options.security_policy.uri())
-            && endpoint.security_mode == expected_mode
-            && endpoint.transport_profile_uri == UaString::new(TCP_PROFILE)
-            && url_matches(&endpoint.endpoint_url, options)
-    }).flat_map(|endpoint| {
-        endpoint.user_identity_tokens.iter().flatten().filter(move |token| {
-            token.token_type == token_type
-                && token.policy_id.as_bytes().is_some_and(|id| !id.is_empty())
-        }).map(move |token| (endpoint, token))
-    }).max_by_key(|(endpoint, token)| (endpoint.security_level, protects_token(endpoint, token)))
+    let candidates = endpoints
+        .iter()
+        .filter(|endpoint| {
+            endpoint.security_policy_uri == UaString::new(options.security_policy.uri())
+                && endpoint.security_mode == expected_mode
+                && endpoint.transport_profile_uri == UaString::new(TCP_PROFILE)
+                && url_matches(&endpoint.endpoint_url, options)
+        })
+        .flat_map(|endpoint| {
+            endpoint
+                .user_identity_tokens
+                .iter()
+                .flatten()
+                .filter(move |token| {
+                    token.token_type == token_type
+                        && token.policy_id.as_bytes().is_some_and(|id| !id.is_empty())
+                })
+                .map(move |token| (endpoint, token))
+        });
+    candidates.max_by_key(|(endpoint, token)| (endpoint.security_level, protects_token(endpoint, token)))
         .ok_or_else(|| {
             let advertised = endpoints.iter().take(16).map(|endpoint| display_url(&endpoint.endpoint_url)).collect::<Vec<_>>().join(", ");
             PlcError::new(ErrorKind::Authentication, format!(
@@ -101,7 +109,7 @@ fn protects_token(endpoint: &EndpointDescription, token: &UserTokenPolicy) -> bo
         .as_bytes()
         .filter(|uri| !uri.is_empty())
         .unwrap_or_else(|| endpoint.security_policy_uri.as_bytes().unwrap_or_default());
-    policy != NONE_POLICY.as_bytes()
+    policy != SecurityPolicy::None.uri().as_bytes()
 }
 
 /// Borrowed components after the same checked authority grammar used by configuration.
