@@ -1,17 +1,20 @@
-//! `OpcuaDriver`: the connection string and tag address parsing of the `opcua` scheme.
-//!
-//! Crate-private until slice S91 adds the connection and implements `Driver` for it: the two
-//! functions take the parameters and return the result of `Driver::parse_config` and
-//! `Driver::parse_address` without the receiver, so that slice only wraps them (the inherent
-//! and the trait method then share a name).
+//! OPC UA driver, with injectable clock and transport factory.
 
+use std::fmt;
 use std::sync::Arc;
 
 use crate::opcua::OpcuaAddress;
+use crate::opcua::channel::{Channel, within};
+use crate::opcua::connection::OpcuaConnection;
+use crate::opcua::lane::Lane;
+use crate::opcua::options::SecurityPolicy;
 use crate::opcua::options::{OpcuaOptions, endpoint};
+use crate::opcua::session::Session;
+use crate::transport::{SystemClock, TcpFactory, TransportFactory};
 use crate::{
-    AddressOptions, ConnectionConfig, ConnectionUri, ErrorKind, PlcError, ProtocolAddress, Result,
-    Timeouts,
+    AddressOptions, CancellationToken, Capabilities, Clock, Connection, ConnectionConfig,
+    ConnectionUri, Deadline, Driver, Endpoint, ErrorKind, OpFuture, PlcError, ProtocolAddress,
+    Result, Timeouts,
 };
 
 /// The connection-string scheme of this driver.
@@ -24,24 +27,73 @@ const TCP: &str = "tcp";
 /// `tls` and `https` codes its pattern mentions are not OPC UA transports here.
 const TRANSPORTS: &str = "the only transport code of opcua is tcp";
 
-/// The `opcua` driver as far as it exists: it parses connection strings and tag addresses.
+/// Factory for OPC UA TCP connections.
 ///
+/// This initial connection slice supports anonymous sessions with explicitly selected
+/// `security-policy=NONE`. It sends HEL, OPN, `CreateSession` and `ActivateSession` before
+/// returning Connected. The secure default is refused until protection is implemented;
+/// credentials are also refused before I/O. Data operations currently return Unsupported.
+///
+/// The whole attempt uses `handshake-timeout-ms` (60000 by default), and close uses
+/// `request-timeout-ms` (30000). `session-timeout-ms` requests 120000 by default; the
+/// server's positive finite revision is adopted. System transport/clock require Tokio;
+/// injected implementations can run without an executor.
+///
+/// # Compatibility: docs/parity/opcua.md#OPCUA-OP-CONNECT
 /// # Compatibility: docs/parity/opcua.md#OPCUA-TRANSPORT-TCP
-/// Protocol code `opcua` and transport `tcp`, implicit when omitted (`OPCUA-TRANSPORT-TCP`).
-/// The `tls`, `tls-psk`, `https` and every other code is refused (`OPCUA-TRANSPORT-TLS`,
-/// `OPCUA-TRANSPORT-HTTPS`, `OPCUA-QUIRK-INET-PATTERN`).
-#[derive(Debug, Default)]
-pub(super) struct OpcuaDriver;
+///
+/// # Examples
+/// ```
+/// use std::sync::Arc;
+/// use stonecrab::{Driver, DriverRegistry};
+/// use stonecrab::opcua::OpcuaDriver;
+/// let driver = OpcuaDriver::new();
+/// let config = driver.parse_config("opcua://localhost:4840?security-policy=NONE")?;
+/// assert_eq!(config.scheme(), "opcua");
+/// let mut registry = DriverRegistry::new();
+/// registry.register(Arc::new(driver))?;
+/// assert!(registry.driver("opcua").is_some());
+/// # Ok::<(), stonecrab::PlcError>(())
+/// ```
+pub struct OpcuaDriver {
+    clock: Arc<dyn Clock>,
+    factory: Arc<dyn TransportFactory>,
+}
 
 impl OpcuaDriver {
+    /// Construct a driver using TCP and the Tokio-backed system clock; performs no I/O.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            clock: Arc::new(SystemClock::default()),
+            factory: Arc::new(TcpFactory::default()),
+        }
+    }
+
+    /// Replace the clock. The transport factory must use the same time source.
+    #[must_use]
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
+
+    /// Replace TCP with a transport factory, such as the deterministic testkit's.
+    #[must_use]
+    pub fn with_transport_factory(mut self, factory: Arc<dyn TransportFactory>) -> Self {
+        self.factory = factory;
+        self
+    }
+
     /// Read `opcua[:tcp]://host:port[/path][?parameters]` into a validated configuration.
     ///
     /// The text is parsed with [`ConnectionUri::parse`], which already refuses duplicate and
     /// empty keys. The configuration has an [`Endpoint::Tcp`](crate::Endpoint::Tcp), the
-    /// core defaults for connect/idle timeouts, reconnect, retry and limits, a read-only access policy and
+    /// core defaults for idle timeout, reconnect, retry and limits, a read-only access policy and
     /// the [`OpcuaOptions`] in its driver options slot: the endpoint URL Hello carries
     /// (`opc.tcp://host:port` and the path, verbatim), `security-policy` and
     /// `message-security`. The request timeout is `request-timeout-ms` (30000 ms by default),
+    /// `handshake-timeout-ms` maps to the whole connect bound (60000 ms by default),
+    /// `session-timeout-ms` requests 120000 ms,
     /// and `encoding.receive-buffer-size` selects the incoming chunk ceiling (65535 by default).
     ///
     /// # Errors
@@ -53,6 +105,8 @@ impl OpcuaDriver {
     /// security name or a secure policy with message security `NONE`. The messages never
     /// repeat the authority or a value; a parameter error names its key.
     ///
+    /// # Compatibility: docs/parity/opcua.md#OPCUA-CFG-HANDSHAKE-TIMEOUT
+    /// # Compatibility: docs/parity/opcua.md#OPCUA-CFG-SESSION-TIMEOUT
     /// # Compatibility: docs/parity/opcua.md#OPCUA-CFG-REQUEST-TIMEOUT
     /// # Compatibility: docs/parity/opcua.md#OPCUA-CFG-UNKNOWN
     /// Unknown keys are an error where upstream warns (`OPCUA-CFG-UNKNOWN`,
@@ -62,7 +116,7 @@ impl OpcuaDriver {
     /// and the endpoint URL is built as upstream builds it (`OPCUA-TRANSPORT-ENDPOINT-URL`).
     /// `security-policy` and `message-security` are `OPCUA-CFG-SECURITY-POLICY` and
     /// `OPCUA-CFG-MESSAGE-SECURITY`.
-    pub(super) fn parse_config(uri: &str) -> Result<ConnectionConfig> {
+    pub(super) fn configuration(uri: &str) -> Result<ConnectionConfig> {
         let parsed = ConnectionUri::parse(uri)?;
         if parsed.scheme() != SCHEME {
             return Err(PlcError::new(
@@ -76,6 +130,7 @@ impl OpcuaDriver {
         let (endpoint, endpoint_url) = endpoint(parsed.authority())?;
         let options = OpcuaOptions::from_parameters(endpoint_url, parsed.options())?;
         let timeouts = Timeouts {
+            connect: options.handshake_timeout,
             request: options.request_timeout,
             ..Timeouts::default()
         };
@@ -94,12 +149,105 @@ impl OpcuaDriver {
     ///
     /// # Compatibility: docs/parity/opcua.md#OPCUA-ADDR-ROUND-TRIP
     /// Delegates to [`OpcuaAddress::parse`], whose grammar rows and divergences apply.
-    pub(super) fn parse_address(
+    pub(super) fn address(
         text: &str,
         _options: &AddressOptions,
     ) -> Result<Arc<dyn ProtocolAddress>> {
         Ok(Arc::new(OpcuaAddress::parse(text)?))
     }
+}
+
+impl Default for OpcuaDriver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Debug for OpcuaDriver {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OpcuaDriver").finish_non_exhaustive()
+    }
+}
+
+impl Driver for OpcuaDriver {
+    fn scheme(&self) -> &'static str {
+        SCHEME
+    }
+    fn capabilities(&self) -> Capabilities {
+        Capabilities::default()
+    }
+    fn parse_config(&self, uri: &str) -> Result<ConnectionConfig> {
+        Self::configuration(uri)
+    }
+    fn parse_address(
+        &self,
+        text: &str,
+        options: &AddressOptions,
+    ) -> Result<Arc<dyn ProtocolAddress>> {
+        Self::address(text, options)
+    }
+    fn connect(&self, config: ConnectionConfig) -> OpFuture<'_, Box<dyn Connection>> {
+        Box::pin(async move {
+            if config.scheme() != SCHEME || !matches!(config.endpoint(), Endpoint::Tcp { .. }) {
+                return Err(PlcError::new(
+                    ErrorKind::InvalidConfig,
+                    "OPC UA requires its TCP configuration",
+                ));
+            }
+            let options = config.driver_options_as::<OpcuaOptions>().ok_or_else(|| {
+                PlcError::new(
+                    ErrorKind::InvalidConfig,
+                    "OPC UA requires parsed driver options",
+                )
+            })?;
+            if options.security_policy != SecurityPolicy::None {
+                return Err(PlcError::new(
+                    ErrorKind::InvalidConfig,
+                    "OPC UA secure policy is not implemented; select None explicitly",
+                ));
+            }
+            if config.credentials().is_some() {
+                return Err(PlcError::new(
+                    ErrorKind::Authentication,
+                    "OPC UA currently supports anonymous sessions only",
+                ));
+            }
+            let deadline = Deadline::after(self.clock.now(), config.timeouts().connect)?;
+            let cancel = CancellationToken::new();
+            let mut nonce = [0; 32];
+            nonce_result(getrandom::fill(&mut nonce))?;
+            let transport = within(
+                self.clock.as_ref(),
+                deadline,
+                &cancel,
+                self.factory
+                    .open(config.endpoint(), *config.limits(), deadline),
+            )
+            .await?;
+            let channel = Channel::open_none(
+                transport,
+                options,
+                Arc::clone(&self.clock),
+                deadline,
+                &cancel,
+            )
+            .await?;
+            let lane = Lane::from_channel(channel, config.timeouts().request);
+            let session = Session::open(lane, options, nonce, deadline, &cancel).await?;
+            let connection: Box<dyn Connection> = Box::new(OpcuaConnection::new(
+                session,
+                Arc::clone(&self.clock),
+                config.timeouts().request,
+                *config.limits(),
+            ));
+            Ok(connection)
+        })
+    }
+}
+
+fn nonce_result(result: std::result::Result<(), getrandom::Error>) -> Result<()> {
+    result
+        .map_err(|_error| PlcError::new(ErrorKind::InvalidConfig, "OPC UA nonce generation failed"))
 }
 
 #[cfg(test)]
@@ -110,7 +258,7 @@ mod tests {
     use super::*;
 
     fn config_of(uri: &str) -> ConnectionConfig {
-        OpcuaDriver::parse_config(uri).expect("a valid connection string")
+        OpcuaDriver::configuration(uri).expect("a valid connection string")
     }
 
     #[test]
@@ -202,7 +350,7 @@ mod tests {
 
     fn refused(uri: &str) -> PlcError {
         let error =
-            OpcuaDriver::parse_config(uri).expect_err("the connection string must be refused");
+            OpcuaDriver::configuration(uri).expect_err("the connection string must be refused");
         assert_eq!(error.kind(), ErrorKind::InvalidConfig, "{uri}");
         error
     }
@@ -344,7 +492,10 @@ mod tests {
         let plain = ConnectionConfig::builder(SCHEME, tcp("host", 4840))
             .build()
             .expect("defaults");
-        assert_eq!(defaults.timeouts().connect, plain.timeouts().connect);
+        assert_eq!(
+            defaults.timeouts().connect,
+            std::time::Duration::from_secs(60)
+        );
         assert_eq!(defaults.timeouts().idle, plain.timeouts().idle);
         assert_eq!(
             defaults.timeouts().request,
@@ -393,11 +544,26 @@ mod tests {
     #[test]
     fn opcua_parse_address_reads_the_tag_grammar() {
         let options = AddressOptions::default();
-        let address = OpcuaDriver::parse_address("ns=2;s=Boiler.Temperature;REAL", &options)
-            .expect("an address");
+        let address =
+            OpcuaDriver::address("ns=2;s=Boiler.Temperature;REAL", &options).expect("an address");
         assert_eq!(address.protocol(), "opcua");
         assert_eq!(address.canonical(), "ns=2;s=Boiler.Temperature;REAL");
-        let error = OpcuaDriver::parse_address("not an address", &options).expect_err("refused");
+        let error = OpcuaDriver::address("not an address", &options).expect_err("refused");
         assert_eq!(error.kind(), ErrorKind::InvalidAddress);
+    }
+}
+
+#[cfg(test)]
+mod nonce_tests {
+    use super::*;
+    #[test]
+    fn opcua_nonce_generation_failure_has_no_fallback() {
+        assert_eq!(
+            nonce_result(Err(getrandom::Error::UNSUPPORTED))
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidConfig
+        );
+        assert_eq!(OpcuaDriver::default().scheme(), "opcua");
     }
 }

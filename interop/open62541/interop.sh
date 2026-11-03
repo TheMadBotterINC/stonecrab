@@ -21,7 +21,7 @@
 #             certificate and the user password) into target/interop-pki/open62541/, for
 #             the Stonecrab tests that run before `stop`
 #   evidence  write the image digest, versions and the server log to the evidence dir
-#   tests     run the exact-count Stonecrab policy-None channel test against the running peer
+#   tests     run the exact-count Stonecrab policy-None channel and session tests against the running peer
 #   stop      remove the container and the `pki` files (no error when they are not there; no
 #             key is kept after a run)
 #   run       build, start, wait, check, pki, tests, evidence, stop; the exit status is the first
@@ -46,8 +46,8 @@ PORT="${INTEROP_OPEN62541_PORT:-4840}"
 HOST="127.0.0.1"
 EVIDENCE="${INTEROP_EVIDENCE_DIR:-$ROOT/target/interop-evidence}/open62541"
 PKI_OUT="${INTEROP_PKI_DIR:-$ROOT/target/interop-pki/open62541}"
-FILTER='binary(stonecrab) & test(/^opcua::channel::tests::opcua_interop_/)'
-EXPECTED_TESTS=1
+FILTER='binary(stonecrab) & test(/^opcua::(channel|session)::tests::opcua_interop_/)'
+EXPECTED_TESTS=2
 
 die() {
   echo "interop: $*" >&2
@@ -162,7 +162,7 @@ run_tests() {
   export STONECRAB_INTEROP_OPEN62541="opcua://${HOST}:${PORT}?security-policy=NONE"
   local listed
   listed="$(cargo nextest list --locked -p stonecrab --all-features \
-    --run-ignored ignored-only -E "$FILTER" --message-format oneline | grep -c 'opcua::channel::tests::opcua_interop_' || true)"
+    --run-ignored ignored-only -E "$FILTER" --message-format oneline | grep -Ec 'opcua::(channel|session)::tests::opcua_interop_' || true)"
   [ "$listed" = "$EXPECTED_TESTS" ] ||
     die "expected $EXPECTED_TESTS Stonecrab interop tests, the filter selects $listed"
   cargo nextest run --locked -p stonecrab --all-features \

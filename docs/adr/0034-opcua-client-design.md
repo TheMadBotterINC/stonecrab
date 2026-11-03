@@ -803,3 +803,51 @@ rather than leaving it inconsistent with the parser. The resource cap still wins
 References: OPC Foundation Part 6 [Hello](https://reference.opcfoundation.org/specs/OPC-10000-6/7.1.2.3)
 and [Acknowledge](https://reference.opcfoundation.org/specs/OPC-10000-6/7.1.2.4),
 Part 4 [OpenSecureChannel parameters](https://reference.opcfoundation.org/specs/OPC-10000-4/5.6.2.2).
+
+## S91 implementation sketch (2026-11-03)
+
+The public `OpcuaDriver` follows the existing clock/factory injection pattern and returns
+an observable connection only after policy-None channel establishment, CreateSession and
+anonymous ActivateSession succeed under one connect deadline. A private session owns the
+lane and adopted authentication token/revised timeout; CloseSession deletes subscriptions,
+then CLO sends without awaiting a reply, with terminal cleanup even on timeout or dropped
+close. Reads/writes remain unsupported until their assigned slices, with truthful flags.
+
+Extend the lane's existing exchange with an absolute-deadline entry point for session
+handshakes and a fire-and-forget channel close using the same identifier sequence. Reuse
+StateCell, CancellationToken, Clock and TransportFactory, without tasks or a new trait.
+A connection close guard makes concurrent/dropped closes terminal and wakes observers.
+The existing private parser remains the actual shared implementation for Driver and fuzz
+callers; remove obsolete module-level dead-code allowances as their callers arrive.
+
+Add handshake-timeout-ms (60000, mapped to Timeouts.connect) and session-timeout-ms
+(120000), extend parser fuzz checks, and retain the server's valid revised timeout. Use
+a minimal selection of a None/None UA TCP endpoint's advertised anonymous policy; full
+discovery, overrides and endpoint diagnostics remain S96. Secure defaults and credentials
+are refused before opening TCP rather than silently falling back.
+
+CreateSession requires a fresh 32-byte nonce. Add optional getrandom 0.4 (already resolved
+as a dev transitive dependency) under opcua only: std offers no portable cryptographic
+random source; transport jitter is explicitly unsuitable. Its safe fill API encapsulates
+OS-specific unsafe calls, with no bundled crypto/native build and no default features;
+record the audit here and in DEPENDENCY_AUDIT.md. Inject the nonce value at the private
+session boundary for deterministic wire tests, without a one-implementation RNG trait.
+
+Touch driver/options/session/connection/lane, Cargo manifests/lock, shared responder/tests,
+interop filter, and component/parity/status/evidence documentation. Cover response headers,
+rejections, revised timeout validity, endpoint policy selection, cancellation/drop, silent
+servers, concurrent/idempotent close and independent open62541 public connect/close. Keep
+all existing coverage floors, signed-off incremental commits and ordinary merges.
+
+References: [CreateSession parameters](https://reference.opcfoundation.org/specs/OPC-10000-4/5.7.2.2),
+[ActivateSession parameters](https://reference.opcfoundation.org/specs/OPC-10000-4/5.7.3.2),
+and [getrandom 0.4 API](https://docs.rs/getrandom/0.4.3/getrandom/).
+
+
+S91 shrink/review: the private parser entry points are named `configuration`/`address`
+to avoid shadowing the public Driver methods; fuzz/tests use these same implementations.
+CLO now belongs to the lane for both pre-session tests and activated-session shutdown;
+the old Channel.close implementation is removed. A concurrent close also races its wait
+against a deadline, so an undriven first future cannot park the second call forever.
+The nonce boundary injects bytes directly into session setup; a failed OS fill has no
+fallback. None does not consume channel key material; secure key derivation remains S101.

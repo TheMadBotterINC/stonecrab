@@ -592,6 +592,7 @@ version = "0.3.0"
 dependencies = [
  "bytes",
  "criterion",
+ "getrandom 0.4.3",
  "proptest",
  "ring",
  "roxmltree",

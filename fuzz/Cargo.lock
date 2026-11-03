@@ -215,6 +215,7 @@ name = "stonecrab"
 version = "0.3.0"
 dependencies = [
  "bytes",
+ "getrandom",
  "serde",
  "serial2",
  "thiserror",

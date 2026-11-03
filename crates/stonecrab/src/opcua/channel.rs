@@ -15,8 +15,8 @@ use std::task::Poll;
 
 use crate::opcua::codec::{NodeId, UaByteString, UaString};
 use crate::opcua::frame::{
-    AsymmetricHeader, Body, ChunkType, Frame, Hello, OpcuaFramer, OpenChunk, SecureChunk,
-    SequenceHeader, TransportLimits,
+    AsymmetricHeader, Body, ChunkType, Frame, Hello, OpcuaFramer, OpenChunk, SequenceHeader,
+    TransportLimits,
 };
 use crate::opcua::generated::channel_security_token::ChannelSecurityToken;
 use crate::opcua::generated::extension_object_definition::ExtensionObjectDefinition as Service;
@@ -36,6 +36,13 @@ pub(super) struct Channel {
     pub(super) clock: Arc<dyn Clock>,
     pub(super) limits: TransportLimits,
     pub(super) token: ChannelSecurityToken,
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "None needs no channel keys; secure key derivation arrives in S101"
+        )
+    )]
     pub(super) server_nonce: UaByteString,
     pub(super) received_sequence: u32,
     configured_mode: MessageSecurity,
@@ -194,42 +201,6 @@ impl Channel {
             configured_mode: options.message_security,
         })
     }
-
-    /// CLO is sent once; no response is awaited. Dropping the owner also closes its pipe.
-    pub(super) async fn close(
-        mut self,
-        deadline: Deadline,
-        cancel: &CancellationToken,
-    ) -> Result<()> {
-        let header = request_header(self.clock.as_ref(), &NodeId::numeric(0, 0), 2, deadline)?;
-        let request = Service::CloseSecureChannelRequest {
-            request_header: header,
-        };
-        let body = encode_service(452, &request, body_budget(self.limits, 24))?;
-        let close = Frame::single(Body::Close(SecureChunk {
-            channel_id: self.token.channel_id,
-            token_id: self.token.token_id,
-            sequence: SequenceHeader {
-                sequence_number: 2,
-                request_id: 2,
-            },
-            body,
-        }));
-        within(
-            self.clock.as_ref(),
-            deadline,
-            cancel,
-            self.framed.send_frame(&close, deadline),
-        )
-        .await?;
-        within(
-            self.clock.as_ref(),
-            deadline,
-            cancel,
-            self.framed.shutdown(deadline),
-        )
-        .await
-    }
 }
 
 fn proposed_limits(resources: ResourceLimits, receive: u32) -> Result<TransportLimits> {
@@ -298,7 +269,7 @@ fn check_frame(frame: &Frame) -> Result<()> {
     Ok(())
 }
 
-async fn within<T>(
+pub(super) async fn within<T>(
     clock: &dyn Clock,
     deadline: Deadline,
     cancel: &CancellationToken,
@@ -335,7 +306,7 @@ impl fmt::Debug for Channel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Channel")
             .field("limits", &self.limits)
-            .field("configured_message_security", &self.configured_mode)
+            .field("configured_message_security", &self.configured_mode.name())
             .field("effective_message_security", &"NONE")
             .field("channel_id", &self.token.channel_id)
             .finish_non_exhaustive()
