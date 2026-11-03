@@ -2,9 +2,9 @@
 
 ## Status
 
-Accepted design (2026-11-03), S98 of POST_ALPHA_PLAN, implementing the E18 approval
+Accepted (2026-11-03), S98 of POST_ALPHA_PLAN, implementing the E18 approval
 recorded by S97. Amends ADR-0006's byte/structure deferral and ADR-0025 decision 9.
-Implementation and validation evidence follow before merge; no release is authorized.
+Implementation and validation are recorded in [S98 evidence](../evidence/opcua-s98.md). No release is authorized.
 
 ## Design and implementation plan
 
