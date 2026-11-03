@@ -48,6 +48,7 @@ mod frame;
 pub mod fuzzing;
 mod options;
 mod read;
+mod value;
 
 pub use driver::OpcuaDriver;
 

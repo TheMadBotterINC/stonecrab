@@ -469,6 +469,21 @@ pub struct OpcuaAddress {
 }
 
 impl OpcuaAddress {
+    /// Render a typed value through the same grammar and canonical formatter as a tag.
+    pub(super) fn node_text(namespace: u16, identifier: OpcuaIdentifier) -> Result<String> {
+        let text = Self {
+            namespace,
+            identifier,
+            dimensions: Vec::new(),
+            attribute: OpcuaAttribute::Value,
+            data_type: OpcuaDataType::Null,
+            config: Vec::new(),
+        }
+        .to_string();
+        Self::parse(&text)?;
+        Ok(text)
+    }
+
     /// Longest address text accepted by [`parse`](Self::parse), in bytes.
     pub const MAX_TEXT_BYTES: usize = MAX_TEXT_BYTES;
 
@@ -1009,7 +1024,7 @@ fn parse_identifier(kind: Kind, text: &str) -> Result<OpcuaIdentifier> {
 
 /// The text of a GUID from the 16 bytes of its binary encoding: the first three groups are
 /// little-endian there, so they are written back reversed.
-fn guid_text(bytes: [u8; 16]) -> String {
+pub(super) fn guid_text(bytes: [u8; 16]) -> String {
     let [
         a0,
         a1,

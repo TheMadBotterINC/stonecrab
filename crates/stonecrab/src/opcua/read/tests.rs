@@ -1,9 +1,9 @@
 use super::*;
 use crate::opcua::codec::{
-    Array, DateTime, DiagnosticInfo, ExpandedNodeId, ExtensionBody, ExtensionObject, LocalizedText,
-    Variant, XmlElement,
+    DateTime, DiagnosticInfo, ExpandedNodeId, ExtensionBody, ExtensionObject, LocalizedText,
+    Scalar, Variant, XmlElement,
 };
-use crate::{ReadRequest, ResourceLimits, Tag};
+use crate::{PlcValue, ReadRequest, ResourceLimits, Tag};
 use std::sync::Arc;
 
 fn data(scalar: Scalar) -> DataValue {
@@ -13,7 +13,14 @@ fn data(scalar: Scalar) -> DataValue {
     }
 }
 fn mapped(data: DataValue) -> ReadItem {
-    item(TagId::new("sample").unwrap(), data, Instant::now())
+    let mut budget = crate::opcua::value::MAX_VALUE_NODES;
+    item(
+        TagId::new("sample").unwrap(),
+        data,
+        Instant::now(),
+        OpcuaDataType::Null,
+        &mut budget,
+    )
 }
 
 #[test]
@@ -194,13 +201,8 @@ fn opcua_uncertain_with_a_value_is_ok_with_its_status_and_source_time() {
 #[test]
 fn opcua_later_value_mappings_are_explicit_per_item_unsupported_errors() {
     let scalars = vec![
-        Scalar::DateTime(DateTime(0)),
-        Scalar::Guid(Guid::default()),
         Scalar::ByteString(UaByteString::null()),
-        Scalar::NodeId(NodeId::numeric(0, 1)),
         Scalar::ExpandedNodeId(ExpandedNodeId::local(NodeId::numeric(0, 1))),
-        Scalar::StatusCode(StatusCode(0)),
-        Scalar::QualifiedName(QualifiedName::default()),
         Scalar::LocalizedText(LocalizedText::default()),
         Scalar::ExtensionObject(ExtensionObject {
             type_id: ExpandedNodeId::local(NodeId::numeric(0, 0)),
@@ -216,12 +218,6 @@ fn opcua_later_value_mappings_are_explicit_per_item_unsupported_errors() {
             ErrorKind::Unsupported(Operation::Read)
         );
     }
-    assert_eq!(
-        decode(VariantValue::Array(Array::Int32(Some(vec![1]))))
-            .unwrap_err()
-            .kind(),
-        ErrorKind::Unsupported(Operation::Read)
-    );
 }
 
 #[test]
@@ -270,4 +266,64 @@ fn opcua_read_request_carries_node_id_attribute_and_index_range() {
         nodes.get(3).unwrap().node_id.identifier,
         Identifier::ByteString(UaByteString::new(vec![1, 2, 3]))
     );
+}
+
+#[test]
+fn opcua_good_absent_and_explicit_null_values_share_the_response_node_budget() {
+    let mut budget = 2;
+    for value in [None, Some(Variant::default())] {
+        let data = DataValue {
+            value,
+            ..DataValue::default()
+        };
+        let result = item(
+            TagId::new("null").unwrap(),
+            data,
+            Instant::now(),
+            OpcuaDataType::Time,
+            &mut budget,
+        );
+        assert_eq!(result.outcome().as_ref().unwrap(), &PlcValue::Null);
+    }
+    assert_eq!(budget, 0);
+    for value in [None, Some(Variant::default())] {
+        let data = DataValue {
+            value,
+            ..DataValue::default()
+        };
+        assert_eq!(
+            item(
+                TagId::new("over").unwrap(),
+                data,
+                Instant::now(),
+                OpcuaDataType::Null,
+                &mut budget
+            )
+            .outcome()
+            .as_ref()
+            .unwrap_err()
+            .kind(),
+            ErrorKind::ResourceLimit
+        );
+        assert_eq!(budget, 0);
+    }
+    let bad = DataValue {
+        status: Some(StatusCode(0x8034_0000)),
+        ..DataValue::default()
+    };
+    assert_eq!(
+        item(
+            TagId::new("bad").unwrap(),
+            bad,
+            Instant::now(),
+            OpcuaDataType::Null,
+            &mut budget
+        )
+        .outcome()
+        .as_ref()
+        .unwrap_err()
+        .kind(),
+        ErrorKind::NotFound
+    );
+    assert_eq!(budget, 0);
 }

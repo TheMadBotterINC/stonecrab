@@ -318,3 +318,28 @@ pub fn chunk_reassembly(input: &[u8]) -> Result<Chunked> {
     }
     Ok(result)
 }
+
+/// Map one binary Variant with a selected temporal suffix through the production value layer.
+///
+/// # Errors
+/// Returns codec errors for malformed input, named Unsupported for deferred kinds,
+/// `InvalidDataType` for unrepresentable overrides, and `ResourceLimit` for depth/node bounds.
+pub fn value(bytes: &[u8], selector: u8) -> Result<crate::PlcValue> {
+    use crate::opcua::OpcuaDataType;
+    let mut reader = BoundedReader::new(bytes);
+    let value = Variant::parse(&mut reader, Depth::new())?;
+    reader.expect_eof()?;
+    let target = match selector % 9 {
+        0 => OpcuaDataType::Null,
+        1 => OpcuaDataType::Time,
+        2 => OpcuaDataType::LTime,
+        3 => OpcuaDataType::Date,
+        4 => OpcuaDataType::LDate,
+        5 => OpcuaDataType::TimeOfDay,
+        6 => OpcuaDataType::LTimeOfDay,
+        7 => OpcuaDataType::DateAndTime,
+        _ => OpcuaDataType::LDateAndTime,
+    };
+    let mut budget = crate::opcua::value::MAX_VALUE_NODES;
+    crate::opcua::value::decode(value, target, &mut budget)
+}

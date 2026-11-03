@@ -431,7 +431,7 @@ macro_rules! variant_types {
             }
 
             /// The number of elements, 0 for a null array.
-            fn len(&self) -> usize {
+            pub(in crate::opcua) fn len(&self) -> usize {
                 match self {
                     $(Self::$name(values) => values.as_ref().map_or(0, Vec::len),)*
                 }

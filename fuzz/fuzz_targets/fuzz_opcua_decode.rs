@@ -11,14 +11,29 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use stonecrab::opcua::fuzzing::{RecursiveType, decode};
+use stonecrab::opcua::fuzzing::{RecursiveType, decode, value};
 
 fuzz_target!(|input: &[u8]| {
     let Some((selector, bytes)) = input.split_first() else {
         return;
     };
     // A refusal is the codec doing its job; only what parsed is checked further.
-    if let Ok(decoded) = decode(RecursiveType::from_selector(*selector), bytes) {
+    let kind = RecursiveType::from_selector(*selector);
+    if let Ok(decoded) = decode(kind, bytes) {
+        if kind == RecursiveType::Variant {
+            if let Ok(mapped) = value(bytes.get(..decoded.consumed).expect("parsed prefix"), selector / 4) {
+                let mut pending = vec![(mapped, 1_usize)];
+                let mut nodes = 0_usize;
+                while let Some((value, depth)) = pending.pop() {
+                    nodes = nodes.checked_add(1).expect("bounded node count");
+                    assert!(nodes <= 1_048_576);
+                    if let stonecrab::PlcValue::List(values) = value {
+                        assert!(depth <= 64);
+                        pending.extend(values.into_iter().map(|value| (value, depth.checked_add(1).expect("bounded depth"))));
+                    }
+                }
+            }
+        }
         let written = decoded.written.expect("a value that parsed is written");
         assert_eq!(decoded.length, Ok(written.len()), "length_in_bytes");
         assert!(written.len() <= decoded.consumed, "a value never grows");

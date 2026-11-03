@@ -60,3 +60,10 @@ accepted bodies must equal independent fragment concatenation, and partial/compl
 bodies must stay within the selected byte limit. Seven first-party seeds cover single
 and split messages, ABORT/reset, size/count limits, malformed ABORT and incomplete input.
 No captured upstream traffic is used as a seed.
+
+
+S95 extends `fuzz_opcua_decode` to pass accepted Variants through the production value
+mapper. Selector bits choose no suffix or one of eight temporal suffixes. Accepted output
+is traversed iteratively to check the aggregate value-node and List-depth bounds; codec /
+unsupported / range refusals are expected. Eight new first-party seeds cover UTC tick
+precision/extrema, overrides, matrices, zero axes and hostile rank/empty-tree expansion.
