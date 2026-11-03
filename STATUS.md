@@ -5,6 +5,34 @@ Implementation baseline: the commit that last modified this file
 (`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
 its own commit; the slice log below records what each one landed.
 
+## OPC UA crypto foundation (S101, 2026-11-03)
+
+E15/ADR-0035 is adopted behind the existing optional opcua feature: AWS-LC, providerless
+webpki and pki-types, with source-built native code, pinned Windows NASM and bundled-build
+configuration. Default/full and stonecrab 0.3.0 stay unchanged. A private backend supplies
+OS entropy and HMAC; one policy descriptor drives URIs, sizes, bounded P_SHA expansion
+and separate client/server schedules. None OPN uses no entropy; CreateSession draws
+32 bytes through the injected source before transport open. Keys format as redacted;
+Secret does not promise zeroization. Secure connections remain refused before I/O.
+
+All 2431 tests and 588+5 doctests pass. Core 6978/6978 and OPC UA 8337/8337 lines meet
+100% coverage; all other component gates pass. Crypto mutations pass (46 caught/20
+unviable), and all 15 size-model mutants are caught. All 15 fuzz targets pass 60 seconds
+each. The isolated 59-feature matrix, regeneration, examples, dependency/machete,
+semver, parity/attributes/DCO and fresh 218-file package/unpacked builds pass. Nine native
+open62541 tests, in-image checks and the read example pass; peer/temporary PKI cleaned up.
+
+Hosted run 41636349368 on source 8a16f51 passes all 33 ordinary jobs, including all five
+targets, Windows on MSRV/latest Rust and the full fuzz smoke run. Scheduled-only is skipped.
+Hosted clean release builds take 44.72 s for modbus, 79.75 s for modbus+opcua and 84.28 s
+for modbus+tls+opcua. The OPC UA delta is 35.03 s, 9704336 binary bytes (debug symbols
+included), 144 KiB registry RSS and 126076 KiB compiler maximum RSS. These are registry
+and build measurements, not protected-session performance. E17 keeps one opt-in feature.
+[Evidence](docs/evidence/opcua-s101.md) records provenance, costs, failures fixed and limits.
+Two protocol rows close: 249 total, 127 implemented/84 planned/38 deferred.
+
+Next: S102, symmetric chunk protection. No secure session or hardware claim is made.
+
 ## Staged OPC UA writes (S100, 2026-11-03)
 
 Policy-None writes require explicit read-write access; read-only remains the default and
@@ -755,6 +783,7 @@ commit; gates named were run locally before that commit.
 
 | Slice | Date | Landed | Gates |
 | --- | --- | --- | --- |
+| S101 | 2026-11-03 | Private crypto backend, policy/size descriptors, bounded P_SHA1/P_SHA256 and directional keys, injected nonce generation; E15/ADR-0035 accepted, ADR-0039. Native CI/source-build requirements and measured E17 costs; Windows time fixtures and colored peer-list gate corrected. [Evidence](docs/evidence/opcua-s101.md) | 2431 tests; core/opcua 100% line coverage; 66 crypto and 15 size-model mutations pass; all 15 fuzz targets 60 s; 59 feature checks; fresh 218-file package; nine native peer cases; hosted CI 41636349368: 33 ordinary jobs pass, scheduled-only skipped |
 | S100 | 2026-11-03 | Staged policy-None writes with explicit access, bounded session metadata and exact scalar/array/matrix encoding; per-item statuses, per-request delivery state, Uncertain/unexpected replies Unknown, no replay. Ranged List hints and iterative owned-request disposal; ADR-0038. [Evidence](docs/evidence/opcua-s100.md) | 2393 tests, core/opcua coverage 100, configured mutations (153 plus final shape/status campaigns) all exit 0, 15 fuzz targets, nine native peer cases, regen/semver/dependencies/parity/attributes; 588+5 doctests, 59 features, 206-file fresh package/unpacked all-feature and opcua-only builds |
 | S99 | 2026-11-03 | Separate registry/cache credential channel, additive X509 identity representation, explicit plain username activation on None, token compatibility, redaction and Authentication source preservation; eight protocol rows, ADR-0037. [Evidence](docs/evidence/opcua-s99.md) | full check (2351 tests, 588+5 doctests), core/opcua coverage 100, mutations 31 caught/23 unviable (54 total, exit 0), strict lint, regen, semver default/all, dependencies/machete, parity/attributes, eight native peer cases, 59 features, 15 fuzz targets, 199-file fresh package and unpacked all-feature/opcua-only builds |
 | S98 | 2026-11-03 | Bytes and immutable ordered PlcStruct with field/depth/node bounds and iterative rejection; independent ReadItem server_time. OPC UA ByteString/LocalizedText and status/source/server metadata, with aggregate structured-array budgeting and Bad failure precedence preserved. Six protocol rows plus core Bytes/Struct contracts; ADR-0036. Self-review under ADR-0005 waiver; [evidence](docs/evidence/opcua-s98.md) | full check (2335 tests, 586+5 doctests), core/opcua coverage 100, 59 features, 15 fuzz targets, mutations 85 caught/23 unviable plus metadata 10/two (both exit 0), strict lint, regen, semver default/all, dependencies/machete, parity/attributes, 198-file package/unpacked all-feature build, seven independent-peer cases |
@@ -1217,7 +1246,7 @@ decisions (2026-10-30)" below), so the slices follow their dependencies: S76 to 
 then S83 and the generator track. E14 and E15 are confirmed by the S80 and S82 evidence.
 The client design is ADR-0034
 ([`docs/adr/0034-opcua-client-design.md`](docs/adr/0034-opcua-client-design.md)), proposed
-by S76 and accepted by S97 on 2026-11-03. Current runtime support is through S96;
+by S76 and accepted by S97 on 2026-11-03. Current runtime support includes staged writes through S100 and the S101 private crypto foundation;
 accepted later-slice lifecycle and subscription contracts are not capability claims.
 
 Maintainer-only steps, which no automated run does: P1 to P3 above (P1, the private
@@ -1301,12 +1330,13 @@ recommended (option 1), and approved pushing the S82 spike branch. The full opti
 ### S97 ratification of maintainer decisions (2026-11-03)
 
 ADR-0034 is Accepted. This records the existing 2026-10-30 approvals, rather than
-requesting a new choice. E15/E16/E20 retain implementation acceptance in S101/S103/S122;
-ADR-0035 remains Proposed. Current runtime support remains the S96 subset.
+requesting a new choice. E15 is implemented in S101 and ADR-0035 is accepted. E16/E20 retain implementation
+acceptance in S103/S122. Current runtime operations include S100 staged writes; S101
+provides private crypto building blocks, with operational secure policies still planned.
 
 - **E13 — OPC UA source/test redistribution.** Approved verbatim mspec and both XML suites with the ASF, precautionary OPC Foundation MIT and trademark notices; raw model/test inputs remain repository-only. S88/S93 provide provenance and evidence.
 - **E14 — Hybrid codec.** Confirmed by S80 measurements and S88 generator fixes: ship generated service bodies/enums as pub(crate), hand-write codec/framing/security, require positive/negative vectors, fuzz dispatch and deterministic regeneration. S96 has 24 enabled cases.
-- **E17 — Feature and version.** One opt-in opcua feature outside default/full. Additive APIs remain compatible with 0.3.0; no release or version bump is authorized. S101 measures any need for an additive security-feature split.
+- **E17 — Feature and version.** One opt-in opcua feature outside default/full. Additive APIs remain compatible with 0.3.0; no release or version bump is authorized. S101 measured the native build/registry cost and keeps the existing feature (see its evidence).
 - **E18 — Additive public surface.** Approve Bytes/ordered bounded Struct, server_time, flat browse types/provided method, X.509 credentials via config/registry/cache, and native subscription parameters/refusals/end reasons/loss counters. S97 ratifies the S83 address accessor enums and MAX_TEXT_BYTES; remaining APIs land in their owning slices.
 - **E19 — Caller-driven lifecycle and subscription end.** Operations and Subscription::recv drive private opcua::pump on the injected clock, without a spawned task. No caller means no idle renewal. Transport loss ends native subscriptions after queued events with typed Disconnected; caller re-subscribes. No automatic re-creation, Republish or TransferSubscriptions in M3. This is the accepted meaning of subscription recovery.
 - **E21 — Secure discovery bootstrap.** Require server-certificate-file for secure connect; discovery uses the configured secure channel. A trust store or tls.verify=false alone is insufficient; discovered certificates are not anchors. Trust-store-only two-phase discovery remains a later extension.
