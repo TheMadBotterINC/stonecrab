@@ -658,7 +658,7 @@ chunk reassembly or reconnect is claimed. The ERR row remains planned overall un
 Hello/connect handling is implemented in S90/S91. Sequence wrap is refused explicitly
 at exhaustion; verification of the interoperability wrap rule remains S106.
 
-## S90 private policy-None channel (2026-11-02)
+## S90 private policy-None channel (2026-11-03)
 
 HEL/ACK, OPN Issue and fire-and-forget CLO are implemented, with bounded directional
 limits, matched channel parameters, shared deadline/cancellation, preserved buffered bytes
