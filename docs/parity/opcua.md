@@ -4,7 +4,7 @@ commit `ea229918f5d07700e04d7d69ab1645da679cb700`.
 
 State at slice S43: nothing is implemented. Stonecrab has no OPC UA code, no OPC UA test
 and no OPC UA connection string yet, so every row below is `planned (M3)` or `deferred`.
-As of S101 (2026-11-03), the opt-in `opcua` feature provides address/configuration parsing,
+As of S102 (2026-11-03), the opt-in `opcua` feature provides address/configuration parsing,
 binary codecs and generated services, framing, a bounded request lane, and public
 `OpcuaDriver` anonymous policy-None session connect/read/close. Applications register it with
 `DriverRegistry`; secure defaults are refused before I/O. The exact-count open62541
@@ -14,7 +14,8 @@ Secure discovery execution and renewal remain their later slices. The built-in S
 UTF-8 bytes for the later per-item mapping rule. S93 adds the pinned 23-vector corpus with explicit canonicalization/refusal boundaries; see [S93 evidence](../evidence/opcua-s93.md) and [S92 Read evidence](../evidence/opcua-s92.md).
 
 S101 adds the private crypto foundation, policy descriptors, bounded directional key derivation
-and injected nonce source; secure channel activation remains a later slice.
+and injected nonce source. S102 adds private token-bound symmetric chunk protection;
+secure channel activation remains a later slice.
 
 OPC UA is milestone M3 of `docs/POST_ALPHA_PLAN.md` section 4: the secure channel and
 session with the upstream security policies, chunking, read, a browse API with its own

@@ -1,7 +1,10 @@
 # S102 symmetric OPC UA chunk protection
 
-Date: 2026-11-03. Implementation/validation in progress on feat/opcua-symmetric-security;
-remaining local gates and hosted CI must pass before merge. ADR-0040 is the committed plan.
+Date: 2026-11-03. Source/packaging baseline dca2c09e63fef6286c290a025a5ef665c53b1b19.
+All local gates and hosted run 41678343505 pass: 32 successful jobs, including the
+five-target matrix and full fuzz smoke; scheduled and new-branch DCO skips are intentional.
+ADR-0040 is the committed plan. The final commit changes repository documentation only.
+
 No new dependency, feature, public operation or version; opcua stays outside default/full.
 
 ## Behavior and boundary
@@ -64,6 +67,49 @@ https://reference.opcfoundation.org/specs/OPC-10000-6/6.7.2.5.1
 
 ## Validation
 
-Core and OPC UA line coverage pass at 100% before the final hardening rerun. Full check,
-mutation, fuzz, package and hosted results are being completed and will be recorded here.
-Local logs: /tmp/stonecrab-s102-*.log. No protected-peer or hardware claim is made in S102.
+- Full check: 2453 tests pass, 588 merged plus five other doctests, fmt/strict Clippy,
+  documentation with warnings denied and no-default-features check.
+- Coverage: core 6978/6978 and OPC UA 8595/8595 lines, both 100%; all other component
+  gates pass. No threshold or exclusion changes. This is line coverage, not branch coverage.
+- Final configured mutations: 64 tested, 56 caught, eight unviable, zero missed/timeouts,
+  exit zero. Uses --config mutants.toml --gitignore true, jobs4 and debug info disabled,
+  focused --re on crypto/(symmetric|backend). The first run's one survivor is closed by
+  the signed-metadata tests. A redundant encoder capacity precheck was removed; actual
+  protected length is checked before allocation. Fragment planning retains S94's existing
+  SecuritySizes formula. Raw outcomes: target/mutants-s102-final/mutants.out/outcomes.json.
+- All 16 ASan fuzz targets pass at least 60 seconds each on nightly-2026-10-01; no artifacts.
+  The new target starts with 32 seed files. [Recorded report](opcua-s102-fuzz.md).
+  This is a gate run, not the deferred release-duration run. The report honestly records
+  the implementation tree while uncommitted; hosted CI tests committed source dca2c09.
+- All 59 feature combinations plus no-default check pass in isolation; cargo-hack restores
+  the manifest and lock cleanly. Stable fuzz Clippy passes with --cfg fuzzing, and root/fuzz
+  dependencies, machete, regeneration, parity and self-tests, attributes and DCO pass.
+  Global parity is 354 implemented/automated-verified references; OPC UA is 128 implemented,
+  83 planned and 38 deferred of 249 rows.
+- Default and all-feature semver checks pass against published stonecrab 0.3.0. No version
+  change or release. Examples pass.
+- Native open62541 fixture checks, nine exact-count None interop tests and read example
+  pass. Image linux/amd64 sha256:46c9ef37a0a66fd7609dac4f69e74692273060e0c9249d33b544714a2e0c1652,
+  open62541 v1.5.9 source 05c2b389b65cc35884eb40d800301af1f3d130cf. Peer stopped and
+  temporary host PKI removed. These are regressions of the existing None path, not a
+  protected-peer interoperability claim for the S102 Rust engine.
+- Fresh-CARGO_HOME package gate passes: 220 shipped files match packaging/stonecrab.txt;
+  no fixtures/testdata directory shipped. Unpacked all-feature and opcua-only builds pass.
+  Archive 868082 bytes, SHA256 39f4bc50240b1c5f3dba3a3e05f71a6f5b6178feedf32888c0d193a27b950cb6;
+  .cargo_vcs_info source dca2c09e63fef6286c290a025a5ef665c53b1b19.
+
+Local logs are /tmp/stonecrab-s102-{check,coverage,clippy,fuzz-clippy,mutants-final,
+fuzz-evidence,features,dependencies,machete,regen,semver,semver-all,package,unpacked-all,
+unpacked-opcua,examples,interop,parity,attrs,dco}.log. Native artifacts remain under
+target/interop-evidence/open62541/. No hardware claim is made.
+
+## Hosted validation
+
+[Run 41678343505](https://github.com/TheMadBotterINC/stonecrab/actions/runs/41678343505)
+on dca2c09 passes all six Ubuntu/macOS/Windows Rust1.97.1/1.99.1 cells, aarch64/armv7
+cross builds, quality/coverage, dependencies, features, package, examples, semver, peer
+jobs and the other ordinary gates. Full fuzz-smoke also passes. Scheduled-only and
+DCO are intentionally skipped: ci.yml suppresses DCO for a new branch push with an
+all-zero before SHA. Local DCO checks the complete feature range and the final normal
+merge range. No hosted DCO pass is claimed for this run.
+The final documentation-only commit preserves built source and package inputs.
