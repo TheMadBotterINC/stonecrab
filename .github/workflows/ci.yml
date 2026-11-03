@@ -308,8 +308,8 @@ jobs:
     # Its server (interop/open62541/main.c) serves a test namespace under policies None,
     # Basic256Sha256, Aes128Sha256RsaOaep and Aes256Sha256RsaPss with anonymous, user name and
     # X.509 identities; its PKI is made at run time inside the container and never stored.
-    # S90/S91 test Stonecrab's policy-None channel handoff and public anonymous session
-    # connect/close, plus open62541's in-image checks. Its own job, apart from the TCP peers
+    # S90–S92 test Stonecrab's None channel, public anonymous session and scalar batch
+    # Read plus the finite read example, alongside open62541's in-image checks. Its own job, apart from the TCP peers
     # and not part of `mise run interop`. The steps are the subcommands of
     # interop/open62541/interop.sh, which `mise run interop-opcua` also runs.
     runs-on: ubuntu-latest

@@ -87,6 +87,7 @@ src/opcua/codec/support.rs
 src/opcua/codec/variant.rs
 src/opcua/codec/vectors.rs
 src/opcua/codec.rs
+src/opcua/connection/tests.rs
 src/opcua/connection.rs
 src/opcua/driver.rs
 src/opcua/frame/properties.rs
@@ -114,6 +115,8 @@ src/opcua/generated.rs
 src/opcua/lane/tests.rs
 src/opcua/lane.rs
 src/opcua/options.rs
+src/opcua/read/tests.rs
+src/opcua/read.rs
 src/opcua/service.rs
 src/opcua/service_tests.rs
 src/opcua/session/tests.rs

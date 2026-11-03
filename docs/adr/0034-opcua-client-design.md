@@ -891,3 +891,16 @@ lane dead-code expectation. Keep 100% handwritten coverage and normal signed-off
 
 References: OPC Foundation Part 4 Read parameters (5.11.2.2 in v1.05.07) and
 TimestampsToReturn (7.39): https://reference.opcfoundation.org/specs/OPC-10000-4/7.39.
+
+
+S92 shrink/review: pure response/count/status assembly stays in opcua/read.rs, leaving
+connection.rs to own lifecycle, deadlines, cancellation and bounded read attempts. The
+read Unsupported stub is deleted, the lane dead-code expectation removed, and the core
+classification variants append to ErrorKind so existing relative ordering is retained.
+StateCell.set_if uses its existing mutex and wakes outside it; pending-read close tests
+prove a late error cannot overwrite terminal Closed. Full attribute transmission lands
+now, but LocalizedText DisplayName conversion remains assigned to S98. The public contract
+suite preserves parsed driver options during config rebuilds and reports exactly 23
+passes plus 10 named unsupported-operation skips. The finite example runs with the
+independent peer, where the existing CI job has a server; the examples task builds it.
+No new dependency, public trait, runtime task, reconnect or data-write support is added.
