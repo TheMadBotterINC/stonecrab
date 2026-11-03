@@ -389,6 +389,10 @@ fn opcua_a_missing_timestamp_is_absent_not_zero() {
     }
     assert_eq!(
         timestamp(Some(DateTime(116_444_735_999_999_999)), Some(100)),
-        Some(std::time::UNIX_EPOCH - Duration::from_nanos(99))
+        // The base tick is represented before the sub-tick adjustment. Windows SystemTime
+        // has 100 ns precision and truncates that 1 ns adjustment.
+        std::time::UNIX_EPOCH
+            .checked_sub(Duration::from_nanos(100))
+            .and_then(|base| base.checked_add(Duration::from_nanos(1)))
     );
 }

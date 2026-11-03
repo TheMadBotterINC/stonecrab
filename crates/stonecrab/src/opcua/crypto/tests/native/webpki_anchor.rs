@@ -2,7 +2,7 @@
 //! built with no crypto provider feature: the signature algorithm is the first-party
 //! `RSA_PKCS1_SHA256` of this crate over aws-lc-rs.
 
-use super::common;
+use super::pki;
 
 use std::time::Duration;
 
@@ -18,9 +18,9 @@ fn at(seconds: u64) -> UnixTime {
 
 #[test]
 fn a_self_signed_application_certificate_validates_against_itself() {
-    let pair = common::key_pair();
-    let spec = common::CertSpec::application("probe application", "probe application", 1);
-    let der = CertificateDer::from(common::certificate(&spec, &pair, &pair));
+    let pair = pki::key_pair();
+    let spec = pki::CertSpec::application("probe application", "probe application", 1);
+    let der = CertificateDer::from(pki::certificate(&spec, &pair, &pair));
     let anchors = [anchor_from_trusted_cert(&der).expect("anchor")];
     let cert = EndEntityCert::try_from(&der).expect("parse");
     let path = cert
@@ -28,7 +28,7 @@ fn a_self_signed_application_certificate_validates_against_itself() {
             &[&SHA256_RSA],
             &anchors,
             &[],
-            at(common::NOW),
+            at(pki::NOW),
             KeyUsage::server_auth(),
             None,
             None,
@@ -47,12 +47,12 @@ fn a_self_signed_application_certificate_validates_against_itself() {
 
 #[test]
 fn a_different_anchor_is_unknown_issuer() {
-    let pair = common::key_pair();
-    let other = common::other_key_pair();
-    let ee_spec = common::CertSpec::application("probe application", "probe application", 1);
-    let other_spec = common::CertSpec::application("someone else", "someone else", 2);
-    let ee = CertificateDer::from(common::certificate(&ee_spec, &pair, &pair));
-    let stranger = CertificateDer::from(common::certificate(&other_spec, &other, &other));
+    let pair = pki::key_pair();
+    let other = pki::other_key_pair();
+    let ee_spec = pki::CertSpec::application("probe application", "probe application", 1);
+    let other_spec = pki::CertSpec::application("someone else", "someone else", 2);
+    let ee = CertificateDer::from(pki::certificate(&ee_spec, &pair, &pair));
+    let stranger = CertificateDer::from(pki::certificate(&other_spec, &other, &other));
     let anchor = anchor_from_trusted_cert(&stranger).expect("anchor");
     let cert = EndEntityCert::try_from(&ee).expect("parse");
     let error = cert
@@ -60,7 +60,7 @@ fn a_different_anchor_is_unknown_issuer() {
             &[&SHA256_RSA],
             &[anchor],
             &[],
-            at(common::NOW),
+            at(pki::NOW),
             KeyUsage::server_auth(),
             None,
             None,
@@ -72,9 +72,9 @@ fn a_different_anchor_is_unknown_issuer() {
 
 #[test]
 fn an_expired_certificate_is_refused() {
-    let pair = common::key_pair();
-    let spec = common::CertSpec::application("probe application", "probe application", 1);
-    let der = CertificateDer::from(common::certificate(&spec, &pair, &pair));
+    let pair = pki::key_pair();
+    let spec = pki::CertSpec::application("probe application", "probe application", 1);
+    let der = CertificateDer::from(pki::certificate(&spec, &pair, &pair));
     let anchor = anchor_from_trusted_cert(&der).expect("anchor");
     let cert = EndEntityCert::try_from(&der).expect("parse");
     // 2037-01-01, a year after notAfter.
@@ -98,20 +98,20 @@ fn an_expired_certificate_is_refused() {
 
 #[test]
 fn a_ca_issued_application_certificate_validates_through_the_ca_anchor() {
-    let ca_key = common::other_key_pair();
-    let app_key = common::key_pair();
-    let mut ca_spec = common::CertSpec::application("probe ca", "probe ca", 1);
+    let ca_key = pki::other_key_pair();
+    let app_key = pki::key_pair();
+    let mut ca_spec = pki::CertSpec::application("probe ca", "probe ca", 1);
     ca_spec.is_ca = true;
-    let app_spec = common::CertSpec::application("probe application", "probe ca", 2);
-    let ca = CertificateDer::from(common::certificate(&ca_spec, &ca_key, &ca_key));
-    let app = CertificateDer::from(common::certificate(&app_spec, &app_key, &ca_key));
+    let app_spec = pki::CertSpec::application("probe application", "probe ca", 2);
+    let ca = CertificateDer::from(pki::certificate(&ca_spec, &ca_key, &ca_key));
+    let app = CertificateDer::from(pki::certificate(&app_spec, &app_key, &ca_key));
     let anchor = anchor_from_trusted_cert(&ca).expect("anchor");
     let cert = EndEntityCert::try_from(&app).expect("parse");
     cert.verify_for_usage(
         &[&SHA256_RSA],
         &[anchor],
         &[],
-        at(common::NOW),
+        at(pki::NOW),
         KeyUsage::client_auth(),
         None,
         None,
@@ -122,9 +122,9 @@ fn a_ca_issued_application_certificate_validates_through_the_ca_anchor() {
 #[test]
 fn without_the_algorithm_nothing_validates() {
     // webpki built with no provider feature trusts no signature algorithm of its own.
-    let pair = common::key_pair();
-    let spec = common::CertSpec::application("probe application", "probe application", 1);
-    let der = CertificateDer::from(common::certificate(&spec, &pair, &pair));
+    let pair = pki::key_pair();
+    let spec = pki::CertSpec::application("probe application", "probe application", 1);
+    let der = CertificateDer::from(pki::certificate(&spec, &pair, &pair));
     let anchor = anchor_from_trusted_cert(&der).expect("anchor");
     let cert = EndEntityCert::try_from(&der).expect("parse");
     assert!(
@@ -132,7 +132,7 @@ fn without_the_algorithm_nothing_validates() {
             &[],
             &[anchor],
             &[],
-            at(common::NOW),
+            at(pki::NOW),
             KeyUsage::server_auth(),
             None,
             None,
@@ -144,9 +144,9 @@ fn without_the_algorithm_nothing_validates() {
 #[test]
 fn a_signature_by_the_certificates_key_verifies_through_the_certificate() {
     // The OPC UA use: the peer signed a chunk, the verifier holds only the certificate.
-    let pair = common::key_pair();
-    let spec = common::CertSpec::application("probe application", "probe application", 1);
-    let der = CertificateDer::from(common::certificate(&spec, &pair, &pair));
+    let pair = pki::key_pair();
+    let spec = pki::CertSpec::application("probe application", "probe application", 1);
+    let der = CertificateDer::from(pki::certificate(&spec, &pair, &pair));
     let cert = EndEntityCert::try_from(&der).expect("parse");
     let mut signature = vec![0u8; pair.public_modulus_len()];
     pair.sign(

@@ -162,8 +162,12 @@ run_tests() {
   export STONECRAB_INTEROP_OPEN62541="opcua://${HOST}:${PORT}?security-policy=NONE"
   export STONECRAB_INTEROP_OPEN62541_PASSWORD_FILE="$PKI_OUT/user-password"
   local listed
-  listed="$(cargo nextest list --locked -p stonecrab --all-features \
-    --run-ignored ignored-only -E "$FILTER" --message-format oneline | grep -Ec 'opcua::(channel|session|connection|lane|endpoint)::tests::opcua_interop_' || true)"
+  # CI sets CARGO_TERM_COLOR=always; color codes split qualified test names.
+  cargo nextest list --locked -p stonecrab --all-features --color never \
+    --run-ignored ignored-only -E "$FILTER" --message-format oneline \
+    > "$EVIDENCE/selected-tests.txt" || return 1
+  listed="$(grep -Ec 'opcua::(channel|session|connection|lane|endpoint)::tests::opcua_interop_' \
+    "$EVIDENCE/selected-tests.txt" || true)"
   [ "$listed" = "$EXPECTED_TESTS" ] ||
     die "expected $EXPECTED_TESTS Stonecrab interop tests, the filter selects $listed"
   cargo nextest run --locked -p stonecrab --all-features \

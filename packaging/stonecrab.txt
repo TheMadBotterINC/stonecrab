@@ -97,8 +97,8 @@ src/opcua/crypto/backend.rs
 src/opcua/crypto/derive.rs
 src/opcua/crypto/policy.rs
 src/opcua/crypto/tests/native/aes_cbc.rs
-src/opcua/crypto/tests/native/common.rs
 src/opcua/crypto/tests/native/mac_digest.rs
+src/opcua/crypto/tests/native/pki.rs
 src/opcua/crypto/tests/native/rsa_oaep.rs
 src/opcua/crypto/tests/native/rsa_sign.rs
 src/opcua/crypto/tests/native/webpki_anchor.rs

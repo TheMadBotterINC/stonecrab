@@ -189,16 +189,3 @@ pub(super) fn key_pair() -> RsaKeyPair {
 pub(super) fn other_key_pair() -> RsaKeyPair {
     RsaKeyPair::generate(KeySize::Rsa2048).expect("generate RSA-2048")
 }
-
-pub(super) fn hex(bytes: &[u8]) -> String {
-    super::super::hex(bytes)
-}
-
-pub(super) fn unhex(text: &str) -> Vec<u8> {
-    text.as_bytes()
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
-        .collect()
-}

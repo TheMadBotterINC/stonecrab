@@ -2,7 +2,7 @@
 //! (`Aes256_Sha256_RsaPss`), encrypted with the public key of a certificate and decrypted with
 //! the private key.
 
-use super::common;
+use super::pki;
 
 use aws_lc_rs::encoding::{AsDer, PublicKeyX509Der};
 use aws_lc_rs::rsa::{
@@ -12,9 +12,9 @@ use aws_lc_rs::rsa::{
 use aws_lc_rs::signature::KeyPair;
 
 fn keys() -> (OaepPublicEncryptingKey, OaepPrivateDecryptingKey) {
-    let private = PrivateDecryptingKey::from_pkcs8(common::pkcs8_2048()).expect("PKCS #8");
+    let private = PrivateDecryptingKey::from_pkcs8(pki::pkcs8_2048()).expect("PKCS #8");
     // The public key a peer has is the SubjectPublicKeyInfo of its certificate.
-    let spki: PublicKeyX509Der<'_> = common::key_pair().public_key().as_der().expect("SPKI");
+    let spki: PublicKeyX509Der<'_> = pki::key_pair().public_key().as_der().expect("SPKI");
     let public = PublicEncryptingKey::from_der(spki.as_ref()).expect("public key");
     (
         OaepPublicEncryptingKey::new(public).expect("oaep public"),
@@ -112,7 +112,7 @@ fn oaep_is_randomised() {
 #[test]
 fn a_wrong_key_does_not_decrypt() {
     let (public, _) = keys();
-    let other = common::other_key_pair();
+    let other = pki::other_key_pair();
     let other_pkcs8: aws_lc_rs::encoding::Pkcs8V1Der<'_> = other.as_der().expect("PKCS #8");
     let other_private = OaepPrivateDecryptingKey::new(
         PrivateDecryptingKey::from_pkcs8(other_pkcs8.as_ref()).expect("PKCS #8"),

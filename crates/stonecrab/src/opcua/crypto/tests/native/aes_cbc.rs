@@ -1,8 +1,6 @@
 //! AES-CBC with a caller-chosen IV and no padding (OPC UA derives key and IV from the channel
 //! nonces and pads the message itself), against the NIST SP 800-38A vectors.
 
-use super::common;
-
 use aws_lc_rs::cipher::{
     AES_128, AES_256, DecryptingKey, DecryptionContext, EncryptingKey, EncryptionContext,
     UnboundCipherKey,
@@ -18,7 +16,7 @@ const PLAINTEXT: &str = concat!(
 );
 
 fn iv() -> [u8; 16] {
-    common::unhex(IV).try_into().expect("16 bytes")
+    super::unhex(IV).try_into().expect("16 bytes")
 }
 
 fn encrypt(
@@ -54,16 +52,16 @@ fn decrypt(
 
 #[test]
 fn aes128_cbc_matches_sp800_38a_f_2_1() {
-    let key = common::unhex("2b7e151628aed2a6abf7158809cf4f3c");
+    let key = super::unhex("2b7e151628aed2a6abf7158809cf4f3c");
     let expected = concat!(
         "7649abac8119b246cee98e9b12e9197d",
         "5086cb9b507219ee95db113a917678b2",
         "73bed6b8e3c1743b7116e69e22229516",
         "3ff1caa1681fac09120eca307586e1a7",
     );
-    let plaintext = common::unhex(PLAINTEXT);
+    let plaintext = super::unhex(PLAINTEXT);
     let ciphertext = encrypt(&AES_128, &key, &plaintext).expect("encrypt");
-    assert_eq!(common::hex(&ciphertext), expected);
+    assert_eq!(super::hex(&ciphertext), expected);
     // No padding: the output is exactly as long as the input.
     assert_eq!(ciphertext.len(), plaintext.len());
     assert_eq!(
@@ -74,16 +72,16 @@ fn aes128_cbc_matches_sp800_38a_f_2_1() {
 
 #[test]
 fn aes256_cbc_matches_sp800_38a_f_2_5() {
-    let key = common::unhex("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4");
+    let key = super::unhex("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4");
     let expected = concat!(
         "f58c4c04d6e5f1ba779eabfb5f7bfbd6",
         "9cfc4e967edb808d679f777bc6702c7d",
         "39f23369a9d9bacfa530e26304231461",
         "b2eb05e2c39be9fcda6c19078c6a9d1b",
     );
-    let plaintext = common::unhex(PLAINTEXT);
+    let plaintext = super::unhex(PLAINTEXT);
     let ciphertext = encrypt(&AES_256, &key, &plaintext).expect("encrypt");
-    assert_eq!(common::hex(&ciphertext), expected);
+    assert_eq!(super::hex(&ciphertext), expected);
     assert_eq!(
         decrypt(&AES_256, &key, &ciphertext).expect("decrypt"),
         plaintext
@@ -92,7 +90,7 @@ fn aes256_cbc_matches_sp800_38a_f_2_5() {
 
 #[test]
 fn input_that_is_not_whole_blocks_is_refused() {
-    let key = common::unhex("2b7e151628aed2a6abf7158809cf4f3c");
+    let key = super::unhex("2b7e151628aed2a6abf7158809cf4f3c");
     assert!(encrypt(&AES_128, &key, &[0u8; 17]).is_err());
     assert!(encrypt(&AES_128, &key, &[0u8; 15]).is_err());
     assert!(decrypt(&AES_128, &key, &[0u8; 17]).is_err());
@@ -106,8 +104,8 @@ fn a_key_of_the_wrong_length_is_refused() {
 
 #[test]
 fn the_iv_matters() {
-    let key = common::unhex("2b7e151628aed2a6abf7158809cf4f3c");
-    let plaintext = common::unhex(PLAINTEXT);
+    let key = super::unhex("2b7e151628aed2a6abf7158809cf4f3c");
+    let plaintext = super::unhex(PLAINTEXT);
     let one = encrypt(&AES_128, &key, &plaintext).expect("encrypt");
     let other_key =
         EncryptingKey::cbc(UnboundCipherKey::new(&AES_128, &key).expect("key")).expect("cbc");

@@ -73,3 +73,30 @@ The first OPC UA comparison adds 16.16 seconds, 168024 KiB compiler maximum RSS,
 warm OS cache make the third build faster than the second; no causal speedup is inferred.
 CI repeats this workload as feature-footprint and preserves raw metrics. Final CI/native
 feature/fuzz costs and E17 decision will be recorded after those jobs finish.
+
+## Hosted portability fixes
+
+The first hosted run 41635079341 (adb9912) built the native graph on Linux/MSRV and both
+cross targets. Windows identified existing tests assuming a larger SystemTime range and
+nanosecond precision. Overflow-clock arms now run only if the platform can represent that
+instant, as the codec's existing range test does; Linux still covers the error path.
+The pre-epoch picosecond expectation applies the base 100 ns tick before its refinement,
+respecting Windows' 100 ns SystemTime resolution. Runtime timestamp code is unchanged.
+See https://doc.rust-lang.org/std/time/struct.SystemTime.html#platform-specific-behavior .
+
+The hosted native peer job also found ANSI color splitting qualified names in its grep
+count. Listing now explicitly uses --color never, preserves the listing, and propagates
+Cargo failure. The exact nine-test requirement is retained. The local forced-color
+listing and the corrected hosted peer job must pass before merge.
+
+The complete 66-mutant crypto campaign passes (46 caught, 20 unviable, zero survivors or
+timeouts). Expansion now uses the policy digest length to calculate a fixed iteration
+count, so corrupt/empty primitive output cannot make an output-driven loop hang.
+No mutation exclusions or coverage exceptions were added.
+
+All 15 fuzz targets completed 60 seconds each with no crash artifact. The first recorded
+run was blocked by a pre-existing 40-byte artifact dated 2026-11-02, hash
+crash-e3e0a1123d8984a3957422ddc378cfa6eda80aaa. It replayed successfully under the current
+ASan binary and was preserved in /tmp/stonecrab-s101-replayed-artifacts; the full recorded
+run was then repeated and passed. The serial smoke attempt was superseded by the existing
+concurrent evidence runner; this is a 60-second gate run, not a release-duration claim.

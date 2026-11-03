@@ -36,8 +36,9 @@ and keep secure policies refused before network I/O until their operational slic
   seed, and server-sending material from the opposite pair. Split signing, encryption
   and IV in that order using checked lengths. None needs no material or entropy. Secure
   nonces must satisfy the policy bound; tests verify exact roles, lengths and slices.
-  Keep key/nonces redacted using the established Secret contract, without claiming
-  zeroization (future key-store work must address secret lifetime explicitly).
+  Keep derived keys redacted using the established Secret contract, without claiming
+  zeroization (future key-store work must address secret lifetime explicitly). Nonces
+  use the existing wire byte-string representation when constructing requests.
 - Driver owns Arc<dyn Backend>; private unit tests replace the field without adding a
   public constructor/setter. Session nonce is 32 bytes from this source. The None channel
   obtains its policy nonce through the same helper and stays empty without drawing

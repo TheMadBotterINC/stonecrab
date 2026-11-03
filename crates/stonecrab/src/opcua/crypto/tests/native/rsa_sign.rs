@@ -2,7 +2,7 @@
 //! PSS with SHA-256 (`Aes256_Sha256_RsaPss`), signed with the key pair and verified with the
 //! public key bytes of the peer's certificate.
 
-use super::common;
+use super::pki;
 
 use aws_lc_rs::digest::{SHA1_FOR_LEGACY_USE_ONLY, digest};
 use aws_lc_rs::rand::SystemRandom;
@@ -15,7 +15,7 @@ use aws_lc_rs::signature::{
 const MESSAGE: &[u8] = b"OpenSecureChannelRequest chunk to sign";
 
 fn sign(encoding: &'static dyn RsaEncoding, message: &[u8]) -> Vec<u8> {
-    let pair = common::key_pair();
+    let pair = pki::key_pair();
     let mut signature = vec![0u8; pair.public_modulus_len()];
     pair.sign(encoding, &SystemRandom::new(), message, &mut signature)
         .expect("sign");
@@ -24,7 +24,7 @@ fn sign(encoding: &'static dyn RsaEncoding, message: &[u8]) -> Vec<u8> {
 
 #[test]
 fn pkcs1_sha256_signs_and_verifies() {
-    let pair = common::key_pair();
+    let pair = pki::key_pair();
     let signature = sign(&RSA_PKCS1_SHA256, MESSAGE);
     assert_eq!(signature.len(), 256);
     // PKCS #1 v1.5 is deterministic.
@@ -39,7 +39,7 @@ fn pkcs1_sha256_signs_and_verifies() {
 
 #[test]
 fn pss_sha256_signs_and_verifies() {
-    let pair = common::key_pair();
+    let pair = pki::key_pair();
     let signature = sign(&RSA_PSS_SHA256, MESSAGE);
     assert_eq!(signature.len(), 256);
     // PSS is salted: two signatures of one message differ.
@@ -51,7 +51,7 @@ fn pss_sha256_signs_and_verifies() {
 
 #[test]
 fn the_two_paddings_do_not_cross_verify() {
-    let pair = common::key_pair();
+    let pair = pki::key_pair();
     let pkcs1 = sign(&RSA_PKCS1_SHA256, MESSAGE);
     let pss = sign(&RSA_PSS_SHA256, MESSAGE);
     let as_pss = UnparsedPublicKey::new(&RSA_PSS_2048_8192_SHA256, pair.public_key().as_ref());
@@ -64,7 +64,7 @@ fn the_two_paddings_do_not_cross_verify() {
 fn pss_salt_length_is_the_digest_length_by_default() {
     // OPC UA RSA-PSS uses a salt as long as the digest. A signature made with a different salt
     // length is refused by a verifier that expects the digest length (the default).
-    let pair = common::key_pair();
+    let pair = pki::key_pair();
     let pss_salt_20 = RSA_PSS_SHA256.with_pss_salt_length(RsaPssSaltLength::Custom(20));
     let pss_salt_20: &'static dyn RsaEncoding = Box::leak(Box::new(pss_salt_20));
     let signature = sign(pss_salt_20, MESSAGE);
@@ -75,7 +75,7 @@ fn pss_salt_length_is_the_digest_length_by_default() {
 #[test]
 fn a_foreign_key_does_not_verify() {
     let signature = sign(&RSA_PKCS1_SHA256, MESSAGE);
-    let other = common::other_key_pair();
+    let other = pki::other_key_pair();
     let public = UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, other.public_key().as_ref());
     assert!(public.verify(MESSAGE, &signature).is_err());
 }
@@ -88,7 +88,7 @@ fn sha1_with_rsa_cannot_be_signed() {
     // a signing encoding is refused as a digest mismatch. SHA-1 appears only on the
     // verification side, as `RSA_PKCS1_2048_8192_SHA1_FOR_LEGACY_USE_ONLY`, which this test
     // names so that a removal would fail the build.
-    let pair = common::key_pair();
+    let pair = pki::key_pair();
     let sha1 = digest(&SHA1_FOR_LEGACY_USE_ONLY, MESSAGE);
     let mut signature = vec![0u8; pair.public_modulus_len()];
     assert!(
