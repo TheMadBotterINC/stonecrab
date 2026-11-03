@@ -748,3 +748,45 @@ The lane needs the effective frame bound before encoding and assigning a sequenc
 Expose `FramedTransport`'s existing minimum-of-framer-and-transport calculation as a
 crate-private accessor, used by both its encoder and the lane. This avoids a duplicate
 bound or treating a local encoding refusal as an interrupted wire send.
+
+## S90 implementation sketch (2026-11-02)
+
+`opcua/channel.rs` owns the framed transport during HEL/ACK and policy-None OPN Issue,
+then either sends CLO without awaiting a response or transfers ownership to the existing
+request lane. The lane adopts the OPN request/sequence counters and the server's first
+sequence, so the first session request continues the same channel rather than restarting
+correlation. No public driver, session, crypto backend, task or dependency is added.
+
+Reuse the generated service bodies, shared request-header/status/encoding functions and
+existing framed buffering. Add a crate-private framer replacement method that retains
+buffered bytes. The OPC UA framer keeps separate receive/send ceilings, with the trait's
+maximum being the larger ceiling; decode/encode each enforce their direction. The lane
+also receives the negotiated send ceiling before assigning a sequence number. Existing
+symmetric `OpcuaFramer::new` callers retain their behavior.
+
+HEL defaults to protocol 0, buffers 65535 (also capped by ResourceLimits), message size
+2097152 and chunk count 64. ACK merges client send with server receive and client receive
+with server send, and conservatively takes the smaller nonzero message/chunk bound.
+Part 6 sections 7.1.2.3/4 reserve zero-as-unlimited for message size/chunk count; buffers
+below 8192 are rejected for this non-ECC channel. A larger server buffer cannot raise
+the client's ceiling. Preserve and enforce coalesced buffered bytes after negotiation.
+
+OPN carries Issue, mode None regardless of the configured mode, a null nonce, null
+certificate/thumbprint and the current default requested lifetime 3600000 ms. Its response
+must match request/handle/policy, protocol, channel/token and nonzero sequence/lifetime;
+adopt the exact server token/lifetime/nonce. ERR and ServiceFault keep their typed numeric
+status and source name. A secure configured policy is rejected before I/O, never silently
+converted to None. Handshake steps share the caller's injected-clock deadline/cancellation;
+configuration of handshake/lifetime options stays with S91/S109 as planned.
+
+Tests extend the first-party responder under `tests/support/`, keep the handwritten
+coverage floor at 100%, and cover limits, unsigned OPN/CLO fields, counter handoff,
+malformed/refused/expired/cancelled handshakes and fire-and-forget close. One ignored
+internal interop test exercises HEL/OPN/CLO and the lane handoff against open62541; the
+script/CI add an exact-count nextest filter and retain evidence under the existing path.
+The independent peer and all controls remain outside the published package. Record the
+scope, parity, package list and checks, with signed-off commits and ordinary merges.
+
+References: OPC Foundation Part 6 [Hello](https://reference.opcfoundation.org/specs/OPC-10000-6/7.1.2.3)
+and [Acknowledge](https://reference.opcfoundation.org/specs/OPC-10000-6/7.1.2.4),
+Part 4 [OpenSecureChannel parameters](https://reference.opcfoundation.org/specs/OPC-10000-4/5.6.2.2).
