@@ -851,3 +851,43 @@ the old Channel.close implementation is removed. A concurrent close also races i
 against a deadline, so an undriven first future cannot park the second call forever.
 The nonce boundary injects bytes directly into session setup; a failed OS fill has no
 fallback. None does not consume channel key material; secure key derivation remains S101.
+
+## S92 implementation sketch (2026-11-03)
+
+Connection.read validates the entire batch before I/O, builds one ReadValueId per tag and
+sends one Read service (maxAge zero, Both timestamps) through the established session's
+lane. A pure opcua/read.rs module converts scalar DataValues and statuses into ordered
+ReadItems; a mismatched result count fails the call, while invalid UTF-8, unsupported
+values and device statuses remain per-item errors with their exact status attached.
+
+Reuse ReadResponseBuilder, the existing Variant codec and generated Read services.
+Add normalized ErrorKind::NotFound, InvalidDataType and AccessDenied to the existing
+non-exhaustive enum because the seven assigned OPC UA status mappings need distinctions
+that do not exist yet. Unknown statuses remain Internal with the number retained; known
+unmapped failures remain DeviceException. Good/Uncertain values retain their exact status;
+absent/Null values map to Null. Preserve wire integer widths and float bits. String/XML
+preserve NUL, whitespace and BOM; null strings map to Null. Arrays/other built-ins and
+explicit type coercions stay with S95/S98. Source time is attached only when supplied and
+convertible; extended metadata remains S98. Attribute selection itself works for all ids,
+while LocalizedText DisplayName mapping stays S98 as assigned there.
+
+The connection races reads against a close token, rejecting new reads in Closing and
+waking pending reads with Disconnected. Session close still uses the live lane for its
+protocol goodbye. Ordinary receive cancellation retains buffering; interrupted sends
+fail the lane. A narrow crate-private StateCell compare-and-set reuses its existing lock
+and wake-outside-lock behavior to prevent a late read failure overwriting Closing/Closed.
+Disconnected/failed lanes are terminal until lifecycle/reconnect S110. Read retries obey
+the existing bounded RetryPolicy only while the same lane is usable and time remains;
+no reconnection, write replay, task, trait, dependency or alternate transport is added.
+
+Touch connection/session/lane/driver, new read.rs and deterministic tests; reuse the
+first-party responder for public tests and add tests/opcua_contract.rs. The contract
+suite's config rebuild must preserve the already-public Arc driver-options slot; this
+fix applies to real OPC UA options, not a test-only bypass. Assert named skips for polling
+and write/ping cases that this driver does not support. Add the finite opcua_read example,
+run it against open62541 in the existing interop job, expand its exact-count filter, and
+update package/parity/status/evidence docs. Remove the read Unsupported stub and obsolete
+lane dead-code expectation. Keep 100% handwritten coverage and normal signed-off commits.
+
+References: OPC Foundation Part 4 Read parameters (5.11.2.2 in v1.05.07) and
+TimestampsToReturn (7.39): https://reference.opcfoundation.org/specs/OPC-10000-4/7.39.
