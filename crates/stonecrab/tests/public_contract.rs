@@ -12,14 +12,14 @@ mod tests {
         Capabilities, Clock, Connection, ConnectionConfig, ConnectionConfigBuilder,
         ConnectionState, ConnectionUri, Credentials, Deadline, Diagnostics, Driver, DriverOptions,
         DriverRegistry, Endpoint, ErrorKind, FailureCategory, ItemError, LossCounters, OpFuture,
-        Operation, PlcDate, PlcDateTime, PlcError, PlcSignedDuration, PlcTimeOfDay, PlcValue,
-        PlcValueType, ProtocolAddress, ProtocolStatus, QueuePolicy, ReadItem, ReadRequest,
-        ReadRequestBuilder, ReadResponse, ReadResponseBuilder, ReconnectPolicy, ResourceLimits,
-        ResourceLimitsBuilder, RetryPolicy, Secret, StateCell, StateWatch, SubscribeRequest,
-        SubscribeRequestBuilder, Subscription, SubscriptionKind, SubscriptionMode,
-        SubscriptionSender, Tag, TagId, Timeouts, UnknownReason, WordOrder, WriteItem,
-        WriteOutcome, WriteRequest, WriteRequestBuilder, WriteResponse, WriteResponseBuilder,
-        WriteResult,
+        Operation, PlcDate, PlcDateTime, PlcError, PlcSignedDuration, PlcStruct, PlcTimeOfDay,
+        PlcValue, PlcValueType, ProtocolAddress, ProtocolStatus, QueuePolicy, ReadItem,
+        ReadRequest, ReadRequestBuilder, ReadResponse, ReadResponseBuilder, ReconnectPolicy,
+        ResourceLimits, ResourceLimitsBuilder, RetryPolicy, Secret, StateCell, StateWatch,
+        SubscribeRequest, SubscribeRequestBuilder, Subscription, SubscriptionKind,
+        SubscriptionMode, SubscriptionSender, Tag, TagId, Timeouts, UnknownReason, WordOrder,
+        WriteItem, WriteOutcome, WriteRequest, WriteRequestBuilder, WriteResponse,
+        WriteResponseBuilder, WriteResult,
     };
 
     #[test]
