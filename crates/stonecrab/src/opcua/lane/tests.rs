@@ -583,11 +583,8 @@ fn opcua_a_transport_loss_fails_the_lane_without_retry() {
 
 #[test]
 fn opcua_invalid_chunk_shapes_are_rejected() {
-    let mut intermediate = message(1, 1, 17, 29, &read_response(1, 1));
-    *intermediate.get_mut(3).unwrap() = b'C';
     let acknowledge = [b"ACKF".to_vec(), 28_u32.to_le_bytes().to_vec(), vec![0; 20]].concat();
     for frame in [
-        intermediate,
         acknowledge,
         message(0, 1, 17, 29, &read_response(1, 1)),
         vec![0xFF; 8],
@@ -935,7 +932,7 @@ fn opcua_an_oversized_local_request_does_not_consume_a_wire_sequence() {
         &rig.token,
         631,
         |mut header| {
-            header.audit_entry_id = UaString::new("x".repeat(65535));
+            header.audit_entry_id = UaString::new("x".repeat(262_144));
             read(header)
         },
         None,
@@ -1021,4 +1018,472 @@ fn opcua_close_rejects_invalid_clock_and_undersized_body_before_sending() {
     );
     assert_eq!(rig.probe.sent().len(), 0);
     assert_eq!(rig.lane.lock().pending.len(), 0);
+}
+
+fn chunk_wire(sequence: u32, request: u32, flag: u8, payload: &[u8]) -> Vec<u8> {
+    let mut bytes = message(sequence, request, 17, 29, payload);
+    *bytes.get_mut(3).unwrap() = flag;
+    bytes
+}
+fn large_read(header: RequestHeader) -> Service {
+    use crate::opcua::codec::QualifiedName;
+    use crate::opcua::generated::read_value_id::ReadValueId;
+    Service::ReadRequest {
+        request_header: header,
+        max_age: 0.0,
+        timestamps_to_return: TimestampsToReturn::TimestampsToReturnBoth,
+        nodes_to_read: Some(
+            (0..1000)
+                .map(|number| ReadValueId {
+                    node_id: NodeId::numeric(2, 0xFFFF_0000_u32.checked_add(number).unwrap()),
+                    attribute_id: 13,
+                    index_range: UaString::null(),
+                    data_encoding: QualifiedName {
+                        namespace_index: 0,
+                        name: UaString::null(),
+                    },
+                })
+                .collect(),
+        ),
+    }
+}
+
+// covers: OPCUA-CHUNK-SEND / OPCUA-CHUNK-SIZE
+#[test]
+fn opcua_a_large_request_is_split_into_continue_chunks_and_one_final() {
+    let mut rig = Rig::new(
+        Script::strict(vec![Step::respond(|bytes| {
+            bytes
+                .starts_with(b"MSGF")
+                .then(|| message(1, 1, 17, 29, &read_response(1, 42)))
+        })]),
+        1,
+    );
+    rig.lane.max_frame = 8192;
+    let reply = block_on_with(
+        &rig.clock,
+        rig.lane
+            .exchange(&rig.token, 631, large_read, None, &rig.cancel),
+    )
+    .unwrap();
+    assert_eq!(value(reply), 42);
+    let sent = rig.probe.sent();
+    assert_eq!(sent.len(), 3);
+    let mut body = Vec::new();
+    for (index, bytes) in sent.iter().enumerate() {
+        assert!(bytes.len() <= 8192);
+        let frame = OpcuaFramer::new(8192, ResourceLimits::builder().build().unwrap())
+            .decode(&mut bytes::BytesMut::from(bytes.as_ref()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            frame.chunk,
+            if index == 2 {
+                ChunkType::Final
+            } else {
+                ChunkType::Intermediate
+            }
+        );
+        let Body::Message(chunk) = frame.body else {
+            panic!("MSG")
+        };
+        assert_eq!(
+            chunk.sequence.sequence_number,
+            u32::try_from(index + 1).unwrap()
+        );
+        assert_eq!(chunk.sequence.request_id, 1);
+        assert_eq!(chunk.channel_id, 17);
+        assert_eq!(chunk.token_id, 29);
+        body.extend_from_slice(&chunk.body);
+    }
+    let Service::ReadRequest { nodes_to_read, .. } = decode_service(&body).unwrap() else {
+        panic!("ReadRequest")
+    };
+    let nodes = nodes_to_read.unwrap();
+    assert_eq!(nodes.len(), 1000);
+    for (index, node) in nodes.iter().enumerate() {
+        assert_eq!(
+            node.node_id,
+            NodeId::numeric(2, 0xFFFF_0000 + u32::try_from(index).unwrap())
+        );
+    }
+    assert_eq!(rig.lane.lock().sent_sequence, 3);
+}
+
+#[test]
+fn opcua_a_request_over_the_negotiated_max_message_size_is_rejected_before_sending() {
+    let mut rig = Rig::new(Script::default(), 1);
+    rig.lane.message_limits.bytes = 10;
+    assert_eq!(
+        ready(&mut rig.request()).unwrap_err().kind(),
+        ErrorKind::ResourceLimit
+    );
+    assert_eq!(rig.probe.sent().len(), 0);
+    assert_eq!(rig.lane.lock().sent_sequence, 0);
+    assert!(rig.lane.lock().pending.is_empty());
+    assert!(!rig.lane.is_failed());
+}
+
+#[test]
+fn opcua_a_request_over_the_negotiated_max_chunk_count_is_rejected_before_sending() {
+    let mut rig = Rig::new(Script::default(), 1);
+    rig.lane.max_frame = 40;
+    rig.lane.message_limits.chunks = 1;
+    assert_eq!(
+        ready(&mut rig.request()).unwrap_err().kind(),
+        ErrorKind::ResourceLimit
+    );
+    assert_eq!(rig.probe.sent().len(), 0);
+    assert_eq!(rig.lane.lock().sent_sequence, 0);
+    assert!(rig.lane.lock().pending.is_empty());
+    assert!(!rig.lane.is_failed());
+}
+
+#[test]
+fn opcua_chunked_responses_split_across_service_fields_decode_once_complete() {
+    let body = read_response(1, -123_456);
+    let replies = body
+        .chunks(3)
+        .enumerate()
+        .map(|(index, part)| {
+            chunk_wire(
+                u32::try_from(index + 1).unwrap(),
+                1,
+                if (index + 1) * 3 >= body.len() {
+                    b'F'
+                } else {
+                    b'C'
+                },
+                part,
+            )
+        })
+        .collect::<Vec<_>>()
+        .concat();
+    let rig = Rig::new(
+        Script::strict(vec![Step::respond(move |_| Some(replies.clone()))]),
+        1,
+    );
+    assert_eq!(
+        value(block_on_with(&rig.clock, rig.request()).unwrap()),
+        -123_456
+    );
+    assert!(rig.lane.lock().pending.is_empty());
+}
+
+// covers: OPCUA-DIV-ABORT-CHUNK / OPCUA-CHUNK-RECEIVE
+#[test]
+fn opcua_an_abort_chunk_fails_only_that_request() {
+    let mut seen = 0;
+    let abort = [0x8008_0000_u32.to_le_bytes().to_vec(), vec![0xFF; 4]].concat();
+    let rig = Rig::new(
+        Script::strict(vec![Step::respond(move |_| {
+            seen += 1;
+            Some(if seen == 1 {
+                chunk_wire(1, 1, b'C', b"partial")
+            } else {
+                [
+                    chunk_wire(2, 1, b'A', &abort),
+                    message(3, 2, 17, 29, &read_response(2, 42)),
+                ]
+                .concat()
+            })
+        })]),
+        2,
+    );
+    let mut first = rig.request();
+    let mut second = rig.request();
+    assert!(poll(&mut first).is_pending());
+    assert_eq!(rig.lane.lock().pending.get(&1).unwrap().assembly.len(), 7);
+    assert!(poll(&mut second).is_pending());
+    assert!(poll(&mut first).is_pending());
+    assert_eq!(value(ready(&mut second).unwrap()), 42);
+    assert_eq!(
+        status_source(&ready(&mut first).unwrap_err()).code,
+        0x8008_0000
+    );
+    assert!(!rig.lane.is_failed());
+    assert!(rig.lane.lock().pending.is_empty());
+    assert_eq!(rig.clock.sleeper_count(), 0);
+}
+
+#[test]
+fn opcua_abort_ignores_message_and_chunk_allowances_and_long_reason_text() {
+    let abort = [
+        0x8008_0000_u32.to_le_bytes().to_vec(),
+        4097_i32.to_le_bytes().to_vec(),
+        vec![b'x'; 4097],
+    ]
+    .concat();
+    let mut rig = Rig::new(
+        Script::strict(vec![Step::respond(move |_| {
+            Some(
+                [
+                    chunk_wire(1, 1, b'C', b"partial"),
+                    chunk_wire(2, 1, b'A', &abort),
+                ]
+                .concat(),
+            )
+        })]),
+        1,
+    );
+    rig.lane.message_limits = MessageLimits {
+        bytes: 128,
+        chunks: 1,
+    };
+    let problem = block_on_with(&rig.clock, rig.request()).unwrap_err();
+    assert_eq!(status_source(&problem).code, 0x8008_0000);
+    assert!(!rig.lane.is_failed());
+    assert!(rig.lane.lock().pending.is_empty());
+}
+
+#[test]
+fn opcua_dropping_or_cancelling_a_partial_message_releases_only_its_assembly() {
+    for cancel in [false, true] {
+        let old = read_response(1, 111);
+        let (prefix, suffix) = old.split_at(5);
+        let first = chunk_wire(1, 1, b'C', prefix);
+        let late = [
+            chunk_wire(2, 1, b'F', suffix),
+            message(3, 2, 17, 29, &read_response(2, 222)),
+        ]
+        .concat();
+        let mut seen = 0;
+        let rig = Rig::new(
+            Script::strict(vec![Step::respond(move |_| {
+                seen += 1;
+                Some(if seen == 1 {
+                    first.clone()
+                } else {
+                    late.clone()
+                })
+            })]),
+            1,
+        );
+        let token = CancellationToken::new();
+        let mut first = rig.lane.exchange(&rig.token, 631, read, None, &token);
+        assert!(poll(&mut first).is_pending());
+        assert_eq!(rig.lane.lock().pending.get(&1).unwrap().assembly.len(), 5);
+        if cancel {
+            token.cancel();
+            assert_eq!(ready(&mut first).unwrap_err().kind(), ErrorKind::Cancelled);
+        }
+        drop(first);
+        assert!(rig.lane.lock().pending.is_empty());
+        assert_eq!(
+            value(block_on_with(&rig.clock, rig.request()).unwrap()),
+            222
+        );
+        assert_eq!(rig.lane.lock().discarded, 1);
+        assert!(!rig.lane.is_failed());
+    }
+}
+
+#[test]
+fn opcua_fragment_limits_fail_before_append_and_release_all_assemblies() {
+    for (bytes, chunks) in [(128, 1), (60, 10)] {
+        let reply = [
+            chunk_wire(1, 1, b'C', &[0; 32]),
+            chunk_wire(2, 1, b'F', &[0; 32]),
+        ]
+        .concat();
+        let mut rig = Rig::new(
+            Script::strict(vec![Step::respond(move |_| Some(reply.clone()))]),
+            1,
+        );
+        rig.lane.message_limits = MessageLimits { bytes, chunks };
+        assert_eq!(
+            block_on_with(&rig.clock, rig.request()).unwrap_err().kind(),
+            ErrorKind::ResourceLimit
+        );
+        assert!(rig.lane.is_failed());
+        assert!(rig.lane.lock().pending.is_empty());
+    }
+}
+
+#[test]
+fn opcua_aggregate_partial_messages_stay_within_the_connection_receive_budget() {
+    let mut seen = 0;
+    let mut rig = Rig::new(
+        Script::strict(vec![Step::respond(move |_| {
+            seen += 1;
+            Some(chunk_wire(seen, seen, b'C', b"123456"))
+        })]),
+        2,
+    );
+    rig.lane.max_buffered = 10;
+    let mut first = rig.request();
+    let mut second = rig.request();
+    assert!(poll(&mut first).is_pending());
+    assert!(poll(&mut second).is_pending());
+    assert!(poll(&mut first).is_pending());
+    assert_eq!(
+        ready(&mut second).unwrap_err().kind(),
+        ErrorKind::ResourceLimit
+    );
+    assert_eq!(rig.lane.lock().pending.get(&1).unwrap().assembly.len(), 0);
+    assert_eq!(
+        ready(&mut first).unwrap_err().kind(),
+        ErrorKind::ResourceLimit
+    );
+    assert!(rig.lane.is_failed());
+}
+
+#[test]
+fn opcua_sequence_exhaustion_for_a_whole_chunked_send_is_checked_before_io() {
+    let mut rig = Rig::new(Script::default(), 1);
+    rig.lane.max_frame = 8192;
+    rig.lane.lock().sent_sequence = u32::MAX - 1;
+    let request = rig
+        .lane
+        .exchange(&rig.token, 631, large_read, None, &rig.cancel);
+    assert_eq!(
+        block_on_with(&rig.clock, request).unwrap_err().kind(),
+        ErrorKind::ResourceLimit
+    );
+    assert_eq!(rig.probe.sent().len(), 0);
+    assert_eq!(rig.lane.lock().sent_sequence, u32::MAX - 1);
+    assert!(!rig.lane.is_failed());
+}
+
+#[tokio::test]
+#[ignore = "needs independent open62541; interop/open62541/interop.sh tests"]
+#[expect(
+    clippy::disallowed_macros,
+    reason = "the interop test records non-secret byte/chunk evidence"
+)]
+async fn opcua_interop_large_array_read_chunks_under_none() {
+    use crate::opcua::channel::Channel;
+    use crate::opcua::codec::{Array, Identifier, QualifiedName};
+    use crate::opcua::driver::OpcuaDriver;
+    use crate::opcua::generated::read_value_id::ReadValueId;
+    use crate::opcua::options::OpcuaOptions;
+    use crate::opcua::session::Session;
+    use crate::transport::{SystemClock, TcpFactory, TransportFactory};
+    let uri = std::env::var("STONECRAB_INTEROP_OPEN62541").expect("interop URI");
+    let config = OpcuaDriver::configuration(&format!("{uri}&encoding.receive-buffer-size=8192&encoding.send-buffer-size=8192&encoding.max-message-size=24576&encoding.max-chunk-count=4")).unwrap();
+    let options = config.driver_options_as::<OpcuaOptions>().unwrap();
+    let clock: Arc<dyn Clock> = Arc::new(SystemClock::default());
+    let deadline = Deadline::after(clock.now(), Duration::from_secs(10)).unwrap();
+    let cancel = CancellationToken::new();
+    let transport = TcpFactory::default()
+        .open(config.endpoint(), *config.limits(), deadline)
+        .await
+        .unwrap();
+    let channel = Channel::open_none(transport, options, Arc::clone(&clock), deadline, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(channel.limits.receive_buffer_size, 8192);
+    assert_eq!(channel.limits.send_buffer_size, 8192);
+    assert_eq!(channel.limits.max_message_size, 24576);
+    assert_eq!(channel.limits.max_chunk_count, 4);
+    let session = Session::open(
+        Lane::from_channel(channel, Duration::from_secs(5)),
+        options,
+        [7; 32],
+        deadline,
+        &cancel,
+    )
+    .await
+    .unwrap();
+    let make_node = |name: &str| ReadValueId {
+        node_id: NodeId {
+            namespace: 1,
+            identifier: Identifier::String(UaString::new(name)),
+        },
+        attribute_id: 13,
+        index_range: UaString::null(),
+        data_encoding: QualifiedName {
+            namespace_index: 0,
+            name: UaString::null(),
+        },
+    };
+    let before = session.lane.lock().received_sequence.unwrap();
+    let reply = session
+        .lane
+        .exchange(
+            &session.authentication_token,
+            631,
+            |header| Service::ReadRequest {
+                request_header: header,
+                max_age: 0.0,
+                timestamps_to_return: TimestampsToReturn::TimestampsToReturnBoth,
+                nodes_to_read: Some(vec![make_node("large/Int32_4000")]),
+            },
+            Some(deadline),
+            &cancel,
+        )
+        .await
+        .unwrap();
+    let Service::ReadResponse {
+        response_header,
+        results,
+        ..
+    } = reply
+    else {
+        panic!("ReadResponse")
+    };
+    assert_eq!(response_header.service_result.0, 0);
+    let results = results.unwrap();
+    assert_eq!(results.len(), 1);
+    let variant = results.first().unwrap().value.as_ref().unwrap();
+    let VariantValue::Array(Array::Int32(Some(values))) = &variant.value else {
+        panic!("Int32 array")
+    };
+    assert_eq!(values.len(), 4000);
+    for (index, value) in values.iter().enumerate() {
+        assert_eq!(*value, i32::try_from(index).unwrap());
+    }
+    let response_chunks = session
+        .lane
+        .lock()
+        .received_sequence
+        .unwrap()
+        .checked_sub(before)
+        .unwrap();
+    assert!(response_chunks >= 2, "16 KB must span 8192-byte chunks");
+    let before = session.lane.lock().sent_sequence;
+    let reply = session
+        .lane
+        .exchange(
+            &session.authentication_token,
+            631,
+            |header| Service::ReadRequest {
+                request_header: header,
+                max_age: 0.0,
+                timestamps_to_return: TimestampsToReturn::TimestampsToReturnBoth,
+                nodes_to_read: Some(vec![make_node("scalar/Int32"); 600]),
+            },
+            Some(deadline),
+            &cancel,
+        )
+        .await
+        .unwrap();
+    let Service::ReadResponse {
+        response_header,
+        results,
+        ..
+    } = reply
+    else {
+        panic!("ReadResponse")
+    };
+    assert_eq!(response_header.service_result.0, 0);
+    let results = results.unwrap();
+    assert_eq!(results.len(), 600);
+    for result in &results {
+        assert_eq!(
+            result.value.as_ref().unwrap().value,
+            VariantValue::Scalar(Scalar::Int32(-123_456_789))
+        );
+    }
+    let request_chunks = session
+        .lane
+        .lock()
+        .sent_sequence
+        .checked_sub(before)
+        .unwrap();
+    assert!(request_chunks >= 2, "600-node read request must be chunked");
+    session.close(deadline, &cancel).await.unwrap();
+    println!(
+        "8192-byte negotiated chunks: 4000 Int32 values exact over {response_chunks} response chunks; 600-node Read exact over {request_chunks} request chunks; close passed"
+    );
 }

@@ -27,7 +27,6 @@ use crate::opcua::service::{decode_service, encode_service, request_header, stat
 use crate::transport::{FramedTransport, Transport};
 use crate::{CancellationToken, Clock, Deadline, ErrorKind, PlcError, ResourceLimits, Result};
 
-const DEFAULT_BUFFER: u32 = 65535;
 const MIN_BUFFER: u32 = 8192;
 const DEFAULT_LIFETIME: u32 = 3_600_000;
 
@@ -63,7 +62,7 @@ impl Channel {
             ));
         }
         let resources = *transport.limits();
-        let proposed = proposed_limits(resources, options.receive_buffer_size)?;
+        let proposed = proposed_limits(resources, options)?;
         let framer = OpcuaFramer::with_buffers(
             proposed.receive_buffer_size,
             proposed.send_buffer_size,
@@ -203,12 +202,12 @@ impl Channel {
     }
 }
 
-fn proposed_limits(resources: ResourceLimits, receive: u32) -> Result<TransportLimits> {
+fn proposed_limits(resources: ResourceLimits, options: &OpcuaOptions) -> Result<TransportLimits> {
     let cap = u32::try_from(resources.max_frame_bytes().get())
         .unwrap_or(u32::MAX)
         .min(0x7FFF_FFFF);
-    let buffer = DEFAULT_BUFFER.min(cap);
-    let receive = receive.min(cap);
+    let buffer = options.send_buffer_size.min(cap);
+    let receive = options.receive_buffer_size.min(cap);
     if buffer < MIN_BUFFER || receive < MIN_BUFFER {
         return Err(error(
             ErrorKind::InvalidConfig,
@@ -218,8 +217,10 @@ fn proposed_limits(resources: ResourceLimits, receive: u32) -> Result<TransportL
     Ok(TransportLimits {
         receive_buffer_size: receive,
         send_buffer_size: buffer,
-        max_message_size: 2_097_152,
-        max_chunk_count: 64,
+        max_message_size: options
+            .max_message_size
+            .min(u32::try_from(resources.max_buffered_bytes().get()).unwrap_or(u32::MAX)),
+        max_chunk_count: options.max_chunk_count,
     })
 }
 

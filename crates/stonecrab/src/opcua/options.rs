@@ -19,6 +19,9 @@ const HANDSHAKE_TIMEOUT: &str = "handshake-timeout-ms";
 const SESSION_TIMEOUT: &str = "session-timeout-ms";
 /// The largest incoming chunk advertised by Hello.
 const RECEIVE_BUFFER: &str = "encoding.receive-buffer-size";
+const SEND_BUFFER: &str = "encoding.send-buffer-size";
+const MAX_MESSAGE: &str = "encoding.max-message-size";
+const MAX_CHUNKS: &str = "encoding.max-chunk-count";
 
 /// The most key characters an error message repeats.
 const KEY_ECHO_LIMIT: usize = 32;
@@ -136,6 +139,9 @@ impl MessageSecurity {
 /// | `session_timeout` | `session-timeout-ms` | 120000 ms |
 /// | `request_timeout` | `request-timeout-ms` | 30000 ms |
 /// | `receive_buffer_size` | `encoding.receive-buffer-size` | 65535 bytes |
+/// | `send_buffer_size` | `encoding.send-buffer-size` | 65535 bytes |
+/// | `max_message_size` | `encoding.max-message-size` | 2097152 body bytes |
+/// | `max_chunk_count` | `encoding.max-chunk-count` | 64 |
 ///
 /// `message_security` is the mode as configured. With policy `NONE` the channel ignores it
 /// (`OPCUA-MODE-POLICY-NONE`, slice S90); a secure policy with mode `NONE` is refused here.
@@ -157,6 +163,9 @@ pub(super) struct OpcuaOptions {
     pub(super) session_timeout: Duration,
     /// The configured receive ceiling before applying `ResourceLimits`.
     pub(super) receive_buffer_size: u32,
+    pub(super) send_buffer_size: u32,
+    pub(super) max_message_size: u32,
+    pub(super) max_chunk_count: u32,
 }
 
 impl DriverOptions for OpcuaOptions {}
@@ -178,6 +187,9 @@ impl OpcuaOptions {
         let mut handshake_timeout = Duration::from_secs(60);
         let mut session_timeout = Duration::from_secs(120);
         let mut receive_buffer_size = 65535;
+        let mut send_buffer_size = 65535;
+        let mut max_message_size = 2_097_152;
+        let mut max_chunk_count = 64;
         for (key, value) in parameters {
             match key.as_str() {
                 SECURITY_POLICY => security_policy = SecurityPolicy::from_name(value)?,
@@ -197,15 +209,30 @@ impl OpcuaOptions {
                         _ => request_timeout = duration,
                     }
                 }
-                RECEIVE_BUFFER => {
-                    let parsed = value.parse::<u32>().ok();
-                    if !value.bytes().all(|byte| byte.is_ascii_digit()) {
-                        return Err(invalid(
-                            "encoding.receive-buffer-size must be an integer from 8192 through 2147483647",
-                        ));
+                RECEIVE_BUFFER | SEND_BUFFER | MAX_MESSAGE | MAX_CHUNKS => {
+                    let (minimum, maximum) = if matches!(key.as_str(), RECEIVE_BUFFER | SEND_BUFFER)
+                    {
+                        (8192, 0x7FFF_FFFF)
+                    } else {
+                        (1, u32::MAX)
+                    };
+                    let parsed = value
+                        .parse::<u32>()
+                        .ok()
+                        .filter(|size| (minimum..=maximum).contains(size));
+                    let size = parsed
+                        .filter(|_size| value.bytes().all(|byte| byte.is_ascii_digit()))
+                        .ok_or_else(|| {
+                            invalid(format!(
+                                "{key} must be an integer from {minimum} through {maximum}"
+                            ))
+                        })?;
+                    match key.as_str() {
+                        RECEIVE_BUFFER => receive_buffer_size = size,
+                        SEND_BUFFER => send_buffer_size = size,
+                        MAX_MESSAGE => max_message_size = size,
+                        _ => max_chunk_count = size,
                     }
-                    receive_buffer_size = parsed.filter(|size| (8192..=0x7FFF_FFFF).contains(size))
-                        .ok_or_else(|| invalid("encoding.receive-buffer-size must be an integer from 8192 through 2147483647"))?;
                 }
                 other => return Err(unknown_key(other)),
             }
@@ -224,6 +251,9 @@ impl OpcuaOptions {
             handshake_timeout,
             session_timeout,
             receive_buffer_size,
+            send_buffer_size,
+            max_message_size,
+            max_chunk_count,
         })
     }
 }
@@ -802,6 +832,98 @@ mod tests {
         for authority in ["secret-host:0/secret-path", "secret-host/secret-path"] {
             let message = refused(authority);
             assert!(!message.contains("secret"), "{message}");
+        }
+    }
+    // covers: OPCUA-LIMIT-SEND-BUFFER
+    #[test]
+    fn opcua_config_send_buffer_size_default_is_65535() {
+        assert_eq!(options(&[]).send_buffer_size, 65535);
+    }
+    #[test]
+    fn opcua_config_send_buffer_size_rejects_zero() {
+        for value in [
+            "0",
+            "8191",
+            "2147483648",
+            "4294967296",
+            "-1",
+            "+8192",
+            " 8192",
+            "8192 ",
+            "",
+            "secret",
+        ] {
+            let problem = refusal(&[(SEND_BUFFER, value)]);
+            assert_eq!(problem.kind(), ErrorKind::InvalidConfig);
+            assert!(problem.to_string().contains(SEND_BUFFER));
+            assert!(!problem.to_string().contains("secret"));
+        }
+        for value in ["8192", "65535", "2147483647"] {
+            assert_eq!(
+                options(&[(SEND_BUFFER, value)]).send_buffer_size,
+                value.parse::<u32>().unwrap()
+            );
+        }
+    }
+    // covers: OPCUA-LIMIT-MAX-MESSAGE
+    #[test]
+    fn opcua_config_max_message_size_default_is_2097152() {
+        assert_eq!(options(&[]).max_message_size, 2_097_152);
+    }
+    #[test]
+    fn opcua_config_max_message_size_rejects_negative() {
+        for value in ["-1", "0", "+1", "4294967296", "", "x", "1.0"] {
+            assert_eq!(
+                refusal(&[(MAX_MESSAGE, value)]).kind(),
+                ErrorKind::InvalidConfig
+            );
+        }
+        assert_eq!(options(&[(MAX_MESSAGE, "1")]).max_message_size, 1);
+        assert_eq!(
+            options(&[(MAX_MESSAGE, "4294967295")]).max_message_size,
+            u32::MAX
+        );
+    }
+    // covers: OPCUA-LIMIT-MAX-CHUNKS
+    #[test]
+    fn opcua_config_max_chunk_count_default_is_64() {
+        assert_eq!(options(&[]).max_chunk_count, 64);
+    }
+    #[test]
+    fn opcua_config_max_chunk_count_rejects_negative() {
+        for value in ["-1", "0", "+1", "4294967296", "", "x", "1.0"] {
+            assert_eq!(
+                refusal(&[(MAX_CHUNKS, value)]).kind(),
+                ErrorKind::InvalidConfig
+            );
+        }
+        assert_eq!(options(&[(MAX_CHUNKS, "1")]).max_chunk_count, 1);
+        assert_eq!(
+            options(&[(MAX_CHUNKS, "4294967295")]).max_chunk_count,
+            u32::MAX
+        );
+    }
+    // covers: OPCUA-CFG-ENCODING
+    #[test]
+    fn opcua_config_encoding_options_use_the_encoding_prefix() {
+        let parsed = options(&[
+            (RECEIVE_BUFFER, "16384"),
+            (SEND_BUFFER, "8192"),
+            (MAX_MESSAGE, "65536"),
+            (MAX_CHUNKS, "8"),
+        ]);
+        assert_eq!(parsed.receive_buffer_size, 16384);
+        assert_eq!(parsed.send_buffer_size, 8192);
+        assert_eq!(parsed.max_message_size, 65536);
+        assert_eq!(parsed.max_chunk_count, 8);
+        for key in [
+            "receive-buffer-size",
+            "send-buffer-size",
+            "max-message-size",
+            "max-chunk-count",
+            "encoding.max-message-Size",
+        ] {
+            assert_eq!(refusal(&[(key, "8192")]).kind(), ErrorKind::InvalidConfig);
         }
     }
 }

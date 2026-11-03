@@ -6,6 +6,7 @@ use crate as library;
 
 mod address;
 mod channel;
+mod chunk;
 // The types of the binary encoding (the built-ins and the recursive types) are written and
 // used by generated service bodies; public connection/value mapping arrives in S91/S92.
 #[cfg_attr(
