@@ -17,8 +17,7 @@ impl Budget {
             bytes,
         }
     }
-    fn charge(&mut self, bytes: usize) -> Result<()> {
-        self.nodes = self.nodes.checked_sub(1).ok_or_else(resource)?;
+    fn charge_bytes(&mut self, bytes: usize) -> Result<()> {
         self.bytes = self.bytes.checked_sub(bytes).ok_or_else(resource)?;
         Ok(())
     }
@@ -71,6 +70,7 @@ fn flatten<'a>(
     value: &'a PlcValue,
     budget: &mut Budget,
 ) -> Result<(Vec<&'a PlcValue>, Vec<usize>)> {
+    budget.nodes = budget.nodes.checked_sub(1).ok_or_else(resource)?;
     let mut pending = vec![(value, 0_usize)];
     let mut dimensions = Vec::new();
     let mut leaves = Vec::new();
@@ -83,7 +83,7 @@ fn flatten<'a>(
         } else {
             1
         };
-        budget.charge(bytes)?;
+        budget.charge_bytes(bytes)?;
         if let PlcValue::List(values) = value {
             if depth >= PlcStruct::MAX_DEPTH {
                 return Err(resource());
@@ -98,13 +98,10 @@ fn flatten<'a>(
             } else {
                 dimensions.push(values.len());
             }
-            if values
-                .len()
-                .checked_add(pending.len())
-                .is_none_or(|nodes| nodes > budget.nodes)
-            {
-                return Err(resource());
-            }
+            budget.nodes = budget
+                .nodes
+                .checked_sub(values.len())
+                .ok_or_else(resource)?;
             for value in values.iter().rev() {
                 pending.push((value, depth.saturating_add(1)));
             }

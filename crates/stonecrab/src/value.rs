@@ -296,7 +296,11 @@ fn push_children<'a>(
 }
 
 /// Rejecting caller-owned List trees must not recursively drop an unvalidated depth.
-fn discard_tree(value: PlcValue) {
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "shared with WriteRequest disposal while the value module stays private; plain pub is unreachable"
+)]
+pub(super) fn discard_tree(value: PlcValue) {
     let mut pending = vec![value];
     while let Some(value) = pending.pop() {
         match value {

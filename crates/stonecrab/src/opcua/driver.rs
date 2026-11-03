@@ -33,7 +33,8 @@ const TRANSPORTS: &str = "the only transport code of opcua is tcp";
 /// `security-policy=NONE`. It sends HEL, OPN, `CreateSession` and `ActivateSession` before
 /// returning Connected. The secure default is refused until protection is implemented;
 /// credentials are also refused before I/O. Reads map scalar Boolean, integers, floats,
-/// String/XML and Null; other operations remain unsupported.
+/// String/XML and Null. S100 adds staged policy-None writes with explicit read-write access;
+/// browse, native subscriptions and secure policies remain planned.
 ///
 /// The whole attempt uses `handshake-timeout-ms` (60000 by default), and close uses
 /// `request-timeout-ms` (30000). `session-timeout-ms` requests 120000 by default; the

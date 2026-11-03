@@ -709,3 +709,88 @@ fn opcua_close_interrupts_a_pending_write_with_its_delivery_state_preserved() {
     block_on_with(&rig.clock, closing).unwrap();
     assert_eq!(connection.state(), ConnectionState::Closed);
 }
+
+#[test]
+fn opcua_write_per_tag_status_is_reported_per_tag() {
+    let rig = Rig::mapped(|service, reaction| {
+        if let Service::WriteRequest { request_header, .. } = service {
+            replace(
+                reaction,
+                write_response(
+                    request_header.request_handle,
+                    &[0, 0x803B_0000, 0x4000_0000, 0x002E_0000],
+                ),
+            )
+        } else {
+            reaction
+        }
+    });
+    let connection = rig.connect();
+    let batch = (42..46)
+        .fold(
+            WriteRequest::builder(connection.limits()),
+            |builder, number| {
+                builder.item(
+                    tag(&number.to_string(), &format!("ns=2;i={number};DINT")),
+                    PlcValue::I32(1),
+                )
+            },
+        )
+        .build()
+        .unwrap();
+    let response = block_on_with(&rig.clock, connection.write(batch)).unwrap();
+    assert_eq!(response.confirmed_count(), 2);
+    assert_eq!(response.rejected_count(), 2);
+    assert_eq!(
+        response
+            .results()
+            .iter()
+            .map(|r| r.tag().as_str())
+            .collect::<Vec<_>>(),
+        ["42", "43", "44", "45"]
+    );
+    assert_eq!(
+        response
+            .results()
+            .iter()
+            .map(|r| r.status().unwrap().code())
+            .collect::<Vec<_>>(),
+        [0, 0x803B_0000, 0x4000_0000, 0x002E_0000]
+    );
+    assert_eq!(rig.writes(), 1);
+    block_on_with(&rig.clock, connection.close()).unwrap();
+}
+
+#[test]
+fn opcua_deep_caller_values_are_rejected_and_abandoned_without_recursive_drop() {
+    std::thread::Builder::new()
+        .stack_size(128 * 1024)
+        .spawn(|| {
+            let rig = Rig::new();
+            let connection = rig.connect();
+            for abandon in [false, true] {
+                let mut value = PlcValue::I32(1);
+                for _ in 0..100_000 {
+                    value = PlcValue::List(vec![value]);
+                }
+                let future = connection.write(request(&*connection, "ns=2;i=42", value));
+                if abandon {
+                    drop(future);
+                } else {
+                    let response = block_on_with(&rig.clock, future).unwrap();
+                    assert_eq!(response.rejected_count(), 1);
+                    let WriteOutcome::Rejected(error) =
+                        response.results().first().unwrap().outcome()
+                    else {
+                        panic!("rejection")
+                    };
+                    assert_eq!(error.kind(), ErrorKind::ResourceLimit);
+                }
+            }
+            assert_eq!(rig.writes(), 0);
+            block_on_with(&rig.clock, connection.close()).unwrap();
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}

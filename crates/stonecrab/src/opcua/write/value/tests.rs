@@ -563,3 +563,51 @@ fn opcua_metadata_access_and_range_rank_rejections_leave_the_budget_unchanged() 
         .is_err()
     );
 }
+
+#[test]
+fn opcua_rank_zero_accepts_arrays_and_ranges_but_never_a_scalar() {
+    let attributes = Attributes {
+        rank: Some(0),
+        ..Attributes::default()
+    };
+    assert!(convert(&PlcValue::I32(1), ";DINT", &attributes).is_err());
+    convert(
+        &PlcValue::List(vec![PlcValue::I32(1)]),
+        ";DINT",
+        &attributes,
+    )
+    .unwrap();
+    convert(
+        &PlcValue::List(vec![PlcValue::I32(1)]),
+        "[0];DINT",
+        &attributes,
+    )
+    .unwrap();
+    let mut budget = Budget {
+        nodes: 3,
+        bytes: 100,
+    };
+    let address = OpcuaAddress::parse("ns=2;i=42;DINT").unwrap();
+    encode(
+        &PlcValue::List(vec![PlcValue::I32(1), PlcValue::I32(2)]),
+        &address,
+        &Attributes::default(),
+        &mut budget,
+    )
+    .unwrap();
+    assert_eq!(budget.nodes, 0);
+    let mut budget = Budget {
+        nodes: 2,
+        bytes: 100,
+    };
+    assert!(
+        encode(
+            &PlcValue::List(vec![PlcValue::I32(1), PlcValue::I32(2)]),
+            &address,
+            &Attributes::default(),
+            &mut budget
+        )
+        .is_err()
+    );
+    assert_eq!(budget.nodes, 2);
+}

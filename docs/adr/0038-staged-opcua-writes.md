@@ -93,3 +93,12 @@ its element type. Whole-array writes without a range use server metadata/inferen
 core builder's exact hint contract stays unchanged. Writes race the existing connection
 stop token inside the lane's tracked entry point, preserving per-request delivery state
 when close interrupts them. The redundant second connection-state check is removed.
+
+Mutation review moves node accounting to enqueue: reserve the root and each list's children
+exactly once with checked subtraction, before growing the traversal stack. This enforces
+both traversal work and pending-allocation limits without a redundant prospective check.
+The owned WriteRequest also needs iterative disposal when a caller supplies a deeply
+nested raw List and encoding rejects it, or drops the operation before polling. Reuse
+S98's discard_tree in a private WriteRequest destructor; preserve its public fields,
+builder, clone and accessors. Tests cover 100000 levels on a 128 KiB thread, both rejected
+encoding and abandoned futures. Builder/explicit Clone behavior is unchanged.
