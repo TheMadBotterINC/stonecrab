@@ -8,7 +8,9 @@ does not ship is marked **deferred** with the slice or milestone that owns it (m
 are those of SPEC.md 'Delivery milestones', slices those of
 [`ALPHA_PLAN.md`](./ALPHA_PLAN.md)). The upstream baseline is pinned in
 `upstream/manifest.toml`; M0 is not complete. Support levels per capability are in
-[`COMPATIBILITY.md`](./COMPATIBILITY.md).
+[`COMPATIBILITY.md`](./COMPATIBILITY.md). S97 accepts [ADR-0034](./adr/0034-opcua-client-design.md)
+and reconciles OPC UA contracts below. Current behavior is stated through S96;
+accepted renewal, reconnect, browse and native-subscription targets retain their later slices.
 
 This document is the diagram set for the crate. It is organized from the outside in: module map first, then the public contract at the crate root (the core), then the layers beneath it, then the dynamic behavior (state machines and sequences) that the static diagrams cannot show.
 
@@ -52,7 +54,7 @@ flowchart TB
         subgraph drivers["Driver modules"]
             SIM["<b>stonecrab::sim</b><br/>feature sim<br/>simulated device + scripted failures"]
             MODBUS["<b>stonecrab::modbus</b><br/>feature modbus<br/>Modbus TCP over one PDU implementation"]
-            OPCUA["<b>opcua</b> (deferred)<br/>secure sessions , read , browse , native subscriptions"]
+            OPCUA["<b>stonecrab::opcua</b><br/>opt-in feature opcua<br/>None sessions + read (S96)<br/>secure sessions , browse , native subscriptions planned"]
             EIP["<b>eip</b> (deferred)<br/>EtherNet/IP incl. Logix"]
             S7["<b>s7</b> (deferred)<br/>Siemens S7"]
             REST["<b>...</b> (deferred)<br/>ADS , SLMP , KNX , BACnet , other baseline drivers"]
@@ -155,8 +157,8 @@ Where the alpha differs from the graph and the original brief:
   RTU (S59, inside `modbus`) have shipped; UDP is S61. Each arrives as a module behind its
   own feature; whether a large one is split into its own crate again is a decision for its
   ADR.
-- **Drivers and shared modules.** The simulator depends on the core alone, so the rule that
-  driver modules depend on transport and codec applies to `modbus` only.
+- **Drivers and shared modules.** The simulator depends on the core alone. Modbus and
+  OPC UA depend on transport and codec; OPC UA owns its private service lane (ADR-0034).
 - **Opt-in.** The defaults give the simulator, Modbus TCP and the sensor profiles; a build
   that wants less turns the defaults off and picks features (section 10).
 
@@ -382,17 +384,23 @@ deadline.
 | `read` | `fn read(&self, request: ReadRequest) -> OpFuture<'_, ReadResponse>` |
 | `write` | `fn write(&self, request: WriteRequest) -> OpFuture<'_, WriteResponse>` |
 | `close` | `fn close(&self) -> OpFuture<'_, ()>` (bounded by `Timeouts.request`) |
+| `ping` | provided `fn ping(&self) -> OpFuture<'_, ()>`, Unsupported unless overridden (S40) |
+| `subscribe` | provided `fn subscribe(&self, request: SubscribeRequest) -> OpFuture<'_, Subscription>`, Unsupported unless overridden (S55) |
 
-**Deferred:** `subscribe` (M2, D4), `browse` and `discover` (M3), drawn in the diagram
-above but not shipped. They will be added as
-provided methods returning `Unsupported`, which is additive for implementors; their
-request, response and event types (`SubscribeRequest`, `Subscription`, `QueuePolicy`,
-`LossCounters`, `BrowseRequest`, `DiscoverRequest` and the rest) do not exist at alpha
-(ADR-0001: no empty scaffolds).
+`SubscribeRequest`, `Subscription`, `QueuePolicy` and `LossCounters` ship for polling
+subscriptions. `browse` remains an additive provided-method target in S111, with flat
+browse types; no browse or discover method is exposed yet (ADR-0001: no empty scaffolds).
+The driver owns its concurrency model: Modbus serializes through ConnectionGuard;
+OPC UA pipelines through its bounded private lane, without a spawned reader task.
+ADR-0034 decisions 6–9 define the accepted M3 target and section 5.2 separates it from
+current S96 behavior.
 
 `DriverRegistry` is populated at setup time: `register(&mut self, Arc<dyn Driver>)
 -> Result<()>` (a duplicate scheme is `InvalidConfig`), `driver(&str)`, `schemes()` (sorted),
-`parse(&str) -> Result<(Arc<dyn Driver>, ConnectionConfig)>` and `connect(&str)`. It takes
+`parse(&str) -> Result<(Arc<dyn Driver>, ConnectionConfig)>` and `connect(&str)`. E18
+adds `connect_with(uri, secrets)` and a cache credential provider in S99; credentials
+stay in ConnectionConfig and never enter ConnectionUri, its Debug output or a cache key.
+URI username/password keys remain refused (E22). It takes
 the scheme from `ConnectionUri::parse` and hands the original text to
 `Driver::parse_config`; an unknown scheme is `Unsupported(Operation::Connect)`. There is no
 lock and no global registry.
@@ -575,6 +583,12 @@ value of a Modbus range selection (ADR-0022). **Deferred:** `Bytes`, `Struct` an
 and the received register bytes on a decode failure's `ProtocolStatus` instead, and the
 structured values wait for an ADR before their first consumer (section 11). `ByteOrder` and
 `WordOrder` are exhaustive two-variant enums. The diagram is not redrawn.
+
+**Accepted M3 value additions (E18, S98).** Append Bytes after List in PlcValue and
+PlcValueType to preserve existing ordering; add a bounded ordered-field Struct. Guid,
+NodeId, QualifiedName and StatusCode stay String representations; LocalizedText becomes
+a two-field Struct. These additions require their own ADR amending ADR-0006/ADR-0025
+and remain unimplemented through S97.
 
 ### 3.3 Requests, responses, and errors
 
@@ -824,8 +838,11 @@ classDiagram
   driver reports `write: true`; a write is refused unless the connection says
   `access=read-write`, and a write with no usable answer is `Unknown` (S46, ADR-0015
   addendum).
-- **Deferred:** `SubscribeRequest`, `Subscription`, `SubscriptionEvent`, `QueuePolicy`,
-  `LossCounters` (M2, D4) and `BrowseRequest`, `BrowseResponse`, `BrowseNode` (M3).
+- Polling ships `SubscribeRequest`, `Subscription`, `QueuePolicy` and `LossCounters`;
+  events are `ReadItem`, without a separate `SubscriptionEvent` enum (S55).
+  `BrowseRequest`, `BrowseResponse` and `BrowseNode` remain S111. E18's additive
+  `ReadItem::server_time` and native subscription parameters/refusals/end reasons/loss
+  counters remain S98/S114, without changing `Subscription::recv`'s signature.
 
 The diagram is not redrawn.
 
@@ -1512,6 +1529,44 @@ runs the same contract suite as `stonecrab::modbus`, as the note beside the diag
 
 ---
 
+### 5.2 OPC UA client and accepted M3 lifecycle (ADR-0034, S97)
+
+**Shipped through S96:** the opt-in opcua feature provides a public driver/address
+surface, binary codecs and 24 generated service cases, TCP framing, a bounded pipelined
+lane, anonymous None connect/read/close, chunking, extended scalar/array/matrix values,
+and endpoint selection/overrides. A private GetEndpoints exchange is interoperability-tested;
+automatic secure discovery remains S106. Secure policies and non-anonymous credentials
+are refused before I/O. The public address surface includes OpcuaIdentifier,
+OpcuaAttribute, OpcuaDataType and OpcuaAddress::MAX_TEXT_BYTES, ratified in ADR-0034
+decision 9. Support evidence remains in COMPATIBILITY and the OPC UA parity record.
+
+**Accepted target, implemented by later slices:** operations first drive due renewal
+at 75 percent of channel lifetime and session-expiry recovery (S109). The private
+`opcua::pump` (S115–S118) is the session-level protocol pump: `Subscription::recv`
+drives bounded outstanding Publish requests over the same lane as Read/Write/Browse,
+routes by subscriptionId, acknowledges only received sequence numbers, and counts loss.
+One recv drives shared protocol work at a time; each consumer has a bounded queue and
+a slow consumer cannot block a Read. This is separate from ADR-0031's public EventPump,
+which reads named batches on connections or cache leases.
+
+D15 applies: OPC UA spawns no reader or renewal task. Without a caller, nothing renews;
+an idle channel/session may lapse and the next operation recovers through a new session.
+S110 repeats the full handshake after transport loss, fails pending requests Disconnected,
+and never replays an ambiguous write. Native subscriptions (S114/S117) retain queued
+events, then recv returns None with typed Disconnected available through end_reason();
+the caller subscribes again after reconnect. Automatic subscription re-creation,
+Republish and TransferSubscriptions are outside M3. An owned idle-renewal task remains
+a later opt-in extension; Modbus's existing supervisor is unchanged.
+
+E21 requires server-certificate-file for a secure policy; discovery runs on that secure
+channel. A trust store or tls.verify=false alone cannot replace that file, and a discovered
+certificate is never a trust anchor. E22 keeps the explicit port requirement and refuses
+URI credentials; tls.verify=false is an explicit recorded opt-in. Loading/trust and
+protected identities remain S103/S104/S108. E17 keeps opcua outside default/full and
+0.3.0 unchanged during M3; a release version requires separate approval.
+
+---
+
 ## 6. `stonecrab::sensors` and board adapters
 
 ```mermaid
@@ -2088,9 +2143,12 @@ stateDiagram-v2
   boundary is found in time the request fails with `Disconnected` and the guard reconnects.
   A reply that arrives whole afterwards is discarded by the session, by correlation (the
   transaction id, unit id and function code), not by the guard.
-- **One in flight, a bounded line behind it.** At most `max_pending_requests` requests are
-  owned at once; one more is `Backpressure` before any I/O. The Modbus connection and the
-  simulator allow one read in flight and answer a second with `Backpressure`.
+- **Driver-specific concurrency.** ConnectionGuard owns at most `max_pending_requests`
+  admitted requests, with one exchange active; one more is `Backpressure` before I/O.
+  The Modbus connection and simulator each allow one read in flight and refuse another
+  with `Backpressure`. OPC UA uses its own bounded pipelined lane (ADR-0034), not this
+  single-flight guard. Its accepted caller-driven renewal/reconnect target is in 5.2;
+  those lifecycle steps remain S109/S110.
 - **`close`** is bounded by `Timeouts.request`, always ends `Closed` and wakes every wait
   the guard owns.
 
@@ -2179,7 +2237,7 @@ sequenceDiagram
     T->>Dev: TCP SYN
     Dev-->>T: SYN/ACK
     T-->>Guard: Box<dyn Transport>
-    Note over Guard: Modbus TCP has no protocol handshake.<br/>OPC UA would run Hello/OpenSecureChannel/CreateSession here
+    Note over Guard: Modbus TCP has no protocol handshake.<br/>OPC UA uses its private lane, not ConnectionGuard.<br/>Its connect includes HEL, OPN, CreateSession and ActivateSession.
     Guard->>Guard: state = Connected
     Drv-->>Reg: Box<dyn Connection>
     Reg-->>App: Box<dyn Connection>
@@ -2280,7 +2338,7 @@ sequenceDiagram
     Dev-->>T: SYN/ACK
     Guard->>Guard: state = Connected
     Guard->>Sub: event StateChanged(Connected)
-    Note over Guard,Sub: Polling subscriptions resume on the next tick.<br/>Native subscriptions (OPC UA) are re-created and reported.
+    Note over Guard,Sub: Polling subscriptions resume on the next tick.<br/>OPC UA target (S117): native subscriptions end Disconnected.<br/>Caller re-subscribes after reconnect; no automatic re-creation.
     opt max_attempts reached
         Guard->>Guard: state = Failed(Disconnected)
         Guard->>Sub: event Ended(Disconnected)
@@ -2402,7 +2460,7 @@ opens no socket).
 | `sensors` | `stonecrab::sensors`, profiles and the TOML loader | `serde` and `toml` | yes |
 | `full` | the same set as the defaults, spelled out; the `profile_read` example requires it | `sim`, `modbus` and `sensors` | no |
 | `transport` | `stonecrab::transport`, deadline-bounded transports and `TcpTransport` | Tokio (`rt`, `net`, `time`, `sync`, `io-util`) | no (on through `modbus`) |
-| `opcua` | `stonecrab::opcua`, the OPC UA client (S83 and S84: the tag address grammar and a crate-private connection string parser so far; ADR-0034) | `transport` (so Tokio) | no |
+| `opcua` | `stonecrab::opcua`, anonymous None connect/read/close, chunking, extended values and endpoint selection through S96; accepted M3 target in ADR-0034/section 5.2 | `transport` (so Tokio); security dependencies join in S101 | no (outside `full` too) |
 | `testkit` | `stonecrab::testkit`, fixtures and the driver contract suite; not a runtime feature | `transport`, `serde`, `serde_json`, `toml`, Tokio `macros` | no |
 
 `cargo add stonecrab` therefore gives the simulator, Modbus TCP and the sensor profiles.
@@ -2427,5 +2485,6 @@ S59, which ships RTU inside `modbus` rather than behind a `modbus-rtu` feature),
 
 - Exact MSpec constructs supported at M1 (decided in M0 inventory).
 - Whether `PlcValue::Date/Time/DateTime` are `std::time::SystemTime`-based or a dedicated calendar type (decided by an ADR before M1; `chrono`/`time`/`jiff` are not permitted in the core by default).
-- OPC UA session and security-channel class structure (M3 design doc).
+- OPC UA client structure is decided by accepted ADR-0034 (S97); security-backend
+  implementation acceptance remains ADR-0035/S101. Later-slice tests determine support.
 - The C ABI, dynamic loading, and `no_std` subsets (post-M5 extensions).

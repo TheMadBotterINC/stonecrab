@@ -1103,8 +1103,9 @@ maintainer accepted E13 to E22 and the S82 spike-branch push on 2026-10-30 ("Mai
 decisions (2026-10-30)" below), so the slices follow their dependencies: S76 to S82 first,
 then S83 and the generator track. E14 and E15 are confirmed by the S80 and S82 evidence.
 The client design is ADR-0034
-([`docs/adr/0034-opcua-client-design.md`](docs/adr/0034-opcua-client-design.md), proposed
-by S76; S97 accepts it).
+([`docs/adr/0034-opcua-client-design.md`](docs/adr/0034-opcua-client-design.md)), proposed
+by S76 and accepted by S97 on 2026-11-03. Current runtime support is through S96;
+accepted later-slice lifecycle and subscription contracts are not capability claims.
 
 Maintainer-only steps, which no automated run does: P1 to P3 above (P1, the private
 vulnerability-reporting channel, is a release prerequisite in `SECURITY.md` that neither
@@ -1183,6 +1184,20 @@ recommended (option 1), and approved pushing the S82 spike branch. The full opti
 - **E22** the port is required (no 4840 default), the URI keys `username` and `password` are
   refused, and `tls.verify=false` is accepted only as that explicit key and is recorded in
   diagnostics.
+
+### S97 ratification of maintainer decisions (2026-11-03)
+
+ADR-0034 is Accepted. This records the existing 2026-10-30 approvals, rather than
+requesting a new choice. E15/E16/E20 retain implementation acceptance in S101/S103/S122;
+ADR-0035 remains Proposed. Current runtime support remains the S96 subset.
+
+- **E13 — OPC UA source/test redistribution.** Approved verbatim mspec and both XML suites with the ASF, precautionary OPC Foundation MIT and trademark notices; raw model/test inputs remain repository-only. S88/S93 provide provenance and evidence.
+- **E14 — Hybrid codec.** Confirmed by S80 measurements and S88 generator fixes: ship generated service bodies/enums as pub(crate), hand-write codec/framing/security, require positive/negative vectors, fuzz dispatch and deterministic regeneration. S96 has 24 enabled cases.
+- **E17 — Feature and version.** One opt-in opcua feature outside default/full. Additive APIs remain compatible with 0.3.0; no release or version bump is authorized. S101 measures any need for an additive security-feature split.
+- **E18 — Additive public surface.** Approve Bytes/ordered bounded Struct, server_time, flat browse types/provided method, X.509 credentials via config/registry/cache, and native subscription parameters/refusals/end reasons/loss counters. S97 ratifies the S83 address accessor enums and MAX_TEXT_BYTES; remaining APIs land in their owning slices.
+- **E19 — Caller-driven lifecycle and subscription end.** Operations and Subscription::recv drive private opcua::pump on the injected clock, without a spawned task. No caller means no idle renewal. Transport loss ends native subscriptions after queued events with typed Disconnected; caller re-subscribes. No automatic re-creation, Republish or TransferSubscriptions in M3. This is the accepted meaning of subscription recovery.
+- **E21 — Secure discovery bootstrap.** Require server-certificate-file for secure connect; discovery uses the configured secure channel. A trust store or tls.verify=false alone is insufficient; discovered certificates are not anchors. Trust-store-only two-phase discovery remains a later extension.
+- **E22 — Connection-string choices.** Require an explicit port, refuse username/password URI keys, and accept tls.verify=false only as the explicit recorded opt-in. Credentials stay outside URI text, Debug and cache keys.
 
 Keep changes reviewable, commit tested slices one signed-off commit per green slice, and
 maintain the per-module coverage gates. No first-party unsafe, panics on input, unbounded
