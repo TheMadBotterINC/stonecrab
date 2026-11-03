@@ -16,8 +16,8 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use stonecrab::modbus::{ModbusOptions, ModbusTcpDriver};
 use stonecrab::{ConnectionUri, Driver, ErrorKind};
+use stonecrab::modbus::{ModbusOptions, ModbusTcpDriver};
 
 fn check(driver: &ModbusTcpDriver, text: &str) {
     match driver.parse_config(text) {
@@ -36,10 +36,7 @@ fn check(driver: &ModbusTcpDriver, text: &str) {
         Err(error) => {
             assert_eq!(error.kind(), ErrorKind::InvalidConfig, "only InvalidConfig");
             let message = error.to_string();
-            assert!(
-                !message.chars().any(char::is_control),
-                "no control characters"
-            );
+            assert!(!message.chars().any(char::is_control), "no control characters");
             // A key name may be echoed between quotes, shortened with "..."; the authority
             // and the values never are. Templates are ASCII without quotes, so a non-ASCII
             // part outside the quotes cannot appear unless it was echoed.
@@ -54,9 +51,7 @@ fn check(driver: &ModbusTcpDriver, text: &str) {
                 if let Some(shown) = quoted {
                     let shown = shown.strip_suffix("...").unwrap_or(shown);
                     assert!(
-                        uri.options()
-                            .iter()
-                            .any(|(key, _value)| key.starts_with(shown)),
+                        uri.options().iter().any(|(key, _value)| key.starts_with(shown)),
                         "only a key, or its beginning, is quoted"
                     );
                 }

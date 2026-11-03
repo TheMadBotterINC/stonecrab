@@ -17,10 +17,7 @@ fuzz_target!(|data: &[u8]| {
     let mut framer = RtuFramer::new();
     let limit = framer.max_frame_bytes();
     assert_eq!(limit, 256, "the ADU limit");
-    assert!(
-        framer.resync_discards(),
-        "RTU resynchronizes by dropping the buffer"
-    );
+    assert!(framer.resync_discards(), "RTU resynchronizes by dropping the buffer");
     let mut buffer = BytesMut::from(data);
     loop {
         let before = buffer.clone();
@@ -28,19 +25,12 @@ fuzz_target!(|data: &[u8]| {
             Ok(Some(adu)) => {
                 let consumed = before.len() - buffer.len();
                 let size = adu.wire_len();
-                assert!(
-                    (5..=limit).contains(&size),
-                    "an ADU is 5 to 256 bytes, got {size}"
-                );
+                assert!((5..=limit).contains(&size), "an ADU is 5 to 256 bytes, got {size}");
                 assert!(consumed >= size, "the frame came off the buffer");
                 let skipped = consumed - size;
                 assert_eq!(&buffer[..], &before[consumed..], "the rest is untouched");
                 let mut wire = BytesMut::new();
-                assert_eq!(
-                    framer.encode(&adu, &mut wire),
-                    Ok(()),
-                    "a decoded ADU encodes"
-                );
+                assert_eq!(framer.encode(&adu, &mut wire), Ok(()), "a decoded ADU encodes");
                 assert_eq!(
                     &wire[..],
                     &before[skipped..consumed],

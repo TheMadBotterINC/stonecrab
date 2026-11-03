@@ -104,10 +104,7 @@ fuzz_target!(|data: &[u8]| {
                 assert!(data <= 245, "file record response data {data}");
             }
             ModbusPdu::WriteFileRecordResponse { records } => {
-                let data: usize = records
-                    .iter()
-                    .map(|record| 7 + 2 * record.registers.len())
-                    .sum();
+                let data: usize = records.iter().map(|record| 7 + 2 * record.registers.len()).sum();
                 assert!((9..=251).contains(&data), "file record echo data {data}");
                 assert!(
                     records.iter().all(|record| {
@@ -241,11 +238,7 @@ fn check_write_request(request: &ModbusPdu) {
             bytes,
         } => {
             assert!((1..=1_968).contains(quantity), "coil quantity {quantity}");
-            assert_eq!(
-                bytes.len(),
-                usize::from(*quantity).div_ceil(8),
-                "coil bytes"
-            );
+            assert_eq!(bytes.len(), usize::from(*quantity).div_ceil(8), "coil bytes");
             ModbusPdu::WriteMultipleResponse {
                 function: FunctionCode::WriteMultipleCoils,
                 start: *start,
@@ -265,10 +258,7 @@ fn check_write_request(request: &ModbusPdu) {
             }
         }
         ModbusPdu::WriteFileRecord { records } => {
-            let data: usize = records
-                .iter()
-                .map(|record| 7 + 2 * record.registers.len())
-                .sum();
+            let data: usize = records.iter().map(|record| 7 + 2 * record.registers.len()).sum();
             assert!((9..=251).contains(&data), "file record data {data}");
             ModbusPdu::WriteFileRecordResponse {
                 records: records.clone(),
@@ -294,9 +284,5 @@ fn check_write_request(request: &ModbusPdu) {
         "the echo of an accepted write request answers it"
     );
     let mut writer = BoundedWriter::new(MAX_PDU_BYTES);
-    assert_eq!(
-        encode_response(&echo, &mut writer),
-        Ok(()),
-        "the echo encodes"
-    );
+    assert_eq!(encode_response(&echo, &mut writer), Ok(()), "the echo encodes");
 }

@@ -391,8 +391,8 @@ each bounded to 256 characters; invalid or credential-bearing URLs are replaced.
 `discovery` is a strict boolean, default true. With a secure policy, `discovery=false`
 requires `server-certificate-file`, currently accepted as a nonempty file path only.
 File loading and certificate trust validation remain S103/S104. Secure connections
-continue to be refused before I/O. GetEndpoints request/response codecs and a private
+continue to be refused before I/O. `GetEndpoints` request/response codecs and a private
 lane exchange are implemented; S106 wires them into secure connect. None connect uses
-CreateSession's endpoint list and skips GetEndpoints. An explicit private probe against
+`CreateSession`'s endpoint list and skips `GetEndpoints`. An explicit private probe against
 open62541 verifies all seven advertised policy/mode combinations and token types; it
 makes no certificate-trust or secure-channel claim.

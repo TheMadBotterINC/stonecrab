@@ -11,11 +11,11 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use stonecrab::ByteOrder;
 use stonecrab::codec::{
     BoundedReader, BoundedWriter, ParseError, coil_byte_count, pack_bits_lsb_first,
     unpack_bits_lsb_first,
 };
+use stonecrab::ByteOrder;
 
 /// Lengths and counts handed to `read_bytes` and `read_bits_lsb_first`.
 const ARGS: [usize; 16] = [
@@ -54,11 +54,7 @@ macro_rules! scalar {
         let before = $reader.remaining();
         match $reader.$read($order) {
             Ok(value) => {
-                assert_eq!(
-                    $reader.remaining(),
-                    before - $width,
-                    "success consumes the width"
-                );
+                assert_eq!($reader.remaining(), before - $width, "success consumes the width");
                 let start = $payload.len() - before;
                 let mut writer = BoundedWriter::new($width);
                 assert!(writer.$write(value, $order).is_ok(), "re-encode fits");
@@ -72,10 +68,7 @@ macro_rules! scalar {
                 assert_eq!($reader.remaining(), before, "failure consumes nothing");
                 assert_eq!(
                     error,
-                    ParseError::Truncated {
-                        needed: $width,
-                        available: before
-                    }
+                    ParseError::Truncated { needed: $width, available: before }
                 );
             }
         }
@@ -119,13 +112,7 @@ fn run(script: &[u8], payload: &[u8]) {
                     assert_eq!(reader.remaining(), before);
                 }
                 Err(error) => {
-                    assert_eq!(
-                        error,
-                        ParseError::Truncated {
-                            needed: arg,
-                            available: before
-                        }
-                    );
+                    assert_eq!(error, ParseError::Truncated { needed: arg, available: before });
                     assert_eq!(reader.remaining(), before);
                 }
             },
@@ -136,10 +123,7 @@ fn run(script: &[u8], payload: &[u8]) {
                     assert_eq!(reader.remaining(), before - coil_byte_count(arg));
                     let start = payload.len() - before;
                     let used = payload.get(start..start + coil_byte_count(arg));
-                    assert_eq!(
-                        Some(pack_bits_lsb_first(&bits).len()),
-                        used.map(<[u8]>::len)
-                    );
+                    assert_eq!(Some(pack_bits_lsb_first(&bits).len()), used.map(<[u8]>::len));
                 }
                 Err(ParseError::OversizedLength { .. }) => {
                     assert!(arg > max);

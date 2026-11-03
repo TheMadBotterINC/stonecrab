@@ -10,8 +10,8 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use stonecrab::sensors::{ProfileError, ProfileId, SensorProfile};
 use stonecrab::{ErrorKind, PlcError};
+use stonecrab::sensors::{ProfileError, ProfileId, SensorProfile};
 
 /// Independent restatement of the identifier rule, so the check does not call the code
 /// under test: 1 to 64 bytes of ASCII, a lowercase letter first, then lowercase letters,
@@ -28,24 +28,15 @@ fn snake_case(text: &str) -> bool {
 fn check(text: &str) {
     match SensorProfile::from_toml(text) {
         Ok(profile) => {
-            assert!(
-                text.len() <= SensorProfile::MAX_TOML_BYTES,
-                "bound enforced"
-            );
+            assert!(text.len() <= SensorProfile::MAX_TOML_BYTES, "bound enforced");
             assert!(
                 matches!(profile.schema_version.get(), 1 | 2),
                 "only versions 1 and 2 load"
             );
             assert!(snake_case(profile.id.as_str()), "profile id is snake_case");
-            assert!(
-                ProfileId::new(profile.id.as_str()).is_ok(),
-                "id re-validates"
-            );
+            assert!(ProfileId::new(profile.id.as_str()).is_ok(), "id re-validates");
             for measurement in &profile.measurements {
-                assert!(
-                    snake_case(measurement.name.as_str()),
-                    "measurement name is snake_case"
-                );
+                assert!(snake_case(measurement.name.as_str()), "measurement name is snake_case");
                 for field in &measurement.status_fields {
                     assert!(snake_case(&field.name), "status field name is snake_case");
                 }
@@ -53,10 +44,7 @@ fn check(text: &str) {
         }
         Err(error) => {
             if text.len() > SensorProfile::MAX_TOML_BYTES {
-                assert!(
-                    matches!(error, ProfileError::Oversized { .. }),
-                    "bound before parsing"
-                );
+                assert!(matches!(error, ProfileError::Oversized { .. }), "bound before parsing");
             }
             let plc = PlcError::from(error);
             assert_eq!(plc.kind(), ErrorKind::InvalidConfig, "only InvalidConfig");
