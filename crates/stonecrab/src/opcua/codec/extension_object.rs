@@ -321,4 +321,46 @@ mod tests {
             Err(ParseError::OversizedLength { length: 10, max: 8 })
         );
     }
+    #[test]
+    fn opcua_static_helper_namespace_and_non_numeric_encoding_cases_remain_raw() {
+        // StaticHelperTest's namespace/URI/identifier cases, through real body dispatch.
+        use crate::opcua::codec::{Guid, Identifier};
+        for namespace in [0, 1, 3] {
+            for identifier in [
+                Identifier::String(UaString::new("Foo")),
+                Identifier::Guid(Guid::default()),
+                Identifier::ByteString(UaByteString::new(vec![])),
+            ] {
+                let id = ExpandedNodeId::local(NodeId {
+                    namespace,
+                    identifier,
+                });
+                let body = UaByteString::new(vec![1, 2, 3]);
+                assert_eq!(
+                    binary_body(&id, body.clone(), Depth::new()).unwrap(),
+                    ExtensionBody::Raw(body)
+                );
+            }
+        }
+        for namespace in [0, 2] {
+            let id = ExpandedNodeId::local(NodeId::numeric(namespace, 101));
+            let body = UaByteString::new(vec![1, 2, 3]);
+            assert_eq!(
+                binary_body(&id, body.clone(), Depth::new()).unwrap(),
+                ExtensionBody::Raw(body)
+            );
+        }
+        let mut id = ExpandedNodeId::local(NodeId::numeric(0, 321));
+        let body = UaByteString::new(vec![0; 4]);
+        assert!(matches!(
+            binary_body(&id, body.clone(), Depth::new()).unwrap(),
+            ExtensionBody::Known(_)
+        ));
+        id.namespace_uri = Some(UaString::new("urn:example:custom"));
+        assert_eq!(
+            binary_body(&id, body.clone(), Depth::new()).unwrap(),
+            ExtensionBody::Raw(body)
+        );
+        assert_vector(&object(0, ExtensionBody::Null), &[0, 0, 0]);
+    }
 }

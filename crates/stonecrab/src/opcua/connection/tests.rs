@@ -3,7 +3,7 @@ use crate::opcua::codec::NodeId;
 use crate::opcua::frame::{Body, OpcuaFramer};
 use crate::opcua::responder::{Device, close_response, int32_value, message, read_results};
 use crate::opcua::service::decode_service;
-use crate::opcua::{OpcuaAddress, OpcuaDriver};
+use crate::opcua::{OpcuaAddress, OpcuaDataType, OpcuaDriver};
 use crate::testkit::{
     FakeClock, FakeTransportFactory, FixtureAddress, Reaction, Script, Step, block_on_with,
 };
@@ -594,4 +594,156 @@ fn opcua_a_clock_failure_has_internal_read_diagnostics_without_sending() {
         Some(crate::FailureCategory::Internal)
     );
     assert_eq!(rig.device.reads(), before);
+}
+
+#[test]
+fn opcua_temporal_suffixes_are_applied_per_tag_in_one_read_batch() {
+    let rig = Rig::new();
+    let connection = rig.connect();
+    let tags = [
+        "TIME",
+        "LTIME",
+        "DATE",
+        "LDATE",
+        "TIME_OF_DAY",
+        "LTIME_OF_DAY",
+        "DATE_AND_TIME",
+        "LDATE_AND_TIME",
+    ]
+    .into_iter()
+    .map(|suffix| {
+        Tag::new(
+            TagId::new(suffix).unwrap(),
+            Arc::new(OpcuaAddress::parse(&format!("ns=2;i=42;{suffix}")).unwrap()),
+        )
+    })
+    .collect();
+    let reply = block_on_with(&rig.clock, connection.read(request(&*connection, tags))).unwrap();
+    assert_eq!(reply.items().len(), 8);
+    assert_eq!(rig.device.reads(), 1);
+    for (index, suffix) in [
+        OpcuaDataType::Time,
+        OpcuaDataType::LTime,
+        OpcuaDataType::Date,
+        OpcuaDataType::LDate,
+        OpcuaDataType::TimeOfDay,
+        OpcuaDataType::LTimeOfDay,
+        OpcuaDataType::DateAndTime,
+        OpcuaDataType::LDateAndTime,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut budget = crate::opcua::value::MAX_VALUE_NODES;
+        let expected = crate::opcua::value::decode(
+            crate::opcua::codec::Variant::scalar(crate::opcua::codec::Scalar::Int32(42)),
+            suffix,
+            &mut budget,
+        )
+        .unwrap();
+        assert_eq!(
+            reply
+                .items()
+                .get(index)
+                .unwrap()
+                .outcome()
+                .as_ref()
+                .unwrap(),
+            &expected
+        );
+    }
+}
+
+#[test]
+fn opcua_an_unmapped_variant_is_a_per_item_unsupported_error() {
+    let rig = altered_read(read_results(4, &[vec![1, 23, 0], int32_value(42, 0)]));
+    let connection = rig.connect();
+    let reply = block_on_with(
+        &rig.clock,
+        connection.read(request(
+            &*connection,
+            vec![tag("unmapped", 1), tag("ok", 2)],
+        )),
+    )
+    .unwrap();
+    let problem = reply
+        .items()
+        .first()
+        .unwrap()
+        .outcome()
+        .as_ref()
+        .unwrap_err();
+    assert_eq!(problem.kind(), ErrorKind::Unsupported(Operation::Read));
+    assert!(problem.to_string().contains("DataValue"));
+    assert_eq!(
+        reply.items().get(1).unwrap().outcome().as_ref().unwrap(),
+        &PlcValue::I32(42)
+    );
+    assert_eq!(reply.items().get(1).unwrap().status().unwrap().code(), 0);
+}
+
+#[test]
+fn opcua_array_shapes_and_bad_node_text_are_isolated_to_their_items() {
+    let matrix = [
+        vec![1, 0xC6],
+        6_i32.to_le_bytes().to_vec(),
+        (1_i32..=6).flat_map(i32::to_le_bytes).collect(),
+        2_i32.to_le_bytes().to_vec(),
+        2_i32.to_le_bytes().to_vec(),
+        3_i32.to_le_bytes().to_vec(),
+    ]
+    .concat();
+    let rig = altered_read(read_results(
+        4,
+        &[
+            matrix,
+            vec![1, 17, 3, 2, 0, 1, 0, 0, 0, 0xFF],
+            [vec![1, 0x86], (-1_i32).to_le_bytes().to_vec()].concat(),
+            [vec![1, 0x86], 0_i32.to_le_bytes().to_vec()].concat(),
+            [
+                vec![1, 0x86],
+                1_i32.to_le_bytes().to_vec(),
+                42_i32.to_le_bytes().to_vec(),
+            ]
+            .concat(),
+        ],
+    ));
+    let connection = rig.connect();
+    let reply = block_on_with(
+        &rig.clock,
+        connection.read(request(
+            &*connection,
+            (0..5).map(|n| tag(&n.to_string(), n)).collect(),
+        )),
+    )
+    .unwrap();
+    let ints = |values: &[i32]| PlcValue::List(values.iter().copied().map(PlcValue::I32).collect());
+    assert_eq!(
+        reply.items().first().unwrap().outcome().as_ref().unwrap(),
+        &PlcValue::List(vec![ints(&[1, 2, 3]), ints(&[4, 5, 6])])
+    );
+    assert_eq!(
+        reply
+            .items()
+            .get(1)
+            .unwrap()
+            .outcome()
+            .as_ref()
+            .unwrap_err()
+            .kind(),
+        ErrorKind::MalformedData
+    );
+    assert_eq!(
+        reply.items().get(2).unwrap().outcome().as_ref().unwrap(),
+        &PlcValue::Null
+    );
+    assert_eq!(
+        reply.items().get(3).unwrap().outcome().as_ref().unwrap(),
+        &ints(&[])
+    );
+    assert_eq!(
+        reply.items().get(4).unwrap().outcome().as_ref().unwrap(),
+        &ints(&[42])
+    );
+    assert_eq!(reply.iter_ok().count(), 4);
 }

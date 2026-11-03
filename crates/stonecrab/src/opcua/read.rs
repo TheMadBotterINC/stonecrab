@@ -1,4 +1,4 @@
-//! Read request assembly and scalar value/status mapping, without I/O.
+//! Read request assembly and value/status mapping, without I/O.
 //!
 //! # Compatibility: docs/parity/opcua.md#OPCUA-READ-REQUEST
 //! # Compatibility: docs/parity/opcua.md#OPCUA-READ-ATTRIBUTE-ID
@@ -16,16 +16,16 @@ use std::num::NonZeroU32;
 use std::time::Instant;
 
 use crate::opcua::codec::{
-    DataValue, DateTime, Guid, Identifier, NodeId, QualifiedName, Scalar, StatusCode, UaByteString,
-    UaString, VariantValue,
+    DataValue, DateTime, Guid, Identifier, NodeId, QualifiedName, StatusCode, UaByteString,
+    UaString,
 };
 use crate::opcua::generated::extension_object_definition::ExtensionObjectDefinition as Service;
 use crate::opcua::generated::read_value_id::ReadValueId;
 use crate::opcua::service::status_error;
-use crate::opcua::{OpcuaAddress, OpcuaIdentifier};
+use crate::opcua::{OpcuaAddress, OpcuaDataType, OpcuaIdentifier};
 use crate::{
     ErrorKind, ItemError, Operation, PlcError, PlcValue, ProtocolStatus, ReadItem, ReadRequest,
-    ReadResponse, Result, TagId,
+    ReadResponse, Result, Tag, TagId,
 };
 
 pub(super) fn response(
@@ -56,8 +56,15 @@ pub(super) fn response(
         ));
     }
     let mut response = ReadResponse::builder(request, started, sampled);
+    let mut budget = crate::opcua::value::MAX_VALUE_NODES;
     for (tag, data) in request.items().iter().zip(results) {
-        response = response.item(item(tag.id().clone(), data, sampled));
+        response = response.item(item(
+            tag.id().clone(),
+            data,
+            sampled,
+            address(tag)?.data_type(),
+            &mut budget,
+        ));
     }
     response.build()
 }
@@ -67,13 +74,7 @@ pub(super) fn nodes(request: &ReadRequest) -> Result<Vec<ReadValueId>> {
         .items()
         .iter()
         .map(|tag| {
-            let address: &dyn Any = tag.address();
-            let address = address.downcast_ref::<OpcuaAddress>().ok_or_else(|| {
-                PlcError::new(
-                    ErrorKind::InvalidAddress,
-                    "OPC UA read requires OPC UA addresses",
-                )
-            })?;
+            let address = address(tag)?;
             if tag.count() != NonZeroU32::MIN {
                 return Err(PlcError::new(
                     ErrorKind::InvalidConfig,
@@ -131,7 +132,23 @@ pub(super) fn nodes(request: &ReadRequest) -> Result<Vec<ReadValueId>> {
         .collect()
 }
 
-pub(super) fn item(tag: TagId, data: DataValue, sampled: Instant) -> ReadItem {
+fn address(tag: &Tag) -> Result<&OpcuaAddress> {
+    let address: &dyn Any = tag.address();
+    address.downcast_ref::<OpcuaAddress>().ok_or_else(|| {
+        PlcError::new(
+            ErrorKind::InvalidAddress,
+            "OPC UA read requires OPC UA addresses",
+        )
+    })
+}
+
+fn item(
+    tag: TagId,
+    data: DataValue,
+    sampled: Instant,
+    target: OpcuaDataType,
+    budget: &mut usize,
+) -> ReadItem {
     let status = data.status.unwrap_or_default();
     let outcome =
         if status.0 & 0x8000_0000 != 0 || (data.value.is_none() && status.0 & 0x4000_0000 != 0) {
@@ -140,8 +157,9 @@ pub(super) fn item(tag: TagId, data: DataValue, sampled: Instant) -> ReadItem {
                 Err(PlcError::new(classify(status), source.to_string()).with_source(source))
             }
         } else {
-            data.value
-                .map_or(Ok(PlcValue::Null), |value| decode(value.value))
+            data.value.map_or(Ok(PlcValue::Null), |value| {
+                crate::opcua::value::decode(value, target, budget)
+            })
         };
     let outcome = outcome.map_err(|error| {
         ItemError::new(error.with_diagnostics(crate::Diagnostics {
@@ -180,56 +198,6 @@ const fn classify(status: StatusCode) -> ErrorKind {
         _ if status.name().is_none() => ErrorKind::Internal,
         _ => ErrorKind::DeviceException,
     }
-}
-
-fn decode(value: VariantValue) -> Result<PlcValue> {
-    let scalar = match value {
-        VariantValue::Null => return Ok(PlcValue::Null),
-        VariantValue::Scalar(scalar) => scalar,
-        VariantValue::Array(_) => return Err(unsupported()),
-    };
-    match scalar {
-        Scalar::Boolean(value) => Ok(PlcValue::Bool(value)),
-        Scalar::SByte(value) => Ok(PlcValue::I8(value)),
-        Scalar::Byte(value) => Ok(PlcValue::U8(value)),
-        Scalar::Int16(value) => Ok(PlcValue::I16(value)),
-        Scalar::UInt16(value) => Ok(PlcValue::U16(value)),
-        Scalar::Int32(value) => Ok(PlcValue::I32(value)),
-        Scalar::UInt32(value) => Ok(PlcValue::U32(value)),
-        Scalar::Int64(value) => Ok(PlcValue::I64(value)),
-        Scalar::UInt64(value) => Ok(PlcValue::U64(value)),
-        Scalar::Float(value) => Ok(PlcValue::F32(value)),
-        Scalar::Double(value) => Ok(PlcValue::F64(value)),
-        Scalar::String(value) => text(value),
-        Scalar::XmlElement(value) => text(value.0),
-        Scalar::DateTime(_)
-        | Scalar::Guid(_)
-        | Scalar::ByteString(_)
-        | Scalar::NodeId(_)
-        | Scalar::ExpandedNodeId(_)
-        | Scalar::StatusCode(_)
-        | Scalar::QualifiedName(_)
-        | Scalar::LocalizedText(_)
-        | Scalar::ExtensionObject(_)
-        | Scalar::DataValue(_)
-        | Scalar::Variant(_)
-        | Scalar::DiagnosticInfo(_) => Err(unsupported()),
-    }
-}
-
-fn text(value: UaString) -> Result<PlcValue> {
-    value.0.map_or(Ok(PlcValue::Null), |bytes| {
-        String::from_utf8(bytes)
-            .map(PlcValue::String)
-            .map_err(|_error| PlcError::new(ErrorKind::MalformedData, "OPC UA String is not UTF-8"))
-    })
-}
-
-fn unsupported() -> PlcError {
-    PlcError::new(
-        ErrorKind::Unsupported(Operation::Read),
-        "OPC UA value mapping is not implemented for this type",
-    )
 }
 
 #[cfg(test)]

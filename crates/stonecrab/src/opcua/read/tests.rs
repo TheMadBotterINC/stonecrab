@@ -1,7 +1,7 @@
 use super::*;
 use crate::opcua::codec::{
-    Array, DateTime, DiagnosticInfo, ExpandedNodeId, ExtensionBody, ExtensionObject, LocalizedText,
-    Variant, XmlElement,
+    DateTime, DiagnosticInfo, ExpandedNodeId, ExtensionBody, ExtensionObject, LocalizedText,
+    Scalar, Variant, XmlElement,
 };
 use crate::{ReadRequest, ResourceLimits, Tag};
 use std::sync::Arc;
@@ -13,7 +13,14 @@ fn data(scalar: Scalar) -> DataValue {
     }
 }
 fn mapped(data: DataValue) -> ReadItem {
-    item(TagId::new("sample").unwrap(), data, Instant::now())
+    let mut budget = crate::opcua::value::MAX_VALUE_NODES;
+    item(
+        TagId::new("sample").unwrap(),
+        data,
+        Instant::now(),
+        OpcuaDataType::Null,
+        &mut budget,
+    )
 }
 
 #[test]
@@ -194,13 +201,8 @@ fn opcua_uncertain_with_a_value_is_ok_with_its_status_and_source_time() {
 #[test]
 fn opcua_later_value_mappings_are_explicit_per_item_unsupported_errors() {
     let scalars = vec![
-        Scalar::DateTime(DateTime(0)),
-        Scalar::Guid(Guid::default()),
         Scalar::ByteString(UaByteString::null()),
-        Scalar::NodeId(NodeId::numeric(0, 1)),
         Scalar::ExpandedNodeId(ExpandedNodeId::local(NodeId::numeric(0, 1))),
-        Scalar::StatusCode(StatusCode(0)),
-        Scalar::QualifiedName(QualifiedName::default()),
         Scalar::LocalizedText(LocalizedText::default()),
         Scalar::ExtensionObject(ExtensionObject {
             type_id: ExpandedNodeId::local(NodeId::numeric(0, 0)),
@@ -216,12 +218,6 @@ fn opcua_later_value_mappings_are_explicit_per_item_unsupported_errors() {
             ErrorKind::Unsupported(Operation::Read)
         );
     }
-    assert_eq!(
-        decode(VariantValue::Array(Array::Int32(Some(vec![1]))))
-            .unwrap_err()
-            .kind(),
-        ErrorKind::Unsupported(Operation::Read)
-    );
 }
 
 #[test]

@@ -1092,3 +1092,10 @@ value mapping rather than create a new harness/dependency. Run full checks/cover
 isolated features, relevant mutations, fuzz, semver, regeneration, dependency/package
 gates and independent peer tests; record self-review/evidence then normal signed-off
 merge and push. No hardware or crate/tag publication.
+
+S95 pre-implementation bound refinement: share the 1048576-node budget across all items
+of one Read response, charging only successful mappings. A null/empty matrix may create
+at most 64 List containers; this prevents nonzero outer axes with a zero inner extent
+from allocating huge empty trees. Positive shapes retain every singleton axis and use
+the same response-wide node bound. The decoder takes the remaining node count from its
+real caller rather than exposing a public option or adding a policy object.
