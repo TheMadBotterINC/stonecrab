@@ -86,7 +86,7 @@ Semantics, beyond ADR-0019 decision 4:
   not add a lint expectation for it, the module that holds the output does.
 - Sub-byte discriminators and fields form runs of exactly one byte, split and joined most
   significant bit first through `split_bits` and `join_bits` of the hand-written support
-  module (`crate::modbus::generated_support`); a value that does not fit its bits is
+  module (`crate::codec`); a value that does not fit its bits is
   `Overflow`, never truncated.
 - A `const` field is checked on parse (`InvalidDiscriminator` naming the field). An
   `implicit` field is read, checked on parse against its expression once the case is read

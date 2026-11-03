@@ -62,7 +62,11 @@ fn body_length(body: Option<&[u8]>) -> Result<usize, ParseError> {
 /// keeps its form. The bytes are kept as read, valid UTF-8 or not, so that a value always
 /// writes back to the bytes it was read from; [`UaString::text`] says whether they are text.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(in crate::opcua) struct UaString(pub(in crate::opcua) Option<Vec<u8>>);
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "generated crate-private service fields name this codec type"
+)]
+pub(crate) struct UaString(pub(in crate::opcua) Option<Vec<u8>>);
 
 impl UaString {
     /// The null String.
@@ -131,7 +135,11 @@ impl UaString {
 ///
 /// A null `ByteString` (length -1) is not an empty one (length 0).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(in crate::opcua) struct UaByteString(pub(in crate::opcua) Option<Vec<u8>>);
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "generated crate-private service fields name this codec type"
+)]
+pub(crate) struct UaByteString(pub(in crate::opcua) Option<Vec<u8>>);
 
 impl UaByteString {
     /// The null `ByteString`.

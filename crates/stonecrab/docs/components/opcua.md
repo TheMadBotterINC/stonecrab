@@ -5,7 +5,8 @@ in neither `default` nor `full`, as `tls` is (decision E17, ADR-0034), and it ne
 has the tag address grammar and, crate-private, the connection string parser and the
 types of the binary encoding (the built-ins and the recursive Variant, `DataValue`,
 `DiagnosticInfo` and `ExtensionObject` envelope) and the TCP framing (the message header and
-the six message types), and nothing that opens a socket. There is no public driver, no
+the six message types), plus the generated 22-case connection/read service codec. Nothing
+opens a socket. There is no public driver, no
 connection, no secure channel and no session yet, and the `opcua` scheme is not registered
 anywhere.
 
@@ -22,6 +23,7 @@ socket and starts no discovery.
 | Built-in types of the binary encoding: String, `ByteString`, Guid, `DateTime`, `StatusCode`, `NodeId`, `ExpandedNodeId`, `QualifiedName`, `LocalizedText` (crate-private) | build-tested |
 | Recursive and open types of the binary encoding: Variant (25 types, arrays, dimensions), `DataValue`, `DiagnosticInfo`, the `ExtensionObject` envelope with Raw, Xml and Null bodies, bounded in depth and in array counts (crate-private) | build-tested |
 | TCP framing: the 8-byte header, HEL, ACK, ERR, OPN, CLO and MSG bodies, the asymmetric header of policy None, the symmetric and sequence headers, and a single-chunk `Framer` (crate-private) | build-tested |
+| Generated 22-case connection/read service bodies and 274 status names; Known ExtensionObject dispatch (crate-private) | build-tested |
 | Driver, connection, secure channel, session | planned |
 | Read, write, browse, subscriptions | planned |
 | Security policies and certificates | planned |
@@ -137,7 +139,7 @@ opcua:tcp://[2001:db8::10]:4840/ua/server
   value, the host or the path.
 
 ## Built-in types
-Crate-private since slice S85 and called by nothing yet: the hand-written scalar types of the
+Crate-private since slice S85: the hand-written scalar types of the
 OPC UA binary encoding (Part 6, 5.2.2) that the recursive types (S86) and the generated service
 layer (S88) are built on. All are little-endian and go through `BoundedReader` and
 `BoundedWriter`, and each has the one signature the generator calls external types through
@@ -161,7 +163,7 @@ layer (S88) are built on. All are little-endian and go through `BoundedReader` a
   The six upper bits of the mask are reserved and ignored.
 
 ## Recursive types
-Crate-private since slice S86 and called by nothing yet: the Variant, `DataValue`,
+Crate-private since slice S86: the Variant, `DataValue`,
 `DiagnosticInfo` and the `ExtensionObject` envelope of the binary encoding. They have the same
 three-function signature as the built-ins, and the first three are the ones a server can nest.
 
@@ -185,7 +187,7 @@ three-function signature as the built-ins, and the first three are the ones a se
   bits that Part 6 reserves are ignored on read and written as zero.
 - An `ExtensionObject` keeps its type id and its body as received: Raw (a `ByteString`), Xml
   (a String) or Null. An encoding byte other than 0, 1 and 2 is refused. The bodies of the
-  standard types are added with the generated layer.
+  standard types are recognized through the generated layer since S88.
 
 Not checked against a server yet (UNVERIFIED, see the ADR-0034 addendum of S86): the order of
 the locale and the localized text in a `DiagnosticInfo`, a dimensions flag on a scalar, and
@@ -213,3 +215,22 @@ and 7.1) that the secure channel of slice S90 will drive through a `FramedTransp
   payload. The payload stays bytes: the generated service layer reads it.
 - The framer reads whole messages and keeps the chunk flag; joining the chunks of one message
   is slice S94's. It writes a message back as the bytes it read, so it keeps no state.
+
+## Generated service bodies
+Since S88, the uniform service layer is generated from the three pinned PLC4X models
+under `upstream/mspec/opcua/`. The production output is private to this crate. There are
+22 enabled cases covering channel/session setup and Read, with first-party positive and
+negative vectors under `fixtures/opcua/services`, deterministic regeneration and the
+`fuzz_opcua_service` target. Generated code has vector coverage; all handwritten OPC UA
+code keeps its 100% line coverage floor.
+
+A local namespace-zero binary ExtensionObject with a recognized encoding id becomes a
+Known body, bounded by its declared byte slice and the shared 64-entry recursion budget.
+Disabled, unknown and custom identifiers retain Raw bytes. Invalid fields in a recognized
+body and trailing bytes fail; they cannot silently become Raw. Known-body serialization
+and length measurement use a bounded temporary encoding of at most 16 MiB. Private
+constructors must pair each Known body with its matching encoding id.
+
+`StatusCode` keeps its exact number and can name the 274 generated known values; an
+unrecognized number has no invented name. This adds codec support only. Network services
+and independent-server evidence remain planned for later slices.

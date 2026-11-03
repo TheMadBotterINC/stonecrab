@@ -122,3 +122,11 @@ doc = false
 bench = false
 
 [workspace]
+
+
+[[bin]]
+name = "fuzz_opcua_service"
+path = "fuzz_targets/fuzz_opcua_service.rs"
+test = false
+doc = false
+bench = false

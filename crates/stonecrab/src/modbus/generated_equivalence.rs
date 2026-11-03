@@ -969,3 +969,15 @@ proptest! {
         prop_assert_eq!(compare_pdu(&bytes, direction, None), Verdict::Same, "{:?}", pdu);
     }
 }
+
+#[test]
+fn generated_numeric_metadata_keeps_modbus_names_and_unknown_values() {
+    assert_eq!(
+        super::generated::modbus_error_code::ModbusErrorCode::name_from_value(1),
+        Some("ILLEGAL_FUNCTION")
+    );
+    assert_eq!(
+        super::generated::modbus_data_type::ModbusDataType::name_from_value(255),
+        None
+    );
+}

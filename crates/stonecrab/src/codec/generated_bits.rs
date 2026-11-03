@@ -1,17 +1,4 @@
-//! Hand-written support of the generated Modbus codec (ADR-0019 decisions 4 and 5).
-//!
-//! Generated files hold no helpers of their own: the names the generated code calls that
-//! are not `stonecrab::codec` primitives resolve here, next to the generated module, and
-//! `generated/MANIFEST.toml` records this module's path. Today that is the pair of bit-run
-//! helpers: `ModbusPDU` begins with a run of sub-byte fields (`bit errorFlag` and `uint 7
-//! functionFlag`, modbus.mspec lines 79-80) that the generated parser reads as one byte and
-//! splits most significant bit first.
-//!
-//! ADR-0019 decision 5 places these helpers in `stonecrab::codec` under an ADR-0013
-//! addendum. While the generated codec is a test-only module (decision 8) they stay here,
-//! crate-private and compiled with it, so the published API does not grow for a test-only
-//! caller; the slice that ships generated code moves them (ADR-0019 addendum of
-//! 2026-10-29).
+//! Shared most-significant-bit field runs used by generated protocol codecs.
 
 use crate::codec::ParseError;
 
@@ -41,7 +28,11 @@ fn mask(width: u32) -> Result<u8, ParseError> {
 ///
 /// # Errors
 /// [`ParseError::Overflow`] when the field does not lie within the byte or is empty.
-pub(super) fn split_bits(run: u8, offset: u32, width: u32) -> Result<u8, ParseError> {
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "unreachable_pub forbids plain pub in a private module"
+)]
+pub(crate) fn split_bits(run: u8, offset: u32, width: u32) -> Result<u8, ParseError> {
     let shift = shift(offset, width)?;
     let mask = mask(width)?;
     Ok(run.checked_shr(shift).ok_or(ParseError::Overflow)? & mask)
@@ -54,7 +45,11 @@ pub(super) fn split_bits(run: u8, offset: u32, width: u32) -> Result<u8, ParseEr
 /// [`ParseError::Overflow`] when the field does not lie within the byte or is empty, or when
 /// `value` does not fit in `width` bits: a value is never truncated (a `functionFlag` above
 /// 127 is refused, not cut to seven bits).
-pub(super) fn join_bits(run: u8, offset: u32, width: u32, value: u8) -> Result<u8, ParseError> {
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "unreachable_pub forbids plain pub in a private module"
+)]
+pub(crate) fn join_bits(run: u8, offset: u32, width: u32, value: u8) -> Result<u8, ParseError> {
     let shift = shift(offset, width)?;
     let mask = mask(width)?;
     if value & !mask != 0 {

@@ -59,7 +59,11 @@ pub(super) const MAX_STRING_BYTES: usize = 16 * 1024 * 1024;
 /// it: [`Depth::enter`] takes one unit and fails with `ParseError::RecursionLimit` at zero. A
 /// built-in has a fixed shape and ignores it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct Depth {
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "the generated service signature passes this crate-private budget"
+)]
+pub(crate) struct Depth {
     /// Entries into recursive types still allowed.
     remaining: u8,
 }

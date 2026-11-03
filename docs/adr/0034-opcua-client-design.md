@@ -702,3 +702,14 @@ bounds on parse/serialize/length; 100% hand-written OPC UA line coverage; full q
 feature, semver, parity, fuzz, packaging and generator gates. Each source/options change
 and generated output gets its own signed-off commit. Future merges preserve individual
 commits as requested by the maintainer; this overrides the squash-merge convention.
+
+
+S88 vector storage follows the S86 convention: independent field constructions in
+`opcua/service_tests.rs`, also checked against retained positive/negative hex fixtures
+under `fixtures/opcua/services/` with `first_party` provenance. This extends the S86
+CODING_STANDARDS 13.6 exception only to those independent construction checks; the
+fixtures and fuzzer seeds are retained as ordinary data. Known-body length is computed
+by a bounded encoding into a temporary writer (16 MiB maximum), since the service enum
+has no generated size function. It cannot allocate from a declared count unchecked;
+read, serialize and length share the same 64-entry recursion budget. The enclosing
+private codec constructor must pair a Known body with its matching encoding id.

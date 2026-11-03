@@ -35,8 +35,6 @@ mod generated;
 #[cfg(test)]
 #[cfg(feature = "testkit")]
 mod generated_equivalence;
-#[cfg(all(test, feature = "testkit"))]
-mod generated_support;
 mod options;
 mod pdu;
 mod rtu;

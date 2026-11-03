@@ -1,0 +1,34 @@
+# S88 / ADR-0034: the pinned connect-and-read service closure.
+protocol = "opcua"
+output = "crates/stonecrab/src/opcua"
+support_module = "crate::codec"
+byte_order = "LITTLE_ENDIAN"
+depth = "crate::opcua::codec::Depth"
+types = [
+  "ExtensionObjectDefinition", "ApplicationType", "MessageSecurityMode",
+  "SecurityTokenRequestType", "TimestampsToReturn", "UserTokenType",
+  "OpcuaStatusCode", "AttributeId",
+]
+
+[cases]
+ExtensionObjectDefinition = [
+  "RequestHeader", "ResponseHeader", "ServiceFault", "ChannelSecurityToken",
+  "OpenSecureChannelRequest", "OpenSecureChannelResponse", "CloseSecureChannelRequest",
+  "ApplicationDescription", "UserTokenPolicy", "EndpointDescription",
+  "SignedSoftwareCertificate", "SignatureData", "CreateSessionRequest", "CreateSessionResponse",
+  "AnonymousIdentityToken", "ActivateSessionRequest", "ActivateSessionResponse",
+  "CloseSessionRequest", "CloseSessionResponse", "ReadValueId", "ReadRequest", "ReadResponse",
+]
+
+[external]
+PascalString = "crate::opcua::codec::UaString"
+PascalByteString = "crate::opcua::codec::UaByteString"
+NodeId = "crate::opcua::codec::NodeId"
+ExpandedNodeId = "crate::opcua::codec::ExpandedNodeId"
+QualifiedName = "crate::opcua::codec::QualifiedName"
+LocalizedText = "crate::opcua::codec::LocalizedText"
+StatusCode = "crate::opcua::codec::StatusCode"
+DiagnosticInfo = "crate::opcua::codec::DiagnosticInfo"
+DataValue = "crate::opcua::codec::DataValue"
+Variant = "crate::opcua::codec::Variant"
+ExtensionObject = { path = "crate::opcua::codec::ExtensionObject", arguments = ["true"] }

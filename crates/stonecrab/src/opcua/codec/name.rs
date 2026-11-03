@@ -10,7 +10,11 @@ const TEXT_FLAG: u8 = 0x02;
 
 /// A name qualified by the index of the namespace that defines it.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(in crate::opcua) struct QualifiedName {
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "generated crate-private service fields name this codec type"
+)]
+pub(crate) struct QualifiedName {
     /// The namespace index.
     pub(in crate::opcua) namespace_index: u16,
     /// The name, which may be null.
@@ -65,7 +69,11 @@ impl QualifiedName {
 /// present null String (`Some` of a null `UaString`), and both are kept as read. The six
 /// upper bits of the mask are reserved, read and ignored and written as zero.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(in crate::opcua) struct LocalizedText {
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "generated crate-private service fields name this codec type"
+)]
+pub(crate) struct LocalizedText {
     /// The locale, such as `en-US`, when its flag is set.
     pub(in crate::opcua) locale: Option<UaString>,
     /// The text, when its flag is set.

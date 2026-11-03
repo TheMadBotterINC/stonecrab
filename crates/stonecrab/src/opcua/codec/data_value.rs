@@ -27,7 +27,11 @@ const SERVER_PICOSECONDS_FLAG: u8 = 0x20;
 /// Each part is `None` when its flag is clear. The picoseconds are kept as they are read, in
 /// units of 10 picoseconds, and are not checked against the 10,000 that make a tick.
 #[derive(Debug, Clone, PartialEq, Default)]
-pub(in crate::opcua) struct DataValue {
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "generated crate-private service fields name this codec type"
+)]
+pub(crate) struct DataValue {
     /// The value.
     pub(in crate::opcua) value: Option<Variant>,
     /// The status code of the value.

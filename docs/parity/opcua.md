@@ -634,3 +634,17 @@ rows to reach `automated-verified` are expected to be `OPCUA-OP-CONNECT` with
 `OPCUA-POLICY-NONE` (Hello to ActivateSession against the server) and `OPCUA-OP-READ`.
 Chunking, renewal and trust-failure rows need fault hooks the independent server may not
 offer; those stay `implemented` over the fake transport (D21).
+
+
+## Private service-codec subset (S88)
+
+These implementation rows describe private codecs, not a connect/read capability. The
+22 cases and their needed enums derive from the pinned mspec files recorded by SHA-256
+in `upstream/manifest.toml`. The original operation, policy and type-mapping rows keep
+S89–S123 as their owners. No OPC UA connection, session or network read is advertised.
+
+| Row id | Upstream behavior (file:line) | Stonecrab behavior | Status | Test ids |
+| --- | --- | --- | --- | --- |
+| OPCUA-CODEC-SERVICE-SUBSET | `opc-manual.mspec`: ExtensionObjectDefinition, pinned source | Generated 22-case connect-and-read body closure, little-endian fields, bounded external types, null versus empty preserved, shared depth budget; all other cases refused by the dispatcher. Private code only. | implemented | `opcua_every_generated_service_has_positive_and_negative_vectors`, `opcua_recognized_malformed_bodies_never_fall_back_to_raw`, `opcua_generated_external_recursion_fits_a_two_mib_stack`, fuzz target `fuzz_opcua_service` |
+| OPCUA-CODEC-KNOWN-BODY | OPC UA Part 6 5.2.2.15, `opc-manual.mspec`: ExtensionObject | Local namespace-zero numeric binary bodies dispatch to the generated subset; disabled/unknown/custom identities stay Raw. Recognized malformed bodies and trailing bytes are errors. Parse, write and length share the recursion/body budgets. | implemented | `opcua_disabled_and_unknown_bodies_remain_raw_and_preserve_identity`, `opcua_recognized_malformed_bodies_never_fall_back_to_raw`, `opcua_known_body_recursion_uses_one_shared_budget`, `opcua_known_body_cannot_exceed_the_binary_body_budget` |
+| OPCUA-CODEC-STATUS-NAMES | `opc-status.mspec`: OpcuaStatusCode, pinned source | Generated static source-name lookup; the hand codec keeps every raw u32, with None for unrecognized names. | implemented | `opcua_unknown_status_code_keeps_its_number` |

@@ -85,6 +85,14 @@ specification-stage placeholder.
   and the module in `mutants.toml`. Parity: `OPCUA-WIRE-HEADER`, `OPCUA-WIRE-MESSAGE-TYPES`,
   `OPCUA-WIRE-OPEN-HEADER` and `OPCUA-QUIRK-CODEC-RHE` are `implemented`, and the first-party
   half of `OPCUA-WIRE-HELLO-ACK` has its test.
+- **Added (opt-in `opcua` feature; slice S88 of milestone M3):** the generated 22-case
+  connection/read service codec and 274 status-code names, from the pinned PLC4X models.
+  Known namespace-zero binary ExtensionObjects decode inside their declared body;
+  unknown and disabled types remain raw. Malformed known bodies, trailing bytes, excessive
+  counts and recursion are refused. First-party valid and negative vectors cover every
+  enabled case; the known-body fuzz target and unchanged coverage gates pass. Bit-run
+  helpers are shared with the generated Modbus tests. No public connection or read API
+  is added yet, and no runtime dependency changes.
 - **Dependencies:** `toml` 0.9 to 1.1 (resolved 1.1.8, with `toml_parser` 1.1.5,
   `toml_datetime` 1.1.2 and `winnow` 1.0.4) for the crate, the fuzz workspace and the code
   generator. There is no API or behavior change: no `toml` type is public, and profiles load

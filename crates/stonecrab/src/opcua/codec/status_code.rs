@@ -1,3 +1,5 @@
+//! # Compatibility: docs/parity/opcua.md#OPCUA-CODEC-STATUS-NAMES
+//!
 //! `StatusCode`: a `UInt32` (OPC UA Part 6, 5.2.2.11).
 
 use crate::codec::{BoundedReader, BoundedWriter, ParseError};
@@ -9,7 +11,11 @@ const SIZE: usize = 4;
 /// A `StatusCode`: the severity in the top two bits, the rest as the specification assigns.
 /// The codec keeps the number as it is and decides nothing about its meaning.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub(in crate::opcua) struct StatusCode(pub(in crate::opcua) u32);
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "generated crate-private service fields name this codec type"
+)]
+pub(crate) struct StatusCode(pub(in crate::opcua) u32);
 
 #[expect(
     clippy::trivially_copy_pass_by_ref,
@@ -17,6 +23,11 @@ pub(in crate::opcua) struct StatusCode(pub(in crate::opcua) u32);
     reason = "the external-type signature takes `&self` and the budget, which a built-in ignores"
 )]
 impl StatusCode {
+    /// The exact source name of a known code; unknown numbers remain unmodified.
+    pub(in crate::opcua) const fn name(self) -> Option<&'static str> {
+        crate::opcua::generated::opcua_status_code::OpcuaStatusCode::name_from_value(self.0)
+    }
+
     /// Reads a `StatusCode`.
     ///
     /// # Errors
@@ -57,6 +68,15 @@ impl StatusCode {
 mod tests {
     use super::*;
     use crate::opcua::codec::support::{assert_cut_off, assert_vector};
+
+    #[test]
+    fn opcua_unknown_status_code_keeps_its_number() {
+        assert_eq!(StatusCode(0).name(), Some("Good"));
+        assert_eq!(StatusCode(0x8034_0000).name(), Some("BadNodeIdUnknown"));
+        let unknown = StatusCode(0xDEAD_BEEF);
+        assert_eq!(unknown.name(), None);
+        assert_vector(&unknown, &[0xEF, 0xBE, 0xAD, 0xDE]);
+    }
 
     #[test]
     fn opcua_codec_status_code_is_a_little_endian_u32() {
