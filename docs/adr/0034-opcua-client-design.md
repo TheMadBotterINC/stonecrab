@@ -189,7 +189,8 @@ through `SubscriptionSender`, and dropping the sender ends the stream.
    item is a per-tag entry in `refused()`, not a log line.
 8. **The credential channel (E18, E22).** Secrets never travel in the connection string.
    The URI keys `username` and `password` are refused (E22); a user name and password, or an
-   X.509 user identity (S99 adds it to the existing `#[non_exhaustive]` `Credentials`), reach
+   X.509 user identity (S99 adds a discriminator to the existing `#[non_exhaustive]`
+   `Credentials` struct, preserving its public fields; ADR-0037), reach
    the driver through `ConnectionConfig`, which `DriverRegistry::connect_with(uri, secrets)`
    and a `ConnectionCache` credential provider supply. They never enter `ConnectionUri`, its
    `Debug` output or a cache key. Key and trust material is named by path
@@ -1209,3 +1210,14 @@ ByteString uses Bytes. Bad status keeps the existing item failure precedence per
 Part 4, with status and both timestamps retained on the failure. Good/Uncertain decoded
 values retain the same metadata. Core and per-response node/depth bounds are independently
 enforced. Custom structure mapping remains S119/S120; credentials remain S99/S108.
+
+## S99 implementation (2026-11-03)
+
+[ADR-0037](0037-credential-channel-and-plain-opcua-identity.md) records the concrete
+credential representation and channel. Published Credentials is a non-exhaustive struct;
+additive CredentialIdentity/X509 paths preserve its existing field access. Registry and
+cache pass secrets separately; URI credential keys stay rejected. Username activation on
+None requires explicit opt-in, exact token compatibility and effective token policy None,
+with a static warning and no weaker-policy fallback. Activation authentication statuses
+retain their device source. Certificate loading/trust and protected identity activation
+remain S103/S104/S108. [S99 evidence](../evidence/opcua-s99.md) records validation.

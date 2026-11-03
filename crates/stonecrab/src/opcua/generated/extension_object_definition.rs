@@ -160,6 +160,12 @@ pub(crate) enum ExtensionObjectDefinition {
     AnonymousIdentityToken {
         policy_id: PascalString,
     },
+    UserNameIdentityToken {
+        policy_id: PascalString,
+        user_name: PascalString,
+        password: PascalByteString,
+        encryption_algorithm: PascalString,
+    },
     ActivateSessionRequest {
         request_header: RequestHeader,
         client_signature: SignatureData,
@@ -856,10 +862,7 @@ impl ExtensionObjectDefinition {
                 value: i64::from(extension_id).cast_unsigned(),
             }),
             321 => Self::parse_anonymous_identity_token(reader, depth),
-            324 => Err(ParseError::InvalidDiscriminator {
-                field: "ExtensionObjectDefinition.UserNameIdentityToken (disabled)",
-                value: i64::from(extension_id).cast_unsigned(),
-            }),
+            324 => Self::parse_user_name_identity_token(reader, depth),
             327 => Err(ParseError::InvalidDiscriminator {
                 field: "ExtensionObjectDefinition.X509IdentityToken (disabled)",
                 value: i64::from(extension_id).cast_unsigned(),
@@ -2147,6 +2150,22 @@ impl ExtensionObjectDefinition {
         Ok(Self::AnonymousIdentityToken { policy_id })
     }
 
+    fn parse_user_name_identity_token(
+        reader: &mut BoundedReader<'_>,
+        depth: Depth,
+    ) -> Result<Self, ParseError> {
+        let policy_id = PascalString::parse(reader, depth)?;
+        let user_name = PascalString::parse(reader, depth)?;
+        let password = PascalByteString::parse(reader, depth)?;
+        let encryption_algorithm = PascalString::parse(reader, depth)?;
+        Ok(Self::UserNameIdentityToken {
+            policy_id,
+            user_name,
+            password,
+            encryption_algorithm,
+        })
+    }
+
     fn parse_activate_session_request(
         reader: &mut BoundedReader<'_>,
         depth: Depth,
@@ -2556,6 +2575,9 @@ impl ExtensionObjectDefinition {
             }
             Self::AnonymousIdentityToken { .. } => {
                 self.serialize_anonymous_identity_token(writer, depth)
+            }
+            Self::UserNameIdentityToken { .. } => {
+                self.serialize_user_name_identity_token(writer, depth)
             }
             Self::ActivateSessionRequest { .. } => {
                 self.serialize_activate_session_request(writer, depth)
@@ -3074,6 +3096,29 @@ impl ExtensionObjectDefinition {
             });
         };
         policy_id.serialize(writer, depth)
+    }
+
+    fn serialize_user_name_identity_token(
+        &self,
+        writer: &mut BoundedWriter,
+        depth: Depth,
+    ) -> Result<(), ParseError> {
+        let Self::UserNameIdentityToken {
+            policy_id,
+            user_name,
+            password,
+            encryption_algorithm,
+        } = self
+        else {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "ExtensionObjectDefinition.UserNameIdentityToken",
+                value: 0,
+            });
+        };
+        policy_id.serialize(writer, depth)?;
+        user_name.serialize(writer, depth)?;
+        password.serialize(writer, depth)?;
+        encryption_algorithm.serialize(writer, depth)
     }
 
     fn serialize_activate_session_request(

@@ -393,12 +393,12 @@ browse types; no browse or discover method is exposed yet (ADR-0001: no empty sc
 The driver owns its concurrency model: Modbus serializes through ConnectionGuard;
 OPC UA pipelines through its bounded private lane, without a spawned reader task.
 ADR-0034 decisions 6–9 define the accepted M3 target and section 5.2 separates it from
-current S96 behavior.
+current S99 behavior.
 
 `DriverRegistry` is populated at setup time: `register(&mut self, Arc<dyn Driver>)
 -> Result<()>` (a duplicate scheme is `InvalidConfig`), `driver(&str)`, `schemes()` (sorted),
-`parse(&str) -> Result<(Arc<dyn Driver>, ConnectionConfig)>` and `connect(&str)`. E18
-adds `connect_with(uri, secrets)` and a cache credential provider in S99; credentials
+`parse(&str) -> Result<(Arc<dyn Driver>, ConnectionConfig)>` and `connect(&str)`. S99 adds
+`connect_with(uri, secrets)` and a cache credential provider (E18, ADR-0037); credentials
 stay in ConnectionConfig and never enter ConnectionUri, its Debug output or a cache key.
 URI username/password keys remain refused (E22). It takes
 the scheme from `ConnectionUri::parse` and hands the original text to
@@ -1532,12 +1532,13 @@ runs the same contract suite as `stonecrab::modbus`, as the note beside the diag
 
 ### 5.2 OPC UA client and accepted M3 lifecycle (ADR-0034, S97)
 
-**Shipped through S96:** the opt-in opcua feature provides a public driver/address
-surface, binary codecs and 24 generated service cases, TCP framing, a bounded pipelined
+**Shipped through S99:** the opt-in opcua feature provides a public driver/address
+surface, binary codecs and 25 generated service cases, TCP framing, a bounded pipelined
 lane, anonymous None connect/read/close, chunking, extended scalar/array/matrix values,
 and endpoint selection/overrides. A private GetEndpoints exchange is interoperability-tested;
-automatic secure discovery remains S106. Secure policies and non-anonymous credentials
-are refused before I/O. The public address surface includes OpcuaIdentifier,
+automatic secure discovery remains S106. Username sessions under None require explicit
+allow-insecure-credentials=true. Secure policies and certificate identities are refused
+before I/O until their assigned slices. The public address surface includes OpcuaIdentifier,
 OpcuaAttribute, OpcuaDataType and OpcuaAddress::MAX_TEXT_BYTES, ratified in ADR-0034
 decision 9. Support evidence remains in COMPATIBILITY and the OPC UA parity record.
 
@@ -2500,3 +2501,14 @@ field nodes/composite depth for arrays/matrices, and attaches both optional Syst
 timestamps and original status to successful or failed items. Local sampled_at stays
 monotonic. Missing times are not replaced. This does not implement custom structure
 resolution, credential changes, secure discovery or native subscriptions.
+
+### Credential channel (S99, ADR-0037)
+
+Registry connect_with attaches Credentials after driver/URI validation. Cache providers
+resolve credentials outside locks only for a new open; None retains driver config and
+errors fail without anonymous fallback. Reuse is by unchanged credential-free URI text;
+remove/close or create another cache before changing its principal. Debug prints only
+provider presence. Credentials preserves its public fields with a private discriminator
+and public CredentialIdentity; X509 paths are represented but not loaded until S103/S108.
+Plain username activation requires explicit opt-in and effective token policy None;
+protected selected token policies are refused without downgrade.

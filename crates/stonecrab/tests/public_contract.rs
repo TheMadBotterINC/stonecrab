@@ -10,13 +10,13 @@ mod tests {
     use stonecrab::{
         AccessPolicy, AddressOptions, AddressOptionsBuilder, ByteOrder, CancellationToken,
         Capabilities, Clock, Connection, ConnectionConfig, ConnectionConfigBuilder,
-        ConnectionState, ConnectionUri, Credentials, Deadline, Diagnostics, Driver, DriverOptions,
-        DriverRegistry, Endpoint, ErrorKind, FailureCategory, ItemError, LossCounters, OpFuture,
-        Operation, PlcDate, PlcDateTime, PlcError, PlcSignedDuration, PlcStruct, PlcTimeOfDay,
-        PlcValue, PlcValueType, ProtocolAddress, ProtocolStatus, QueuePolicy, ReadItem,
-        ReadRequest, ReadRequestBuilder, ReadResponse, ReadResponseBuilder, ReconnectPolicy,
-        ResourceLimits, ResourceLimitsBuilder, RetryPolicy, Secret, StateCell, StateWatch,
-        SubscribeRequest, SubscribeRequestBuilder, Subscription, SubscriptionKind,
+        ConnectionState, ConnectionUri, CredentialIdentity, Credentials, Deadline, Diagnostics,
+        Driver, DriverOptions, DriverRegistry, Endpoint, ErrorKind, FailureCategory, ItemError,
+        LossCounters, OpFuture, Operation, PlcDate, PlcDateTime, PlcError, PlcSignedDuration,
+        PlcStruct, PlcTimeOfDay, PlcValue, PlcValueType, ProtocolAddress, ProtocolStatus,
+        QueuePolicy, ReadItem, ReadRequest, ReadRequestBuilder, ReadResponse, ReadResponseBuilder,
+        ReconnectPolicy, ResourceLimits, ResourceLimitsBuilder, RetryPolicy, Secret, StateCell,
+        StateWatch, SubscribeRequest, SubscribeRequestBuilder, Subscription, SubscriptionKind,
         SubscriptionMode, SubscriptionSender, Tag, TagId, Timeouts, UnknownReason, WordOrder,
         WriteItem, WriteOutcome, WriteRequest, WriteRequestBuilder, WriteResponse,
         WriteResponseBuilder, WriteResult,
@@ -34,6 +34,7 @@ mod tests {
         assert_send_sync::<ConnectionConfig>();
         assert_send_sync::<ConnectionConfigBuilder>();
         assert_send_sync::<Credentials>();
+        assert_send_sync::<CredentialIdentity>();
         assert_send_sync::<Endpoint>();
         assert_send_sync::<ConnectionState>();
         assert_send_sync::<ConnectionUri>();

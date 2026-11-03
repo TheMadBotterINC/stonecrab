@@ -65,10 +65,14 @@ fn check(text: &str) {
                     || key == "encoding.max-message-size"
                     || key == "encoding.max-chunk-count"
                     || key == "discovery"
+                    || key == "allow-insecure-credentials"
                     || key == "endpoint-host"
                     || key == "endpoint-port"
                     || key == "server-certificate-file"
             }));
+            if let Some(value) = uri.option("allow-insecure-credentials") {
+                assert!(["true", "false"].contains(&value));
+            }
             let discovery = uri.option("discovery").is_none_or(|value| match value {
                 "true" => true,
                 "false" => false,

@@ -16,10 +16,13 @@ use std::time::{Duration, Instant};
 
 use crate::future::{WakerSlots, wake_all};
 use crate::{
-    Capabilities, Clock, Connection, ConnectionState, Diagnostics, DriverRegistry, ErrorKind,
-    FailureCategory, OpFuture, Operation, PlcError, ReadRequest, ReadResponse, ResourceLimits,
-    Result, StateWatch, SubscribeRequest, Subscription, WriteRequest, WriteResponse,
+    Capabilities, Clock, Connection, ConnectionState, ConnectionUri, Credentials, Diagnostics,
+    DriverRegistry, ErrorKind, FailureCategory, OpFuture, Operation, PlcError, ReadRequest,
+    ReadResponse, ResourceLimits, Result, StateWatch, SubscribeRequest, Subscription, WriteRequest,
+    WriteResponse,
 };
+
+type CredentialProvider = dyn Fn(&ConnectionUri) -> Result<Option<Credentials>> + Send + Sync;
 
 /// Upstream's `DEFAULT_MAX_IDLE_TIME_MS`: five minutes.
 const DEFAULT_MAX_IDLE_TIME: Duration = Duration::from_secs(300);
@@ -152,6 +155,7 @@ impl ConnectionCache {
                 close_timeout: DEFAULT_CLOSE_TIMEOUT,
             },
             limits: None,
+            credential_provider: None,
         }
     }
 
@@ -459,6 +463,7 @@ pub struct ConnectionCacheBuilder {
     clock: Arc<dyn Clock>,
     settings: Settings,
     limits: Option<ResourceLimits>,
+    credential_provider: Option<Arc<CredentialProvider>>,
 }
 
 impl ConnectionCacheBuilder {
@@ -511,6 +516,23 @@ impl ConnectionCacheBuilder {
         self
     }
 
+    /// Supply credentials for each new connection, outside cache locks.
+    ///
+    /// Called after URI/driver validation, never for a reused connection. None keeps the
+    /// driver's config; an error fails the open without an anonymous retry. Callback work
+    /// must be nonblocking and errors must satisfy [`PlcError`]'s redaction contract.
+    ///
+    /// Each cache has one identity policy: remove/close or use a new cache before changing
+    /// a URI's principal. URI text must remain credential-free; provider results are never
+    /// added to the key. Captures are excluded from Debug.
+    pub fn credential_provider(
+        mut self,
+        provider: impl Fn(&ConnectionUri) -> Result<Option<Credentials>> + Send + Sync + 'static,
+    ) -> Self {
+        self.credential_provider = Some(Arc::new(provider));
+        self
+    }
+
     /// Validate the settings and make the cache.
     ///
     /// # Errors
@@ -549,6 +571,7 @@ impl ConnectionCacheBuilder {
         Ok(ConnectionCache {
             inner: Arc::new(Inner {
                 registry: self.registry,
+                credential_provider: self.credential_provider,
                 clock: self.clock,
                 settings,
                 max_pending: limits.max_pending_requests().get(),
@@ -564,6 +587,7 @@ impl fmt::Debug for ConnectionCacheBuilder {
             .field("registry", &self.registry)
             .field("settings", &self.settings)
             .field("limits", &self.limits)
+            .field("credential_provider", &self.credential_provider.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -716,6 +740,7 @@ struct Settings {
 /// The cache's shared state; leases keep it alive.
 struct Inner {
     registry: Arc<DriverRegistry>,
+    credential_provider: Option<Arc<CredentialProvider>>,
     clock: Arc<dyn Clock>,
     settings: Settings,
     /// `max_pending_requests` of the builder's limits.
@@ -967,7 +992,13 @@ impl Inner {
     /// Open a new connection for the holder and lend it, or close it again if the string
     /// was removed or the cache closed meanwhile.
     async fn open(&self, claim: &Claim) -> Result<(Arc<dyn Connection>, Instant)> {
-        let connection: Arc<dyn Connection> = Arc::from(self.registry.connect(&claim.key).await?);
+        let (driver, mut config) = self.registry.parse(&claim.key)?;
+        if let Some(provider) = &self.credential_provider
+            && let Some(credentials) = provider(&ConnectionUri::parse(&claim.key)?)?
+        {
+            config = config.with_credentials(credentials);
+        }
+        let connection: Arc<dyn Connection> = Arc::from(driver.connect(config).await?);
         let lent = self.with(|state, now, deferred| {
             let entry = state.held(claim)?;
             entry.connection = Some(Arc::clone(&connection));

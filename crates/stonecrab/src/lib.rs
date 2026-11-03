@@ -100,8 +100,8 @@ pub use cancel::CancellationToken;
 pub use capability::{Capabilities, Operation, SubscriptionMode};
 pub use clock::Clock;
 pub use config::{
-    AccessPolicy, ConnectionConfig, ConnectionConfigBuilder, Credentials, DriverOptions, Endpoint,
-    ReconnectPolicy, RetryPolicy, Timeouts,
+    AccessPolicy, ConnectionConfig, ConnectionConfigBuilder, CredentialIdentity, Credentials,
+    DriverOptions, Endpoint, ReconnectPolicy, RetryPolicy, Timeouts,
 };
 pub use connection::Connection;
 pub use connection_cache::{ConnectionCache, ConnectionCacheBuilder, LeasedConnection};

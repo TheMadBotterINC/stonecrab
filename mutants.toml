@@ -33,6 +33,7 @@ examine_globs = [
   "crates/stonecrab/src/opcua/frame/*.rs",
   "crates/stonecrab/src/opcua/options.rs",
   "crates/stonecrab/src/opcua/endpoint.rs",
+  "crates/stonecrab/src/opcua/identity.rs",
   "crates/stonecrab/src/opcua/service.rs",
   "crates/stonecrab/src/opcua/read.rs",
   "crates/stonecrab/src/opcua/value.rs",

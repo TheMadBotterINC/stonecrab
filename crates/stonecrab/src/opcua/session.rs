@@ -7,15 +7,13 @@
 
 use std::time::Duration;
 
-use crate::opcua::codec::{
-    ExpandedNodeId, ExtensionBody, ExtensionObject, LocalizedText, NodeId, UaByteString, UaString,
-};
+use crate::opcua::codec::{LocalizedText, NodeId, UaByteString, UaString};
 use crate::opcua::generated::application_description::ApplicationDescription;
 use crate::opcua::generated::application_type::ApplicationType;
 use crate::opcua::generated::extension_object_definition::ExtensionObjectDefinition as Service;
 use crate::opcua::generated::response_header::ResponseHeader;
 use crate::opcua::generated::signature_data::SignatureData;
-use crate::opcua::generated::user_token_type::UserTokenType;
+use crate::opcua::identity::{Identity, activation_error};
 use crate::opcua::lane::Lane;
 use crate::opcua::options::OpcuaOptions;
 use crate::opcua::service::status_error;
@@ -32,6 +30,7 @@ impl Session {
     pub(super) async fn open(
         lane: Lane,
         options: &OpcuaOptions,
+        identity: Identity<'_>,
         nonce: [u8; 32],
         deadline: Deadline,
         cancel: &CancellationToken,
@@ -85,13 +84,15 @@ impl Session {
             .filter(|duration| !duration.is_zero())
             .ok_or_else(|| malformed("invalid revised session timeout"))?;
         let endpoints = server_endpoints.unwrap_or_default();
-        let (endpoint, policy) = crate::opcua::endpoint::select(
-            &endpoints,
-            options,
-            UserTokenType::UserTokenTypeAnonymous,
-        )?;
+        let (endpoint, policy) =
+            crate::opcua::endpoint::select(&endpoints, options, identity.token_type())?;
         let selected_endpoint = crate::opcua::endpoint::display_url(&endpoint.endpoint_url);
-        let policy_id = policy.policy_id.clone();
+        let user_identity_token = identity.token(policy, &endpoint.security_policy_uri)?;
+        if matches!(identity, Identity::UserName(_)) {
+            tracing::warn!(
+                "OPC UA sending plain username credentials: allow-insecure-credentials=true"
+            );
+        }
         let reply = lane
             .exchange_until(
                 &authentication_token,
@@ -101,25 +102,21 @@ impl Session {
                     client_signature: empty_signature(),
                     client_software_certificates: None,
                     locale_ids: None,
-                    user_identity_token: ExtensionObject {
-                        type_id: ExpandedNodeId::local(NodeId::numeric(0, 321)),
-                        body: ExtensionBody::Known(Box::new(Service::AnonymousIdentityToken {
-                            policy_id,
-                        })),
-                    },
+                    user_identity_token,
                     user_token_signature: empty_signature(),
                 },
                 deadline,
                 cancel,
             )
-            .await?;
+            .await
+            .map_err(activation_error)?;
         let Service::ActivateSessionResponse {
             response_header, ..
         } = reply
         else {
             return Err(malformed("expected ActivateSessionResponse"));
         };
-        check_status(&response_header)?;
+        check_status(&response_header).map_err(activation_error)?;
         Ok(Self {
             lane,
             authentication_token,

@@ -177,6 +177,8 @@ pub(super) struct OpcuaOptions {
     pub(super) message_security: MessageSecurity,
     /// Discovery primitives are configured here; secure-connect wiring is S106.
     pub(super) discovery: bool,
+    /// Explicit opt-in for plain username tokens; the selected token must also be None.
+    pub(super) allow_insecure_credentials: bool,
     pub(super) endpoint_host: Option<String>,
     pub(super) endpoint_port: Option<u16>,
     /// Syntactic path only until certificate loading/trust lands in S103/S104.
@@ -206,6 +208,7 @@ impl OpcuaOptions {
         parameters: &[(String, String)],
     ) -> Result<Self> {
         let mut discovery = true;
+        let mut allow_insecure_credentials = false;
         let mut endpoint_host = None;
         let mut endpoint_port = None;
         let mut server_certificate_file = None;
@@ -220,13 +223,8 @@ impl OpcuaOptions {
         let mut max_chunk_count = 64;
         for (key, value) in parameters {
             match key.as_str() {
-                "discovery" => {
-                    discovery = match value.as_str() {
-                        "true" => true,
-                        "false" => false,
-                        _ => return Err(invalid("discovery must be true or false")),
-                    }
-                }
+                "discovery" => discovery = boolean(key, value)?,
+                "allow-insecure-credentials" => allow_insecure_credentials = boolean(key, value)?,
                 "endpoint-host" => {
                     let host = value
                         .strip_prefix('[')
@@ -307,6 +305,7 @@ impl OpcuaOptions {
             security_policy,
             message_security,
             discovery,
+            allow_insecure_credentials,
             endpoint_host,
             endpoint_port,
             server_certificate_file,
@@ -420,6 +419,14 @@ fn unknown_key(key: &str) -> PlcError {
         "unknown connection parameter '{shown}'{hint}; supported parameters include {SECURITY_POLICY} \
          and {MESSAGE_SECURITY}"
     ))
+}
+
+fn boolean(key: &str, value: &str) -> Result<bool> {
+    match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(invalid(format!("{key} must be true or false"))),
+    }
 }
 
 fn invalid(message: impl Into<String>) -> PlcError {
@@ -1123,6 +1130,31 @@ mod discovery_tests {
                 error.to_string(),
                 "endpoint-host must be a host name or IP address"
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod credential_tests {
+    use super::*;
+    // covers: OPCUA-CFG-ALLOW-INSECURE-CREDENTIALS
+    #[test]
+    fn opcua_config_allow_insecure_credentials_default_is_false() {
+        let parse = |value: Option<&str>| {
+            OpcuaOptions::from_parameters(
+                "opc.tcp://fake:4840".to_owned(),
+                &value
+                    .map(|value| vec![("allow-insecure-credentials".to_owned(), value.to_owned())])
+                    .unwrap_or_default(),
+            )
+        };
+        assert!(!parse(None).unwrap().allow_insecure_credentials);
+        assert!(parse(Some("true")).unwrap().allow_insecure_credentials);
+        assert!(!parse(Some("false")).unwrap().allow_insecure_credentials);
+        for value in ["", "TRUE", "1", "password-sentinel"] {
+            let error = parse(Some(value)).unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+            assert!(!error.to_string().contains("password-sentinel"));
         }
     }
 }

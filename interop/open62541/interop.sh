@@ -47,7 +47,7 @@ HOST="127.0.0.1"
 EVIDENCE="${INTEROP_EVIDENCE_DIR:-$ROOT/target/interop-evidence}/open62541"
 PKI_OUT="${INTEROP_PKI_DIR:-$ROOT/target/interop-pki/open62541}"
 FILTER='binary(stonecrab) & test(/^opcua::(channel|session|connection|lane|endpoint)::tests::opcua_interop_/)'
-EXPECTED_TESTS=7
+EXPECTED_TESTS=8
 
 die() {
   echo "interop: $*" >&2
@@ -89,7 +89,7 @@ start() {
   need_docker
   stop
   docker run -d --name "$NAME" -p "127.0.0.1:${PORT}:${PORT}" \
-    -e "OPCUA_PORT=${PORT}" -e "OPCUA_ADVERTISED_HOST=${HOST}" "$IMAGE" >/dev/null
+    -e "OPCUA_PORT=${PORT}" -e "OPCUA_ADVERTISED_HOST=${HOST}" -e OPCUA_ALLOW_NONE_PASSWORD=1 "$IMAGE" >/dev/null
 }
 
 probe() {
@@ -160,6 +160,7 @@ run_tests() {
   mkdir -p "$EVIDENCE"
   cd "$ROOT"
   export STONECRAB_INTEROP_OPEN62541="opcua://${HOST}:${PORT}?security-policy=NONE"
+  export STONECRAB_INTEROP_OPEN62541_PASSWORD_FILE="$PKI_OUT/user-password"
   local listed
   listed="$(cargo nextest list --locked -p stonecrab --all-features \
     --run-ignored ignored-only -E "$FILTER" --message-format oneline | grep -Ec 'opcua::(channel|session|connection|lane|endpoint)::tests::opcua_interop_' || true)"

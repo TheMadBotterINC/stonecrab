@@ -5,6 +5,34 @@ Implementation baseline: the commit that last modified this file
 (`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
 its own commit; the slice log below records what each one landed.
 
+## Credential channel and explicit plain OPC UA identity (S99, 2026-11-03)
+
+Registry connect_with and a per-cache credential provider pass secrets separately from
+URI/key text. Providers run outside locks on new opens only; None preserves driver config,
+errors fail without anonymous fallback, and remove/close precedes credential rotation.
+Additive CredentialIdentity/X509 paths preserve the published Credentials struct fields;
+no certificate loading or activation is added. Config Debug/display hide the full identity.
+
+Username sessions on None require explicit allow-insecure-credentials=true and a static
+warning. Matching token policy ID is used; only effective token policy None sends plain
+UTF-8 password bytes without nonce/encryption algorithm. Protected policies are refused
+without downgrade. Password without username is invalid before I/O; missing/empty-pair
+credentials mean anonymous. Identity/access activation statuses become Authentication
+with their exact device source retained. URI username/password keys remain rejected.
+
+ADR-0037 implements E18/E22 without changing crate version/features/dependencies.
+Eight OPC UA rows close (249 total: 115 implemented, 96 planned, 38 deferred).
+Full check passes 2351 tests and 588+5 doctests; handwritten core/opcua coverage is 100%.
+Two mutation campaigns pass (54 tested: 31 caught/23 unviable), and eight independent
+open62541 native cases plus its in-image checks and public example pass. Docker stopped,
+host PKI removed. All 59 feature combinations and 15 fuzz targets pass; the reviewed
+199-file package verifies fresh and builds unpacked with all features and opcua alone.
+The matrix caught and verified the missing existing tracing dependency edge for opcua.
+[S99 evidence](docs/evidence/opcua-s99.md) records the archive hash and ADR-0005 waiver self-review.
+
+Next: S100, staged OPC UA writes. Certificate loading/trust and protected identity remain
+S103/S104/S108. Normal merges preserve signed-off commits; no hardware/release claims.
+
 ## Bytes, bounded structures and OPC UA metadata (S98, 2026-11-03)
 
 S98 appends exact Bytes and bounded Struct values without changing previous type order.
@@ -698,6 +726,7 @@ commit; gates named were run locally before that commit.
 
 | Slice | Date | Landed | Gates |
 | --- | --- | --- | --- |
+| S99 | 2026-11-03 | Separate registry/cache credential channel, additive X509 identity representation, explicit plain username activation on None, token compatibility, redaction and Authentication source preservation; eight protocol rows, ADR-0037. [Evidence](docs/evidence/opcua-s99.md) | full check (2351 tests, 588+5 doctests), core/opcua coverage 100, mutations 31 caught/23 unviable (54 total, exit 0), strict lint, regen, semver default/all, dependencies/machete, parity/attributes, eight native peer cases, 59 features, 15 fuzz targets, 199-file fresh package and unpacked all-feature/opcua-only builds |
 | S98 | 2026-11-03 | Bytes and immutable ordered PlcStruct with field/depth/node bounds and iterative rejection; independent ReadItem server_time. OPC UA ByteString/LocalizedText and status/source/server metadata, with aggregate structured-array budgeting and Bad failure precedence preserved. Six protocol rows plus core Bytes/Struct contracts; ADR-0036. Self-review under ADR-0005 waiver; [evidence](docs/evidence/opcua-s98.md) | full check (2335 tests, 586+5 doctests), core/opcua coverage 100, 59 features, 15 fuzz targets, mutations 85 caught/23 unviable plus metadata 10/two (both exit 0), strict lint, regen, semver default/all, dependencies/machete, parity/attributes, 198-file package/unpacked all-feature build, seven independent-peer cases |
 | S97 | 2026-11-03 | Accept ADR-0034 and record seven existing maintainer outcomes; ratify S83 address accessor surface, reconcile architecture/Connection/README contracts and refresh Phase H completion. Distinguish caller-driven OPC UA session pump and typed native-subscription end from EventPump and future capability claims. Documentation only; self-review under ADR-0005 waiver; [evidence](docs/evidence/opcua-s97.md) | full check (2321 tests, 584+5 doctests), strict lint/rustdoc, no-default build, parity/self-test, attributes, documentation/relative-link consistency, executable-source comparison, unchanged 198-file package verification, DCO |
 | S96 | 2026-11-03 | Parsed endpoint matching and host/port overrides, exact policy/mode/token compatibility, security-level ranking and token-protection tie-break, bounded sanitized diagnostics and selected URL Debug. GetEndpoints codecs/private exchange; discovery configuration with fail-closed off/secure/no-path rule. Ten assigned parity rows; secure execution/trust retain later slices. Runner propagates test/example failures. Self-review under ADR-0005 waiver; [evidence](docs/evidence/opcua-s96.md) | check (2321 tests), coverage (opcua 100), 59 feature combinations, 15 fuzz targets, mutants 126 caught/10 unviable plus final selector 57 caught/two unviable (both exit 0), regen, parity/lint, semver default/all, dependencies/machete, 198-file package/unpacked build, six independent-peer cases, three negative runner probes |

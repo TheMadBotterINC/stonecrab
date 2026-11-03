@@ -5,6 +5,12 @@ Changelog. Stonecrab is one crate, so each release has one section. `stonecrab` 
 specification-stage placeholder.
 
 ## Unreleased
+- **Added (S99):** `DriverRegistry::connect_with` and a per-cache credential provider,
+  keeping secrets separate from URI text and cache keys. Additive X.509 identity paths
+  preserve the published Credentials fields; activation remains S108. OPC UA username
+  sessions over None require explicit `allow-insecure-credentials=true` and emit a
+  redacted warning. Protected token policies remain refused; device identity refusals
+  map to Authentication with their source retained. No dependency/version change.
 - **Added (S98):** exact Bytes and bounded ordered Struct values, with immutable
   `PlcStruct` fields and iterative construction/rejection checks. Type ordering is
   preserved; neither representation coerces to numbers. `ReadItem` gains independent

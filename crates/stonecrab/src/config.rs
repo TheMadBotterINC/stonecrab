@@ -361,6 +361,34 @@ impl fmt::Display for AccessPolicy {
     }
 }
 
+/// The identity form carried separately from connection-string text.
+///
+/// Certificate paths name files to be loaded by a driver, not in-memory key material.
+/// Formatting redacts those paths. X.509 OPC UA activation remains S108 (ADR-0037).
+#[non_exhaustive]
+pub enum CredentialIdentity {
+    /// The existing username/password fields on [`Credentials`].
+    UserNamePassword,
+    /// A user certificate and its unencrypted private key, supplied by file path.
+    X509 {
+        /// Certificate file; parsing/trust are the driver's responsibility.
+        certificate_file: std::path::PathBuf,
+        /// Private key file; never printed by this type's formatter.
+        private_key_file: std::path::PathBuf,
+    },
+}
+
+impl fmt::Debug for CredentialIdentity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UserNamePassword => f.write_str("UserNamePassword"),
+            Self::X509 { .. } => {
+                f.write_str("X509 { certificate_file: [REDACTED], private_key_file: [REDACTED] }")
+            }
+        }
+    }
+}
+
 /// A user name and password for authenticating to a device or gateway.
 ///
 /// The password is a [`Secret`], so formatting never shows it. The user name is shown
@@ -383,6 +411,7 @@ pub struct Credentials {
     pub username: String,
     /// Account password; formatting prints `[REDACTED]`.
     pub password: Secret<String>,
+    identity: CredentialIdentity,
 }
 
 impl Credentials {
@@ -399,7 +428,41 @@ impl Credentials {
         Self {
             username: username.into(),
             password: Secret::new(password.into()),
+            identity: CredentialIdentity::UserNamePassword,
         }
+    }
+
+    /// Name user certificate/key files without reading them or opening a connection.
+    ///
+    /// The legacy username/password fields are empty for this identity form. The driver
+    /// must reject unsupported certificate authentication rather than treating it as anonymous.
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab::{CredentialIdentity, Credentials};
+    /// let credentials = Credentials::x509("user.der", "user-key.pem");
+    /// assert!(matches!(credentials.identity(), CredentialIdentity::X509 { .. }));
+    /// assert!(!format!("{credentials:?}").contains("user-key.pem"));
+    /// ```
+    #[must_use]
+    pub fn x509(
+        certificate_file: impl Into<std::path::PathBuf>,
+        private_key_file: impl Into<std::path::PathBuf>,
+    ) -> Self {
+        Self {
+            username: String::new(),
+            password: Secret::new(String::new()),
+            identity: CredentialIdentity::X509 {
+                certificate_file: certificate_file.into(),
+                private_key_file: private_key_file.into(),
+            },
+        }
+    }
+
+    /// Identity kind and file paths, without cloning or exposing the password.
+    #[must_use]
+    pub const fn identity(&self) -> &CredentialIdentity {
+        &self.identity
     }
 }
 
@@ -573,6 +636,11 @@ impl ConnectionConfig {
     #[must_use]
     pub const fn credentials(&self) -> Option<&Secret<Credentials>> {
         self.credentials.as_ref()
+    }
+
+    pub(super) fn with_credentials(mut self, credentials: Credentials) -> Self {
+        self.credentials = Some(Secret::new(credentials));
+        self
     }
 
     /// Resource budgets for the connection.

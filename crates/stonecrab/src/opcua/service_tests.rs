@@ -187,6 +187,11 @@ fn vectors() -> Vec<(&'static str, u16, Vec<u8>)> {
         ),
         ("AnonymousIdentityToken", 321, NULL.to_vec()),
         (
+            "UserNameIdentityToken",
+            324,
+            [NULL.to_vec(), NULL.to_vec(), NULL.to_vec(), NULL.to_vec()].concat(),
+        ),
+        (
             "ActivateSessionRequest",
             467,
             [
@@ -279,7 +284,7 @@ fn local(id: u32) -> ExpandedNodeId {
 #[test]
 fn opcua_every_generated_service_has_positive_and_negative_vectors() {
     let all = vectors();
-    assert_eq!(all.len(), 24, "S96 connect/read/discovery closure");
+    assert_eq!(all.len(), 25, "S99 connect/read/discovery/identity closure");
     for (name, id, body) in all {
         assert_eq!(
             fixture(name, false),
@@ -352,7 +357,7 @@ fn opcua_every_generated_service_has_positive_and_negative_vectors() {
 
 #[test]
 fn opcua_disabled_and_unknown_bodies_remain_raw_and_preserve_identity() {
-    for id in [0_u32, 324, 100_000, u32::MAX] {
+    for id in [0_u32, 327, 100_000, u32::MAX] {
         let raw = object(local(id), vec![0xAA, 0xBB]);
         let wire = encode(&raw, Depth::new()).unwrap();
         assert_eq!(parse(&wire).unwrap(), raw, "unsupported id {id} survives");
@@ -384,7 +389,7 @@ fn opcua_disabled_and_unknown_bodies_remain_raw_and_preserve_identity() {
     }
     for bytes in [UaByteString::null(), UaByteString::new(Vec::new())] {
         let raw = ExtensionObject {
-            type_id: local(324),
+            type_id: local(327),
             body: ExtensionBody::Raw(bytes),
         };
         assert_eq!(

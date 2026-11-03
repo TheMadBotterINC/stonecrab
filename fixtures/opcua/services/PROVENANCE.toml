@@ -150,3 +150,9 @@ name = "GetEndpointsResponse"
 encoding_id = 431
 valid = "GetEndpointsResponse.hex"
 negative = "GetEndpointsResponse-truncated.hex"
+
+[[vector]]
+name = "UserNameIdentityToken"
+encoding_id = 324
+valid = "UserNameIdentityToken.hex"
+negative = "UserNameIdentityToken-truncated.hex"
