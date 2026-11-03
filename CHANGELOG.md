@@ -5,6 +5,12 @@ Changelog. Stonecrab is one crate, so each release has one section. `stonecrab` 
 specification-stage placeholder.
 
 ## Unreleased
+- **Added (opt-in `opcua` feature; slice S89):** a private bounded service exchange lane
+  with request-id correlation, sender priority over waiting receives, injected-clock
+  headers/deadlines, channel/token/sequence validation and exact ERR/ServiceFault statuses.
+  A dropped receive preserves partial frames; an interrupted send fails the lane, with
+  no automatic replay. `request-timeout-ms` now parses into `Timeouts.request` (30000 ms
+  by default). No public driver or network connect/read capability is added yet.
 - Integrate the continuous-acquisition branch with the published 0.3.0 APIs: add the
   finite `profile_poll` example, simulator/pymodbus CI smoke runs, virtual-day acquisition
   test and hardware commissioning procedure. Preserve the existing Acquisition,

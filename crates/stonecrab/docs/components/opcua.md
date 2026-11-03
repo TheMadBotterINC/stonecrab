@@ -6,8 +6,8 @@ has the tag address grammar and, crate-private, the connection string parser and
 types of the binary encoding (the built-ins and the recursive Variant, `DataValue`,
 `DiagnosticInfo` and `ExtensionObject` envelope) and the TCP framing (the message header and
 the six message types), plus the generated 22-case connection/read service codec. Nothing
-opens a socket. There is no public driver, no
-connection, no secure channel and no session yet, and the `opcua` scheme is not registered
+opens a socket. S89 adds a crate-private caller-driven service exchange lane. There is no
+public driver, no connection, no secure channel and no session yet, and the `opcua` scheme is not registered
 anywhere.
 
 This module offers `OpcuaAddress`, a validated `ProtocolAddress` for the tag text
@@ -24,6 +24,7 @@ socket and starts no discovery.
 | Recursive and open types of the binary encoding: Variant (25 types, arrays, dimensions), `DataValue`, `DiagnosticInfo`, the `ExtensionObject` envelope with Raw, Xml and Null bodies, bounded in depth and in array counts (crate-private) | build-tested |
 | TCP framing: the 8-byte header, HEL, ACK, ERR, OPN, CLO and MSG bodies, the asymmetric header of policy None, the symmetric and sequence headers, and a single-chunk `Framer` (crate-private) | build-tested |
 | Generated 22-case connection/read service bodies and 274 status names; Known `ExtensionObject` dispatch (crate-private) | build-tested |
+| Bounded service exchange lane: correlation, sender priority, headers, sequence/channel/token checks, ERR and `ServiceFault` (crate-private) | build-tested |
 | Driver, connection, secure channel, session | planned |
 | Read, write, browse, subscriptions | planned |
 | Security policies and certificates | planned |
@@ -131,6 +132,8 @@ opcua:tcp://[2001:db8::10]:4840/ua/server
 - `message-security` is `NONE`, `SIGN` or `SIGN_ENCRYPT` (the default), case-sensitive. A
   secure policy with `NONE` is `InvalidConfig`; with policy `NONE` the mode is kept as
   configured and the channel will ignore it.
+- `request-timeout-ms` is a positive decimal millisecond count, 30000 by default. It sets
+  `Timeouts.request` and the header timeout hint; a shorter caller deadline takes precedence.
 - Every other key is `InvalidConfig`, and so is a key written twice. That includes the keys
   the framework fills (`protocol-code`, `transport-code`, `transport-config`), the
   credentials a connection string must not carry (`username`, `password`; they arrive in
@@ -234,3 +237,25 @@ constructors must pair each Known body with its matching encoding id.
 `StatusCode` keeps its exact number and can name the 274 generated known values; an
 unrecognized number has no invented name. This adds codec support only. Network services
 and independent-server evidence remain planned for later slices.
+
+## Service exchange lane
+Since S89, an established policy-None channel can exchange services through a private,
+bounded request lane above `FramedTransport`. Any waiting caller receives for every
+request id; a queued sender interrupts the cancel-safe receive and gets transport
+ownership before another read starts. No task runs between calls. `ResourceLimits` bounds
+pending requests, including queued and completed entries until consumed, and the shared
+framer/transport minimum bounds encoded requests before a sequence number is consumed.
+
+Request headers carry the session token, injected wall-clock timestamp, request handle
+and remaining timeout hint. Replies must use the expected channel/token and consecutive
+nonzero sequence numbers. Unknown request ids are discarded and counted. Wrap is refused
+explicitly pending the S106 interop check. ERR fails all pending requests immediately;
+a `ServiceFault` fails only its request with the exact status number and known name in
+a typed source. Server reason text is not echoed. No service is replayed.
+
+Dropping or cancelling a receive releases its slot and retains partial frame bytes for
+other callers. Interrupting a send can leave partial bytes on the wire and fails the
+whole lane. Deterministic tests exercise both outcomes, out-of-order replies, simultaneous
+waiters, sender priority, reentrant wake-ups, resource bounds and fake-clock deadlines.
+Hello, channel negotiation, sessions, public connect/read and independent-server evidence
+remain the next slices.
