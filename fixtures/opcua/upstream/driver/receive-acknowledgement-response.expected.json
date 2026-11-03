@@ -1,0 +1,8 @@
+{
+  "adjustments": [
+    "totalLength: 24 -> 28"
+  ],
+  "case": "Receive Acknowledgement Response",
+  "encoding_id": null,
+  "root_type": "MessagePDU"
+}

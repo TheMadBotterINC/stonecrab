@@ -1,0 +1,10 @@
+{
+  "adjustments": [
+    "sLength: 25 -> 14",
+    "bitLength: 200 -> 112",
+    "totalLength: 6450 -> 1867"
+  ],
+  "case": "Receive Create Session Response",
+  "encoding_id": 464,
+  "root_type": "MessagePDU"
+}

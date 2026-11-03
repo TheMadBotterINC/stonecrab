@@ -944,3 +944,17 @@ of an independently captured wire session. Retain ASF headers, extend root/crate
 and verify the archive contains no suites, adapter or fixtures. E13 part B is already
 accepted. Keep runtime coverage floors unchanged, frequent signed-off commits and ordinary
 merges; update parity/status/evidence and the S123 refusal-list obligation.
+
+
+S93 equivalence refinement: the upstream Read request encodes namespace-0 numeric NodeId
+2258 in seven bytes; the existing S85 codec chooses its equivalent compact four-byte
+form. Preserve that runtime behavior and independently derive the expected canonical
+frame (131 to 128 bytes), as the first-party codec vectors already do with `reencodes_as`.
+Both frames must parse to the same Read target and the canonical result must be idempotent.
+The exit check is therefore 15 byte-exact round-trips, one named canonical round-trip and
+seven exact disabled-service refusals, rather than a claim that every supported upstream
+encoding is preserved. Record OPCUA-DIV-NUMERIC-NODE-ID-ENCODING. The exact envelope
+round-trip for encoding id 811 remains explicitly Raw; S116/S123 must add semantic coverage.
+The seven refusals belong to Write (S100), MonitoringParameters (S114), and notification /
+Publish (S116, with event content S118). Corpus scope, corrections and reproduction are in
+fixtures/opcua/UPSTREAM.md. No product behavior was changed to satisfy the corpus.

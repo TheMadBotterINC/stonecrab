@@ -1,0 +1,6 @@
+{
+  "adjustments": [],
+  "case": "Receive Activate Session Response",
+  "encoding_id": 470,
+  "root_type": "MessagePDU"
+}

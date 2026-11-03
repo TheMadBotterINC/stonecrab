@@ -1,0 +1,6 @@
+{
+  "adjustments": [],
+  "case": "Send Opcua Open Secure Channel Request",
+  "encoding_id": 446,
+  "root_type": "MessagePDU"
+}

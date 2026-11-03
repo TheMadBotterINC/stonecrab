@@ -1,0 +1,6 @@
+{
+  "adjustments": [],
+  "case": "Receive read response",
+  "encoding_id": 634,
+  "root_type": "MessagePDU"
+}

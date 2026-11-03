@@ -1,0 +1,6 @@
+{
+  "adjustments": [],
+  "case": "Send Opcua Hello Packet",
+  "encoding_id": null,
+  "root_type": "MessagePDU"
+}
