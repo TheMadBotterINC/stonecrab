@@ -5,6 +5,28 @@ Implementation baseline: the commit that last modified this file
 (`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
 its own commit; the slice log below records what each one landed.
 
+## OPC UA client design accepted (S97, 2026-11-03)
+
+ADR-0034 is Accepted, recording the existing E13/E14/E17/E18/E19/E21/E22 approvals and
+ratifying S83's address accessor types and text bound. Architecture, Connection rustdoc,
+both README support descriptions and the plan now agree on driver-specific concurrency,
+caller-driven renewal/Publish, a private session pump separate from EventPump, and native
+subscriptions ending with typed Disconnected so callers re-subscribe. Current S96 runtime
+support stays distinct from the accepted later-slice targets. E15/E16/E20 implementation
+acceptance remains S101/S103/S122; ADR-0035 stays Proposed. Completed Phase H rows are current.
+
+Documentation only: no executable code, API, dependency, feature, version, capability or
+parity-state change. Full check passes (2321 tests, 584+5 doctests, strict lint/rustdoc and
+no-default-features build), as do parity/self-test, attributes, consistency/link checks,
+DCO and the unchanged 198-file package inventory/verification. Executable source after
+stripping Rustdoc, manifests, lock and parity record match the S96 base. Runtime coverage
+and other runtime evidence remain S96's; no hardware or publication was performed.
+Self-review uses ADR-0005's waiver; [S97 evidence](docs/evidence/opcua-s97.md) records scope
+and validation.
+
+Next: S98, additive Bytes/Struct values and read metadata, with their own ADR.
+Normal merges preserve all signed-off commits.
+
 ## OPC UA endpoint selection and discovery primitives (S96, 2026-11-03)
 
 S96 adds generated GetEndpoints request/response codecs and a private exchange over the
@@ -646,6 +668,7 @@ commit; gates named were run locally before that commit.
 
 | Slice | Date | Landed | Gates |
 | --- | --- | --- | --- |
+| S97 | 2026-11-03 | Accept ADR-0034 and record seven existing maintainer outcomes; ratify S83 address accessor surface, reconcile architecture/Connection/README contracts and refresh Phase H completion. Distinguish caller-driven OPC UA session pump and typed native-subscription end from EventPump and future capability claims. Documentation only; self-review under ADR-0005 waiver; [evidence](docs/evidence/opcua-s97.md) | full check (2321 tests, 584+5 doctests), strict lint/rustdoc, no-default build, parity/self-test, attributes, documentation/relative-link consistency, executable-source comparison, unchanged 198-file package verification, DCO |
 | S96 | 2026-11-03 | Parsed endpoint matching and host/port overrides, exact policy/mode/token compatibility, security-level ranking and token-protection tie-break, bounded sanitized diagnostics and selected URL Debug. GetEndpoints codecs/private exchange; discovery configuration with fail-closed off/secure/no-path rule. Ten assigned parity rows; secure execution/trust retain later slices. Runner propagates test/example failures. Self-review under ADR-0005 waiver; [evidence](docs/evidence/opcua-s96.md) | check (2321 tests), coverage (opcua 100), 59 feature combinations, 15 fuzz targets, mutants 126 caught/10 unviable plus final selector 57 caught/two unviable (both exit 0), regen, parity/lint, semver default/all, dependencies/machete, 198-file package/unpacked build, six independent-peer cases, three negative runner probes |
 | S95 | 2026-11-03 | Pure extended value mapper, arrays/matrices, UTC tick precision, canonical Guid/NodeId text and checked temporal suffixes. Shared rank/node bounds, named per-item refusals, absent/explicit Null budget correction; 13 assigned parity rows plus two documented divergences. Self-review under ADR-0005 waiver; [evidence](docs/evidence/opcua-s95.md) | check (2296 tests), coverage (opcua 100), 59 features, 15 fuzz targets, final mapper mutations (43 caught/11 unviable) and affected-read rerun (30 caught/6 unviable), both exit 0, regen, parity/lint, semver default/all, dependencies/machete, 196-file package/unpacked build, five independent-peer cases |
 | S94 | 2026-11-03 | Bounded policy-None MSG splitting/reassembly, all encoding.* limits, request-local exact-status ABORT, aggregate partial-body budgets and cancellation/drop cleanup. Shared pure size arithmetic; no secure transforms or public array mapping yet. Eleven parity rows close. Self-review under ADR-0005 waiver; [evidence](docs/evidence/opcua-s94.md) | check (2265 tests), coverage (opcua 100), 59 features, 15 fuzz targets plus final assembler run, mutants (33 caught/2 unviable), regen, parity/lint, semver default/all, dependencies/machete, 194-file package/unpacked build, four independent-peer cases |
