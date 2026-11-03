@@ -842,3 +842,12 @@ all existing coverage floors, signed-off incremental commits and ordinary merges
 References: [CreateSession parameters](https://reference.opcfoundation.org/specs/OPC-10000-4/5.7.2.2),
 [ActivateSession parameters](https://reference.opcfoundation.org/specs/OPC-10000-4/5.7.3.2),
 and [getrandom 0.4 API](https://docs.rs/getrandom/0.4.3/getrandom/).
+
+
+S91 shrink/review: the private parser entry points are named `configuration`/`address`
+to avoid shadowing the public Driver methods; fuzz/tests use these same implementations.
+CLO now belongs to the lane for both pre-session tests and activated-session shutdown;
+the old Channel.close implementation is removed. A concurrent close also races its wait
+against a deadline, so an undriven first future cannot park the second call forever.
+The nonce boundary injects bytes directly into session setup; a failed OS fill has no
+fallback. None does not consume channel key material; secure key derivation remains S101.

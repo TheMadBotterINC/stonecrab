@@ -749,3 +749,67 @@ fn opcua_config_session_timeout_default_is_120000() {
         }
     }
 }
+
+#[test]
+fn opcua_session_cancellation_and_drop_never_activate_a_half_open_session() {
+    for stage in [2, 3] {
+        for dropped in [false, true] {
+            let clock = FakeClock::default();
+            let transport = FakeTransport::new(
+                Script::strict(vec![Step::respond(move |bytes| {
+                    if bytes.starts_with(b"MSG") {
+                        let Body::Message(chunk) = frame(bytes).body else {
+                            panic!("message")
+                        };
+                        if chunk.sequence.request_id == stage {
+                            return None;
+                        }
+                    }
+                    reply(bytes)
+                })]),
+                clock.clone(),
+                ResourceLimits::builder().build().unwrap(),
+            );
+            let probe = transport.probe();
+            let config = OpcuaDriver::configuration(URI).unwrap();
+            let options = config.driver_options_as::<OpcuaOptions>().unwrap();
+            let cancel = CancellationToken::new();
+            let deadline = Deadline::after(clock.now(), Duration::from_secs(60)).unwrap();
+            let channel = block_on_with(
+                &clock,
+                Channel::open_none(
+                    Box::new(transport),
+                    options,
+                    Arc::new(clock.clone()),
+                    deadline,
+                    &cancel,
+                ),
+            )
+            .unwrap();
+            let mut session = Box::pin(Session::open(
+                Lane::from_channel(channel, Duration::from_secs(30)),
+                options,
+                [7; 32],
+                deadline,
+                &cancel,
+            ));
+            assert!(
+                session
+                    .as_mut()
+                    .poll(&mut Context::from_waker(Waker::noop()))
+                    .is_pending()
+            );
+            if dropped {
+                drop(session);
+            } else {
+                cancel.cancel();
+                assert_eq!(
+                    block_on_with(&clock, session).err().unwrap().kind(),
+                    ErrorKind::Cancelled
+                );
+            }
+            assert_eq!(probe.sent().len(), usize::try_from(stage).unwrap() + 1);
+            assert_eq!(clock.sleeper_count(), 0);
+        }
+    }
+}

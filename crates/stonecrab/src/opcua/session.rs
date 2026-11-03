@@ -1,5 +1,6 @@
 //! Anonymous session setup on an explicitly selected None channel.
 //!
+//! # Compatibility: docs/parity/opcua.md#OPCUA-MODE-NONE
 //! # Compatibility: docs/parity/opcua.md#OPCUA-LIFE-CREATE-SESSION
 //! # Compatibility: docs/parity/opcua.md#OPCUA-LIFE-CLOSE-SESSION
 //! # Compatibility: docs/parity/opcua.md#OPCUA-LIMIT-CLOSE-HINT
