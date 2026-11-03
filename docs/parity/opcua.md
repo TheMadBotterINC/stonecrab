@@ -54,7 +54,7 @@ Status vocabulary, as used in the Status column:
   a test name under `crates/stonecrab`, and each test id in its Test ids column is a name a
   Rust source or fuzz target carries. No other row here is subject to those checks.
 
-Row count: 247 rows with ids (every table), 62 `implemented`, 144 `planned (M3)` and 38
+Row count: 247 rows with ids (every table), 65 `implemented`, 144 `planned (M3)` and 38
 `deferred`. The Divergences, quirk and Go tables reuse no ids. S43 wrote 228 rows (195
 planned, 33 deferred); S76 added 13 planned divergence rows and moved five planned rows to
 `deferred` under decision E16; S83 implemented 12 planned rows (`OPCUA-ADDR-*`, the quirk

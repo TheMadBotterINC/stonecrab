@@ -4,6 +4,11 @@ in neither `default` nor `full`, as `tls` is (decision E17, ADR-0034), and it ne
 `transport` feature. The module is being built in slices (milestone M3, ADR-0034). It currently has the
 address grammar, public `OpcuaDriver`, binary codecs, generated services, TCP framing,
 policy-None channel/session setup and bounded request lane. End-to-end scalar Read is available since S92.
+S93 checks 23 pinned upstream vectors against the codec: 15 byte-exact round-trips, one
+existing numeric `NodeId` canonicalization and seven exact disabled-service refusals.
+The notification envelope round-trip preserves an opaque body; full service/type support
+remains its later slices. The independent XML adapter and fixtures are repository-only;
+no runtime behavior changes in S93.
 
 This module offers `OpcuaAddress`, a validated `ProtocolAddress` for the tag text
 `ns=<n>;<i|s|g|b>=<id>[range][;a=<attribute>][;TYPE][|key=value,...]`, with the types its
