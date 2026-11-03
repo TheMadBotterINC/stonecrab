@@ -2,8 +2,9 @@
 
 ## Status
 
-Accepted design (2026-11-03), S99, under E18/E22 and ADR-0034. Implementation/evidence
-must pass before merge; encrypted user tokens and X.509 activation remain S108.
+Accepted and implemented (2026-11-03), S99, under E18/E22 and ADR-0034.
+[S99 evidence](../evidence/opcua-s99.md) records the completed gates and software-peer
+validation; encrypted user tokens and X.509 activation remain S108.
 
 ## Design and implementation plan
 
@@ -70,4 +71,5 @@ peer's allowNonePolicyPassword setting is confined to this explicit software tes
 S99 feature validation found that the new static warning needs the existing optional
 tracing dependency when opcua is enabled alone. The opcua feature now enables dep:tracing,
 as sim/modbus already do. No dependency/package or lockfile entry is added. Feature-only
-builds and archive verification must be repeated after this manifest correction.
+builds, the complete isolated feature matrix, fresh archive verification and unpacked
+all-feature/opcua-only builds pass after this manifest correction.

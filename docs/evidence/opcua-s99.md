@@ -56,8 +56,21 @@ username tokens and X509 activation remain S108, writes S100, secure channel S10
   in its own gen commit. Independent complete/truncated service vectors and corpus seeds
   cover the added body; the service dispatch has 25 cases.
 - Default/all-feature semver, default and fuzz Clippy, dependencies/machete,
-  parity/self-test and attribute lint pass. Remaining final gates and archive identity
-  are recorded below after completion.
+  parity/self-test and attribute lint pass. The final full check after documentation
+  changes also passes, with the same test/doctest totals.
+- All 59 feature combinations plus the no-default-features check pass in isolation.
+  The first matrix caught a missing tracing feature edge in the opcua-only build;
+  opcua now enables the existing optional dep:tracing, as sim/modbus already do.
+  No new package, lockfile entry, feature name or version is added. The standalone
+  check and complete isolated matrix pass after correction; manifests restore cleanly.
+- All 15 fuzz targets pass with a 10-second budget each on the pinned nightly, including
+  new strict-boolean connection seeds and complete/truncated username service bodies.
+- Fresh-CARGO_HOME package verification passes against the reviewed 199-file inventory.
+  Unpacked all-feature and no-default-features/opcua-only builds both pass after the
+  feature correction. Source 3641f036ab14c308df1d2e39bca3fd080acfaf28, archive 824255
+  bytes, SHA-256 f48fe4c6723fc892265928205125bb96a632e55b47be9cce612d919f8dab8b4b.
+  No fixtures, XML adapter or raw vendored model are shipped. Signed-off commit checks
+  and final diff checks pass.
 
 ## Independent peer
 
@@ -85,9 +98,10 @@ the private discriminator; no compatibility alias, executor, dependency or hidde
 Next: S100, staged OPC UA writes. Normal signed-off merge preserves every commit.
 No hardware, tag/release or external messaging was performed.
 
-Logs: /tmp/stonecrab-s99-{check,coverage-final,identity-mutants,core-mutants,regen,
+Logs: /tmp/stonecrab-s99-{check-final,coverage-final,identity-mutants,core-mutants,regen,
 interop,semver-final,semver-all,dependencies-final,machete-final,parity-final,
-lint-attrs-final,default-clippy,fuzz-clippy}.log. Mutation outcomes:
+lint-attrs-final,default-clippy,fuzz-clippy,features-final,fuzz-final,package-final,
+packaged-all-final,packaged-opcua-only,opcua-only,dco-final}.log. Mutation outcomes:
 /tmp/stonecrab-s99-identity-mutants/mutants.out/outcomes.json and
 /tmp/stonecrab-s99-core-mutants/mutants.out/outcomes.json.
 Independent peer evidence: target/interop-evidence/open62541/ (no private keys).
