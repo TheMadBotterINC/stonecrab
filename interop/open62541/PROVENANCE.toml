@@ -75,9 +75,9 @@ note = "First-party. The in-image checks: open62541's client against servers sta
 
 [[file]]
 path = "interop.sh"
-origin = "Authored for S81, in the shape of interop/libmodbus/interop.sh"
+origin = "Authored for S81, in the shape of interop/libmodbus/interop.sh; extended in S90 with the exact-count Stonecrab channel test"
 license = "Apache-2.0"
-note = "First-party. Build, run, probe, check and collect evidence; shared by the CI job and mise run interop-opcua."
+note = "First-party. Build, run, probe, check the peer and Stonecrab channel, and collect evidence; shared by the CI job and mise run interop-opcua."
 
 [[file]]
 path = "README.md"

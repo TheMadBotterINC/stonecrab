@@ -4,9 +4,9 @@ The independent OPC UA peer of milestone M3 (slice S81): an OPC UA server and a 
 built on open62541 v1.5.9 (C, MPL-2.0), a stack that shares no code with Stonecrab or with
 Eclipse Milo. The `interop-opcua` job of `.github/workflows/ci.yml` and `mise run
 interop-opcua` build it, run the checks below against it and keep the evidence. It is outside
-`mise run interop`, which stays the Modbus TCP peers, until the peer has proved stable. No
-Stonecrab OPC UA code exists yet; slice S90 adds the driver's `#[ignore]` interop tests that
-use this image.
+`mise run interop`, which stays the Modbus TCP peers, until the peer has proved stable. S90 adds one exact-count, ignored Stonecrab channel test: HEL/ACK, policy-None OPN Issue,
+CLO without awaiting a response, and request/sequence counter handoff to the lane.
+Public sessions/connect and Read follow in S91/S92.
 
 ## First-party statement and provenance
 
@@ -213,3 +213,20 @@ a few minutes natively and longer under emulation.
 (`OPCUA_PORT`, `OPCUA_ADVERTISED_HOST`, `OPCUA_TRUST`, `OPCUA_SMALL_CHUNKS`,
 `OPCUA_MAX_SESSION_TIMEOUT_MS`, `OPCUA_MAX_TOKEN_LIFETIME_MS`, `OPCUA_EVENT_PERIOD_MS`,
 `OPCUA_ALLOW_NONE_PASSWORD`).
+
+## Stonecrab channel validation (S90)
+
+`interop.sh tests` runs the ignored unit test
+`opcua::channel::tests::opcua_interop_peer_answers_hello_and_opens_a_none_channel`.
+Its nextest filter must select exactly one test (`EXPECTED_TESTS=1`). `run` and hosted CI
+execute it after the in-image checks and PKI step and retain `nextest.txt` beside the
+existing image identity/check/server evidence. The script supplies
+`STONECRAB_INTEROP_OPEN62541=opcua://127.0.0.1:<port>?security-policy=NONE`.
+
+The test opens and closes a channel, then opens another and hands it to the existing
+request lane. A request with no session receives `BadSessionIdInvalid`, proving that the
+continued counters reach the server's session check. The peer revised the requested
+3600000 ms lifetime to 600000 ms in the local S90 run; the client retained that value.
+This is internal channel evidence. Public connect, session activation and usable Read
+remain the next milestones. The in-image client separately tests the server scaffold's
+secure policies and identities.
