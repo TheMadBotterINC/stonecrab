@@ -23,7 +23,7 @@ socket and starts no discovery.
 | Built-in types of the binary encoding: String, `ByteString`, Guid, `DateTime`, `StatusCode`, `NodeId`, `ExpandedNodeId`, `QualifiedName`, `LocalizedText` (crate-private) | build-tested |
 | Recursive and open types of the binary encoding: Variant (25 types, arrays, dimensions), `DataValue`, `DiagnosticInfo`, the `ExtensionObject` envelope with Raw, Xml and Null bodies, bounded in depth and in array counts (crate-private) | build-tested |
 | TCP framing: the 8-byte header, HEL, ACK, ERR, OPN, CLO and MSG bodies, the asymmetric header of policy None, the symmetric and sequence headers, and a single-chunk `Framer` (crate-private) | build-tested |
-| Generated 22-case connection/read service bodies and 274 status names; Known ExtensionObject dispatch (crate-private) | build-tested |
+| Generated 22-case connection/read service bodies and 274 status names; Known `ExtensionObject` dispatch (crate-private) | build-tested |
 | Driver, connection, secure channel, session | planned |
 | Read, write, browse, subscriptions | planned |
 | Security policies and certificates | planned |
@@ -224,7 +224,7 @@ negative vectors under `fixtures/opcua/services`, deterministic regeneration and
 `fuzz_opcua_service` target. Generated code has vector coverage; all handwritten OPC UA
 code keeps its 100% line coverage floor.
 
-A local namespace-zero binary ExtensionObject with a recognized encoding id becomes a
+A local namespace-zero binary `ExtensionObject` with a recognized encoding id becomes a
 Known body, bounded by its declared byte slice and the shared 64-entry recursion budget.
 Disabled, unknown and custom identifiers retain Raw bytes. Invalid fields in a recognized
 body and trailing bytes fail; they cannot silently become Raw. Known-body serialization
