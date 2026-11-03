@@ -13,8 +13,12 @@ use crate::{
 /// A [`Driver`](crate::Driver) returns a `Box<dyn Connection>` from `connect`. The trait
 /// is object safe and `Send + Sync`; every asynchronous method returns an [`OpFuture`], a
 /// boxed `Send` future, so a connection can be shared between tasks and driven by any
-/// executor. All per-connection state (the transport, the lifecycle state, the in-flight
-/// request) lives behind it.
+/// executor. Per-connection transport, lifecycle and pending-request state live behind it.
+/// The driver chooses how to bound concurrent requests: Modbus uses a serialized
+/// `ConnectionGuard`, while OPC UA uses a private pipelined lane (ADR-0034). The accepted
+/// OPC UA renewal and native-subscription design is caller-driven, with no spawned task;
+/// those operations remain staged in S109–S118. Its private session pump is separate from
+/// the public [`EventPump`](crate::EventPump) for named read batches.
 ///
 /// # Narrow surface
 /// The surface is the seven required methods below (decision D2) and two provided methods

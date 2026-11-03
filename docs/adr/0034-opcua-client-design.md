@@ -1,17 +1,19 @@
 # 0034: OPC UA client design
 ## Status
-Proposed (2026-10-30), as slice S76 of docs/POST_ALPHA_PLAN.md (Phase H, M3: "draft ADR-0034
-'OPC UA client design' as Proposed"); slice S97 accepts it. It records how the maintainer's
-decisions of 2026-10-30 shape the client: E14 (the hybrid codec, confirmed once S80 reports),
-E17 (the feature and the version rule), E18 (the public additions) and E19 (the caller-driven
-pump and the subscription end), with E21 and E22 as the parity record applies them. The
-cryptography backend (E15) and the key and trust formats (E16) are ADR-0035's and slices
-S101 to S104's; this ADR only names where they plug in. It amends ADR-0013 (two `ParseError`
-variants, decision 5), extends ADR-0019 as the S80 addendum will record (decision 3), and
-leaves `ConnectionGuard` (ADR-0014) unchanged for every other driver (decision 6). Nothing is
-implemented by this slice.
+Accepted (2026-11-03), slice S97 of docs/POST_ALPHA_PLAN.md. Proposed by S76 on
+2026-10-30; acceptance records the maintainer's existing E13/E14/E17/E18/E19/E21/E22
+approvals of that date. E14 is confirmed by S80's measurements and the S88 generator
+fixes. E15/E16/E20 implementation acceptance remains S101/S103/S122; ADR-0035 stays
+Proposed until S101.
 
-## Context
+Decisions below are the accepted M3 target. S83–S96 implement the address/configuration,
+codec, framing, request lane, anonymous None connect/read/close, chunking, value mapping
+and endpoint-selection subset. Renewal/reconnect, protected credentials, browse and
+native subscriptions remain their owning slices; acceptance does not mark them supported.
+S97 changes documentation only. This ADR amends ADR-0013 for codec bounds and ADR-0019
+for shipped OPC UA generation, while Modbus keeps ADR-0014's ConnectionGuard.
+
+## Context at proposal (S76)
 Upstream's OPC UA driver (Apache PLC4X v1.0.0, commit ea229918) is a hand-written client
 around Java classes generated from `opc-manual.mspec`, itself generated from the OPC
 Foundation NodeSet (ADR-0019, Context). `Conversation.submit` gives each request a request id
@@ -69,11 +71,11 @@ through `SubscriptionSender`, and dropping the sender ends the stream.
    Because `scripts/coverage-gate.sh` excludes `generated/` from the line floor, the
    generated layer is proven instead by a valid and a negative vector for every enabled case,
    a fuzz target on the known-body dispatch and byte-identical regeneration (`mise run regen`).
-   A disabled case is refused with `InvalidDiscriminator`, which the ExtensionObject envelope
-   turns into a Raw body, so a response carrying a type Stonecrab does not decode still
-   succeeds. If S80 shows constructs the generator cannot emit, E14 falls back to option 2:
-   the same structures hand-written in `crate::opcua::service`, with the generated output kept
-   as a `cfg(test)` cross-check.
+   A disabled case is refused with `InvalidDiscriminator`; the ExtensionObject envelope
+   preserves its identity and bytes as Raw. A recognized malformed body never falls back
+   to Raw, and service callers still reject an unexpected response type. S80 measured the generator gaps; S88 fixed them and shipped the generated
+   subset, confirming E14 option 1. The original hand-written fallback was not needed.
+   S96 enables 24 cases; remaining services join in their owning slices.
 3. **The external-type contract.** The generator's `[external]` table (S79) maps an mspec
    type name to a hand-written Rust type with one fixed shape: a parse function from a
    `BoundedReader` and a depth budget, a serialize function to a `BoundedWriter` with the same
@@ -130,11 +132,12 @@ through `SubscriptionSender`, and dropping the sender ends the stream.
    and a Publish waits at the server for up to its timeout hint, so a single in-flight slot
    would hold every Read behind it. The OPC UA connection therefore does not use
    `ConnectionGuard`; a private lane in `crate::opcua::lane` owns the
-   `FramedTransport` instead, and the guard stays as it is for Modbus and the simulator.
-   - Sending: the lane gives each request its request id and sequence numbers, encodes and
-     chunks it and sends it now, under a send lock, then registers a pending entry (request
-     id to reply slot) in a table bounded by `ResourceLimits::max_pending_requests`; a full
-     table is `Backpressure`.
+   `FramedTransport` instead. Modbus retains its guard, and the simulator retains its own
+   single-flight state.
+   - Sending: reserve a pending entry (request id to reply slot) before sending, in a table
+     bounded by `ResourceLimits::max_pending_requests`; a full table is `Backpressure`.
+     The lane assigns sequence numbers, encodes/chunks and sends under exclusive send
+     ownership. Dropping the request releases its entry.
    - Receiving: whichever caller is waiting for a reply reads the next frame for everyone,
      under a receive lock, and hands each reassembled message to the slot its request id
      names. No task is spawned. A reply for an unknown or abandoned request id is discarded
@@ -213,9 +216,12 @@ through `SubscriptionSender`, and dropping the sender ends the stream.
      `Subscription::refused()` and `end_reason()`, and new `LossCounters` fields (server
      overflow, sequence gaps, unknown notifications). `Subscription::recv` keeps its
      signature.
-   - In `crate::opcua`, only the driver, its address type and the options a caller names are
-     public. The lane, the codec, the generated layer, the pump and the security code are
-     `pub(crate)` or private.
+   - In `crate::opcua`, the public surface includes `OpcuaDriver`, `OpcuaAddress`, the
+     accessor enums `OpcuaIdentifier`, `OpcuaAttribute` and `OpcuaDataType`, and
+     `OpcuaAddress::MAX_TEXT_BYTES` (8192), ratified here from S83. Public address parsing
+     includes `parse_query`; connection parameters remain private `OpcuaOptions`.
+     The lane, codec, generated layer, session pump and security code remain private or
+     `pub(crate)`. Later public browse types follow E18 in their owning slices.
 10. **Module layout.** `crates/stonecrab/src/opcua.rs` and `src/opcua/`, by the slice that
     adds each file:
 
@@ -244,8 +250,9 @@ through `SubscriptionSender`, and dropping the sender ends the stream.
     `generated/`.
 
 ## Consequences
-- A build without `opcua` is unchanged: no new module, dependency or public item. Every
-  public addition of M3 is additive, so 0.3.0 users upgrade without code changes.
+- A build without `opcua` gains no OPC UA module or dependency. E18's additive core
+  values and provided trait methods remain shared contracts across features; they are
+  not gated on a protocol. Existing public variants/methods remain compatible with 0.3.0.
 - The generated layer ships in the library for the first time, so regeneration, the vector
   pair per case and the dispatch fuzz target become release gates for `opcua`.
 - Reads, writes, browses and Publish share one channel concurrently, bounded by
@@ -262,7 +269,7 @@ through `SubscriptionSender`, and dropping the sender ends the stream.
   other, so the shared parts (state machine, backoff, deadlines) stay in the shared types.
 
 ## Alternatives considered
-- **Hand-write everything (E14 option 2).** Kept as the fallback if S80 finds constructs the
+- **Hand-write everything (E14 option 2).** The proposal's fallback if S80 found constructs the
   generator cannot emit; it gives up the per-case vectors against the upstream model and
   costs more hand-written code to keep at 100 percent coverage.
 - **Generate everything, built-ins and framing included (E14 option 3).** Generator gaps G11
@@ -284,10 +291,14 @@ through `SubscriptionSender`, and dropping the sender ends the stream.
   still reach `ConnectionUri`, logs and cache keys.
 
 ## Compliance
-- To be added by the slices that implement it: `crates/stonecrab/src/opcua.rs` and
-  `src/opcua/` as in decision 10; the `opcua` feature in `crates/stonecrab/Cargo.toml` (S83);
-  `ParseError::RecursionLimit` and `CountLimit` in `crates/stonecrab/src/codec/error.rs` (S86);
-  `protocols/opcua.toml` and the vendored mspec files with their manifest entries (S88).
+- Implemented through S96: `crates/stonecrab/src/opcua.rs` and `src/opcua/` as in
+  decision 10; the opt-in feature (S83), codec bounds (S86), vendored model and generated
+  service subset (S88), lane (S89), None channel/session (S90/S91), Read and extended
+  values (S92/S95), upstream vectors (S93), chunking (S94), and endpoint selection and
+  private GetEndpoints exchange (S96). Evidence is linked in STATUS's slice log.
+- Accepted targets remain staged: value/metadata additions S98, credential channel S99,
+  secure policies S101–S108, renewal/reconnect S109/S110, browse S111–S113, and native
+  subscription/pump contracts S114–S118. Their future-facing text is not runtime evidence.
 - Gates: the `opcua` floor of 100 in `scripts/coverage-gate.sh` and the module lists of
   `scripts/lint-attrs.sh` and `mutants.toml` (S83); the `regen` job extended to OPC UA (S88);
   the semver job against 0.3.0 on every slice; Clippy's `disallowed-methods` ban on spawning;
@@ -295,8 +306,8 @@ through `SubscriptionSender`, and dropping the sender ends the stream.
   v1.5.9 (S81) and the second peer of E20 (S122).
 - `docs/parity/opcua.md` records every row with its planned tests and owning slice; the
   divergence rows `OPCUA-DIV-*` name the slice that implements each difference.
-- S97 accepts this ADR and corrects the stale contract text (`ARCHITECTURE.md` and
-  `connection.rs:15-17`) to agree with decisions 6 and 7.
+- S97 accepts this ADR, ratifies S83's accessor surface, and reconciles ARCHITECTURE,
+  Connection rustdoc, the plan and STATUS with decisions 6–9. It adds no runtime behavior.
 
 ## Addendum (S83, 2026-10-30): the address grammar
 Slice S83 added the `opcua` feature, `crate::opcua` and `OpcuaAddress` (decisions 1 and 10),
@@ -322,8 +333,8 @@ and fixed the points the parity record left to it. The status of this ADR is unc
   must parse back); messages echo at most 32 characters. A `b` identifier with non-zero
   bits before its pad is refused, so each byte string has one text.
 - **Surface.** `OpcuaAddress`, `OpcuaIdentifier`, `OpcuaAttribute` and `OpcuaDataType` are
-  public and the types of its accessors (decision 9 names only the address type; S97, which
-  accepts this ADR, ratifies the three accessor enums and `OpcuaAddress::MAX_TEXT_BYTES`);
+  public and the types of its accessors (ratified in decision 9 by S97, together with
+  `OpcuaAddress::MAX_TEXT_BYTES`);
   `OpcuaAddress::parse_query` reads a browse query
   (empty and `**` mean `ns=0;i=85`). The driver's `parse_address` over it arrives with
   the connection string (S84) and stays crate-private until S91.
@@ -1159,3 +1170,31 @@ Reference checks: OPC Foundation Part 4 sections
 [7.41](https://reference.opcfoundation.org/specs/OPC-10000-4/7.41) describe the null
 GetEndpoints authentication token, empty transport-profile filter, and token-policy
 inheritance. Ranking is an advertised preference, not proof of server identity.
+
+## S97 acceptance plan (2026-11-03)
+
+Ratify the existing E13/E14/E17/E18/E19/E21/E22 outcomes and the S83 address accessor
+surface, then reconcile the architecture and Connection rustdoc with decisions 6–9.
+This slice changes documentation only: current S96 behavior stays distinct from the
+accepted S109–S118 renewal, reconnect and native-subscription contracts.
+
+Update this ADR's status/compliance, the plan's outcome and slice tables, STATUS's
+maintainer decisions/handoff, both README support descriptions, ARCHITECTURE's module,
+trait, value, lifecycle, connect/reconnect and feature descriptions, and Connection's
+in-flight-state wording. The private OPC UA session pump is `opcua::pump`, separate
+from ADR-0031's public batch-reading EventPump. E15/E16/E20 implementation acceptance
+remains S101/S103/S122. Validate doc-only changes, table/link consistency, parity and
+attribute checks, strict Clippy/rustdoc, doctests and the existing full suite. Runtime
+coverage evidence remains S96's; add no behavioral tests or new capability claims.
+
+## S97 acceptance record (2026-11-03)
+
+The plan above was executed. Decisions 7–9 preserve the caller-driven session pump,
+queued events followed by None and typed Disconnected on transport loss, the separate
+credential channel and additive public values/APIs. An idle OPC UA connection renews
+nothing; automatic re-creation, Republish and TransferSubscriptions are outside M3.
+The private `opcua::pump` serves one session's protocol work; ADR-0031's public EventPump
+reads named batches on connections or cache leases and is unrelated. S109/S110/S114–S118
+implement the accepted lifecycle, with parity evidence required before support claims.
+E13's redistribution approval and E14's generator evidence are recorded in the plan's
+outcome table and STATUS, alongside E17/E18/E19/E21/E22. Acceptance authorizes no release.
