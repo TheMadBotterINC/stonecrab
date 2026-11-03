@@ -5,8 +5,8 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::{
-    Connection, ConnectionConfig, ConnectionUri, Diagnostics, Driver, ErrorKind, FailureCategory,
-    OpFuture, Operation, PlcError, Result,
+    Connection, ConnectionConfig, ConnectionUri, Credentials, Diagnostics, Driver, ErrorKind,
+    FailureCategory, OpFuture, Operation, PlcError, Result,
 };
 
 /// A set of drivers keyed by connection-string scheme.
@@ -196,10 +196,48 @@ impl DriverRegistry {
     /// );
     /// ```
     pub fn connect(&self, uri: &str) -> OpFuture<'_, Box<dyn Connection>> {
-        match self.parse(uri) {
-            Ok((driver, config)) => Box::pin(async move { driver.connect(config).await }),
-            Err(error) => Box::pin(std::future::ready(Err(error))),
-        }
+        connect_parsed(self.parse(uri))
+    }
+
+    /// Open a parsed URI with separately supplied credentials, never interpolating secrets.
+    ///
+    /// Explicit credentials replace any identity supplied by the driver's parser. Other
+    /// validated settings remain unchanged. OPC UA still rejects URI username/password keys.
+    ///
+    /// # Errors
+    /// As [`Self::connect`]; credential validation belongs to the driver before I/O.
+    ///
+    /// # Cancel safety
+    /// As [`Self::connect`]; dropping the future abandons the connection attempt.
+    ///
+    /// # Wire effects
+    /// None on parse failure; otherwise the driver's handshake, within its connect deadline.
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab::{Credentials, DriverRegistry};
+    /// let registry = DriverRegistry::new();
+    /// let attempt = registry.connect_with("opcua://host:4840", Credentials::new("operator", "example-only"));
+    /// drop(attempt);
+    /// ```
+    pub fn connect_with(
+        &self,
+        uri: &str,
+        credentials: Credentials,
+    ) -> OpFuture<'_, Box<dyn Connection>> {
+        connect_parsed(
+            self.parse(uri)
+                .map(|(driver, config)| (driver, config.with_credentials(credentials))),
+        )
+    }
+}
+
+fn connect_parsed(
+    parsed: Result<(Arc<dyn Driver>, ConnectionConfig)>,
+) -> OpFuture<'static, Box<dyn Connection>> {
+    match parsed {
+        Ok((driver, config)) => Box::pin(async move { driver.connect(config).await }),
+        Err(error) => Box::pin(std::future::ready(Err(error))),
     }
 }
 
