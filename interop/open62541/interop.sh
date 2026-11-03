@@ -46,8 +46,8 @@ PORT="${INTEROP_OPEN62541_PORT:-4840}"
 HOST="127.0.0.1"
 EVIDENCE="${INTEROP_EVIDENCE_DIR:-$ROOT/target/interop-evidence}/open62541"
 PKI_OUT="${INTEROP_PKI_DIR:-$ROOT/target/interop-pki/open62541}"
-FILTER='binary(stonecrab) & test(/^opcua::(channel|session|connection|lane)::tests::opcua_interop_/)'
-EXPECTED_TESTS=5
+FILTER='binary(stonecrab) & test(/^opcua::(channel|session|connection|lane|endpoint)::tests::opcua_interop_/)'
+EXPECTED_TESTS=6
 
 die() {
   echo "interop: $*" >&2
@@ -162,13 +162,13 @@ run_tests() {
   export STONECRAB_INTEROP_OPEN62541="opcua://${HOST}:${PORT}?security-policy=NONE"
   local listed
   listed="$(cargo nextest list --locked -p stonecrab --all-features \
-    --run-ignored ignored-only -E "$FILTER" --message-format oneline | grep -Ec 'opcua::(channel|session|connection|lane)::tests::opcua_interop_' || true)"
+    --run-ignored ignored-only -E "$FILTER" --message-format oneline | grep -Ec 'opcua::(channel|session|connection|lane|endpoint)::tests::opcua_interop_' || true)"
   [ "$listed" = "$EXPECTED_TESTS" ] ||
     die "expected $EXPECTED_TESTS Stonecrab interop tests, the filter selects $listed"
   cargo nextest run --locked -p stonecrab --all-features \
-    --run-ignored ignored-only -E "$FILTER" --test-threads 1 --no-capture 2>&1 | tee "$EVIDENCE/nextest.txt"
+    --run-ignored ignored-only -E "$FILTER" --test-threads 1 --no-capture 2>&1 | tee "$EVIDENCE/nextest.txt" || return 1
   STONECRAB_URL="$STONECRAB_INTEROP_OPEN62541" STONECRAB_ADDRESS='ns=1;s=scalar/Int32' \
-    cargo run --locked -p stonecrab --example opcua_read --features opcua 2>&1 | tee "$EVIDENCE/example.txt"
+    cargo run --locked -p stonecrab --example opcua_read --features opcua 2>&1 | tee "$EVIDENCE/example.txt" || return 1
 }
 
 evidence() {
