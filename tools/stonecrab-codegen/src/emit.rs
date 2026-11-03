@@ -1208,7 +1208,14 @@ fn text_literal(text: &str) -> Option<Lit> {
 
 /// An integer written as an enum value or constant, and its value.
 fn integer_text(raw: &str) -> Option<(String, u128)> {
-    parse_integer(raw).map(|value| (raw.to_owned(), value))
+    parse_integer(raw).map(|value| {
+        let literal = if raw.len() >= 6 {
+            decimal(value)
+        } else {
+            raw.to_owned()
+        };
+        (literal, value)
+    })
 }
 
 fn integer_literal(expr: &Expr) -> Option<(String, u128)> {
