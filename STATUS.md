@@ -5,6 +5,31 @@ Implementation baseline: the commit that last modified this file
 (`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
 its own commit; the slice log below records what each one landed.
 
+## OPC UA public session connect (S91, 2026-11-03)
+
+S91 adds public `OpcuaDriver` with the existing clock/transport injection pattern and
+explicit registry registration. Policy None opens TCP, HEL/ACK, OPN, CreateSession and
+anonymous ActivateSession before returning Connected. CreateSession uses a fresh 32-byte
+OS nonce; the revised session timeout and authentication token are retained. Handshake
+and session timeout options default to 60000 and 120000 ms. Secure defaults and supplied
+credentials are refused before I/O; read/write flags remain false until their slices.
+
+Close sends CloseSession (delete subscriptions, hint 50000), then CLO without a response
+wait, under request timeout. Timeout/drop is terminal, repeated close succeeds, and even
+a concurrent close waiting behind an undriven future is bounded. The old Channel.close
+path is deleted; both pre-session and activated-session shutdown use the lane counters.
+Optional getrandom 0.4.3 supplies OS entropy without a new crypto stack or trait; its
+runtime boundary is audited in ADR-0034 and DEPENDENCY_AUDIT.md.
+
+Local checks: 2211 tests, 584+5 doctests, 100% handwritten OPC UA coverage (6259/6259),
+59 feature combinations, default/all-feature semver, regeneration, dependency checks,
+189-file verified archive and focused mutations (23 caught, 3 unviable, no survivors).
+Two exact-count tests pass against independent open62541, including public registry
+session connect/close. Details and fuzz results are in [S91 evidence](docs/evidence/opcua-s91.md).
+No hardware or release/publishing work was performed. Normal merges preserve all commits.
+
+Next: S92, the first end-to-end Read and the OPC UA connection contract suite.
+
 ## OPC UA policy-None channel (S90, 2026-11-03)
 
 S90 adds private HEL/ACK negotiation, OPN Issue and fire-and-forget CLO. Directional
