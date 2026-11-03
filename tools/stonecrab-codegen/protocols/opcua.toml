@@ -1,4 +1,4 @@
-# S88 / ADR-0034: the pinned connect-and-read service closure.
+# S100 / ADR-0034: the pinned connection, read and write service closure.
 protocol = "opcua"
 output = "crates/stonecrab/src/opcua"
 support_module = "crate::codec"
@@ -19,6 +19,7 @@ ExtensionObjectDefinition = [
   "SignedSoftwareCertificate", "SignatureData", "CreateSessionRequest", "CreateSessionResponse",
   "AnonymousIdentityToken", "UserNameIdentityToken", "ActivateSessionRequest", "ActivateSessionResponse",
   "CloseSessionRequest", "CloseSessionResponse", "ReadValueId", "ReadRequest", "ReadResponse",
+  "WriteValue", "WriteRequest", "WriteResponse",
 ]
 
 [external]
