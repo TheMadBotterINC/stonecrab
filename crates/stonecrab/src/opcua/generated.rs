@@ -29,3 +29,4 @@ pub(super) mod signed_software_certificate;
 pub(super) mod timestamps_to_return;
 pub(super) mod user_token_policy;
 pub(super) mod user_token_type;
+pub(super) mod write_value;

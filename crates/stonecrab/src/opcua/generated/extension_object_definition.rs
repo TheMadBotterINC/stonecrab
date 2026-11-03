@@ -40,6 +40,7 @@ use super::signed_software_certificate::SignedSoftwareCertificate;
 use super::timestamps_to_return::TimestampsToReturn;
 use super::user_token_policy::UserTokenPolicy;
 use super::user_token_type::UserTokenType;
+use super::write_value::WriteValue;
 
 #[derive(Debug, Clone, PartialEq)]
 #[expect(
@@ -202,6 +203,21 @@ pub(crate) enum ExtensionObjectDefinition {
     ReadResponse {
         response_header: ResponseHeader,
         results: Option<Vec<DataValue>>,
+        diagnostic_infos: Option<Vec<DiagnosticInfo>>,
+    },
+    WriteValue {
+        node_id: NodeId,
+        attribute_id: u32,
+        index_range: PascalString,
+        value: DataValue,
+    },
+    WriteRequest {
+        request_header: RequestHeader,
+        nodes_to_write: Option<Vec<WriteValue>>,
+    },
+    WriteResponse {
+        response_header: ResponseHeader,
+        results: Option<Vec<StatusCode>>,
         diagnostic_infos: Option<Vec<DiagnosticInfo>>,
     },
 }
@@ -1206,18 +1222,9 @@ impl ExtensionObjectDefinition {
                 field: "ExtensionObjectDefinition.HistoryReadResponse (disabled)",
                 value: i64::from(extension_id).cast_unsigned(),
             }),
-            670 => Err(ParseError::InvalidDiscriminator {
-                field: "ExtensionObjectDefinition.WriteValue (disabled)",
-                value: i64::from(extension_id).cast_unsigned(),
-            }),
-            673 => Err(ParseError::InvalidDiscriminator {
-                field: "ExtensionObjectDefinition.WriteRequest (disabled)",
-                value: i64::from(extension_id).cast_unsigned(),
-            }),
-            676 => Err(ParseError::InvalidDiscriminator {
-                field: "ExtensionObjectDefinition.WriteResponse (disabled)",
-                value: i64::from(extension_id).cast_unsigned(),
-            }),
+            670 => Self::parse_write_value(reader, depth),
+            673 => Self::parse_write_request(reader, depth),
+            676 => Self::parse_write_response(reader, depth),
             679 => Err(ParseError::InvalidDiscriminator {
                 field: "ExtensionObjectDefinition.HistoryUpdateDetails (disabled)",
                 value: i64::from(extension_id).cast_unsigned(),
@@ -2535,6 +2542,159 @@ impl ExtensionObjectDefinition {
         })
     }
 
+    fn parse_write_value(reader: &mut BoundedReader<'_>, depth: Depth) -> Result<Self, ParseError> {
+        let node_id = NodeId::parse(reader, depth)?;
+        let attribute_id = reader.read_u32(ByteOrder::LittleEndian)?;
+        let index_range = PascalString::parse(reader, depth)?;
+        let value = DataValue::parse(reader, depth)?;
+        Ok(Self::WriteValue {
+            node_id,
+            attribute_id,
+            index_range,
+            value,
+        })
+    }
+
+    fn parse_write_request(
+        reader: &mut BoundedReader<'_>,
+        depth: Depth,
+    ) -> Result<Self, ParseError> {
+        let request_header = RequestHeader::parse(reader, depth, 391)?;
+        let no_of_nodes_to_write = reader.read_i32(ByteOrder::LittleEndian)?;
+        let nodes_to_write = {
+            let array_count = i64::from(no_of_nodes_to_write);
+            if array_count == -1 {
+                None
+            } else {
+                let array_count = usize::try_from(array_count).map_err(|_overflow| {
+                    ParseError::InvalidDiscriminator {
+                        field: "nodesToWrite",
+                        value: array_count.unsigned_abs(),
+                    }
+                })?;
+                if array_count > reader.remaining() {
+                    return Err(ParseError::CountLimit {
+                        field: "nodesToWrite",
+                        count: array_count,
+                        max: reader.remaining(),
+                    });
+                }
+                let mut array_items = Vec::new();
+                for _ in 0..array_count {
+                    array_items.push(WriteValue::parse(reader, depth, 670)?);
+                }
+                Some(array_items)
+            }
+        };
+        if i64::from(no_of_nodes_to_write)
+            != (if nodes_to_write.is_none() {
+                -1_i64
+            } else {
+                i64::try_from(nodes_to_write.as_ref().map_or(0, Vec::len))
+                    .map_err(|_overflow| ParseError::Overflow)?
+            })
+        {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "noOfNodesToWrite",
+                value: u64::from(no_of_nodes_to_write.unsigned_abs()),
+            });
+        }
+        Ok(Self::WriteRequest {
+            request_header,
+            nodes_to_write,
+        })
+    }
+
+    fn parse_write_response(
+        reader: &mut BoundedReader<'_>,
+        depth: Depth,
+    ) -> Result<Self, ParseError> {
+        let response_header = ResponseHeader::parse(reader, depth, 394)?;
+        let no_of_results = reader.read_i32(ByteOrder::LittleEndian)?;
+        let results = {
+            let array_count = i64::from(no_of_results);
+            if array_count == -1 {
+                None
+            } else {
+                let array_count = usize::try_from(array_count).map_err(|_overflow| {
+                    ParseError::InvalidDiscriminator {
+                        field: "results",
+                        value: array_count.unsigned_abs(),
+                    }
+                })?;
+                if array_count > reader.remaining() {
+                    return Err(ParseError::CountLimit {
+                        field: "results",
+                        count: array_count,
+                        max: reader.remaining(),
+                    });
+                }
+                let mut array_items = Vec::new();
+                for _ in 0..array_count {
+                    array_items.push(StatusCode::parse(reader, depth)?);
+                }
+                Some(array_items)
+            }
+        };
+        let no_of_diagnostic_infos = reader.read_i32(ByteOrder::LittleEndian)?;
+        let diagnostic_infos = {
+            let array_count = i64::from(no_of_diagnostic_infos);
+            if array_count == -1 {
+                None
+            } else {
+                let array_count = usize::try_from(array_count).map_err(|_overflow| {
+                    ParseError::InvalidDiscriminator {
+                        field: "diagnosticInfos",
+                        value: array_count.unsigned_abs(),
+                    }
+                })?;
+                if array_count > reader.remaining() {
+                    return Err(ParseError::CountLimit {
+                        field: "diagnosticInfos",
+                        count: array_count,
+                        max: reader.remaining(),
+                    });
+                }
+                let mut array_items = Vec::new();
+                for _ in 0..array_count {
+                    array_items.push(DiagnosticInfo::parse(reader, depth)?);
+                }
+                Some(array_items)
+            }
+        };
+        if i64::from(no_of_results)
+            != (if results.is_none() {
+                -1_i64
+            } else {
+                i64::try_from(results.as_ref().map_or(0, Vec::len))
+                    .map_err(|_overflow| ParseError::Overflow)?
+            })
+        {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "noOfResults",
+                value: u64::from(no_of_results.unsigned_abs()),
+            });
+        }
+        if i64::from(no_of_diagnostic_infos)
+            != (if diagnostic_infos.is_none() {
+                -1_i64
+            } else {
+                i64::try_from(diagnostic_infos.as_ref().map_or(0, Vec::len))
+                    .map_err(|_overflow| ParseError::Overflow)?
+            })
+        {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "noOfDiagnosticInfos",
+                value: u64::from(no_of_diagnostic_infos.unsigned_abs()),
+            });
+        }
+        Ok(Self::WriteResponse {
+            response_header,
+            results,
+            diagnostic_infos,
+        })
+    }
+
     pub(crate) fn serialize(
         &self,
         writer: &mut BoundedWriter,
@@ -2592,6 +2752,9 @@ impl ExtensionObjectDefinition {
             Self::ReadValueId { .. } => self.serialize_read_value_id(writer, depth),
             Self::ReadRequest { .. } => self.serialize_read_request(writer, depth),
             Self::ReadResponse { .. } => self.serialize_read_response(writer, depth),
+            Self::WriteValue { .. } => self.serialize_write_value(writer, depth),
+            Self::WriteRequest { .. } => self.serialize_write_request(writer, depth),
+            Self::WriteResponse { .. } => self.serialize_write_response(writer, depth),
         }
     }
 
@@ -3326,6 +3489,107 @@ impl ExtensionObjectDefinition {
         else {
             return Err(ParseError::InvalidDiscriminator {
                 field: "ExtensionObjectDefinition.ReadResponse",
+                value: 0,
+            });
+        };
+        response_header.serialize(writer, depth)?;
+        let no_of_results = i32::try_from(if results.is_none() {
+            -1_i64
+        } else {
+            i64::try_from(results.as_ref().map_or(0, Vec::len))
+                .map_err(|_overflow| ParseError::Overflow)?
+        })
+        .map_err(|_overflow| ParseError::Overflow)?;
+        writer.write_i32(no_of_results, ByteOrder::LittleEndian)?;
+        if let Some(array_items) = results {
+            for array_item in array_items {
+                array_item.serialize(writer, depth)?;
+            }
+        }
+        let no_of_diagnostic_infos = i32::try_from(if diagnostic_infos.is_none() {
+            -1_i64
+        } else {
+            i64::try_from(diagnostic_infos.as_ref().map_or(0, Vec::len))
+                .map_err(|_overflow| ParseError::Overflow)?
+        })
+        .map_err(|_overflow| ParseError::Overflow)?;
+        writer.write_i32(no_of_diagnostic_infos, ByteOrder::LittleEndian)?;
+        if let Some(array_items) = diagnostic_infos {
+            for array_item in array_items {
+                array_item.serialize(writer, depth)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn serialize_write_value(
+        &self,
+        writer: &mut BoundedWriter,
+        depth: Depth,
+    ) -> Result<(), ParseError> {
+        let Self::WriteValue {
+            node_id,
+            attribute_id,
+            index_range,
+            value,
+        } = self
+        else {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "ExtensionObjectDefinition.WriteValue",
+                value: 0,
+            });
+        };
+        node_id.serialize(writer, depth)?;
+        writer.write_u32(*attribute_id, ByteOrder::LittleEndian)?;
+        index_range.serialize(writer, depth)?;
+        value.serialize(writer, depth)
+    }
+
+    fn serialize_write_request(
+        &self,
+        writer: &mut BoundedWriter,
+        depth: Depth,
+    ) -> Result<(), ParseError> {
+        let Self::WriteRequest {
+            request_header,
+            nodes_to_write,
+        } = self
+        else {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "ExtensionObjectDefinition.WriteRequest",
+                value: 0,
+            });
+        };
+        request_header.serialize(writer, depth)?;
+        let no_of_nodes_to_write = i32::try_from(if nodes_to_write.is_none() {
+            -1_i64
+        } else {
+            i64::try_from(nodes_to_write.as_ref().map_or(0, Vec::len))
+                .map_err(|_overflow| ParseError::Overflow)?
+        })
+        .map_err(|_overflow| ParseError::Overflow)?;
+        writer.write_i32(no_of_nodes_to_write, ByteOrder::LittleEndian)?;
+        if let Some(array_items) = nodes_to_write {
+            for array_item in array_items {
+                array_item.serialize(writer, depth)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn serialize_write_response(
+        &self,
+        writer: &mut BoundedWriter,
+        depth: Depth,
+    ) -> Result<(), ParseError> {
+        let Self::WriteResponse {
+            response_header,
+            results,
+            diagnostic_infos,
+        } = self
+        else {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "ExtensionObjectDefinition.WriteResponse",
                 value: 0,
             });
         };

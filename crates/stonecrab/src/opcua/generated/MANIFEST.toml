@@ -68,6 +68,9 @@ ExtensionObjectDefinition = [
   "SignedSoftwareCertificate",
   "UserNameIdentityToken",
   "UserTokenPolicy",
+  "WriteRequest",
+  "WriteResponse",
+  "WriteValue",
 ]
 
 [options.external]
