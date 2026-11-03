@@ -13,7 +13,7 @@ use crate::opcua::codec::{Depth, StatusCode, UaString};
 use crate::opcua::service::status_error;
 use crate::{ErrorKind, PlcError, Result};
 
-/// Sizes of the active policy's block transformation and footer. S101 adds secure rows.
+/// Sizes of the active policy's block transformation and footer.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct SecuritySizes {
     signature: usize,
@@ -29,6 +29,20 @@ impl SecuritySizes {
         cipher_block: 1,
         padding: 0,
     };
+
+    pub(super) const fn new(
+        signature: usize,
+        plain_block: usize,
+        cipher_block: usize,
+        padding: usize,
+    ) -> Self {
+        Self {
+            signature,
+            plain_block,
+            cipher_block,
+            padding,
+        }
+    }
 
     /// UASC has a 12-byte message header and an 8-byte sequence header.
     pub(super) fn max_body(self, buffer: usize, security_header: usize) -> Result<usize> {

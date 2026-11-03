@@ -85,16 +85,7 @@ impl SecurityPolicy {
 
     /// Exact wire policy URI; endpoint selection never downgrades a policy.
     pub(super) const fn uri(self) -> &'static str {
-        match self {
-            Self::None => "http://opcfoundation.org/UA/SecurityPolicy#None",
-            Self::Basic256Sha256 => "http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256",
-            Self::Aes128Sha256RsaOaep => {
-                "http://opcfoundation.org/UA/SecurityPolicy#Aes128_Sha256_RsaOaep"
-            }
-            Self::Aes256Sha256RsaPss => {
-                "http://opcfoundation.org/UA/SecurityPolicy#Aes256_Sha256_RsaPss"
-            }
-        }
+        self.descriptor().uri
     }
 
     /// Whether the policy signs or encrypts, which is every policy but `NONE`.

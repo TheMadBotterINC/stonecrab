@@ -664,16 +664,17 @@ fn opcua_clock_and_encoding_failures_release_the_request_without_io() {
     assert_eq!(rig.probe.sent(), Vec::<Bytes>::new());
 
     let rig = Rig::new(Script::default(), 1);
-    rig.clock.set_wall_now(
-        std::time::SystemTime::UNIX_EPOCH
-            .checked_add(Duration::from_secs(1_000_000_000_000))
-            .unwrap(),
-    );
-    assert_eq!(
-        ready(&mut rig.request()).unwrap_err().kind(),
-        ErrorKind::InvalidConfig
-    );
-    assert!(rig.lane.lock().pending.is_empty());
+    // SystemTime on Windows cannot represent an instant outside OPC UA's tick range.
+    if let Some(far) =
+        std::time::SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(1_000_000_000_000))
+    {
+        rig.clock.set_wall_now(far);
+        assert_eq!(
+            ready(&mut rig.request()).unwrap_err().kind(),
+            ErrorKind::InvalidConfig
+        );
+        assert!(rig.lane.lock().pending.is_empty());
+    }
 }
 
 struct EarlyClock {
@@ -1000,14 +1001,15 @@ fn opcua_lane_close_cannot_complete_from_an_unsolicited_reply() {
 #[test]
 fn opcua_close_rejects_invalid_clock_and_undersized_body_before_sending() {
     let mut rig = Rig::new(Script::default(), 1);
-    rig.clock.set_wall_now(
-        std::time::SystemTime::UNIX_EPOCH
-            .checked_add(Duration::from_secs(1_000_000_000_000))
-            .unwrap(),
-    );
     let deadline = Deadline::after(rig.clock.now(), Duration::from_secs(1)).unwrap();
-    assert!(block_on_with(&rig.clock, rig.lane.close(deadline, &rig.cancel)).is_err());
-    assert_eq!(rig.probe.sent().len(), 0);
+    // As above, only exercise the unrepresentable tick when SystemTime can hold it.
+    if let Some(far) =
+        std::time::SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(1_000_000_000_000))
+    {
+        rig.clock.set_wall_now(far);
+        assert!(block_on_with(&rig.clock, rig.lane.close(deadline, &rig.cancel)).is_err());
+        assert_eq!(rig.probe.sent().len(), 0);
+    }
     rig.clock.set_wall_now(std::time::SystemTime::UNIX_EPOCH);
     rig.lane.max_frame = 24;
     assert_eq!(
@@ -1369,9 +1371,16 @@ async fn opcua_interop_large_array_read_chunks_under_none() {
         .open(config.endpoint(), *config.limits(), deadline)
         .await
         .unwrap();
-    let channel = Channel::open_none(transport, options, Arc::clone(&clock), deadline, &cancel)
-        .await
-        .unwrap();
+    let channel = Channel::open_none(
+        transport,
+        options,
+        Arc::clone(&clock),
+        deadline,
+        &cancel,
+        &crate::opcua::crypto::Native,
+    )
+    .await
+    .unwrap();
     assert_eq!(channel.limits.receive_buffer_size, 8192);
     assert_eq!(channel.limits.send_buffer_size, 8192);
     assert_eq!(channel.limits.max_message_size, 24576);

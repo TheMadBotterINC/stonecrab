@@ -54,6 +54,7 @@ impl Channel {
         clock: Arc<dyn Clock>,
         deadline: Deadline,
         cancel: &CancellationToken,
+        crypto: &dyn crate::opcua::crypto::Backend,
     ) -> Result<Self> {
         if options.security_policy != SecurityPolicy::None {
             return Err(error(
@@ -112,7 +113,7 @@ impl Channel {
             client_protocol_version: 0,
             request_type: SecurityTokenRequestType::SecurityTokenRequestTypeIssue,
             security_mode: MessageSecurityMode::MessageSecurityModeNone,
-            client_nonce: UaByteString::null(),
+            client_nonce: crate::opcua::crypto::channel_nonce(crypto, options.security_policy)?,
             requested_lifetime: DEFAULT_LIFETIME,
         };
         let body = encode_service(446, &request, body_budget(limits, overhead))?;

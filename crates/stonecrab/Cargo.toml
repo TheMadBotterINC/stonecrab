@@ -33,8 +33,8 @@ transport = ["dep:tokio"]
 tls = ["transport", "dep:rustls", "dep:tokio-rustls"]
 # The OPC UA client (`stonecrab::opcua`, ADR-0034): public anonymous None connect/read/close. Off by
 # default and not part of `full`, as `tls` is (decision E17); needs the transport. The
-# cryptography dependencies of the security policies join it with their slices (ADR-0035).
-opcua = ["transport", "dep:getrandom", "dep:tracing"]
+# native crypto foundation is optional with this feature (S101, ADR-0035/0039).
+opcua = ["transport", "dep:getrandom", "dep:tracing", "dep:aws-lc-rs", "dep:aws-lc-sys", "dep:rustls-webpki", "dep:rustls-pki-types"]
 # The serial transport on a blocking worker thread (`stonecrab::transport::SerialTransport`).
 # Needs the transport. `modbus` enables it for Modbus RTU (ADR-0024).
 serial = ["transport", "dep:serial2"]
@@ -60,6 +60,10 @@ testkit = ["transport", "dep:serde", "dep:serde_json", "dep:toml", "tokio/macros
 
 # Each example needs the driver it exercises, so a build without that feature skips it
 # instead of failing; CI builds them all with --all-features.
+[[example]]
+name = "feature_footprint"
+required-features = ["modbus"]
+
 [[example]]
 name = "opcua_read"
 required-features = ["opcua"]
@@ -422,7 +426,15 @@ name = "modbus_loopback"
 harness = false
 required-features = ["modbus", "testkit"]
 
+# aws-lc-sys selects the native build feature; webpki is the library name of rustls-webpki.
+[package.metadata.cargo-machete]
+ignored = ["aws-lc-sys", "rustls-webpki"]
+
 [dependencies]
+aws-lc-rs = { workspace = true, optional = true }
+aws-lc-sys = { workspace = true, optional = true }
+rustls-webpki = { workspace = true, optional = true }
+rustls-pki-types = { workspace = true, optional = true }
 getrandom = { workspace = true, optional = true }
 thiserror.workspace = true
 bytes.workspace = true

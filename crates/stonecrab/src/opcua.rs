@@ -20,6 +20,15 @@ mod chunk;
 )]
 mod codec;
 mod connection;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        unused_imports,
+        reason = "S102 and S105 consume the private policy and derivation foundation"
+    )
+)]
+mod crypto;
 mod driver;
 mod endpoint;
 #[expect(

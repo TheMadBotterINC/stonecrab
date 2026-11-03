@@ -59,6 +59,7 @@ impl Rig {
                 Arc::new(self.clock.clone()),
                 self.deadline,
                 &self.cancel,
+                &crate::opcua::crypto::Native,
             ),
         )
     }
@@ -450,6 +451,7 @@ fn opcua_cancelling_a_pending_handshake_releases_all_timers() {
         Arc::new(rig.clock.clone()),
         rig.deadline,
         &rig.cancel,
+        &crate::opcua::crypto::Native,
     ));
     assert!(
         pending
@@ -822,6 +824,7 @@ fn opcua_channel_rejects_clocks_that_cannot_wait() {
                 clock,
                 rig.deadline,
                 &rig.cancel,
+                &crate::opcua::crypto::Native,
             ),
         )
         .unwrap_err();
@@ -856,9 +859,16 @@ async fn opcua_interop_peer_answers_hello_and_opens_a_none_channel() {
         .open(config.endpoint(), *config.limits(), deadline)
         .await
         .unwrap();
-    let channel = Channel::open_none(transport, options, Arc::clone(&clock), deadline, &cancel)
-        .await
-        .unwrap();
+    let channel = Channel::open_none(
+        transport,
+        options,
+        Arc::clone(&clock),
+        deadline,
+        &cancel,
+        &crate::opcua::crypto::Native,
+    )
+    .await
+    .unwrap();
     assert!(channel.token.channel_id > 0);
     assert!(channel.token.token_id > 0);
     assert!(channel.token.revised_lifetime > 0);
@@ -876,9 +886,16 @@ async fn opcua_interop_peer_answers_hello_and_opens_a_none_channel() {
         .open(config.endpoint(), *config.limits(), deadline)
         .await
         .unwrap();
-    let channel = Channel::open_none(transport, options, Arc::clone(&clock), deadline, &cancel)
-        .await
-        .unwrap();
+    let channel = Channel::open_none(
+        transport,
+        options,
+        Arc::clone(&clock),
+        deadline,
+        &cancel,
+        &crate::opcua::crypto::Native,
+    )
+    .await
+    .unwrap();
     let lane = Lane::from_channel(channel, config.timeouts().request);
     let token = NodeId::numeric(0, 0);
     let problem = lane

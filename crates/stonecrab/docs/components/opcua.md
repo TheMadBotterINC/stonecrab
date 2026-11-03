@@ -469,3 +469,18 @@ Unknown, preserving a device status when present. Bad statuses remain typed reje
 Core's existing `TimeoutAfterTransmit` reason is the fallback for an unusable confirmation;
 no new public reason variant is added. Only a verified `WriteResponse`'s wrong result count
 remains the explicit `MalformedData` error described above, with no automatic replay.
+
+## Crypto foundation and native build requirements (S101)
+
+Enabling `opcua` compiles AWS-LC through optional aws-lc-rs 1.19.0/aws-lc-sys 0.47.0.
+A C compiler is required; Windows `x86_64` additionally needs NASM (CI uses 2.16.03).
+`CMake` is needed if the native build selects its `CMake` fallback. Defaults/prebuilt NASM
+objects are disabled. Set `AWS_LC_SYS_USE_SYSTEM=0` to require the bundled source build;
+do not combine that setting with `AWS_LC_SYS_SYSTEM_DIR`. Repository mise and CI set it.
+The TLS feature retains its ring provider, so `tls,opcua` includes both native libraries.
+
+S101 supplies policy descriptors, bounded `P_SHA1/P_SHA256` derivation and injectable OS
+nonce generation. Operational secure channels, message protection and trust validation
+remain later slices. The driver still refuses secure policies before I/O. No public RNG
+configuration or new feature is introduced; `opcua` stays outside default/full. Key
+formatting is redacted by Secret; this does not promise zeroization of allocations.

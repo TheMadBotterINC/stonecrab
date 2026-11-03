@@ -423,6 +423,7 @@ fn opcua_create_session_adopts_the_authentication_token_and_revised_timeout() {
             Arc::new(clock.clone()),
             deadline,
             &cancel,
+            &crate::opcua::crypto::Native,
         ),
     )
     .unwrap();
@@ -794,6 +795,7 @@ fn opcua_session_cancellation_and_drop_never_activate_a_half_open_session() {
                     Arc::new(clock.clone()),
                     deadline,
                     &cancel,
+                    &crate::opcua::crypto::Native,
                 ),
             )
             .unwrap();
