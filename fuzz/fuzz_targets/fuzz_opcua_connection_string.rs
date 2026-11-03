@@ -55,7 +55,10 @@ fn check(text: &str) {
                 "a secure policy signs or encrypts"
             );
             assert!(uri.options().iter().all(|(key, _value)| {
-                key == "security-policy" || key == "message-security" || key == "request-timeout-ms"
+                key == "security-policy"
+                    || key == "message-security"
+                    || key == "request-timeout-ms"
+                    || key == "encoding.receive-buffer-size"
             }));
             let timeout = uri
                 .options()
@@ -68,6 +71,16 @@ fn check(text: &str) {
                     Duration::from_millis(millis)
                 });
             assert_eq!(parsed.config.timeouts().request, timeout);
+            let receive = uri
+                .options()
+                .iter()
+                .find(|(key, _)| key == "encoding.receive-buffer-size")
+                .map_or(65535, |(_, value)| {
+                    assert!(value.bytes().all(|byte| byte.is_ascii_digit()));
+                    value.parse::<u32>().expect("valid receive buffer")
+                });
+            assert!((8192..=0x7FFF_FFFF).contains(&receive));
+            assert_eq!(parsed.receive_buffer_size, receive);
             let shown = parsed.config.redacted_display();
             assert!(!shown.chars().any(char::is_control), "one clean line");
         }

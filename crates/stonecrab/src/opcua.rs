@@ -1,6 +1,11 @@
 #![doc = include_str!("../docs/components/opcua.md")]
 
 mod address;
+#[cfg_attr(
+    not(all(test, feature = "testkit")),
+    expect(dead_code, reason = "the public driver/session layer arrives in S91")
+)]
+mod channel;
 // The types of the binary encoding (the built-ins and the recursive types) are written and
 // used by generated service bodies; public connection/value mapping arrives in S91/S92.
 #[cfg_attr(
@@ -27,6 +32,11 @@ mod generated;
     )
 )]
 mod lane;
+#[cfg(test)]
+#[cfg(feature = "testkit")]
+#[path = "../tests/support/opcua_responder.rs"]
+mod responder;
+mod service;
 #[cfg(test)]
 mod service_tests;
 // The connection string and its options are parsed here but nothing calls them until the

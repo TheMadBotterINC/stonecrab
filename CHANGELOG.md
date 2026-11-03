@@ -5,6 +5,13 @@ Changelog. Stonecrab is one crate, so each release has one section. `stonecrab` 
 specification-stage placeholder.
 
 ## Unreleased
+- **Added (opt-in `opcua` feature; slice S90):** private policy-None HEL/ACK negotiation,
+  OpenSecureChannel Issue with a null nonce, exact server token/lifetime adoption and
+  fire-and-forget CloseSecureChannel. Directional frame/message bounds and continued lane
+  counters are tested against the first-party responder and open62541. The receive-buffer
+  option now parses (65535 default; minimum 8192). Shared pure service functions move out
+  of the lane, and the independent-server job runs an exact-count Stonecrab channel test.
+  Public session/connect and usable Read remain the next milestones.
 - **Added (opt-in `opcua` feature; slice S89):** a private bounded service exchange lane
   with request-id correlation, sender priority over waiting receives, injected-clock
   headers/deadlines, channel/token/sequence validation and exact ERR/ServiceFault statuses.

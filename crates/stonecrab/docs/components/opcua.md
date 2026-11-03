@@ -1,14 +1,10 @@
 # Stonecrab OPC UA
 The OPC UA client of Stonecrab (`stonecrab::opcua`), behind the opt-in `opcua` feature. It is
 in neither `default` nor `full`, as `tls` is (decision E17, ADR-0034), and it needs the
-`transport` feature. The module is being built in slices (milestone M3, ADR-0034): so far it
-has the tag address grammar and, crate-private, the connection string parser and the
-types of the binary encoding (the built-ins and the recursive Variant, `DataValue`,
-`DiagnosticInfo` and `ExtensionObject` envelope) and the TCP framing (the message header and
-the six message types), plus the generated 22-case connection/read service codec. Nothing
-opens a socket. S89 adds a crate-private caller-driven service exchange lane. There is no
-public driver, no connection, no secure channel and no session yet, and the `opcua` scheme is not registered
-anywhere.
+`transport` feature. The module is being built in slices (milestone M3, ADR-0034). It currently has the
+address grammar and private connection-string parser, binary codecs, generated services,
+TCP framing, policy-None channel handshake and bounded request lane. Public driver and
+session integration follow in S91, with end-to-end Read in S92.
 
 This module offers `OpcuaAddress`, a validated `ProtocolAddress` for the tag text
 `ns=<n>;<i|s|g|b>=<id>[range][;a=<attribute>][;TYPE][|key=value,...]`, with the types its
@@ -25,10 +21,11 @@ socket and starts no discovery.
 | TCP framing: the 8-byte header, HEL, ACK, ERR, OPN, CLO and MSG bodies, the asymmetric header of policy None, the symmetric and sequence headers, and a single-chunk `Framer` (crate-private) | build-tested |
 | Generated 22-case connection/read service bodies and 274 status names; Known `ExtensionObject` dispatch (crate-private) | build-tested |
 | Bounded service exchange lane: correlation, sender priority, headers, sequence/channel/token checks, ERR and `ServiceFault` (crate-private) | build-tested |
-| Driver, connection, secure channel, session | planned |
+| Policy-None HEL/ACK, OPN Issue, CLO and counter handoff (crate-private) | interoperability-tested with open62541 |
+| Driver, connection, session | planned |
 | Read, write, browse, subscriptions | planned |
-| Security policies and certificates | planned |
-| Interoperability with an independent server | planned |
+| Signed/encrypted security policies and certificate validation | planned |
+| Independent-server session/read interoperability | planned |
 | Hardware verification | planned |
 
 Build-tested here means unit tests, a property test and a fuzz target on the address text, a
@@ -134,6 +131,8 @@ opcua:tcp://[2001:db8::10]:4840/ua/server
   configured and the channel will ignore it.
 - `request-timeout-ms` is a positive decimal millisecond count, 30000 by default. It sets
   `Timeouts.request` and the header timeout hint; a shorter caller deadline takes precedence.
+- `encoding.receive-buffer-size` is decimal 8192 through 2147483647, default 65535.
+  `ResourceLimits` caps it before Hello, and ACK may reduce it further.
 - Every other key is `InvalidConfig`, and so is a key written twice. That includes the keys
   the framework fills (`protocol-code`, `transport-code`, `transport-config`), the
   credentials a connection string must not carry (`username`, `password`; they arrive in
@@ -257,5 +256,27 @@ Dropping or cancelling a receive releases its slot and retains partial frame byt
 other callers. Interrupting a send can leave partial bytes on the wire and fails the
 whole lane. Deterministic tests exercise both outcomes, out-of-order replies, simultaneous
 waiters, sender priority, reentrant wake-ups, resource bounds and fake-clock deadlines.
-Hello, channel negotiation, sessions, public connect/read and independent-server evidence
-remain the next slices.
+S90 supplies Hello/channel negotiation and independent-server channel evidence; sessions
+and public connect/read remain the next slices.
+
+## Policy-None channel
+Since S90, the private channel owner exchanges Hello/Acknowledge, sends `OpenSecureChannel`
+Issue and retains the exact server token, revised lifetime and nonce. Policy None uses
+mode None for every configured mode, with a null client nonce and no certificate material,
+signature or encryption. Selecting this path requires policy None explicitly. Configured
+and effective mode appear in channel Debug output; nonce/certificate bytes do not.
+
+Client receive merges with server send, and client send with server receive. Buffers are
+at least 8192 bytes; message size and chunk-count zero mean unlimited. Negotiation keeps
+buffered bytes and the framer enforces each direction separately. Message-body bounds
+apply before service decoding/encoding. The current requested channel lifetime is
+3600000 ms; configurable lifetime and renewal arrive in S109. One caller deadline and
+cancellation token bound the handshake, including silent peers; S91 adds the named
+handshake-timeout option and public connection assembly.
+
+Before handing ownership to the lane, the channel can send `CloseSecureChannel` once and
+close its transport without waiting for a reply. Handoff preserves request/sequence
+counters and negotiated bounds. One exact-count ignored test against open62541 v1.5.9
+proves HEL/OPN/CLO and counter continuation into a request refused for having no session.
+Its evidence is recorded by `interop/open62541/interop.sh tests` and CI. Full session
+activation and usable Read follow in S91/S92; chunk reassembly follows in S94.

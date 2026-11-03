@@ -787,6 +787,19 @@ script/CI add an exact-count nextest filter and retain evidence under the existi
 The independent peer and all controls remain outside the published package. Record the
 scope, parity, package list and checks, with signed-off commits and ordinary merges.
 
+The second real caller exposes a module-boundary issue: the lane's pure request-header,
+service encode/decode and status-source functions are also used during channel setup.
+Move those five functions and the status type into `opcua/service.rs`, updating both
+callers and tests and deleting the old definitions. This avoids a channel/lane dependency
+cycle and keeps shared pure service work separate from transport ownership. Framer docs
+also clarify that a round trip assumes the encoded frame fits the receive ceiling.
+
+S90's assigned receive-buffer row includes its named option, whereas the S94 text groups
+all encoding options together. Implement `encoding.receive-buffer-size` here (default
+65535, 8192 through Int32::MAX) and use it in HEL; S94 adds the other three options. Extend
+the existing connection-string fuzz oracle and seeds with the new accepted key/value,
+rather than leaving it inconsistent with the parser. The resource cap still wins.
+
 References: OPC Foundation Part 6 [Hello](https://reference.opcfoundation.org/specs/OPC-10000-6/7.1.2.3)
 and [Acknowledge](https://reference.opcfoundation.org/specs/OPC-10000-6/7.1.2.4),
 Part 4 [OpenSecureChannel parameters](https://reference.opcfoundation.org/specs/OPC-10000-4/5.6.2.2).

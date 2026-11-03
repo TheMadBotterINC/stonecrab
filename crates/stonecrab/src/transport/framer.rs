@@ -93,15 +93,16 @@ pub trait Framer<F>: Send {
     /// empty buffer or a header that is still incomplete). More bytes are then needed;
     /// the buffer is untouched.
     ///
-    /// The declared frame size is compared with [`max_frame_bytes`](Self::max_frame_bytes)
-    /// as soon as the header is complete and before anything is allocated or waited for.
+    /// The declared frame size is compared with the receive ceiling, bounded by
+    /// [`max_frame_bytes`](Self::max_frame_bytes), as soon as the header is complete
+    /// and before anything is allocated or waited for.
     ///
     /// # Compatibility: docs/parity/transport.md#TRANSPORT-FRAMING
     /// No upstream parity claim (see the trait).
     ///
     /// # Errors
-    /// - [`FrameError::Oversized`] if the header declares a frame larger than
-    ///   `max_frame_bytes`; the buffer is untouched.
+    /// - [`FrameError::Oversized`] if the header declares a frame larger than the
+    ///   receive ceiling; the buffer is untouched.
     /// - [`FrameError::Malformed`] if the header is invalid (a wrong protocol id, an
     ///   impossible length); the buffer is untouched.
     /// - [`FrameError::Truncated`] is not returned by `decode`: an incomplete frame is
@@ -114,8 +115,9 @@ pub trait Framer<F>: Send {
     /// Append the wire form of `frame` to `out`.
     ///
     /// `out` may already hold bytes (a scratch buffer is reused); `encode` only appends.
-    /// On `Err` nothing was appended. The encoded frame must decode back to an equal
-    /// frame.
+    /// On `Err` nothing was appended. The encoding must round-trip to an equal frame
+    /// when it also fits the receive ceiling (negotiated protocols may have different
+    /// send and receive ceilings).
     ///
     /// # Compatibility: docs/parity/transport.md#TRANSPORT-FRAMING
     /// No upstream parity claim (see the trait).

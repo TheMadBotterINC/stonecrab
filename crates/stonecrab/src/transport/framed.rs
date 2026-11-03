@@ -176,13 +176,18 @@ impl<F: Send, R: Framer<F>> FramedTransport<F, R> {
         self.buffer.len()
     }
 
-    /// The common outbound bound, also used before a pipelined lane reserves sequence space.
+    /// The framer/transport envelope ceiling; encode may enforce a tighter send ceiling.
     pub(crate) fn max_frame_bytes(&self) -> usize {
         self.transport
             .limits()
             .max_frame_bytes()
             .get()
             .min(self.framer.max_frame_bytes())
+    }
+
+    /// Apply negotiated framing limits without discarding coalesced or partial input.
+    pub(crate) fn replace_framer(&mut self, framer: R) {
+        self.framer = framer;
     }
 
     /// Hold `frame` for the next [`next_frame`](Self::next_frame), which returns it before

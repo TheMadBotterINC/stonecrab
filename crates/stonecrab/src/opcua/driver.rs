@@ -41,7 +41,8 @@ impl OpcuaDriver {
     /// core defaults for connect/idle timeouts, reconnect, retry and limits, a read-only access policy and
     /// the [`OpcuaOptions`] in its driver options slot: the endpoint URL Hello carries
     /// (`opc.tcp://host:port` and the path, verbatim), `security-policy` and
-    /// `message-security`. The request timeout is `request-timeout-ms` (30000 ms by default).
+    /// `message-security`. The request timeout is `request-timeout-ms` (30000 ms by default),
+    /// and `encoding.receive-buffer-size` selects the incoming chunk ceiling (65535 by default).
     ///
     /// # Errors
     /// Returns [`ErrorKind::InvalidConfig`] for text that is not a valid connection string,
@@ -132,6 +133,42 @@ mod tests {
             options_of(&custom).request_timeout,
             custom.timeouts().request
         );
+    }
+
+    #[test]
+    fn opcua_config_receive_buffer_size_default_is_65535() {
+        assert_eq!(
+            options_of(&config_of("opcua://host:4840")).receive_buffer_size,
+            65535
+        );
+        for value in [8192, 65535, 0x7FFF_FFFF] {
+            let config = config_of(&format!(
+                "opcua://host:4840?encoding.receive-buffer-size={value}"
+            ));
+            assert_eq!(options_of(&config).receive_buffer_size, value);
+        }
+    }
+
+    #[test]
+    fn opcua_config_receive_buffer_size_rejects_zero() {
+        for value in [
+            "0",
+            "8191",
+            "-1",
+            "+8192",
+            "2147483648",
+            "4294967296",
+            "x",
+            "8.5",
+        ] {
+            assert_eq!(
+                refused(&format!(
+                    "opcua://host:4840?encoding.receive-buffer-size={value}"
+                ))
+                .kind(),
+                ErrorKind::InvalidConfig
+            );
+        }
     }
 
     #[test]
