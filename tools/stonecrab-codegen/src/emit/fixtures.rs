@@ -600,3 +600,22 @@ fn generator_rejects_duplicate_type_names() {
         "an unused duplicate"
     );
 }
+
+#[test]
+fn generator_numeric_enum_names_preserve_source_spelling_and_unknown_values() {
+    let spec = "[enum uint 32 Status ['0' Good] ['0x80010000' BadUnexpectedError]]\n[enum uint 16 Signed ['1' UPPER_VALUE] ['2' Positive]]";
+    let modules =
+        run(spec, &options(&["Status", "Signed"], &[], None)).expect("numeric enums generate");
+    let main = r#"
+fn main() {
+    const GOOD: Option<&str> = status::Status::name_from_value(0);
+    assert_eq!(GOOD, Some("Good"));
+    assert_eq!(status::Status::name_from_value(0x80010000), Some("BadUnexpectedError"));
+    assert_eq!(status::Status::name_from_value(0xDEADBEEF), None);
+    assert_eq!(signed::Signed::name_from_value(1), Some("UPPER_VALUE"));
+    assert_eq!(signed::Signed::name_from_value(2), Some("Positive"));
+    assert_eq!(signed::Signed::name_from_value(u16::MAX), None);
+}
+"#;
+    compile_and_run("enum-names", &modules, main).expect("static names and unknown values");
+}
