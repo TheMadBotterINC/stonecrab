@@ -1168,3 +1168,33 @@ mod credential_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod write_tests {
+    use super::*;
+    #[test]
+    fn opcua_config_access_is_explicit_and_defaults_to_read_only() {
+        let parse = |access: Option<&str>| {
+            OpcuaOptions::from_parameters(
+                "opc.tcp://fake:4840".into(),
+                &access
+                    .map(|value| vec![("access".to_owned(), value.to_owned())])
+                    .unwrap_or_default(),
+            )
+        };
+        assert_eq!(parse(None).unwrap().access, crate::AccessPolicy::ReadOnly);
+        assert_eq!(
+            parse(Some("read-only")).unwrap().access,
+            crate::AccessPolicy::ReadOnly
+        );
+        assert_eq!(
+            parse(Some("read-write")).unwrap().access,
+            crate::AccessPolicy::ReadWrite
+        );
+        for text in ["", "write", "READ-WRITE", "password-sentinel"] {
+            let error = parse(Some(text)).unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+            assert_eq!(error.to_string(), "access must be read-only or read-write");
+        }
+    }
+}

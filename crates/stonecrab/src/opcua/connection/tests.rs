@@ -960,3 +960,205 @@ async fn opcua_interop_reads_bytes_localized_text_and_both_timestamps() {
     );
     connection.close().await.unwrap();
 }
+
+#[tokio::test]
+#[ignore = "requires the disposable open62541 peer"]
+async fn opcua_interop_write_then_read_round_trips_every_writable_type() {
+    use crate::{PlcDate, PlcDateTime, PlcSignedDuration, PlcTimeOfDay};
+    let uri = std::env::var("STONECRAB_INTEROP_OPEN62541").expect("URI");
+    let driver = OpcuaDriver::new();
+    let connection = driver
+        .connect(
+            driver
+                .parse_config(&format!("{uri}&access=read-write"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let datetime = PlcValue::DateTime(PlcDateTime::new(
+        PlcDate::from_days_since_epoch(10957),
+        PlcTimeOfDay::from_hms_nano(1, 2, 3, 456_789_100).unwrap(),
+    ));
+    let values = vec![
+        ("Boolean", PlcValue::Bool(false)),
+        ("SByte", PlcValue::I8(i8::MIN)),
+        ("Byte", PlcValue::U8(u8::MAX)),
+        ("Int16", PlcValue::I16(i16::MIN)),
+        ("UInt16", PlcValue::U16(u16::MAX)),
+        ("Int32", PlcValue::I32(i32::MIN)),
+        ("UInt32", PlcValue::U32(u32::MAX)),
+        ("Int64", PlcValue::I64(i64::MIN)),
+        ("UInt64", PlcValue::U64(u64::MAX)),
+        ("Float", PlcValue::F32(1.5)),
+        ("Double", PlcValue::F64(-2.5)),
+        ("String", PlcValue::String("write 水\0text".into())),
+        ("DateTime", datetime),
+        ("ByteString", PlcValue::Bytes(vec![0, 255, 1, 254])),
+    ];
+    let mut write = WriteRequest::builder(connection.limits());
+    let mut read = ReadRequest::builder(connection.limits());
+    for (name, value) in &values {
+        let tag = Tag::new(
+            TagId::new(name).unwrap(),
+            Arc::new(OpcuaAddress::parse(&format!("ns=1;s=writable/{name}")).unwrap()),
+        );
+        write = write.item(tag.clone(), value.clone());
+        read = read.tag(tag);
+    }
+    let response = connection.write(write.build().unwrap()).await.unwrap();
+    assert_eq!(response.confirmed_count(), values.len(), "{response:?}");
+    let response = connection.read(read.build().unwrap()).await.unwrap();
+    for (item, (_, expected)) in response.items().iter().zip(&values) {
+        assert_eq!(item.outcome().as_ref().unwrap(), expected);
+    }
+    // CHAR/WCHAR use String on the wire; WSTRING has the same UTF-8 representation.
+    for (suffix, value, expected) in [
+        ("CHAR", PlcValue::Char('Z'), PlcValue::String("Z".into())),
+        ("WCHAR", PlcValue::Char('水'), PlcValue::String("水".into())),
+        (
+            "STRING",
+            PlcValue::String("wide 水".into()),
+            PlcValue::String("wide 水".into()),
+        ),
+    ] {
+        let tag = Tag::new(
+            TagId::new("text").unwrap(),
+            Arc::new(OpcuaAddress::parse(&format!("ns=1;s=writable/String;{suffix}")).unwrap()),
+        );
+        let response = connection
+            .write(
+                WriteRequest::builder(connection.limits())
+                    .item(tag, value)
+                    .build()
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.confirmed_count(), 1);
+        let response = connection
+            .read(request(
+                &*connection,
+                vec![Tag::new(
+                    TagId::new("text").unwrap(),
+                    Arc::new(OpcuaAddress::parse("ns=1;s=writable/String").unwrap()),
+                )],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            response
+                .items()
+                .first()
+                .unwrap()
+                .outcome()
+                .as_ref()
+                .unwrap(),
+            &expected
+        );
+    }
+    let duration = PlcValue::SignedDuration(PlcSignedDuration::from_millis(-123).unwrap());
+    let tag = Tag::new(
+        TagId::new("time").unwrap(),
+        Arc::new(OpcuaAddress::parse("ns=1;s=writable/Int32;TIME").unwrap()),
+    );
+    let response = connection
+        .write(
+            WriteRequest::builder(connection.limits())
+                .item(tag.clone(), duration.clone())
+                .build()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.confirmed_count(), 1);
+    let response = connection
+        .read(request(&*connection, vec![tag]))
+        .await
+        .unwrap();
+    assert_eq!(
+        response
+            .items()
+            .first()
+            .unwrap()
+            .outcome()
+            .as_ref()
+            .unwrap(),
+        &duration
+    );
+    let array = PlcValue::List(vec![
+        PlcValue::I32(10),
+        PlcValue::I32(20),
+        PlcValue::I32(30),
+    ]);
+    let matrix = PlcValue::List(vec![
+        PlcValue::List(vec![PlcValue::I32(1), PlcValue::I32(2), PlcValue::I32(3)]),
+        PlcValue::List(vec![PlcValue::I32(4), PlcValue::I32(5), PlcValue::I32(6)]),
+    ]);
+    for (name, value) in [("Int32Array", array), ("Int32Matrix", matrix)] {
+        let tag = Tag::new(
+            TagId::new(name).unwrap(),
+            Arc::new(OpcuaAddress::parse(&format!("ns=1;s=writable/{name}")).unwrap()),
+        );
+        let response = connection
+            .write(
+                WriteRequest::builder(connection.limits())
+                    .item(tag.clone(), value.clone())
+                    .build()
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.confirmed_count(), 1, "{response:?}");
+        let response = connection
+            .read(request(&*connection, vec![tag]))
+            .await
+            .unwrap();
+        assert_eq!(
+            response
+                .items()
+                .first()
+                .unwrap()
+                .outcome()
+                .as_ref()
+                .unwrap(),
+            &value
+        );
+    }
+    let tag = Tag::new(
+        TagId::new("selected").unwrap(),
+        Arc::new(OpcuaAddress::parse("ns=1;s=writable/Int32Array[1];DINT").unwrap()),
+    );
+    let response = connection
+        .write(
+            WriteRequest::builder(connection.limits())
+                .item(tag, PlcValue::List(vec![PlcValue::I32(-99)]))
+                .build()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.confirmed_count(), 1);
+    let tag = Tag::new(
+        TagId::new("check").unwrap(),
+        Arc::new(OpcuaAddress::parse("ns=1;s=writable/Int32Array").unwrap()),
+    );
+    let response = connection
+        .read(request(&*connection, vec![tag]))
+        .await
+        .unwrap();
+    assert_eq!(
+        response
+            .items()
+            .first()
+            .unwrap()
+            .outcome()
+            .as_ref()
+            .unwrap(),
+        &PlcValue::List(vec![
+            PlcValue::I32(10),
+            PlcValue::I32(-99),
+            PlcValue::I32(30)
+        ])
+    );
+    connection.close().await.unwrap();
+}

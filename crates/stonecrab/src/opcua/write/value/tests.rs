@@ -253,7 +253,7 @@ fn opcua_a_time_that_overflows_int32_is_rejected() {
 }
 // covers: OPCUA-WRITE-DATETIME / OPCUA-DIV-DATETIME-WRITE / OPCUA-QUIRK-DATETIME-WRITE
 #[test]
-fn opcua_date_time_is_encoded_as_ticks_since_1601() {
+fn opcua_a_date_time_written_then_read_returns_the_same_instant() {
     for value in [
         date(-134_774, 0),
         date(-1, 86_399_999_999_900),
@@ -487,6 +487,78 @@ fn opcua_write_budget_is_transactional_and_bounds_depth_and_pending_nodes() {
             &address,
             &Attributes::default(),
             &mut budget
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn opcua_date_time_is_encoded_as_ticks_since_1601() {
+    let value = convert(&date(0, 100), ";DATE_AND_TIME", &Attributes::default()).unwrap();
+    assert_eq!(
+        value.value,
+        VariantValue::Scalar(Scalar::DateTime(DateTime(116_444_736_000_000_001)))
+    );
+}
+#[test]
+fn opcua_the_four_string_types_are_sent_as_opc_string() {
+    for (value, suffix) in [
+        (PlcValue::Char('x'), ";CHAR"),
+        (PlcValue::Char('水'), ";WCHAR"),
+        (PlcValue::String("ascii".into()), ";STRING"),
+        (PlcValue::String("wide 水".into()), ""),
+    ] {
+        let variant = convert(
+            &value,
+            suffix,
+            &Attributes {
+                data_type: Some(12),
+                ..Attributes::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(kind(&variant), 12);
+    }
+    assert!(OpcuaDataType::from_name("WSTRING").is_none());
+}
+
+#[test]
+fn opcua_metadata_access_and_range_rank_rejections_leave_the_budget_unchanged() {
+    assert_eq!(
+        convert(
+            &PlcValue::I32(1),
+            "",
+            &Attributes {
+                access: Some(1),
+                ..Attributes::default()
+            }
+        )
+        .unwrap_err()
+        .kind(),
+        ErrorKind::AccessDenied
+    );
+    assert!(
+        convert(
+            &PlcValue::List(vec![PlcValue::I32(1)]),
+            "[0];DINT",
+            &Attributes {
+                rank: Some(2),
+                ..Attributes::default()
+            }
+        )
+        .is_err()
+    );
+    let ragged = PlcValue::List(vec![
+        PlcValue::List(vec![PlcValue::I32(1)]),
+        PlcValue::I32(2),
+    ]);
+    assert!(convert(&ragged, ";DINT", &Attributes::default()).is_err());
+    assert!(scalar(&PlcValue::I32(1), Encoding::BuiltIn(0)).is_err());
+    assert!(
+        convert(
+            &PlcValue::List(vec![PlcValue::Null]),
+            "",
+            &Attributes::default()
         )
         .is_err()
     );

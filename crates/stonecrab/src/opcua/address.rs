@@ -706,7 +706,11 @@ impl ProtocolAddress for OpcuaAddress {
     }
 
     fn value_type_hint(&self) -> Option<PlcValueType> {
-        self.data_type.value_type()
+        if self.dimensions.is_empty() {
+            self.data_type.value_type()
+        } else {
+            Some(PlcValueType::List)
+        }
     }
 }
 

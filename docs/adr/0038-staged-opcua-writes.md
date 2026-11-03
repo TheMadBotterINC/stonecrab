@@ -86,3 +86,10 @@ requires array-valued range writes and correlates results in request order.
 [ValueRank/ArrayDimensions](https://reference.opcfoundation.org/specs/OPC-10000-3/8.6)
 provide the shape constraints. Existing codec bounds and immutable value APIs are reused;
 metadata failure never authorizes an anonymous retry, write retry, or schema guess.
+
+Native range validation exposed the old scalar hint on ranged OPC UA addresses. A tag
+with any IndexRange now hints List, including a single index; the suffix still describes
+its element type. Whole-array writes without a range use server metadata/inference. The
+core builder's exact hint contract stays unchanged. Writes race the existing connection
+stop token inside the lane's tracked entry point, preserving per-request delivery state
+when close interrupts them. The redundant second connection-state check is removed.

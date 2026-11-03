@@ -57,7 +57,7 @@ pub(in crate::opcua) fn encode(
         Some(
             dimensions
                 .into_iter()
-                .map(|size| i32::try_from(size).map_err(|_value| resource()))
+                .map(|size| i32::try_from(size).ok().ok_or_else(resource))
                 .collect::<Result<Vec<_>>>()?,
         )
     } else {
@@ -261,140 +261,138 @@ fn infer(value: &PlcValue) -> Result<Encoding> {
     Ok(Encoding::BuiltIn(kind))
 }
 
-#[expect(
-    clippy::wildcard_enum_match_arm,
-    reason = "a requested wire type accepts only explicitly convertible PlcValue forms; every other form is invalid"
-)]
+const fn wire_type(encoding: Encoding) -> u32 {
+    match encoding {
+        Encoding::BuiltIn(kind) => kind,
+        Encoding::Milliseconds => 6,
+    }
+}
+
 fn scalar(value: &PlcValue, encoding: Encoding) -> Result<Scalar> {
-    let Encoding::BuiltIn(kind) = encoding else {
-        let nanos = match value {
-            PlcValue::SignedDuration(duration) => i128::from(duration.as_nanos()),
-            PlcValue::Duration(duration) => {
-                i128::try_from(duration.as_nanos()).map_err(|_value| invalid())?
-            }
-            _ => return Err(invalid()),
-        };
-        if nanos.rem_euclid(1_000_000) != 0 {
-            return Err(invalid());
-        }
-        return Ok(Scalar::Int32(
-            i32::try_from(nanos.div_euclid(1_000_000)).map_err(|_value| invalid())?,
-        ));
-    };
-    macro_rules! signed {
-        ($variant:ident, $ty:ty) => {
-            Scalar::$variant(
-                <$ty>::try_from(value.as_i64().ok_or_else(invalid)?).map_err(|_value| invalid())?,
-            )
-        };
-    }
-    macro_rules! unsigned {
-        ($variant:ident, $ty:ty) => {
-            Scalar::$variant(
-                <$ty>::try_from(value.as_u64().ok_or_else(invalid)?).map_err(|_value| invalid())?,
-            )
-        };
-    }
-    Ok(match kind {
-        1 => match value {
-            PlcValue::Bool(value) => Scalar::Boolean(*value),
-            _ => return Err(invalid()),
-        },
-        2 => signed!(SByte, i8),
-        3 => unsigned!(Byte, u8),
-        4 => signed!(Int16, i16),
-        5 => unsigned!(UInt16, u16),
-        6 => signed!(Int32, i32),
-        7 => unsigned!(UInt32, u32),
-        8 => Scalar::Int64(value.as_i64().ok_or_else(invalid)?),
-        9 => Scalar::UInt64(value.as_u64().ok_or_else(invalid)?),
-        10 => match value {
-            PlcValue::F32(value) => Scalar::Float(*value),
-            PlcValue::F64(value) => Scalar::Float(narrow(*value)?),
-            _ => return Err(invalid()),
-        },
-        11 => match value {
-            PlcValue::F32(value) => Scalar::Double(f64::from(*value)),
-            PlcValue::F64(value) => Scalar::Double(*value),
-            _ => return Err(invalid()),
-        },
-        12 => Scalar::String(match value {
-            PlcValue::Char(value) => UaString::new(value.to_string()),
-            PlcValue::String(value) => UaString::new(value),
-            _ => return Err(invalid()),
-        }),
-        13 => {
-            let PlcValue::DateTime(value) = value else {
-                return Err(invalid());
-            };
-            let nanos = i128::from(value.date().days_since_epoch())
-                .checked_mul(86_400_000_000_000)
-                .and_then(|days| days.checked_add(i128::from(value.time().nanos_since_midnight())))
-                .ok_or_else(invalid)?;
-            if nanos.rem_euclid(100) != 0 {
-                return Err(invalid());
-            }
-            let ticks = nanos
-                .div_euclid(100)
-                .checked_add(116_444_736_000_000_000)
-                .and_then(|ticks| i64::try_from(ticks).ok())
-                .ok_or_else(invalid)?;
-            Scalar::DateTime(DateTime(ticks))
-        }
-        15 => match value {
-            PlcValue::Bytes(value) => Scalar::ByteString(UaByteString::new(value.clone())),
-            _ => return Err(invalid()),
-        },
+    Ok(match wire_type(encoding) {
+        1 => Scalar::Boolean(boolean(value)?),
+        2 => Scalar::SByte(signed(value)?),
+        3 => Scalar::Byte(unsigned(value)?),
+        4 => Scalar::Int16(signed(value)?),
+        5 => Scalar::UInt16(unsigned(value)?),
+        6 => Scalar::Int32(int32(value, encoding)?),
+        7 => Scalar::UInt32(unsigned(value)?),
+        8 => Scalar::Int64(signed(value)?),
+        9 => Scalar::UInt64(unsigned(value)?),
+        10 => Scalar::Float(float(value)?),
+        11 => Scalar::Double(double(value)?),
+        12 => Scalar::String(string(value)?),
+        13 => Scalar::DateTime(datetime(value)?),
+        15 => Scalar::ByteString(bytes(value)?),
         _ => return Err(unsupported()),
     })
 }
 
+fn signed<T: TryFrom<i64>>(value: &PlcValue) -> Result<T> {
+    T::try_from(value.as_i64().ok_or_else(invalid)?).map_err(|_range| invalid())
+}
+fn unsigned<T: TryFrom<u64>>(value: &PlcValue) -> Result<T> {
+    T::try_from(value.as_u64().ok_or_else(invalid)?).map_err(|_range| invalid())
+}
+fn boolean(value: &PlcValue) -> Result<bool> {
+    value.as_bool().ok_or_else(invalid)
+}
+fn double(value: &PlcValue) -> Result<f64> {
+    value.as_f64().ok_or_else(invalid)
+}
+fn float(value: &PlcValue) -> Result<f32> {
+    if let PlcValue::F32(value) = value {
+        return Ok(*value);
+    }
+    narrow(double(value)?)
+}
 /// Rust has no `TryFrom<f64>` for `f32`; decimal round-trip plus binary equality proves exact narrowing.
 fn narrow(value: f64) -> Result<f32> {
-    let narrowed = value
-        .to_string()
-        .parse::<f32>()
-        .map_err(|_number| invalid())?;
+    let narrowed = value.to_string().parse::<f32>().ok().ok_or_else(invalid)?;
     if value.is_nan() || f64::from(narrowed).to_bits() == value.to_bits() {
         Ok(narrowed)
     } else {
         Err(invalid())
     }
 }
-
-fn array(leaves: &[&PlcValue], encoding: Encoding) -> Result<Array> {
-    let kind = match encoding {
-        Encoding::BuiltIn(kind) => kind,
-        Encoding::Milliseconds => 6,
+fn string(value: &PlcValue) -> Result<UaString> {
+    if let PlcValue::Char(value) = value {
+        return Ok(UaString::new(value.to_string()));
+    }
+    if let PlcValue::String(value) = value {
+        return Ok(UaString::new(value));
+    }
+    Err(invalid())
+}
+fn bytes(value: &PlcValue) -> Result<UaByteString> {
+    if let PlcValue::Bytes(value) = value {
+        return Ok(UaByteString::new(value.clone()));
+    }
+    Err(invalid())
+}
+fn int32(value: &PlcValue, encoding: Encoding) -> Result<i32> {
+    if let Encoding::BuiltIn(_) = encoding {
+        return signed(value);
+    }
+    let nanos = if let PlcValue::SignedDuration(duration) = value {
+        i128::from(duration.as_nanos())
+    } else if let PlcValue::Duration(duration) = value {
+        i128::try_from(duration.as_nanos())
+            .ok()
+            .ok_or_else(invalid)?
+    } else {
+        return Err(invalid());
     };
+    if nanos.rem_euclid(1_000_000) != 0 {
+        return Err(invalid());
+    }
+    i32::try_from(nanos.div_euclid(1_000_000)).map_err(|_range| invalid())
+}
+fn datetime(value: &PlcValue) -> Result<DateTime> {
+    let PlcValue::DateTime(value) = value else {
+        return Err(invalid());
+    };
+    let nanos = i128::from(value.date().days_since_epoch())
+        .checked_mul(86_400_000_000_000)
+        .and_then(|days| days.checked_add(i128::from(value.time().nanos_since_midnight())))
+        .ok_or_else(invalid)?;
+    if nanos.rem_euclid(100) != 0 {
+        return Err(invalid());
+    }
+    let ticks = nanos
+        .div_euclid(100)
+        .checked_add(116_444_736_000_000_000)
+        .and_then(|ticks| i64::try_from(ticks).ok())
+        .ok_or_else(invalid)?;
+    Ok(DateTime(ticks))
+}
+fn array(leaves: &[&PlcValue], encoding: Encoding) -> Result<Array> {
     macro_rules! elements {
-        ($variant:ident) => {
+        ($variant:ident, $convert:expr) => {
             Array::$variant(Some(
                 leaves
                     .iter()
-                    .map(|value| match scalar(value, encoding)? {
-                        Scalar::$variant(value) => Ok(value),
-                        _ => Err(invalid()),
-                    })
+                    .copied()
+                    .map($convert)
                     .collect::<Result<Vec<_>>>()?,
             ))
         };
     }
-    Ok(match kind {
-        1 => elements!(Boolean),
-        2 => elements!(SByte),
-        3 => elements!(Byte),
-        4 => elements!(Int16),
-        5 => elements!(UInt16),
-        6 => elements!(Int32),
-        7 => elements!(UInt32),
-        8 => elements!(Int64),
-        9 => elements!(UInt64),
-        10 => elements!(Float),
-        11 => elements!(Double),
-        12 => elements!(String),
-        13 => elements!(DateTime),
-        15 => elements!(ByteString),
+    Ok(match wire_type(encoding) {
+        1 => elements!(Boolean, boolean),
+        2 => elements!(SByte, signed),
+        3 => elements!(Byte, unsigned),
+        4 => elements!(Int16, signed),
+        5 => elements!(UInt16, unsigned),
+        6 => elements!(Int32, |value| int32(value, encoding)),
+        7 => elements!(UInt32, unsigned),
+        8 => elements!(Int64, signed),
+        9 => elements!(UInt64, unsigned),
+        10 => elements!(Float, float),
+        11 => elements!(Double, double),
+        12 => elements!(String, string),
+        13 => elements!(DateTime, datetime),
+        15 => elements!(ByteString, bytes),
         _ => return Err(unsupported()),
     })
 }

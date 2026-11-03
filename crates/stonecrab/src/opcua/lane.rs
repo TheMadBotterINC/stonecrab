@@ -172,21 +172,28 @@ impl Lane {
         nodes: Vec<crate::opcua::generated::write_value::WriteValue>,
         deadline: Deadline,
         cancel: &CancellationToken,
+        closing: &CancellationToken,
     ) -> (Result<Service>, bool) {
         let transmitted = AtomicBool::new(false);
-        let result = self
-            .exchange_tracked(
-                authentication_token,
-                673,
-                |header| Service::WriteRequest {
-                    request_header: header,
-                    nodes_to_write: Some(nodes),
-                },
-                deadline,
-                cancel,
-                Some(&transmitted),
-            )
-            .await;
+        let mut exchange = pin!(self.exchange_tracked(
+            authentication_token,
+            673,
+            |header| Service::WriteRequest {
+                request_header: header,
+                nodes_to_write: Some(nodes),
+            },
+            deadline,
+            cancel,
+            Some(&transmitted),
+        ));
+        let mut closing = pin!(closing.cancelled());
+        let result = poll_fn(|cx| {
+            if closing.as_mut().poll(cx).is_ready() {
+                return Poll::Ready(Err(error(ErrorKind::Disconnected, "connection is closing")));
+            }
+            exchange.as_mut().poll(cx)
+        })
+        .await;
         (result, transmitted.load(Ordering::Acquire))
     }
 

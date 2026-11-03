@@ -193,12 +193,12 @@ add_array(UA_Server *server, const char *path, const UA_DataType *type, void *da
 
 static void
 add_matrix(UA_Server *server, const char *path, const UA_DataType *type, void *data,
-           size_t count, size_t rank, UA_UInt32 *dims) {
+           size_t count, size_t rank, UA_UInt32 *dims, UA_Boolean writable) {
     UA_Variant v;
     UA_Variant_setArray(&v, data, count, type);
     v.arrayDimensions = dims;
     v.arrayDimensionsSize = rank;
-    add_variable(server, path, type, v, (UA_Int32)rank, rank, dims, false);
+    add_variable(server, path, type, v, (UA_Int32)rank, rank, dims, writable);
 }
 
 static void
@@ -293,8 +293,10 @@ add_scalars(UA_Server *server) {
     UA_UInt32 d23[2] = {2, 3};
     UA_Double m222[8] = {1, 2, 3, 4, 5, 6, 7, 8};
     UA_UInt32 d222[3] = {2, 2, 2};
-    add_matrix(server, "matrix/Int32_2x3", &UA_TYPES[UA_TYPES_INT32], m23, 6, 2, d23);
-    add_matrix(server, "matrix/Double_2x2x2", &UA_TYPES[UA_TYPES_DOUBLE], m222, 8, 3, d222);
+    add_matrix(server, "matrix/Int32_2x3", &UA_TYPES[UA_TYPES_INT32], m23, 6, 2, d23, false);
+    add_matrix(server, "matrix/Double_2x2x2", &UA_TYPES[UA_TYPES_DOUBLE], m222, 8, 3, d222, false);
+
+    add_matrix(server, "writable/Int32Matrix", &UA_TYPES[UA_TYPES_INT32], m23, 6, 2, d23, true);
 
     UA_Variant c;
     UA_Variant_setScalar(&c, &counter, &UA_TYPES[UA_TYPES_UINT32]);

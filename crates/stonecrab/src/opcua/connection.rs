@@ -27,7 +27,7 @@ pub(super) struct OpcuaConnection {
     limits: ResourceLimits,
     state: StateCell,
     closing: AtomicBool,
-    reads_stopped: CancellationToken,
+    operations_stopped: CancellationToken,
     retry: crate::RetryPolicy,
     access: crate::AccessPolicy,
 }
@@ -48,7 +48,7 @@ impl OpcuaConnection {
             limits,
             state: StateCell::new(ConnectionState::Connected).0,
             closing: AtomicBool::new(false),
-            reads_stopped: CancellationToken::new(),
+            operations_stopped: CancellationToken::new(),
             retry,
             access,
         }
@@ -125,7 +125,7 @@ impl OpcuaConnection {
                 Err(error)
                     if self.retry.should_retry(error.kind(), attempt)
                         && !self.session.lane.is_failed()
-                        && !self.reads_stopped.is_cancelled()
+                        && !self.operations_stopped.is_cancelled()
                         && !request
                             .deadline()
                             .is_some_and(|deadline| deadline.is_elapsed(self.clock.now())) => {}
@@ -149,7 +149,7 @@ impl OpcuaConnection {
         deadline: Option<Deadline>,
         cancel: &CancellationToken,
     ) -> Result<Service> {
-        let mut stopped = pin!(self.reads_stopped.cancelled());
+        let mut stopped = pin!(self.operations_stopped.cancelled());
         let mut exchange = self.session.lane.exchange(
             &self.session.authentication_token,
             631,
@@ -277,12 +277,6 @@ impl OpcuaConnection {
         if prepared.is_empty() {
             return write::finish(request, local, started, self.clock.now());
         }
-        if self.state() != ConnectionState::Connected {
-            return Err(PlcError::new(
-                ErrorKind::Disconnected,
-                "OPC UA connection is closing",
-            ));
-        }
         let (reply, transmitted) = self
             .session
             .lane
@@ -291,6 +285,7 @@ impl OpcuaConnection {
                 prepared,
                 deadline,
                 &cancel,
+                &self.operations_stopped,
             )
             .await;
         match reply {
@@ -332,7 +327,7 @@ impl OpcuaConnection {
             .await;
         }
         self.state.set_if(previous, ConnectionState::Closing);
-        self.reads_stopped.cancel();
+        self.operations_stopped.cancel();
         self.session
             .close(deadline, &CancellationToken::new())
             .await

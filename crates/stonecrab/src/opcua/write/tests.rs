@@ -481,3 +481,231 @@ fn opcua_write_access_limits_and_address_errors_send_nothing() {
         ErrorKind::Disconnected
     );
 }
+
+fn modify(reaction: Reaction, id: u32, mutate: impl FnOnce(&mut Service)) -> Reaction {
+    let Reaction::Reply(bytes) = &reaction else {
+        panic!("reply")
+    };
+    let mut service = payload(bytes);
+    mutate(&mut service);
+    replace(
+        reaction,
+        crate::opcua::service::encode_service(id, &service, 262_144)
+            .unwrap()
+            .to_vec(),
+    )
+}
+#[test]
+fn opcua_metadata_errors_are_rejected_without_guessing_a_type() {
+    for mode in 0..4 {
+        let rig = Rig::mapped(move |service, reaction| {
+            if let Service::ReadRequest { request_header, .. } = service {
+                if mode == 0 {
+                    return replace(
+                        reaction,
+                        crate::opcua::responder::close_response(request_header.request_handle, 0),
+                    );
+                }
+                modify(reaction, 634, |service| {
+                    let Service::ReadResponse {
+                        response_header,
+                        results,
+                        ..
+                    } = service
+                    else {
+                        panic!("read")
+                    };
+                    match mode {
+                        1 => *results = None,
+                        2 => {
+                            response_header.service_result =
+                                crate::opcua::codec::StatusCode(0x8001_0000);
+                        }
+                        3 => {
+                            results.as_mut().unwrap().first_mut().unwrap().status =
+                                Some(crate::opcua::codec::StatusCode(0x801F_0000));
+                        }
+                        _ => panic!("mode"),
+                    }
+                })
+            } else {
+                reaction
+            }
+        });
+        let connection = rig.connect();
+        for _ in 0..2 {
+            let response = block_on_with(
+                &rig.clock,
+                connection.write(request(&*connection, "ns=2;i=42", PlcValue::I32(1))),
+            )
+            .unwrap();
+            assert_eq!(response.rejected_count(), 1);
+            assert_eq!(response.confirmed_count(), 0);
+        }
+        assert_eq!(rig.metadata(), 2, "failed metadata is never cached");
+        assert_eq!(rig.writes(), 0);
+        block_on_with(&rig.clock, connection.close()).unwrap();
+    }
+}
+#[test]
+fn opcua_metadata_timeout_stops_the_batch_before_any_write() {
+    let rig = Rig::mapped(|service, reaction| {
+        if matches!(service, Service::ReadRequest { .. }) {
+            Reaction::Silence
+        } else {
+            reaction
+        }
+    });
+    let connection = rig.connect();
+    assert_eq!(
+        block_on_with(
+            &rig.clock,
+            connection.write(request(&*connection, "ns=2;i=42", PlcValue::I32(1)))
+        )
+        .unwrap_err()
+        .kind(),
+        ErrorKind::Timeout
+    );
+    assert_eq!(rig.writes(), 0);
+    // The test peer assigned a sequence to its suppressed reply; close may reject the gap.
+    let closed = block_on_with(&rig.clock, connection.close());
+    assert!(closed.is_ok() || closed.unwrap_err().kind() == ErrorKind::MalformedData);
+    assert_eq!(connection.state(), ConnectionState::Closed);
+}
+#[test]
+fn opcua_local_write_failures_remain_per_item_and_keep_request_order() {
+    let rig = Rig::new();
+    let connection = rig.connect();
+    let batch = WriteRequest::builder(connection.limits())
+        .item(
+            tag("attribute", "ns=2;i=42;a=DisplayName;DINT"),
+            PlcValue::I32(1),
+        )
+        .item(
+            tag("range", "ns=2;i=42[0..1];DINT"),
+            PlcValue::List(vec![PlcValue::I32(1)]),
+        )
+        .item(tag("good", "ns=2;i=42;DINT"), PlcValue::I32(2))
+        .build()
+        .unwrap();
+    let response = block_on_with(&rig.clock, connection.write(batch)).unwrap();
+    assert_eq!(response.rejected_count(), 2);
+    assert_eq!(response.confirmed_count(), 1);
+    assert_eq!(
+        response
+            .results()
+            .iter()
+            .map(|r| r.tag().as_str())
+            .collect::<Vec<_>>(),
+        ["attribute", "range", "good"]
+    );
+    assert_eq!(rig.writes(), 1);
+    assert_eq!(rig.metadata(), 0);
+    let response = block_on_with(
+        &rig.clock,
+        connection.write(request(
+            &*connection,
+            "ns=2;i=42;a=DisplayName;DINT",
+            PlcValue::I32(1),
+        )),
+    )
+    .unwrap();
+    assert_eq!(response.rejected_count(), 1);
+    assert_eq!(rig.writes(), 1);
+    block_on_with(&rig.clock, connection.close()).unwrap();
+}
+#[test]
+fn opcua_write_deadline_and_encoded_size_failures_precede_transmission() {
+    use crate::{Clock, Deadline};
+    let rig = Rig::new();
+    let connection = rig.connect();
+    let batch = WriteRequest::builder(connection.limits())
+        .item(tag("one", "ns=2;i=42;DINT"), PlcValue::I32(1))
+        .deadline(Deadline::at(rig.clock.now()))
+        .build()
+        .unwrap();
+    assert_eq!(
+        block_on_with(&rig.clock, connection.write(batch))
+            .unwrap_err()
+            .kind(),
+        ErrorKind::Timeout
+    );
+    let value = PlcValue::String("x".repeat(connection.limits().max_buffered_bytes().get()));
+    assert_eq!(
+        block_on_with(
+            &rig.clock,
+            connection.write(request(&*connection, "ns=2;i=42;STRING", value))
+        )
+        .unwrap_err()
+        .kind(),
+        ErrorKind::ResourceLimit
+    );
+    assert_eq!(rig.writes() + rig.metadata(), 0);
+    block_on_with(&rig.clock, connection.close()).unwrap();
+}
+#[test]
+fn opcua_wrong_write_response_type_and_service_failure_are_typed_errors() {
+    for mode in 0..2 {
+        let rig = Rig::mapped(move |service, reaction| {
+            if let Service::WriteRequest { request_header, .. } = service {
+                if mode == 0 {
+                    return replace(
+                        reaction,
+                        crate::opcua::responder::close_response(request_header.request_handle, 0),
+                    );
+                }
+                modify(reaction, 676, |service| {
+                    let Service::WriteResponse {
+                        response_header, ..
+                    } = service
+                    else {
+                        panic!("write")
+                    };
+                    response_header.service_result = crate::opcua::codec::StatusCode(0x8001_0000);
+                })
+            } else {
+                reaction
+            }
+        });
+        let connection = rig.connect();
+        let error = block_on_with(
+            &rig.clock,
+            connection.write(request(&*connection, "ns=2;i=42;DINT", PlcValue::I32(1))),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.kind(),
+            if mode == 0 {
+                ErrorKind::MalformedData
+            } else {
+                ErrorKind::DeviceException
+            }
+        );
+        assert_eq!(rig.writes(), 1);
+        block_on_with(&rig.clock, connection.close()).unwrap();
+    }
+}
+#[test]
+fn opcua_close_interrupts_a_pending_write_with_its_delivery_state_preserved() {
+    let rig = Rig::new();
+    let connection = rig.connect();
+    rig.device.unknown_after_transmit();
+    let mut writing = connection.write(request(&*connection, "ns=2;i=42;DINT", PlcValue::I32(1)));
+    assert!(
+        writing
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending()
+    );
+    let mut closing = connection.close();
+    assert!(
+        closing
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending()
+    );
+    let response = block_on_with(&rig.clock, writing).unwrap();
+    assert_eq!(response.unknown_count(), 1);
+    block_on_with(&rig.clock, closing).unwrap();
+    assert_eq!(connection.state(), ConnectionState::Closed);
+}
