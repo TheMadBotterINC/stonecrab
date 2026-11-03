@@ -747,3 +747,156 @@ fn opcua_array_shapes_and_bad_node_text_are_isolated_to_their_items() {
     );
     assert_eq!(reply.iter_ok().count(), 4);
 }
+
+#[tokio::test]
+#[ignore = "requires open62541; interop/open62541/interop.sh tests"]
+#[expect(
+    clippy::disallowed_macros,
+    reason = "interop evidence records mapped types and explicit refusals"
+)]
+async fn opcua_interop_reads_every_builtin_scalar_array_and_matrix_node() {
+    use crate::{PlcDate, PlcDateTime, PlcTimeOfDay};
+    let uri = std::env::var("STONECRAB_INTEROP_OPEN62541").expect("URI");
+    let driver = OpcuaDriver::new();
+    let connection = driver
+        .connect(
+            driver
+                .parse_config(&format!(
+                    "{uri}&encoding.receive-buffer-size=8192&encoding.send-buffer-size=8192"
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let ints = |values: &[i32]| PlcValue::List(values.iter().copied().map(PlcValue::I32).collect());
+    let doubles =
+        |values: &[f64]| PlcValue::List(values.iter().copied().map(PlcValue::F64).collect());
+    let expected = vec![
+        ("scalar/Boolean", PlcValue::Bool(true)),
+        ("scalar/SByte", PlcValue::I8(-12)),
+        ("scalar/Byte", PlcValue::U8(200)),
+        ("scalar/Int16", PlcValue::I16(-1234)),
+        ("scalar/UInt16", PlcValue::U16(54321)),
+        ("scalar/Int32", PlcValue::I32(-123_456_789)),
+        ("scalar/UInt32", PlcValue::U32(3_123_456_789)),
+        ("scalar/Int64", PlcValue::I64(-1_234_567_890_123)),
+        ("scalar/UInt64", PlcValue::U64(12_345_678_901_234_567_890)),
+        ("scalar/Float", PlcValue::F32(1.5)),
+        ("scalar/Double", PlcValue::F64(std::f64::consts::E)),
+        ("scalar/String", PlcValue::String("stonecrab".to_owned())),
+        (
+            "scalar/DateTime",
+            PlcValue::DateTime(PlcDateTime::new(
+                PlcDate::from_ymd(2026, 10, 30).unwrap(),
+                PlcTimeOfDay::from_nanos_since_midnight(0).unwrap(),
+            )),
+        ),
+        (
+            "scalar/Guid",
+            PlcValue::String("72962b91-fa75-4ae6-8d28-b404dc7daf63".to_owned()),
+        ),
+        ("scalar/XmlElement", PlcValue::String("<a>1</a>".to_owned())),
+        ("scalar/NodeId", PlcValue::String("ns=0;i=2253".to_owned())),
+        (
+            "scalar/StatusCode",
+            PlcValue::String("BadTimeout (0x800A0000)".to_owned()),
+        ),
+        (
+            "scalar/QualifiedName",
+            PlcValue::String("ns=1;s=qname".to_owned()),
+        ),
+        (
+            "array/Boolean",
+            PlcValue::List(vec![
+                PlcValue::Bool(true),
+                PlcValue::Bool(false),
+                PlcValue::Bool(true),
+            ]),
+        ),
+        ("array/Int32", ints(&[1, -2, 3, -4, 5])),
+        ("array/Double", doubles(&[0.5, 1.5, 2.5])),
+        (
+            "array/String",
+            PlcValue::List(
+                ["alpha", "beta", "gamma"]
+                    .into_iter()
+                    .map(|text| PlcValue::String(text.to_owned()))
+                    .collect(),
+            ),
+        ),
+        (
+            "matrix/Int32_2x3",
+            PlcValue::List(vec![ints(&[1, 2, 3]), ints(&[4, 5, 6])]),
+        ),
+        (
+            "matrix/Double_2x2x2",
+            PlcValue::List(vec![
+                PlcValue::List(vec![doubles(&[1.0, 2.0]), doubles(&[3.0, 4.0])]),
+                PlcValue::List(vec![doubles(&[5.0, 6.0]), doubles(&[7.0, 8.0])]),
+            ]),
+        ),
+    ];
+    let refused = [
+        ("scalar/ByteString", "ByteString"),
+        ("scalar/ExpandedNodeId", "ExpandedNodeId"),
+        ("scalar/LocalizedText", "LocalizedText"),
+        ("scalar/DataValue", "DataValue"),
+        ("scalar/DiagnosticInfo", "DiagnosticInfo"),
+        ("structure", "ExtensionObject"),
+    ];
+    let large = [
+        ("large/Int32_4000", 4000_usize),
+        ("large/Int32_10000", 10000_usize),
+    ];
+    let mut request = ReadRequest::builder(connection.limits());
+    for name in expected
+        .iter()
+        .map(|(name, _)| *name)
+        .chain(refused.iter().map(|(name, _)| *name))
+        .chain(large.iter().map(|(name, _)| *name))
+    {
+        request = request.tag(Tag::new(
+            TagId::new(name).unwrap(),
+            Arc::new(OpcuaAddress::parse(&format!("ns=1;s={name}")).unwrap()),
+        ));
+    }
+    let reply = connection.read(request.build().unwrap()).await.unwrap();
+    assert_eq!(reply.items().len(), 32);
+    assert_eq!(reply.iter_ok().count(), 26);
+    assert_eq!(reply.iter_failed().count(), 6);
+    for ((name, expected), item) in expected.iter().zip(reply.items()) {
+        assert_eq!(item.tag().as_str(), *name);
+        assert_eq!(item.outcome().as_ref().unwrap(), expected, "{name}");
+        assert_eq!(
+            item.status().unwrap().code(),
+            0,
+            "value StatusCode never replaces item quality"
+        );
+    }
+    for ((name, kind), item) in refused
+        .iter()
+        .zip(reply.items().iter().skip(expected.len()))
+    {
+        assert_eq!(item.tag().as_str(), *name);
+        let error = item.outcome().as_ref().unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Unsupported(Operation::Read));
+        assert!(error.to_string().contains(kind));
+    }
+    for ((name, count), item) in large
+        .iter()
+        .zip(reply.items().iter().skip(expected.len() + refused.len()))
+    {
+        assert_eq!(item.tag().as_str(), *name);
+        let PlcValue::List(values) = item.outcome().as_ref().unwrap() else {
+            panic!("array")
+        };
+        assert_eq!(values.len(), *count);
+        for (index, value) in values.iter().enumerate() {
+            assert_eq!(*value, PlcValue::I32(i32::try_from(index).unwrap()));
+        }
+    }
+    connection.close().await.unwrap();
+    println!(
+        "public Read: 18 mapped scalars, four arrays, 2D/3D matrices and 4000/10000-element arrays exact; six named deferred-kind errors isolated; 8192-byte buffers; close passed"
+    );
+}

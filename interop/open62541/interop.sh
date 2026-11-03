@@ -47,7 +47,7 @@ HOST="127.0.0.1"
 EVIDENCE="${INTEROP_EVIDENCE_DIR:-$ROOT/target/interop-evidence}/open62541"
 PKI_OUT="${INTEROP_PKI_DIR:-$ROOT/target/interop-pki/open62541}"
 FILTER='binary(stonecrab) & test(/^opcua::(channel|session|connection|lane)::tests::opcua_interop_/)'
-EXPECTED_TESTS=4
+EXPECTED_TESTS=5
 
 die() {
   echo "interop: $*" >&2
