@@ -165,3 +165,15 @@ and `MbapFramer` in the Modbus crate converts a codec `ParseError` into it.
   in this crate, named as CONTRIBUTING "Fuzz findings" requires.
 - The `deny` job stays blocking; the D23 command above is re-run whenever a dependency
   of the codec changes.
+
+
+## S88 addendum: generated bit runs
+
+The most-significant-bit field-run helpers formerly in Modbus's test-only
+`generated_support` move unchanged into private `codec::generated_bits`. They are
+crate-private, compiled for OPC UA production use or the Modbus generated-code tests.
+Both generators import them through `crate::codec`; the old wrapper is deleted. Their
+boundary tests move with them and remain inside the codec's 100% line gate. No public
+codec API is added. Built-in codec types named by generated crate-private service fields
+also become crate-private within the private OPC UA codec module; narrow visibility-lint
+expectations record that requirement without exposing any type publicly.

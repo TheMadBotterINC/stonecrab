@@ -30,7 +30,11 @@ const INNER_INFO_FLAG: u8 = 0x40;
 /// table of the response and are kept as read, negative values included: what they mean is for
 /// the layer that has the table.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(in crate::opcua) struct DiagnosticInfo {
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "generated crate-private service fields name this codec type"
+)]
+pub(crate) struct DiagnosticInfo {
     /// The index of the symbolic id in the string table.
     pub(in crate::opcua) symbolic_id: Option<i32>,
     /// The index of the namespace URI in the string table.

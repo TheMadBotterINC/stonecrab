@@ -91,6 +91,23 @@ impl Ctx<'_> {
             emit_match(&mut methods, "self", &merge_arms(arms));
             line(&mut methods, "}");
             line(&mut methods, "");
+            line(
+                &mut methods,
+                &format!(
+                    "pub(crate) const fn name_from_value(value: {rust}) -> Option<&'static str> {{"
+                ),
+            );
+            line(&mut methods, "match value {");
+            for ((_, _, text), value) in wire_values.iter().zip(&def.values) {
+                line(
+                    &mut methods,
+                    &format!("{text} => Some(\"{}\"),", value.name),
+                );
+            }
+            line(&mut methods, "_ => None,");
+            line(&mut methods, "}");
+            line(&mut methods, "}");
+            line(&mut methods, "");
             if self.wire_enums.contains(&def.name) {
                 self.emit_enum_wire(def, &mut methods, ty, *bits, &wire_values, &mut imports)?;
             }

@@ -5597,3 +5597,27 @@ vendored_path = "upstream/mspec/modbus/modbus.mspec"
 git_blob = "d6d102422ae654ca2745df6806a6f2ad9bb1fb65"
 sha256 = "cb8ea683da2f3ddc207ee2b4469f1737a6a34ccc5d425b12d37c69110ff94143"
 vendored_on = "2026-10-29"
+
+[[mspec]]
+protocol = "opcua"
+upstream_path = "protocols/opcua/src/main/generated/protocols/opcua/opc-manual.mspec"
+vendored_path = "upstream/mspec/opcua/opc-manual.mspec"
+git_blob = "a8cfc6fcfe11cd47a9d166f19b6735e489df8479"
+sha256 = "3c0a04d5daa72089df32316463d8421d8d9b9aee49d6eeaab991545ceaf937e4"
+vendored_on = "2026-11-02"
+
+[[mspec]]
+protocol = "opcua"
+upstream_path = "protocols/opcua/src/main/generated/protocols/opcua/opc-status.mspec"
+vendored_path = "upstream/mspec/opcua/opc-status.mspec"
+git_blob = "ac49b8b2c2434b5e6808390ad132139965d12b9a"
+sha256 = "f90c951f6ee5479863f84b8a96b92a4e59173eb06aefccd6091b4d32d07fad8e"
+vendored_on = "2026-11-02"
+
+[[mspec]]
+protocol = "opcua"
+upstream_path = "protocols/opcua/src/main/generated/protocols/opcua/opc-attribute.mspec"
+vendored_path = "upstream/mspec/opcua/opc-attribute.mspec"
+git_blob = "6cfa588e8b31e8caf3a00bdeabf6b0f67e6d44ec"
+sha256 = "c3235ae79bf27669f1a6583095dd0982c1d5faf36bef87dec81a5eaa4f908177"
+vendored_on = "2026-11-02"

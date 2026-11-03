@@ -1,17 +1,18 @@
+//! # Compatibility: docs/parity/opcua.md#OPCUA-CODEC-KNOWN-BODY
+//!
 //! The `ExtensionObject` envelope (OPC UA Part 6, 5.2.2.15): a type id, an encoding byte and,
 //! when the encoding says so, a length-prefixed body.
 //!
-//! This is the envelope only. The body is kept as the bytes the server sent: a binary body as
-//! a `ByteString` ([`ExtensionBody::Raw`]), an XML body as a String ([`ExtensionBody::Xml`]),
-//! and an object with no body as [`ExtensionBody::Null`]. The type id is read as an
-//! `ExpandedNodeId`, as upstream's mspec does: a conforming server sends the `NodeId` subset,
-//! which is the same bytes. The decoding of a known body is wired in with the generated
-//! service layer (slice S88). The type spends one unit of the [`Depth`] budget on entry, which
-//! a decoded body will inherit, so that an object that holds a Variant that holds an object is
-//! counted at every step.
+//! Recognized local namespace-zero binary bodies use the generated service decoder.
+//! Unsupported bodies stay raw, with their type id and null/empty distinction intact.
+//! A recognized body's errors and trailing bytes are refused. The envelope spends one
+//! recursion entry and passes the remaining budget through generated and external fields.
 
 use crate::codec::{BoundedReader, BoundedWriter, ParseError};
-use crate::opcua::codec::{Depth, ExpandedNodeId, UaByteString, UaString};
+use crate::opcua::codec::{
+    Depth, ExpandedNodeId, Identifier, MAX_STRING_BYTES, UaByteString, UaString,
+};
+use crate::opcua::generated::extension_object_definition::ExtensionObjectDefinition;
 
 /// The encoding byte of an object with no body.
 const NO_BODY: u8 = 0;
@@ -21,11 +22,13 @@ const BINARY_BODY: u8 = 1;
 const XML_BODY: u8 = 2;
 
 /// The body of an `ExtensionObject`, as received.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub(in crate::opcua) enum ExtensionBody {
     /// No body (encoding byte 0).
     #[default]
     Null,
+    /// A decoded binary body. Its encoding id is the enclosing object's type id.
+    Known(Box<ExtensionObjectDefinition>),
     /// A binary body (encoding byte 1): the bytes of the `ByteString`, null or empty as read.
     Raw(UaByteString),
     /// An XML body (encoding byte 2): the bytes of the String, which are not checked.
@@ -34,8 +37,12 @@ pub(in crate::opcua) enum ExtensionBody {
 
 /// A structure of a type the field that holds it does not name: the id of its encoding and its
 /// body.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::opcua) struct ExtensionObject {
+#[derive(Debug, Clone, PartialEq)]
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "generated crate-private service fields name this codec type"
+)]
+pub(crate) struct ExtensionObject {
     /// The node id of the data type encoding of the body.
     pub(in crate::opcua) type_id: ExpandedNodeId,
     /// The body.
@@ -58,7 +65,7 @@ impl ExtensionObject {
         let type_id = ExpandedNodeId::parse(reader, depth)?;
         let body = match reader.read_u8()? {
             NO_BODY => ExtensionBody::Null,
-            BINARY_BODY => ExtensionBody::Raw(UaByteString::parse(reader, depth)?),
+            BINARY_BODY => binary_body(&type_id, UaByteString::parse(reader, depth)?, depth)?,
             XML_BODY => ExtensionBody::Xml(UaString::parse(reader, depth)?),
             other => {
                 return Err(ParseError::InvalidDiscriminator {
@@ -84,6 +91,11 @@ impl ExtensionObject {
         self.type_id.serialize(writer, depth)?;
         match &self.body {
             ExtensionBody::Null => writer.write_u8(NO_BODY),
+            ExtensionBody::Known(value) => {
+                let bytes = encoded_body(value, depth)?;
+                writer.write_u8(BINARY_BODY)?;
+                bytes.serialize(writer, depth)
+            }
             ExtensionBody::Raw(bytes) => {
                 writer.write_u8(BINARY_BODY)?;
                 bytes.serialize(writer, depth)
@@ -105,6 +117,7 @@ impl ExtensionObject {
         let depth = depth.enter()?;
         let body = match &self.body {
             ExtensionBody::Null => 0,
+            ExtensionBody::Known(value) => encoded_body(value, depth)?.length_in_bytes(depth)?,
             ExtensionBody::Raw(bytes) => bytes.length_in_bytes(depth)?,
             ExtensionBody::Xml(text) => text.length_in_bytes(depth)?,
         };
@@ -114,6 +127,51 @@ impl ExtensionObject {
             .and_then(|size| size.checked_add(1))
             .ok_or(ParseError::Overflow)
     }
+}
+
+/// Only the namespace-zero, local numeric encoding ids belong to the generated table.
+fn binary_body(
+    type_id: &ExpandedNodeId,
+    bytes: UaByteString,
+    depth: Depth,
+) -> Result<ExtensionBody, ParseError> {
+    if type_id.node_id.namespace != 0
+        || type_id.namespace_uri.is_some()
+        || type_id.server_index.is_some()
+    {
+        return Ok(ExtensionBody::Raw(bytes));
+    }
+    let Identifier::Numeric(id) = type_id.node_id.identifier else {
+        return Ok(ExtensionBody::Raw(bytes));
+    };
+    let Ok(id) = i32::try_from(id) else {
+        return Ok(ExtensionBody::Raw(bytes));
+    };
+    let mut body = BoundedReader::new(bytes.as_bytes().unwrap_or_default());
+    match ExtensionObjectDefinition::parse(&mut body, depth, id) {
+        Ok(value) => {
+            body.expect_eof()?;
+            Ok(ExtensionBody::Known(Box::new(value)))
+        }
+        Err(ParseError::InvalidDiscriminator { field, .. })
+            if field == "ExtensionObjectDefinition"
+                || (field.starts_with("ExtensionObjectDefinition.")
+                    && field.ends_with(" (disabled)")) =>
+        {
+            Ok(ExtensionBody::Raw(bytes))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Encoding is bounded before each append, even when called only to measure a body.
+fn encoded_body(
+    value: &ExtensionObjectDefinition,
+    depth: Depth,
+) -> Result<UaByteString, ParseError> {
+    let mut writer = BoundedWriter::new(MAX_STRING_BYTES);
+    value.serialize(&mut writer, depth)?;
+    Ok(UaByteString::new(writer.into_bytes()))
 }
 
 #[cfg(test)]

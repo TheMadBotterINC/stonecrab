@@ -86,7 +86,7 @@ Semantics, beyond ADR-0019 decision 4:
   not add a lint expectation for it, the module that holds the output does.
 - Sub-byte discriminators and fields form runs of exactly one byte, split and joined most
   significant bit first through `split_bits` and `join_bits` of the hand-written support
-  module (`crate::modbus::generated_support`); a value that does not fit its bits is
+  module (`crate::codec`); a value that does not fit its bits is
   `Overflow`, never truncated.
 - A `const` field is checked on parse (`InvalidDiscriminator` naming the field). An
   `implicit` field is read, checked on parse against its expression once the case is read
@@ -471,3 +471,9 @@ A generator change that alters the output bumps the package version (the header 
 and is followed by a regeneration-only `gen` commit. Grammar changes between baselines are
 ported to `src/mspec.rs` and `src/expression.rs` with their own tests first (ADR-0019
 decision 10). The Java bootstrap of CODING_STANDARDS 17.6 is not used.
+
+
+Numeric enums also expose `const name_from_value(raw) -> Option<&'static str>` using
+exact mspec names. Unknown values return None so an external StatusCode can keep its
+number without forcing it into a closed enum. Generator 0.3.0 adds this metadata only;
+encoded wire values and generated parse/serialize behavior are unchanged.

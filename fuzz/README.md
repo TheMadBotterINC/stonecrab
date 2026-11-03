@@ -44,3 +44,11 @@ crate, merged before or with the fix.
 
 Property tests write `proptest-regressions/` files next to the tests; those directories
 are tracked in git, never ignored.
+
+
+`fuzz_opcua_service` drives the S88 generated known-service dispatcher through the
+hand-written external codecs. The first four bytes select the signed encoding id;
+remaining bytes are a service body. Twenty-two first-party service seeds plus disabled,
+unknown and oversized-array cases exercise canonical rewrite stability, counts and
+shared depth bounds. Provenance and positive/negative body hex fixtures are retained
+under `fixtures/opcua/services/`; no upstream captured test suite is copied here.

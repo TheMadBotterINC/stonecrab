@@ -2,6 +2,8 @@
 
 mod bits;
 mod error;
+#[cfg(any(feature = "opcua", all(test, feature = "modbus", feature = "testkit")))]
+mod generated_bits;
 mod reader;
 mod writer;
 
@@ -9,6 +11,8 @@ use crate::ByteOrder;
 
 pub use bits::{coil_byte_count, pack_bits_lsb_first, unpack_bits_lsb_first};
 pub use error::ParseError;
+#[cfg(any(feature = "opcua", all(test, feature = "modbus", feature = "testkit")))]
+pub(crate) use generated_bits::{join_bits, split_bits};
 pub use reader::BoundedReader;
 pub use writer::BoundedWriter;
 

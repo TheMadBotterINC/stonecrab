@@ -1,0 +1,140 @@
+# First-party S88 vectors, not captured or copied from a server or PLC4X test suite.
+# Fields follow the pinned mspec and OPC UA Part 6 binary encoding rules.
+[origin]
+kind = "first_party"
+source = "OPC UA Part 6 5.2.2 and pinned PLC4X opc-manual.mspec field order"
+commit = "ea229918f5d07700e04d7d69ab1645da679cb700"
+upstream_path = "protocols/opcua/src/main/generated/protocols/opcua/opc-manual.mspec"
+note = "Unit tests construct matching fields independently in opcua/service_tests.rs; fuzz seeds prepend a four-byte signed encoding id. Every full fixture has a one-byte truncation."
+
+[[vector]]
+name = "RequestHeader"
+encoding_id = 391
+valid = "RequestHeader.hex"
+negative = "RequestHeader-truncated.hex"
+
+[[vector]]
+name = "ResponseHeader"
+encoding_id = 394
+valid = "ResponseHeader.hex"
+negative = "ResponseHeader-truncated.hex"
+
+[[vector]]
+name = "ServiceFault"
+encoding_id = 397
+valid = "ServiceFault.hex"
+negative = "ServiceFault-truncated.hex"
+
+[[vector]]
+name = "ChannelSecurityToken"
+encoding_id = 443
+valid = "ChannelSecurityToken.hex"
+negative = "ChannelSecurityToken-truncated.hex"
+
+[[vector]]
+name = "OpenSecureChannelRequest"
+encoding_id = 446
+valid = "OpenSecureChannelRequest.hex"
+negative = "OpenSecureChannelRequest-truncated.hex"
+
+[[vector]]
+name = "OpenSecureChannelResponse"
+encoding_id = 449
+valid = "OpenSecureChannelResponse.hex"
+negative = "OpenSecureChannelResponse-truncated.hex"
+
+[[vector]]
+name = "CloseSecureChannelRequest"
+encoding_id = 452
+valid = "CloseSecureChannelRequest.hex"
+negative = "CloseSecureChannelRequest-truncated.hex"
+
+[[vector]]
+name = "ApplicationDescription"
+encoding_id = 310
+valid = "ApplicationDescription.hex"
+negative = "ApplicationDescription-truncated.hex"
+
+[[vector]]
+name = "UserTokenPolicy"
+encoding_id = 306
+valid = "UserTokenPolicy.hex"
+negative = "UserTokenPolicy-truncated.hex"
+
+[[vector]]
+name = "EndpointDescription"
+encoding_id = 314
+valid = "EndpointDescription.hex"
+negative = "EndpointDescription-truncated.hex"
+
+[[vector]]
+name = "SignedSoftwareCertificate"
+encoding_id = 346
+valid = "SignedSoftwareCertificate.hex"
+negative = "SignedSoftwareCertificate-truncated.hex"
+
+[[vector]]
+name = "SignatureData"
+encoding_id = 458
+valid = "SignatureData.hex"
+negative = "SignatureData-truncated.hex"
+
+[[vector]]
+name = "CreateSessionRequest"
+encoding_id = 461
+valid = "CreateSessionRequest.hex"
+negative = "CreateSessionRequest-truncated.hex"
+
+[[vector]]
+name = "CreateSessionResponse"
+encoding_id = 464
+valid = "CreateSessionResponse.hex"
+negative = "CreateSessionResponse-truncated.hex"
+
+[[vector]]
+name = "AnonymousIdentityToken"
+encoding_id = 321
+valid = "AnonymousIdentityToken.hex"
+negative = "AnonymousIdentityToken-truncated.hex"
+
+[[vector]]
+name = "ActivateSessionRequest"
+encoding_id = 467
+valid = "ActivateSessionRequest.hex"
+negative = "ActivateSessionRequest-truncated.hex"
+
+[[vector]]
+name = "ActivateSessionResponse"
+encoding_id = 470
+valid = "ActivateSessionResponse.hex"
+negative = "ActivateSessionResponse-truncated.hex"
+
+[[vector]]
+name = "CloseSessionRequest"
+encoding_id = 473
+valid = "CloseSessionRequest.hex"
+negative = "CloseSessionRequest-truncated.hex"
+
+[[vector]]
+name = "CloseSessionResponse"
+encoding_id = 476
+valid = "CloseSessionResponse.hex"
+negative = "CloseSessionResponse-truncated.hex"
+
+[[vector]]
+name = "ReadValueId"
+encoding_id = 628
+valid = "ReadValueId.hex"
+negative = "ReadValueId-truncated.hex"
+
+[[vector]]
+name = "ReadRequest"
+encoding_id = 631
+valid = "ReadRequest.hex"
+negative = "ReadRequest-truncated.hex"
+
+[[vector]]
+name = "ReadResponse"
+encoding_id = 634
+valid = "ReadResponse.hex"
+negative = "ReadResponse-truncated.hex"

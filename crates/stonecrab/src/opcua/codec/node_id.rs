@@ -44,7 +44,11 @@ pub(in crate::opcua) enum Identifier {
 
 /// A node id: a namespace index and an identifier.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::opcua) struct NodeId {
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "generated crate-private service fields name this codec type"
+)]
+pub(crate) struct NodeId {
     /// The namespace index.
     pub(in crate::opcua) namespace: u16,
     /// The identifier within the namespace.

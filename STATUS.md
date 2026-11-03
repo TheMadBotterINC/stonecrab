@@ -1,9 +1,25 @@
 # Stonecrab status and engineering handoff
 
-Updated: 2026-10-29.
+Updated: 2026-11-02.
 Implementation baseline: the commit that last modified this file
 (`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
 its own commit; the slice log below records what each one landed.
+
+## OPC UA service codecs (S88, 2026-11-02)
+
+The 22-case connection/read service subset is generated from the approved, pinned
+PLC4X models and wired into bounded Known ExtensionObject decoding. Unsupported bodies
+remain raw; malformed recognized bodies fail. Status diagnostics can look up 274 names
+without losing unknown numbers. This is private codec infrastructure; public connect
+and Read remain planned for S91/S92. Next: S89, the bounded pipelined exchange lane.
+See [verification evidence](docs/evidence/opcua-s88.md) and the
+[design sketch](docs/adr/0034-opcua-client-design.md#s88-implementation-sketch-2026-11-02).
+
+Local checks passed: 2123 tests, 588 doctests, 100% handwritten OPC UA line coverage,
+59 feature combinations, generator tests/regeneration, fuzz smoke and a 60-second service
+fuzz run, semver against 0.3.0 and package verification. No physical peer was used.
+Future integration uses ordinary merges preserving individual commits, per the
+maintainer's 2026-11-02 instruction; CONTRIBUTING and CODING_STANDARDS reflect it.
 
 ## Acquisition branch integration (2026-11-02)
 

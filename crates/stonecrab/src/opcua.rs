@@ -2,16 +2,25 @@
 
 mod address;
 // The types of the binary encoding (the built-ins and the recursive types) are written and
-// tested here, but nothing calls them until the generated service layer (slice S88).
+// used by generated service bodies; public connection/value mapping arrives in S91/S92.
 #[cfg_attr(
     not(test),
     expect(
         dead_code,
         unused_imports,
-        reason = "the generated service layer of slice S88 is the first caller"
+        reason = "the connection and value layer consume the remaining codec entry points in S91/S92"
     )
 )]
 mod codec;
+// Service bodies are decoded by ExtensionObject now; channel/session code will also use
+// the separately generated request and response structs in S89–S92.
+#[expect(
+    dead_code,
+    reason = "generated metadata and service constructors are consumed incrementally by S89–S92"
+)]
+mod generated;
+#[cfg(test)]
+mod service_tests;
 // The connection string and its options are parsed here but nothing calls them until the
 // driver arrives (slice S91, which removes these two expectations).
 #[cfg_attr(

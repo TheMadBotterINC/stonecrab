@@ -201,3 +201,48 @@ pub fn frame(
         }
     }))
 }
+
+/// Exercise the generated service dispatcher. The first four bytes are the little-endian
+/// encoding id; the remaining input is the service body. Unknown/disabled ids are refused.
+///
+/// # Errors
+/// Returns the codec's `ParseError` for malformed, excessive or unsupported input.
+pub fn service(bytes: &[u8]) -> core::result::Result<Decoded, ParseError> {
+    if bytes.len() > crate::opcua::codec::MAX_STRING_BYTES {
+        return Err(ParseError::OversizedLength {
+            length: bytes.len(),
+            max: crate::opcua::codec::MAX_STRING_BYTES,
+        });
+    }
+    round_trip(bytes, parse_service, serialize_service, measure_service)
+}
+
+type Service = (
+    i32,
+    crate::opcua::generated::extension_object_definition::ExtensionObjectDefinition,
+);
+
+fn parse_service(
+    reader: &mut BoundedReader<'_>,
+    depth: Depth,
+) -> core::result::Result<Service, ParseError> {
+    let id = reader.read_i32(crate::ByteOrder::LittleEndian)?;
+    let value =
+        crate::opcua::generated::extension_object_definition::ExtensionObjectDefinition::parse(
+            reader, depth, id,
+        )?;
+    Ok((id, value))
+}
+fn serialize_service(
+    value: &Service,
+    writer: &mut BoundedWriter,
+    depth: Depth,
+) -> core::result::Result<(), ParseError> {
+    writer.write_i32(value.0, crate::ByteOrder::LittleEndian)?;
+    value.1.serialize(writer, depth)
+}
+fn measure_service(value: &Service, depth: Depth) -> core::result::Result<usize, ParseError> {
+    let mut writer = BoundedWriter::new(crate::opcua::codec::MAX_STRING_BYTES);
+    serialize_service(value, &mut writer, depth)?;
+    Ok(writer.as_slice().len())
+}
