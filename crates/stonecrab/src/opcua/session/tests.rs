@@ -300,7 +300,7 @@ fn opcua_dropping_close_is_terminal_and_wakes_a_concurrent_close() {
 }
 
 #[test]
-fn opcua_write_is_unsupported_and_read_fails_after_close() {
+fn opcua_read_only_writes_are_refused_and_read_fails_after_close() {
     let (driver, clock, _) = driver(Script::strict(vec![Step::respond(reply)]));
     assert_eq!(driver.scheme(), "opcua");
     assert_eq!(
@@ -331,11 +331,7 @@ fn opcua_write_is_unsupported_and_read_fails_after_close() {
             .item(tag.clone(), crate::PlcValue::Bool(true))
             .build()
             .unwrap();
-        let expected_write = if closed {
-            ErrorKind::Disconnected
-        } else {
-            ErrorKind::Unsupported(Operation::Write)
-        };
+        let expected_write = ErrorKind::Unsupported(Operation::Write);
         if closed {
             assert_eq!(
                 block_on_with(&clock, connection.read(read))
@@ -459,6 +455,7 @@ fn opcua_create_session_adopts_the_authentication_token_and_revised_timeout() {
         Duration::from_secs(30),
         ResourceLimits::builder().build().unwrap(),
         crate::RetryPolicy::default(),
+        crate::AccessPolicy::ReadOnly,
     );
     let shown = format!("{connection:?}");
     assert!(shown.contains("54.321s"));
@@ -1059,7 +1056,7 @@ fn opcua_credentials_over_an_unprotected_token_policy_fail_before_sending() {
     }
 }
 
-struct CapturedLog(Arc<std::sync::Mutex<Vec<u8>>>);
+struct CapturedLog(Arc<Mutex<Vec<u8>>>);
 impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CapturedLog {
     type Writer = tracing_subscriber::fmt::writer::MutexGuardWriter<'a, Vec<u8>>;
     fn make_writer(&'a self) -> Self::Writer {
@@ -1069,7 +1066,7 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CapturedLog {
 
 #[test]
 fn opcua_allow_insecure_credentials_sends_the_user_name_and_warns() {
-    let output = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+    let output = Arc::new(Mutex::new(Vec::<u8>::new()));
     let subscriber = tracing_subscriber::fmt()
         .with_ansi(false)
         .without_time()

@@ -40,6 +40,7 @@ mod tests {
         let timeout = device.clone();
         let disconnect = device.clone();
         let exception = device.clone();
+        let unknown = device.clone();
         let fixture = ContractFixture::new(
             Arc::new(clock.clone()),
             "ns=2;i=42",
@@ -58,7 +59,8 @@ mod tests {
             },
             move || count.reads(),
         )
-        .with_writable("ns=2;i=42", PlcValue::I32(1))
+        .with_writable("ns=2;i=42;DINT", PlcValue::I32(1))
+        .with_inject_unknown_after_transmit(move || unknown.unknown_after_transmit())
         .with_inject_timeout(move || timeout.timeout())
         .with_inject_disconnect(move || disconnect.disconnect())
         .with_inject_device_exception(move || exception.exception());
@@ -66,7 +68,7 @@ mod tests {
             &clock,
             ContractSuite::run(
                 &driver,
-                "opcua://fake:4840/path?security-policy=NONE&request-timeout-ms=25",
+                "opcua://fake:4840/path?security-policy=NONE&request-timeout-ms=25&access=read-write",
                 &fixture,
             ),
         )
@@ -80,10 +82,9 @@ mod tests {
                 skipped.push((case.name, reason.as_str()));
             }
         }
-        assert_eq!(report.passed(), 23, "{report}");
+        assert_eq!(report.passed(), 24, "{report}");
         let expected = [
-            "a read-only policy rejects a write with no I/O",
-            "an unknown write outcome is never replayed",
+            "an unsupported write performs no I/O",
             "a supported ping answers and changes no state",
             "a ping to a silent device yields Timeout",
             "a cyclic subscription delivers one event per tick and discloses its interval",

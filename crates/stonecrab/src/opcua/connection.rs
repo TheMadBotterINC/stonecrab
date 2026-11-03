@@ -29,6 +29,7 @@ pub(super) struct OpcuaConnection {
     closing: AtomicBool,
     reads_stopped: CancellationToken,
     retry: crate::RetryPolicy,
+    access: crate::AccessPolicy,
 }
 
 impl OpcuaConnection {
@@ -38,6 +39,7 @@ impl OpcuaConnection {
         request_timeout: Duration,
         limits: ResourceLimits,
         retry: crate::RetryPolicy,
+        access: crate::AccessPolicy,
     ) -> Self {
         Self {
             session,
@@ -48,62 +50,54 @@ impl OpcuaConnection {
             closing: AtomicBool::new(false),
             reads_stopped: CancellationToken::new(),
             retry,
+            access,
         }
-    }
-
-    fn unavailable(&self, operation: Operation) -> PlcError {
-        if self.state() != ConnectionState::Connected {
-            return PlcError::new(ErrorKind::Disconnected, "OPC UA connection is closed");
-        }
-        PlcError::new(
-            ErrorKind::Unsupported(operation),
-            "OPC UA operation is not implemented",
-        )
-        .with_diagnostics(crate::Diagnostics {
-            operation: Some(operation),
-            connection_state: Some(self.state()),
-            category: Some(crate::FailureCategory::Validation),
-            ..crate::Diagnostics::default()
-        })
     }
 
     async fn read_inner(&self, request: ReadRequest) -> Result<ReadResponse> {
         let started = self.clock.now();
         let result = self.read_batch(&request).await;
-        result.map_err(|error| {
-            if self.session.lane.is_failed() {
-                self.state.set_if(
-                    ConnectionState::Connected,
-                    ConnectionState::Failed(error.kind()),
-                );
-            }
-            let category = match error.kind() {
-                ErrorKind::InvalidAddress
-                | ErrorKind::InvalidConfig
-                | ErrorKind::ResourceLimit
-                | ErrorKind::Unsupported(_) => crate::FailureCategory::Validation,
-                ErrorKind::MalformedData
-                | ErrorKind::DeviceException
-                | ErrorKind::NotFound
-                | ErrorKind::InvalidDataType
-                | ErrorKind::AccessDenied
-                | ErrorKind::Authentication
-                | ErrorKind::Trust => crate::FailureCategory::Protocol,
-                ErrorKind::Internal => crate::FailureCategory::Internal,
-                ErrorKind::Timeout
-                | ErrorKind::Cancelled
-                | ErrorKind::Disconnected
-                | ErrorKind::Backpressure => crate::FailureCategory::Transport,
-            };
-            let retries = error.diagnostics().retries;
-            error.with_diagnostics(crate::Diagnostics {
-                operation: Some(Operation::Read),
-                connection_state: Some(self.state()),
-                latency: Some(self.clock.now().saturating_duration_since(started)),
-                category: Some(category),
-                retries,
-                ..crate::Diagnostics::default()
-            })
+        result.map_err(|error| self.operation_error(Operation::Read, started, error))
+    }
+
+    fn operation_error(
+        &self,
+        operation: Operation,
+        started: std::time::Instant,
+        error: PlcError,
+    ) -> PlcError {
+        if self.session.lane.is_failed() {
+            self.state.set_if(
+                ConnectionState::Connected,
+                ConnectionState::Failed(error.kind()),
+            );
+        }
+        let category = match error.kind() {
+            ErrorKind::InvalidAddress
+            | ErrorKind::InvalidConfig
+            | ErrorKind::ResourceLimit
+            | ErrorKind::Unsupported(_) => crate::FailureCategory::Validation,
+            ErrorKind::MalformedData
+            | ErrorKind::DeviceException
+            | ErrorKind::NotFound
+            | ErrorKind::InvalidDataType
+            | ErrorKind::AccessDenied
+            | ErrorKind::Authentication
+            | ErrorKind::Trust => crate::FailureCategory::Protocol,
+            ErrorKind::Internal => crate::FailureCategory::Internal,
+            ErrorKind::Timeout
+            | ErrorKind::Cancelled
+            | ErrorKind::Disconnected
+            | ErrorKind::Backpressure => crate::FailureCategory::Transport,
+        };
+        let retries = error.diagnostics().retries;
+        error.with_diagnostics(crate::Diagnostics {
+            operation: Some(operation),
+            connection_state: Some(self.state()),
+            latency: Some(self.clock.now().saturating_duration_since(started)),
+            category: Some(category),
+            retries,
+            ..crate::Diagnostics::default()
         })
     }
 
@@ -180,6 +174,141 @@ impl OpcuaConnection {
         .await
     }
 
+    async fn write_inner(&self, request: WriteRequest) -> Result<WriteResponse> {
+        let started = self.clock.now();
+        self.write_batch(&request, started)
+            .await
+            .map_err(|error| self.operation_error(Operation::Write, started, error))
+    }
+
+    async fn write_batch(
+        &self,
+        request: &WriteRequest,
+        started: std::time::Instant,
+    ) -> Result<WriteResponse> {
+        use crate::opcua::{OpcuaDataType, attributes, read, write};
+        if self.access == crate::AccessPolicy::ReadOnly {
+            return Err(PlcError::new(
+                ErrorKind::Unsupported(Operation::Write),
+                "OPC UA connection is read-only",
+            ));
+        }
+        if self.state() != ConnectionState::Connected {
+            return Err(PlcError::new(
+                ErrorKind::Disconnected,
+                "OPC UA connection is closed",
+            ));
+        }
+        if request.items().len() > self.limits.max_items_per_request().get() {
+            return Err(PlcError::new(
+                ErrorKind::ResourceLimit,
+                "OPC UA write exceeds the connection item budget",
+            ));
+        }
+        let deadline = Deadline::after(started, self.request_timeout)?;
+        let deadline = request
+            .deadline()
+            .map_or(deadline, |requested| deadline.min(requested));
+        let cancel = request.cancel().cloned().unwrap_or_default();
+        if cancel.is_cancelled() {
+            return Err(PlcError::new(
+                ErrorKind::Cancelled,
+                "OPC UA write cancelled before transmission",
+            ));
+        }
+        if deadline.is_elapsed(self.clock.now()) {
+            return Err(PlcError::new(
+                ErrorKind::Timeout,
+                "OPC UA write deadline elapsed before transmission",
+            ));
+        }
+        let nodes = request
+            .items()
+            .iter()
+            .map(|item| read::node(item.tag()))
+            .collect::<Result<Vec<_>>>()?;
+        let mut local = Vec::new();
+        let mut tags = Vec::new();
+        let mut prepared = Vec::new();
+        let mut budget = write::value::Budget::new(self.limits.max_buffered_bytes().get());
+        for (item, node) in request.items().iter().zip(nodes) {
+            let attributes = if node.attribute_id == 13
+                && read::address(item.tag())?.data_type() == OpcuaDataType::Null
+            {
+                match attributes::resolve(
+                    &self.session,
+                    &node,
+                    self.limits.max_items_per_request(),
+                    deadline,
+                    &cancel,
+                )
+                .await
+                {
+                    Ok(attributes) => attributes,
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            ErrorKind::Timeout
+                                | ErrorKind::Cancelled
+                                | ErrorKind::Disconnected
+                                | ErrorKind::Backpressure
+                                | ErrorKind::ResourceLimit
+                                | ErrorKind::Internal
+                        ) =>
+                    {
+                        return Err(error);
+                    }
+                    Err(error) => {
+                        local.push(write::rejected(item.tag().id().clone(), error));
+                        continue;
+                    }
+                }
+            } else {
+                attributes::Attributes::default()
+            };
+            match write::node(item, node, &attributes, &mut budget) {
+                Ok(node) => {
+                    tags.push(item.tag().id().clone());
+                    prepared.push(node);
+                }
+                Err(error) => local.push(write::rejected(item.tag().id().clone(), error)),
+            }
+        }
+        if prepared.is_empty() {
+            return write::finish(request, local, started, self.clock.now());
+        }
+        if self.state() != ConnectionState::Connected {
+            return Err(PlcError::new(
+                ErrorKind::Disconnected,
+                "OPC UA connection is closing",
+            ));
+        }
+        let (reply, transmitted) = self
+            .session
+            .lane
+            .write(
+                &self.session.authentication_token,
+                prepared,
+                deadline,
+                &cancel,
+            )
+            .await;
+        match reply {
+            Ok(reply) => write::response(request, tags, local, reply, started, self.clock.now()),
+            Err(error) if transmitted => {
+                if self.session.lane.is_failed() {
+                    self.state.set_if(
+                        ConnectionState::Connected,
+                        ConnectionState::Failed(error.kind()),
+                    );
+                }
+                local.extend(write::unknown(tags, error.kind()));
+                write::finish(request, local, started, self.clock.now())
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     async fn close_inner(&self) -> Result<()> {
         let previous = self.state.current();
         if previous == ConnectionState::Closed {
@@ -226,8 +355,8 @@ impl Connection for OpcuaConnection {
     fn read(&self, request: ReadRequest) -> OpFuture<'_, ReadResponse> {
         Box::pin(self.read_inner(request))
     }
-    fn write(&self, _request: WriteRequest) -> OpFuture<'_, WriteResponse> {
-        Box::pin(async move { Err(self.unavailable(Operation::Write)) })
+    fn write(&self, request: WriteRequest) -> OpFuture<'_, WriteResponse> {
+        Box::pin(self.write_inner(request))
     }
     fn close(&self) -> OpFuture<'_, ()> {
         Box::pin(self.close_inner())
@@ -271,6 +400,7 @@ impl std::fmt::Debug for OpcuaConnection {
 pub(super) fn capabilities() -> Capabilities {
     Capabilities {
         read: true,
+        write: true,
         ..Capabilities::default()
     }
 }

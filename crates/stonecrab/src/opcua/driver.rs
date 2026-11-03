@@ -140,6 +140,7 @@ impl OpcuaDriver {
         };
         ConnectionConfig::builder(SCHEME, endpoint)
             .timeouts(timeouts)
+            .access(options.access)
             .driver_options(Arc::new(options))
             .build()
     }
@@ -242,6 +243,7 @@ impl Driver for OpcuaDriver {
                 config.timeouts().request,
                 *config.limits(),
                 config.retry().clone(),
+                config.access(),
             ));
             Ok(connection)
         })

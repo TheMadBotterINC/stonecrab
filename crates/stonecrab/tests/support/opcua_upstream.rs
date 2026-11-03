@@ -37,7 +37,7 @@ const SUITES: [(&str, &str, &str); 2] = [
 ];
 
 // S123 must empty this exact list as the owning services are generated.
-const REFUSALS: [(&str, i32, &str); 7] = [
+const REFUSALS: [(&str, i32, &str); 5] = [
     (
         "raw/opc-ua-publish-response-payload-data-change",
         829,
@@ -63,8 +63,6 @@ const REFUSALS: [(&str, i32, &str); 7] = [
         742,
         "MonitoringParameters",
     ),
-    ("driver/send-write-request", 673, "WriteRequest"),
-    ("driver/receive-write-response", 676, "WriteResponse"),
 ];
 const CANONICAL_READ: &str = "driver/send-read-request";
 // This envelope round-trips opaquely; it is not evidence of DataChangeNotification support.
@@ -702,7 +700,7 @@ fn opcua_upstream_vectors_round_trip_or_match_the_exact_disabled_service_list() 
             Err(error) => panic!("unexpected refusal {}: {error}", vector.name),
         }
     }
-    assert_eq!(supported, 16);
+    assert_eq!(supported, 18);
     assert_eq!(
         refused,
         REFUSALS

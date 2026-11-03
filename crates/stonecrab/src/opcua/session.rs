@@ -5,6 +5,7 @@
 //! # Compatibility: docs/parity/opcua.md#OPCUA-LIFE-CLOSE-SESSION
 //! # Compatibility: docs/parity/opcua.md#OPCUA-LIMIT-CLOSE-HINT
 
+use std::sync::Mutex;
 use std::time::Duration;
 
 use crate::opcua::codec::{LocalizedText, NodeId, UaByteString, UaString};
@@ -24,6 +25,7 @@ pub(super) struct Session {
     pub(super) authentication_token: NodeId,
     pub(super) revised_timeout: Duration,
     pub(super) selected_endpoint: String,
+    pub(super) attributes: Mutex<Vec<(NodeId, crate::opcua::attributes::Attributes)>>,
 }
 
 impl Session {
@@ -122,6 +124,7 @@ impl Session {
             authentication_token,
             revised_timeout,
             selected_endpoint,
+            attributes: Mutex::new(Vec::new()),
         })
     }
 
