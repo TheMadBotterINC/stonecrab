@@ -66,7 +66,7 @@ mod tests {
             &clock,
             ContractSuite::run(
                 &driver,
-                "opcua://fake:4840?security-policy=NONE&request-timeout-ms=25",
+                "opcua://fake:4840/path?security-policy=NONE&request-timeout-ms=25",
                 &fixture,
             ),
         )

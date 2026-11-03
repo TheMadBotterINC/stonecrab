@@ -1,0 +1,1 @@
+opcua://fake:4840/path?security-policy=NONE&endpoint-host=internal&endpoint-port=4841

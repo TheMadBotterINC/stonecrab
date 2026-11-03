@@ -27,7 +27,7 @@ socket and starts no discovery.
 | Built-in types of the binary encoding: String, `ByteString`, Guid, `DateTime`, `StatusCode`, `NodeId`, `ExpandedNodeId`, `QualifiedName`, `LocalizedText` (crate-private) | build-tested |
 | Recursive and open types of the binary encoding: Variant (25 types, arrays, dimensions), `DataValue`, `DiagnosticInfo`, the `ExtensionObject` envelope with Raw, Xml and Null bodies, bounded in depth and in array counts (crate-private) | build-tested |
 | TCP framing: the 8-byte header, HEL, ACK, ERR, OPN, CLO and MSG bodies, the asymmetric header of policy None, the symmetric and sequence headers, and a bounded chunk `Framer` (crate-private) | build-tested |
-| Generated 22-case connection/read service bodies and 274 status names; Known `ExtensionObject` dispatch (crate-private) | build-tested |
+| Generated 24-case connection/read/discovery service bodies and 274 status names; Known `ExtensionObject` dispatch (crate-private) | build-tested |
 | Bounded service exchange lane: correlation, sender priority, headers, sequence/channel/token checks, ERR and `ServiceFault` (crate-private) | build-tested |
 | Policy-None HEL/ACK, OPN Issue, CLO and counter handoff (crate-private) | interoperability-tested with open62541 |
 | Public driver and anonymous None connection/session | interoperability-tested with open62541 |
@@ -292,7 +292,7 @@ cancellation token bound the handshake, including silent peers. `handshake-timeo
 maps to the whole connect bound since S91.
 
 Handoff preserves request/sequence counters and negotiated bounds. The lane sends
-`CloseSecureChannel` without waiting for a reply. Five exact-count ignored tests against
+`CloseSecureChannel` without waiting for a reply. Six exact-count ignored tests against
 open62541 v1.5.9 prove channel counter continuation, public session connect/close, scalar Read
 and large array/Read-batch chunking under 8192-byte buffers. S95 also verifies extended public scalar/array/matrix mapping.
 Evidence is recorded by `interop/open62541/interop.sh tests` and CI.
@@ -310,7 +310,9 @@ TCP, HEL/ACK, OPN Issue, `CreateSession` and anonymous `ActivateSession` share o
 `CreateSession` request carries a fresh 32-byte OS nonce and `session-timeout-ms` (120000
 by default). The returned authentication token and valid revised timeout are retained.
 Activation uses the advertised anonymous policy id on a None/None UA TCP endpoint;
-full endpoint selection/discovery/overrides remain S96. Connection becomes Connected
+S96 selects by parsed URL, exact policy URI/effective mode, TCP profile and compatible
+user token type. Highest security level wins, with advertised token protection as the
+tie-break. The sanitized selected URL appears in connection Debug. Connection becomes Connected
 only after successful activation. `with_clock` and `with_transport_factory` follow the
 other drivers' deterministic injection pattern.
 
@@ -376,3 +378,21 @@ write, supported-ping and polling-subscription behavior. The independent peer ve
 18 scalar types, arrays, 2D/3D matrices and large arrays plus named deferred-kind errors
 in one batch. It also checks an unknown node and runs the finite
 `opcua_read` example against `ns=1;s=scalar/Int32`.
+
+## Endpoint selection and discovery primitives (S96)
+
+`endpoint-host` and `endpoint-port` (1..=65535) add an alternative advertised host/port
+match; the original pair remains accepted. Neither option changes the TCP destination.
+The path must match exactly, including case and trailing slash. DNS names compare without
+case and equivalent IPv6 spellings compare as addresses. Port 4840 never matches 48400.
+A selection failure names these options and lists at most 16 sanitized endpoint URLs,
+each bounded to 256 characters; invalid or credential-bearing URLs are replaced.
+
+`discovery` is a strict boolean, default true. With a secure policy, `discovery=false`
+requires `server-certificate-file`, currently accepted as a nonempty file path only.
+File loading and certificate trust validation remain S103/S104. Secure connections
+continue to be refused before I/O. `GetEndpoints` request/response codecs and a private
+lane exchange are implemented; S106 wires them into secure connect. None connect uses
+`CreateSession`'s endpoint list and skips `GetEndpoints`. An explicit private probe against
+open62541 verifies all seven advertised policy/mode combinations and token types; it
+makes no certificate-trust or secure-channel claim.

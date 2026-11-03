@@ -5,6 +5,37 @@ Implementation baseline: the commit that last modified this file
 (`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
 its own commit; the slice log below records what each one landed.
 
+## OPC UA endpoint selection and discovery primitives (S96, 2026-11-03)
+
+S96 adds generated GetEndpoints request/response codecs and a private exchange over the
+existing lane. Anonymous activation now selects by parsed URL, exact policy URI/effective
+mode, TCP profile and compatible token type. Highest security level wins, then advertised
+token protection; null/empty token policies inherit the channel. Endpoint host/port
+overrides add an alternative match without changing the TCP destination. Selection errors
+bound and sanitize advertised URLs; connection Debug records the selected URL.
+
+Discovery defaults true. Discovery off with a secure policy requires a nonempty
+server-certificate-file path; actual file loading/trust remains S103/S104, and secure
+connect discovery remains S106. None connect skips GetEndpoints and uses CreateSession's
+endpoint list. No new public API, dependency, feature or version (0.3.0); opcua remains
+outside default and full. Ten parity rows close (101 implemented/110 planned/38 deferred).
+
+Final checks: 2321 tests, 584+5 doctests; handwritten OPC UA 7240/7240 and every coverage
+floor pass. 59 feature combinations, 15 fuzz targets, default/fuzz Clippy, regeneration,
+semver default/all, dependencies/machete and the 198-file package/unpacked all-feature build
+pass. The configured endpoint/options mutation campaign has 126 caught/10 unviable;
+the final selector campaign has 57 caught/two unviable, both exit 0, no survivors/timeouts.
+All six exact-count open62541 tests and the finite public example pass; the new probe
+verifies all seven advertised policy/mode combinations and their token types. The runner
+now propagates failed tests/examples even in a shell conditional; three negative stand-in
+cases verify it. The public contract fixture now uses its advertised /path.
+
+Self-review under ADR-0005's waiver and [S96 evidence](docs/evidence/opcua-s96.md) record
+the design/shrink pass, exact scope and local validation limits. No hardware or publication
+was performed; copied PKI and the independent server are cleaned up.
+
+Next: S97, ADR-0034 acceptance and contract-text alignment. Normal merges preserve commits.
+
 ## OPC UA extended values, arrays and matrices (S95, 2026-11-03)
 
 S95 extracts one pure Variant mapper and adds DateTime, Guid/NodeId/QualifiedName/StatusCode
@@ -615,6 +646,7 @@ commit; gates named were run locally before that commit.
 
 | Slice | Date | Landed | Gates |
 | --- | --- | --- | --- |
+| S96 | 2026-11-03 | Parsed endpoint matching and host/port overrides, exact policy/mode/token compatibility, security-level ranking and token-protection tie-break, bounded sanitized diagnostics and selected URL Debug. GetEndpoints codecs/private exchange; discovery configuration with fail-closed off/secure/no-path rule. Ten assigned parity rows; secure execution/trust retain later slices. Runner propagates test/example failures. Self-review under ADR-0005 waiver; [evidence](docs/evidence/opcua-s96.md) | check (2321 tests), coverage (opcua 100), 59 feature combinations, 15 fuzz targets, mutants 126 caught/10 unviable plus final selector 57 caught/two unviable (both exit 0), regen, parity/lint, semver default/all, dependencies/machete, 198-file package/unpacked build, six independent-peer cases, three negative runner probes |
 | S95 | 2026-11-03 | Pure extended value mapper, arrays/matrices, UTC tick precision, canonical Guid/NodeId text and checked temporal suffixes. Shared rank/node bounds, named per-item refusals, absent/explicit Null budget correction; 13 assigned parity rows plus two documented divergences. Self-review under ADR-0005 waiver; [evidence](docs/evidence/opcua-s95.md) | check (2296 tests), coverage (opcua 100), 59 features, 15 fuzz targets, final mapper mutations (43 caught/11 unviable) and affected-read rerun (30 caught/6 unviable), both exit 0, regen, parity/lint, semver default/all, dependencies/machete, 196-file package/unpacked build, five independent-peer cases |
 | S94 | 2026-11-03 | Bounded policy-None MSG splitting/reassembly, all encoding.* limits, request-local exact-status ABORT, aggregate partial-body budgets and cancellation/drop cleanup. Shared pure size arithmetic; no secure transforms or public array mapping yet. Eleven parity rows close. Self-review under ADR-0005 waiver; [evidence](docs/evidence/opcua-s94.md) | check (2265 tests), coverage (opcua 100), 59 features, 15 fuzz targets plus final assembler run, mutants (33 caught/2 unviable), regen, parity/lint, semver default/all, dependencies/machete, 194-file package/unpacked build, four independent-peer cases |
 | S93 | 2026-11-03 | Two verbatim upstream XML suites, 23 independently derived vectors, checked fingerprints/provenance/output/file set, and exact codec equivalence boundaries: 15 byte-exact, one existing compact NodeId canonicalization, seven named disabled-service refusals. HEL/ACK parity closes; opaque notification preservation stays distinct from semantic support. No runtime change. Self-review under ADR-0005 waiver; [evidence](docs/evidence/opcua-s93.md) | check (2239 tests), coverage (opcua 100), 59 features, regen, parity/lint with self-tests, semver default/all, dependencies/machete, 192-file package and unpacked all-feature build |

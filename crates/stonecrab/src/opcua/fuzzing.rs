@@ -239,6 +239,14 @@ fn parse_service(
         crate::opcua::generated::extension_object_definition::ExtensionObjectDefinition::parse(
             reader, depth, id,
         )?;
+    if let crate::opcua::generated::extension_object_definition::ExtensionObjectDefinition::GetEndpointsResponse { endpoints: Some(endpoints), .. } = &value {
+        for policy in ["NONE", "Basic256Sha256", "Aes128_Sha256_RsaOaep", "Aes256_Sha256_RsaPss"] {
+            let options = OpcuaOptions::from_parameters("opc.tcp://fake:4840/path".to_owned(), &[("security-policy".to_owned(),policy.to_owned())]);
+            if let Ok(options) = options {
+                let _selection = crate::opcua::endpoint::select(endpoints, &options, crate::opcua::generated::user_token_type::UserTokenType::UserTokenTypeAnonymous);
+            }
+        }
+    }
     Ok((id, value))
 }
 fn serialize_service(

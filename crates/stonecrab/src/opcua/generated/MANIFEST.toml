@@ -54,6 +54,8 @@ ExtensionObjectDefinition = [
   "CreateSessionRequest",
   "CreateSessionResponse",
   "EndpointDescription",
+  "GetEndpointsRequest",
+  "GetEndpointsResponse",
   "OpenSecureChannelRequest",
   "OpenSecureChannelResponse",
   "ReadRequest",

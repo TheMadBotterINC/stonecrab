@@ -8,6 +8,7 @@ use crate::opcua::OpcuaDriver;
 use crate::opcua::channel::Channel;
 use crate::opcua::connection::OpcuaConnection;
 use crate::opcua::frame::{Body, Frame, OpcuaFramer};
+use crate::opcua::generated::message_security_mode::MessageSecurityMode;
 use crate::opcua::responder::{
     acknowledge, activate_response, close_response, create_response, message, open_response,
     service_fault,
@@ -453,6 +454,7 @@ fn opcua_create_session_adopts_the_authentication_token_and_revised_timeout() {
     );
     let shown = format!("{connection:?}");
     assert!(shown.contains("54.321s"));
+    assert!(shown.contains("selected_endpoint: \"opc.tcp://fake:4840/path\""));
     assert!(!shown.contains("nonce"));
     let watch = connection.watch_state();
     drop(connection);
@@ -816,4 +818,79 @@ fn opcua_session_cancellation_and_drop_never_activate_a_half_open_session() {
             assert_eq!(clock.sleeper_count(), 0);
         }
     }
+}
+
+// covers: OPCUA-LIFE-ACTIVATE
+#[test]
+fn opcua_activate_session_uses_the_selected_endpoint_token_policy() {
+    let mut response = decode_service(&create_response(2, 54321.0, 0)).unwrap();
+    let Service::CreateSessionResponse {
+        server_endpoints, ..
+    } = &mut response
+    else {
+        panic!("fixture")
+    };
+    let mut stronger = server_endpoints.as_ref().unwrap().first().unwrap().clone();
+    stronger.security_level = 255;
+    stronger
+        .user_identity_tokens
+        .as_mut()
+        .unwrap()
+        .first_mut()
+        .unwrap()
+        .policy_id = UaString::new("selected-anonymous");
+    server_endpoints.as_mut().unwrap().push(stronger);
+    let (driver, clock, factory) = driver(scripted_response(2, encode(&response)));
+    let connection = connect(&driver, &clock).unwrap();
+    let sent = factory.probes().remove(0).sent();
+    let Service::ActivateSessionRequest {
+        user_identity_token,
+        ..
+    } = payload(sent.get(3).unwrap())
+    else {
+        panic!("activate")
+    };
+    assert_eq!(
+        user_identity_token.body,
+        ExtensionBody::Known(Box::new(Service::AnonymousIdentityToken {
+            policy_id: UaString::new("selected-anonymous")
+        }))
+    );
+    block_on_with(&clock, connection.close()).unwrap();
+}
+
+#[test]
+fn opcua_anonymous_session_activates_with_an_anonymous_identity_token() {
+    let (driver, clock, factory) = driver(Script::strict(vec![
+        Step::respond(reply),
+        Step::respond(reply),
+        Step::respond(reply),
+        Step::respond(reply),
+        Step::respond(reply),
+        Step::respond(reply),
+    ]));
+    let config =
+        OpcuaDriver::configuration("opcua://fake:4840/path?security-policy=NONE&discovery=false")
+            .unwrap();
+    let connection = block_on_with(&clock, driver.connect(config)).unwrap();
+    let sent = factory.probes().remove(0).sent();
+    assert_eq!(
+        sent.len(),
+        4,
+        "None connect skips GetEndpoints even with explicit discovery option"
+    );
+    let Service::ActivateSessionRequest {
+        user_identity_token,
+        ..
+    } = payload(sent.get(3).unwrap())
+    else {
+        panic!("activate")
+    };
+    assert_eq!(
+        user_identity_token.body,
+        ExtensionBody::Known(Box::new(Service::AnonymousIdentityToken {
+            policy_id: UaString::new("anonymous-policy")
+        }))
+    );
+    block_on_with(&clock, connection.close()).unwrap();
 }

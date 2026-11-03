@@ -219,8 +219,8 @@ a few minutes natively and longer under emulation.
 `interop.sh tests` runs the ignored unit test
 `opcua::channel::tests::opcua_interop_peer_answers_hello_and_opens_a_none_channel`.
 S91 also runs `opcua::session::tests::opcua_interop_connects_and_closes_with_policy_none`
-through the public driver/registry API. The nextest filter must select exactly five tests
-(`EXPECTED_TESTS=5`). `run` and hosted CI
+through the public driver/registry API. The nextest filter must select exactly six tests
+(`EXPECTED_TESTS=6`). `run` and hosted CI
 execute it after the in-image checks and PKI step and retain `nextest.txt` beside the
 existing image identity/check/server evidence. The script supplies
 `STONECRAB_INTEROP_OPEN62541=opcua://127.0.0.1:<port>?security-policy=NONE`.
@@ -253,3 +253,12 @@ arrays, 2D/3D matrices and every element of the 4000/10000-element arrays. The s
 requires six named per-item refusals (ByteString, ExpandedNodeId, LocalizedText, DataValue,
 DiagnosticInfo and custom ExtensionObject) without losing mapped items. ByteString and
 LocalizedText remain S98; custom structure mapping remains later. Session close follows.
+
+S96 adds `opcua::endpoint::tests::opcua_interop_get_endpoints_lists_the_independent_servers_policies`.
+An explicit private None-channel discovery probe checks exactly seven EndpointDescriptions:
+None, plus each of Basic256Sha256, Aes128_Sha256_RsaOaep and Aes256_Sha256_RsaPss in
+Sign and SignAndEncrypt. Each advertises anonymous, username and certificate token policies
+and a server certificate (including the None endpoint in this configured peer). This
+checks discovery decoding, not certificate trust or native secure-connect behavior.
+The runner returns failure immediately for a failed nextest command or example even
+when invoked from run_all's shell conditional; it cannot mask a test failure.

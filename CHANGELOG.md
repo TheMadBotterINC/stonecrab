@@ -5,6 +5,14 @@ Changelog. Stonecrab is one crate, so each release has one section. `stonecrab` 
 specification-stage placeholder.
 
 ## Unreleased
+- **Added (opt-in `opcua`; S96):** parsed endpoint URL matching, exact policy/mode/token
+  compatibility, security-level ranking and endpoint host/port overrides. Anonymous
+  activation uses the selected token policy; bounded diagnostics exclude credential URLs.
+  GetEndpoints codecs and a private exchange are tested against all seven open62541
+  endpoints. Discovery defaults true; secure discovery wiring remains S106, and certificate
+  loading/trust remains S103/S104. No new dependency, public API, feature or version.
+- **Fixed (interop):** an OPC UA test failure now stops the runner before the example,
+  including when the runner is called from a shell conditional.
 - **Added (opt-in `opcua`; S95):** extended scalar values, null/empty/one-element arrays,
   row-major matrices and checked temporal suffixes. UTC DateTime preserves every 100 ns
   tick; Guid/NodeId/QualifiedName/StatusCode use explicit text forms. Shared rank/node

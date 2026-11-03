@@ -83,6 +83,20 @@ impl SecurityPolicy {
         }
     }
 
+    /// Exact wire policy URI; endpoint selection never downgrades a policy.
+    pub(super) const fn uri(self) -> &'static str {
+        match self {
+            Self::None => "http://opcfoundation.org/UA/SecurityPolicy#None",
+            Self::Basic256Sha256 => "http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256",
+            Self::Aes128Sha256RsaOaep => {
+                "http://opcfoundation.org/UA/SecurityPolicy#Aes128_Sha256_RsaOaep"
+            }
+            Self::Aes256Sha256RsaPss => {
+                "http://opcfoundation.org/UA/SecurityPolicy#Aes256_Sha256_RsaPss"
+            }
+        }
+    }
+
     /// Whether the policy signs or encrypts, which is every policy but `NONE`.
     pub(super) const fn is_secure(self) -> bool {
         !matches!(self, Self::None)
@@ -137,6 +151,10 @@ impl MessageSecurity {
 /// | `message_security` | `message-security` | `SIGN_ENCRYPT` |
 /// | `handshake_timeout` | `handshake-timeout-ms` | 60000 ms |
 /// | `session_timeout` | `session-timeout-ms` | 120000 ms |
+/// | `discovery` | `discovery` | true (secure-connect execution in S106) |
+/// | `endpoint_host` | `endpoint-host` | none (an additional advertised host match) |
+/// | `endpoint_port` | `endpoint-port` | none (an additional advertised port match) |
+/// | `server_certificate_file` | `server-certificate-file` | none (path only; loading in S103) |
 /// | `request_timeout` | `request-timeout-ms` | 30000 ms |
 /// | `receive_buffer_size` | `encoding.receive-buffer-size` | 65535 bytes |
 /// | `send_buffer_size` | `encoding.send-buffer-size` | 65535 bytes |
@@ -157,6 +175,12 @@ pub(super) struct OpcuaOptions {
     pub(super) security_policy: SecurityPolicy,
     /// The message security mode (`message-security`).
     pub(super) message_security: MessageSecurity,
+    /// Discovery primitives are configured here; secure-connect wiring is S106.
+    pub(super) discovery: bool,
+    pub(super) endpoint_host: Option<String>,
+    pub(super) endpoint_port: Option<u16>,
+    /// Syntactic path only until certificate loading/trust lands in S103/S104.
+    pub(super) server_certificate_file: Option<String>,
     /// `request-timeout-ms`, shared with `Timeouts.request`.
     pub(super) request_timeout: Duration,
     pub(super) handshake_timeout: Duration,
@@ -181,6 +205,10 @@ impl OpcuaOptions {
         endpoint_url: String,
         parameters: &[(String, String)],
     ) -> Result<Self> {
+        let mut discovery = true;
+        let mut endpoint_host = None;
+        let mut endpoint_port = None;
+        let mut server_certificate_file = None;
         let mut security_policy = SecurityPolicy::Basic256Sha256;
         let mut message_security = MessageSecurity::SignEncrypt;
         let mut request_timeout = Duration::from_secs(30);
@@ -192,6 +220,32 @@ impl OpcuaOptions {
         let mut max_chunk_count = 64;
         for (key, value) in parameters {
             match key.as_str() {
+                "discovery" => {
+                    discovery = match value.as_str() {
+                        "true" => true,
+                        "false" => false,
+                        _ => return Err(invalid("discovery must be true or false")),
+                    }
+                }
+                "endpoint-host" => {
+                    let host = value
+                        .strip_prefix('[')
+                        .and_then(|v| v.strip_suffix(']'))
+                        .unwrap_or(value);
+                    if !is_name(value) && host.parse::<std::net::Ipv6Addr>().is_err() {
+                        return Err(invalid("endpoint-host must be a host name or IP address"));
+                    }
+                    endpoint_host = Some(host.to_owned());
+                }
+                "endpoint-port" => endpoint_port = Some(parse_port(value)?),
+                "server-certificate-file" => {
+                    if value.is_empty() || value.chars().any(char::is_control) {
+                        return Err(invalid(
+                            "server-certificate-file must be a nonempty file path",
+                        ));
+                    }
+                    server_certificate_file = Some(value.clone());
+                }
                 SECURITY_POLICY => security_policy = SecurityPolicy::from_name(value)?,
                 MESSAGE_SECURITY => message_security = MessageSecurity::from_name(value)?,
                 REQUEST_TIMEOUT | HANDSHAKE_TIMEOUT | SESSION_TIMEOUT => {
@@ -243,10 +297,19 @@ impl OpcuaOptions {
                  or encrypts"
             )));
         }
+        if !discovery && security_policy.is_secure() && server_certificate_file.is_none() {
+            return Err(invalid(
+                "discovery=false with a secure policy requires server-certificate-file",
+            ));
+        }
         Ok(Self {
             endpoint_url,
             security_policy,
             message_security,
+            discovery,
+            endpoint_host,
+            endpoint_port,
+            server_certificate_file,
             request_timeout,
             handshake_timeout,
             session_timeout,
@@ -264,6 +327,21 @@ impl OpcuaOptions {
 /// upstream defines no default and a defaulted port hides a typo (decision E22). The path is
 /// everything from the first `/`, kept verbatim.
 pub(super) fn endpoint(authority: &str) -> Result<(Endpoint, String)> {
+    let (host, port, path) = authority_parts(authority)?;
+    let endpoint = Endpoint::Tcp {
+        host: host.to_owned(),
+        port,
+    };
+    let path = path.map_or_else(String::new, |rest| format!("/{rest}"));
+    let url = format!("opc.tcp://{endpoint}{path}");
+    Ok((endpoint, url))
+}
+
+/// Shared checked authority grammar for configured and advertised URLs.
+pub(super) fn authority_parts(authority: &str) -> Result<(&str, u16, Option<&str>)> {
+    if authority.len().saturating_add("opc.tcp://".len()) > MAX_ENDPOINT_URL_BYTES {
+        return Err(invalid("the endpoint URL is longer than 4096 bytes"));
+    }
     let (address, path) = match authority.split_once('/') {
         Some((address, rest)) => (address, Some(rest)),
         None => (authority, None),
@@ -294,16 +372,7 @@ pub(super) fn endpoint(authority: &str) -> Result<(Endpoint, String)> {
         }
         (host, port)
     };
-    let endpoint = Endpoint::Tcp {
-        host: host.to_owned(),
-        port: parse_port(port)?,
-    };
-    let path = path.map_or_else(String::new, |rest| format!("/{rest}"));
-    let url = format!("opc.tcp://{endpoint}{path}");
-    if url.len() > MAX_ENDPOINT_URL_BYTES {
-        return Err(invalid("the endpoint URL is longer than 4096 bytes"));
-    }
-    Ok((endpoint, url))
+    Ok((host, parse_port(port)?, path))
 }
 
 /// The refusal of an authority without a port.
@@ -348,7 +417,7 @@ fn unknown_key(key: &str) -> PlcError {
         ""
     };
     invalid(format!(
-        "unknown connection parameter '{shown}'{hint}; the parameters are {SECURITY_POLICY} \
+        "unknown connection parameter '{shown}'{hint}; supported parameters include {SECURITY_POLICY} \
          and {MESSAGE_SECURITY}"
     ))
 }
@@ -924,6 +993,136 @@ mod tests {
             "encoding.max-message-Size",
         ] {
             assert_eq!(refusal(&[(key, "8192")]).kind(), ErrorKind::InvalidConfig);
+        }
+    }
+}
+
+#[cfg(test)]
+mod discovery_tests {
+    use super::*;
+    fn parse(pairs: &[(&str, &str)]) -> Result<OpcuaOptions> {
+        OpcuaOptions::from_parameters(
+            "opc.tcp://host:4840".to_owned(),
+            &pairs
+                .iter()
+                .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+                .collect::<Vec<_>>(),
+        )
+    }
+    #[test]
+    fn opcua_security_policies_have_the_exact_wire_uris() {
+        for (policy, suffix) in [
+            (SecurityPolicy::None, "None"),
+            (SecurityPolicy::Basic256Sha256, "Basic256Sha256"),
+            (SecurityPolicy::Aes128Sha256RsaOaep, "Aes128_Sha256_RsaOaep"),
+            (SecurityPolicy::Aes256Sha256RsaPss, "Aes256_Sha256_RsaPss"),
+        ] {
+            assert_eq!(
+                policy.uri(),
+                format!("http://opcfoundation.org/UA/SecurityPolicy#{suffix}")
+            );
+        }
+    }
+    // covers: OPCUA-CFG-DISCOVERY
+    #[test]
+    fn opcua_config_discovery_default_is_true() {
+        let options = parse(&[]).unwrap();
+        assert!(options.discovery);
+        assert_eq!(options.endpoint_host, None);
+        assert_eq!(options.endpoint_port, None);
+        assert_eq!(options.server_certificate_file, None);
+        assert!(parse(&[("discovery", "true")]).unwrap().discovery);
+        assert!(
+            !parse(&[("security-policy", "NONE"), ("discovery", "false")])
+                .unwrap()
+                .discovery
+        );
+    }
+    #[test]
+    fn opcua_config_discovery_rejects_a_non_boolean_value() {
+        for value in ["", "TRUE", "False", "1", "0", "secret"] {
+            let error = parse(&[("discovery", value)]).unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+            assert_eq!(error.to_string(), "discovery must be true or false");
+        }
+    }
+    // covers: OPCUA-DISC-DISABLED
+    #[test]
+    fn opcua_discovery_off_with_a_secure_policy_and_no_certificate_file_is_invalid_config() {
+        let error = parse(&[("discovery", "false")]).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+        assert!(error.to_string().contains("server-certificate-file"));
+        for pairs in [
+            [
+                ("server-certificate-file", "server.der"),
+                ("discovery", "false"),
+            ],
+            [
+                ("discovery", "false"),
+                ("server-certificate-file", "server.der"),
+            ],
+        ] {
+            let options = parse(&pairs).unwrap();
+            assert!(!options.discovery);
+            assert_eq!(
+                options.server_certificate_file.as_deref(),
+                Some("server.der")
+            );
+        }
+        for value in ["", "private\0path", "private\npath"] {
+            let error = parse(&[("server-certificate-file", value)]).unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+            assert!(!error.to_string().contains("private"));
+        }
+    }
+    #[test]
+    fn opcua_config_endpoint_port_rejects_zero_and_65536() {
+        for value in ["0", "65536", "-1", "+1", "", " 4840"] {
+            assert_eq!(
+                parse(&[("endpoint-port", value)]).unwrap_err().kind(),
+                ErrorKind::InvalidConfig
+            );
+        }
+        for value in [1_u16, 4840, 65535] {
+            assert_eq!(
+                parse(&[("endpoint-port", &value.to_string())])
+                    .unwrap()
+                    .endpoint_port,
+                Some(value)
+            );
+        }
+    }
+    #[test]
+    fn opcua_config_endpoint_host_is_a_name_or_an_ip_and_never_echoed_on_refusal() {
+        for (value, expected) in [
+            ("internal", "internal"),
+            ("10.1.2.3", "10.1.2.3"),
+            ("[::1]", "::1"),
+            ("::1", "::1"),
+        ] {
+            assert_eq!(
+                parse(&[("endpoint-host", value)])
+                    .unwrap()
+                    .endpoint_host
+                    .as_deref(),
+                Some(expected)
+            );
+        }
+        for value in [
+            "",
+            "secret:password@host",
+            "host:4840",
+            "[secret",
+            "[::1",
+            "[bad]",
+            "host/secret",
+        ] {
+            let error = parse(&[("endpoint-host", value)]).unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+            assert_eq!(
+                error.to_string(),
+                "endpoint-host must be a host name or IP address"
+            );
         }
     }
 }

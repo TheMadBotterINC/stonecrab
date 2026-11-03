@@ -92,6 +92,8 @@ src/opcua/codec.rs
 src/opcua/connection/tests.rs
 src/opcua/connection.rs
 src/opcua/driver.rs
+src/opcua/endpoint/tests.rs
+src/opcua/endpoint.rs
 src/opcua/frame/properties.rs
 src/opcua/frame.rs
 src/opcua/fuzzing.rs

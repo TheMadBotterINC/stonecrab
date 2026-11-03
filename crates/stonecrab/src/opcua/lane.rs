@@ -430,7 +430,10 @@ impl Lane {
         };
         pending.reply = Some(decode_service(&body).and_then(|service| {
             let header = match &service {
-                Service::CreateSessionResponse {
+                Service::GetEndpointsResponse {
+                    response_header, ..
+                }
+                | Service::CreateSessionResponse {
                     response_header, ..
                 }
                 | Service::ActivateSessionResponse {

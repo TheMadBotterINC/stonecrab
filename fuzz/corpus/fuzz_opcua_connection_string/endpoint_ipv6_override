@@ -1,0 +1,1 @@
+opcua://[::1]:4840/path?security-policy=NONE&endpoint-host=[2001:db8::1]&endpoint-port=65535

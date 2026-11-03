@@ -100,6 +100,22 @@ fn vectors() -> Vec<(&'static str, u16, Vec<u8>)> {
         ("RequestHeader", 391, request_header()),
         ("ResponseHeader", 394, response_header()),
         ("ServiceFault", 397, response_header()),
+        (
+            "GetEndpointsRequest",
+            428,
+            [
+                request_header(),
+                NULL.to_vec(),
+                NULL.to_vec(),
+                NULL.to_vec(),
+            ]
+            .concat(),
+        ),
+        (
+            "GetEndpointsResponse",
+            431,
+            [response_header(), 1_i32.to_le_bytes().to_vec(), endpoint()].concat(),
+        ),
         ("ChannelSecurityToken", 443, token()),
         (
             "OpenSecureChannelRequest",
@@ -263,7 +279,7 @@ fn local(id: u32) -> ExpandedNodeId {
 #[test]
 fn opcua_every_generated_service_has_positive_and_negative_vectors() {
     let all = vectors();
-    assert_eq!(all.len(), 22, "S88 connect-and-read closure");
+    assert_eq!(all.len(), 24, "S96 connect/read/discovery closure");
     for (name, id, body) in all {
         assert_eq!(
             fixture(name, false),
