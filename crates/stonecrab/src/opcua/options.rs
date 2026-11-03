@@ -5,12 +5,16 @@
 //! are read exactly: names are case-sensitive, and an error message names a key (shortened)
 //! or a fixed reason, never a value, the host or the endpoint path.
 
+use std::time::Duration;
+
 use crate::{DriverOptions, Endpoint, ErrorKind, PlcError, Result};
 
 /// `security-policy`.
 const SECURITY_POLICY: &str = "security-policy";
 /// `message-security`.
 const MESSAGE_SECURITY: &str = "message-security";
+/// The request deadline and header timeout hint in milliseconds.
+const REQUEST_TIMEOUT: &str = "request-timeout-ms";
 
 /// The most key characters an error message repeats.
 const KEY_ECHO_LIMIT: usize = 32;
@@ -123,6 +127,7 @@ impl MessageSecurity {
 /// | `endpoint_url` | the authority: `opc.tcp://host:port` and the path | none, the port is required |
 /// | `security_policy` | `security-policy` | `Basic256Sha256` |
 /// | `message_security` | `message-security` | `SIGN_ENCRYPT` |
+/// | `request_timeout` | `request-timeout-ms` | 30000 ms |
 ///
 /// `message_security` is the mode as configured. With policy `NONE` the channel ignores it
 /// (`OPCUA-MODE-POLICY-NONE`, slice S90); a secure policy with mode `NONE` is refused here.
@@ -138,6 +143,8 @@ pub(super) struct OpcuaOptions {
     pub(super) security_policy: SecurityPolicy,
     /// The message security mode (`message-security`).
     pub(super) message_security: MessageSecurity,
+    /// `request-timeout-ms`, shared with `Timeouts.request`.
+    pub(super) request_timeout: Duration,
 }
 
 impl DriverOptions for OpcuaOptions {}
@@ -146,8 +153,8 @@ impl OpcuaOptions {
     /// Read the query parameters of a connection string for the endpoint `endpoint_url`.
     ///
     /// The core grammar has already refused duplicate and empty keys, so each key appears
-    /// once. Every key but `security-policy` and `message-security` is refused, which
-    /// includes the keys the framework fills, the credentials a URI must not carry and the
+    /// once. Only `security-policy`, `message-security` and `request-timeout-ms` are accepted; this
+    /// refuses the keys the framework fills, credentials a URI must not carry and the
     /// upstream names that later slices implement or that have gone.
     pub(super) fn from_parameters(
         endpoint_url: String,
@@ -155,10 +162,21 @@ impl OpcuaOptions {
     ) -> Result<Self> {
         let mut security_policy = SecurityPolicy::Basic256Sha256;
         let mut message_security = MessageSecurity::SignEncrypt;
+        let mut request_timeout = Duration::from_secs(30);
         for (key, value) in parameters {
             match key.as_str() {
                 SECURITY_POLICY => security_policy = SecurityPolicy::from_name(value)?,
                 MESSAGE_SECURITY => message_security = MessageSecurity::from_name(value)?,
+                REQUEST_TIMEOUT => {
+                    let millis = value.parse::<u64>().ok().filter(|millis| *millis > 0);
+                    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+                        return Err(invalid("request-timeout-ms must be a positive integer"));
+                    }
+                    request_timeout =
+                        Duration::from_millis(millis.ok_or_else(|| {
+                            invalid("request-timeout-ms must be a positive integer")
+                        })?);
+                }
                 other => return Err(unknown_key(other)),
             }
         }
@@ -172,6 +190,7 @@ impl OpcuaOptions {
             endpoint_url,
             security_policy,
             message_security,
+            request_timeout,
         })
     }
 }

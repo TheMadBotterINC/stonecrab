@@ -176,6 +176,15 @@ impl<F: Send, R: Framer<F>> FramedTransport<F, R> {
         self.buffer.len()
     }
 
+    /// The common outbound bound, also used before a pipelined lane reserves sequence space.
+    pub(crate) fn max_frame_bytes(&self) -> usize {
+        self.transport
+            .limits()
+            .max_frame_bytes()
+            .get()
+            .min(self.framer.max_frame_bytes())
+    }
+
     /// Hold `frame` for the next [`next_frame`](Self::next_frame), which returns it before
     /// anything else. The guard's supervisor uses it to keep a frame it read while nobody
     /// had asked for one.
@@ -543,12 +552,7 @@ impl<F: Send, R: Framer<F>> FramedTransport<F, R> {
         self.framer
             .encode(frame, &mut self.scratch)
             .map_err(frame_failure)?;
-        let limit = self
-            .transport
-            .limits()
-            .max_frame_bytes()
-            .get()
-            .min(self.framer.max_frame_bytes());
+        let limit = self.max_frame_bytes();
         if self.scratch.len() > limit {
             return Err(frame_failure(FrameError::Oversized(self.scratch.len())));
         }

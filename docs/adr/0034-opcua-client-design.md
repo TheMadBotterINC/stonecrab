@@ -735,10 +735,16 @@ unknown request ids are discarded and counted. IDs never wrap into an outstandin
 sequence wrap remains unverified pending S106 and exhaustion fails explicitly.
 
 Also touch options/driver parsing for `request-timeout-ms` (30000 by default), parity,
-component/status/evidence docs, packaging and the mutation file list. First-party scripted
+component/status/evidence docs, packaging and focused mutation checks of the pure
+validation/correlation paths. The default mutation list keeps excluding I/O code. First-party scripted
 responder support belongs under `tests/support/opcua_responder.rs`, shared with private
 lane unit tests now and public connection tests in S91. Tests cover out-of-order replies,
 simultaneous waiters, sender priority, dropped/cancelled/timed-out receives, partial frames,
 partial sends, limits, foreign identifiers, ERR/ServiceFault and fake-clock deadlines.
 All existing coverage floors remain unchanged. S90 owns HEL/OPN negotiation; S91 owns
 connection lifecycle/reconnect, so S89 adds no public driver or support claim.
+
+The lane needs the effective frame bound before encoding and assigning a sequence number.
+Expose `FramedTransport`'s existing minimum-of-framer-and-transport calculation as a
+crate-private accessor, used by both its encoder and the lane. This avoids a duplicate
+bound or treating a local encoding refusal as an interrupted wire send.

@@ -11,6 +11,7 @@ use crate::opcua::OpcuaAddress;
 use crate::opcua::options::{OpcuaOptions, endpoint};
 use crate::{
     AddressOptions, ConnectionConfig, ConnectionUri, ErrorKind, PlcError, ProtocolAddress, Result,
+    Timeouts,
 };
 
 /// The connection-string scheme of this driver.
@@ -37,10 +38,10 @@ impl OpcuaDriver {
     ///
     /// The text is parsed with [`ConnectionUri::parse`], which already refuses duplicate and
     /// empty keys. The configuration has an [`Endpoint::Tcp`](crate::Endpoint::Tcp), the
-    /// core defaults for timeouts, reconnect, retry and limits, a read-only access policy and
+    /// core defaults for connect/idle timeouts, reconnect, retry and limits, a read-only access policy and
     /// the [`OpcuaOptions`] in its driver options slot: the endpoint URL Hello carries
     /// (`opc.tcp://host:port` and the path, verbatim), `security-policy` and
-    /// `message-security`.
+    /// `message-security`. The request timeout is `request-timeout-ms` (30000 ms by default).
     ///
     /// # Errors
     /// Returns [`ErrorKind::InvalidConfig`] for text that is not a valid connection string,
@@ -51,6 +52,7 @@ impl OpcuaDriver {
     /// security name or a secure policy with message security `NONE`. The messages never
     /// repeat the authority or a value; a parameter error names its key.
     ///
+    /// # Compatibility: docs/parity/opcua.md#OPCUA-CFG-REQUEST-TIMEOUT
     /// # Compatibility: docs/parity/opcua.md#OPCUA-CFG-UNKNOWN
     /// Unknown keys are an error where upstream warns (`OPCUA-CFG-UNKNOWN`,
     /// `OPCUA-DIV-UNKNOWN-KEYS`), which includes the keys the framework fills
@@ -72,7 +74,12 @@ impl OpcuaDriver {
         }
         let (endpoint, endpoint_url) = endpoint(parsed.authority())?;
         let options = OpcuaOptions::from_parameters(endpoint_url, parsed.options())?;
+        let timeouts = Timeouts {
+            request: options.request_timeout,
+            ..Timeouts::default()
+        };
         ConnectionConfig::builder(SCHEME, endpoint)
+            .timeouts(timeouts)
             .driver_options(Arc::new(options))
             .build()
     }
@@ -103,6 +110,44 @@ mod tests {
 
     fn config_of(uri: &str) -> ConnectionConfig {
         OpcuaDriver::parse_config(uri).expect("a valid connection string")
+    }
+
+    #[test]
+    fn opcua_config_request_timeout_default_is_30000() {
+        let config = config_of("opcua://host:4840");
+        assert_eq!(
+            config.timeouts().request,
+            std::time::Duration::from_secs(30)
+        );
+        assert_eq!(
+            options_of(&config).request_timeout,
+            config.timeouts().request
+        );
+        let custom = config_of("opcua://host:4840?request-timeout-ms=125");
+        assert_eq!(
+            custom.timeouts().request,
+            std::time::Duration::from_millis(125)
+        );
+        assert_eq!(
+            options_of(&custom).request_timeout,
+            custom.timeouts().request
+        );
+    }
+
+    #[test]
+    fn opcua_config_request_timeout_rejects_zero_negative_and_non_numeric() {
+        for value in [
+            "0",
+            "-1",
+            "hello",
+            "1.5",
+            "+1",
+            "18446744073709551616",
+            "1%20",
+        ] {
+            let problem = refused(&format!("opcua://host:4840?request-timeout-ms={value}"));
+            assert!(!problem.to_string().contains(value), "no value is echoed");
+        }
     }
 
     fn options_of(config: &ConnectionConfig) -> &OpcuaOptions {
@@ -262,7 +307,12 @@ mod tests {
         let plain = ConnectionConfig::builder(SCHEME, tcp("host", 4840))
             .build()
             .expect("defaults");
-        assert_eq!(defaults.timeouts(), plain.timeouts());
+        assert_eq!(defaults.timeouts().connect, plain.timeouts().connect);
+        assert_eq!(defaults.timeouts().idle, plain.timeouts().idle);
+        assert_eq!(
+            defaults.timeouts().request,
+            std::time::Duration::from_secs(30)
+        );
         assert_eq!(defaults.limits(), plain.limits());
         assert_eq!(defaults.access(), plain.access());
         assert_eq!(defaults.address_options().convention(), None);

@@ -19,6 +19,14 @@ mod codec;
     reason = "generated metadata and service constructors are consumed incrementally by S89–S92"
 )]
 mod generated;
+#[cfg_attr(
+    not(all(test, feature = "testkit")),
+    expect(
+        dead_code,
+        reason = "the channel/session layers of S90/S91 own the lane"
+    )
+)]
+mod lane;
 #[cfg(test)]
 mod service_tests;
 // The connection string and its options are parsed here but nothing calls them until the
