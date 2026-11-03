@@ -5,6 +5,13 @@ Changelog. Stonecrab is one crate, so each release has one section. `stonecrab` 
 specification-stage placeholder.
 
 ## Unreleased
+- **Added (opt-in `opcua`; S94):** bounded policy-None MSG chunking for large requests
+  and responses, with negotiated body/chunk limits checked before growth or sending.
+  Peer ABORT preserves its status and fails only its request. Partial receives survive
+  cancellation; request drop releases its assembly. All four `encoding.*` limits now
+  parse, and local memory bounds cap advertised message bytes. Deterministic, fuzz and
+  independent open62541 large-array/batch tests cover the path. Public array mapping
+  and secure chunk transforms remain later slices.
 - **Test evidence (S93):** 23 pinned upstream OPC UA vectors with verbatim Apache PLC4X
   suites, independent XML serialization and provenance checks. The current codec has
   15 byte-exact round-trips, one documented compact NodeId canonicalization and seven

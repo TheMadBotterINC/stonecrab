@@ -9,6 +9,10 @@ existing numeric `NodeId` canonicalization and seven exact disabled-service refu
 The notification envelope round-trip preserves an opaque body; full service/type support
 remains its later slices. The independent XML adapter and fixtures are repository-only;
 no runtime behavior changes in S93.
+S94 adds bounded MSG splitting/reassembly under the existing request lane. A large request
+is preflighted before any bytes are sent, C/F chunks keep their request id and advance
+sequence numbers, and a peer ABORT fails only its request with the exact status. Partial
+responses survive interrupted receives; dropping a request frees its partial body.
 
 This module offers `OpcuaAddress`, a validated `ProtocolAddress` for the tag text
 `ns=<n>;<i|s|g|b>=<id>[range][;a=<attribute>][;TYPE][|key=value,...]`, with the types its
@@ -22,7 +26,7 @@ socket and starts no discovery.
 | Connection string and driver-owned options (`OpcuaDriver`) | build-tested |
 | Built-in types of the binary encoding: String, `ByteString`, Guid, `DateTime`, `StatusCode`, `NodeId`, `ExpandedNodeId`, `QualifiedName`, `LocalizedText` (crate-private) | build-tested |
 | Recursive and open types of the binary encoding: Variant (25 types, arrays, dimensions), `DataValue`, `DiagnosticInfo`, the `ExtensionObject` envelope with Raw, Xml and Null bodies, bounded in depth and in array counts (crate-private) | build-tested |
-| TCP framing: the 8-byte header, HEL, ACK, ERR, OPN, CLO and MSG bodies, the asymmetric header of policy None, the symmetric and sequence headers, and a single-chunk `Framer` (crate-private) | build-tested |
+| TCP framing: the 8-byte header, HEL, ACK, ERR, OPN, CLO and MSG bodies, the asymmetric header of policy None, the symmetric and sequence headers, and a bounded chunk `Framer` (crate-private) | build-tested |
 | Generated 22-case connection/read service bodies and 274 status names; Known `ExtensionObject` dispatch (crate-private) | build-tested |
 | Bounded service exchange lane: correlation, sender priority, headers, sequence/channel/token checks, ERR and `ServiceFault` (crate-private) | build-tested |
 | Policy-None HEL/ACK, OPN Issue, CLO and counter handoff (crate-private) | interoperability-tested with open62541 |
@@ -136,7 +140,13 @@ opcua:tcp://[2001:db8::10]:4840/ua/server
   configured and the channel will ignore it.
 - `request-timeout-ms` is a positive decimal millisecond count, 30000 by default. It sets
   `Timeouts.request` and the header timeout hint; a shorter caller deadline takes precedence.
-- `encoding.receive-buffer-size` is decimal 8192 through 2147483647, default 65535.
+- `encoding.receive-buffer-size` and `encoding.send-buffer-size` are decimal 8192 through
+  2147483647, each defaulting to 65535. Both are capped by the local frame budget.
+- `encoding.max-message-size` and `encoding.max-chunk-count` are positive decimal `UInt32`
+  values, defaulting to 2097152 body bytes and 64 chunks. Hello caps message bytes to the
+  local receive budget (262144 by default); negotiated limits apply before allocation and
+  on send. Aggregate partial responses share that local receive budget. A peer zero never
+  removes local bounds. Message bytes exclude chunk/security/sequence headers.
   `ResourceLimits` caps it before Hello, and ACK may reduce it further.
 - Every other key is `InvalidConfig`, and so is a key written twice. That includes the keys
   the framework fills (`protocol-code`, `transport-code`, `transport-config`), the
@@ -220,8 +230,9 @@ and 7.1) that the secure channel of slice S90 will drive through a `FramedTransp
   thumbprint: 59 bytes for the policy None), the sequence header and the payload.
   `CloseSecureChannel` and Message carry the channel id, the token id, the sequence header and the
   payload. The payload stays bytes: the generated service layer reads it.
-- The framer reads whole messages and keeps the chunk flag; joining the chunks of one message
-  is slice S94's. It writes a message back as the bytes it read, so it keeps no state.
+- The framer reads whole chunks and keeps the chunk flag; joining the chunks of one message
+  is owned by the lane since S94. It writes a chunk back as the bytes it read, so the
+  framer keeps no reassembly state.
 
 ## Generated service bodies
 Since S88, the uniform service layer is generated from the three pinned PLC4X models
@@ -272,7 +283,8 @@ signature or encryption. Selecting this path requires policy None explicitly. Co
 and effective mode appear in channel Debug output; nonce/certificate bytes do not.
 
 Client receive merges with server send, and client send with server receive. Buffers are
-at least 8192 bytes; message size and chunk-count zero mean unlimited. Negotiation keeps
+at least 8192 bytes; a peer message-size or chunk-count zero imposes no additional peer
+limit, while local limits remain finite. Negotiation keeps
 buffered bytes and the framer enforces each direction separately. Message-body bounds
 apply before service decoding/encoding. The current requested channel lifetime is
 3600000 ms; configurable lifetime and renewal arrive in S109. One caller deadline and
@@ -280,10 +292,10 @@ cancellation token bound the handshake, including silent peers. `handshake-timeo
 maps to the whole connect bound since S91.
 
 Handoff preserves request/sequence counters and negotiated bounds. The lane sends
-`CloseSecureChannel` without waiting for a reply. Three exact-count ignored tests against
-open62541 v1.5.9 prove channel counter continuation, public session connect/close and scalar Read.
-Evidence is recorded by `interop/open62541/interop.sh tests` and CI; chunk reassembly
-follows in S94.
+`CloseSecureChannel` without waiting for a reply. Four exact-count ignored tests against
+open62541 v1.5.9 prove channel counter continuation, public session connect/close, scalar Read
+and large array/Read-batch chunking under 8192-byte buffers. Public array mapping remains S95.
+Evidence is recorded by `interop/open62541/interop.sh tests` and CI.
 
 
 ## Public connect and anonymous session

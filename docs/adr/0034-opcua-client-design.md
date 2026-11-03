@@ -1017,3 +1017,16 @@ large array through the private lane under 8192-byte chunks (public array mappin
 Run all required coverage floors, full tests/docs/lints, isolated features, regen, fuzz,
 semver/dependency checks and reviewed package list; record evidence, then normal signed-off
 merge and push. No hardware, crate/tag publication or new crypto stack is involved.
+
+
+S94 review: aggregate receive growth and per-message growth share one checked byte-budget
+function. A small allocation boundary takes a requested additional capacity so a real
+TryReserveError can be exercised with usize::MAX without exhausting memory or using an
+allocator shim. The initial coverage run found those error closures unexercised; the
+refinement tests both arithmetic overflow and allocation failure while preserving partial
+bytes. No coverage floor or exclusion changes. Request assemblies live directly in the
+existing pending table; aggregate retained length is summed over that bounded table,
+avoiding a second map or a redundant counter to synchronize on drop/failure. The named
+send parity regression uses a large Read until Write arrives in S100; the same test checks
+C/F flags, no ABORT, exact NodeIds, chunk bounds and per-chunk sequences. Secure size rows
+and cryptographic transforms remain S101; only policy None is executable here.

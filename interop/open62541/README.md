@@ -214,13 +214,13 @@ a few minutes natively and longer under emulation.
 `OPCUA_MAX_SESSION_TIMEOUT_MS`, `OPCUA_MAX_TOKEN_LIFETIME_MS`, `OPCUA_EVENT_PERIOD_MS`,
 `OPCUA_ALLOW_NONE_PASSWORD`).
 
-## Stonecrab channel and session validation (S90/S91)
+## Stonecrab channel, session, Read and chunk validation (S90–S94)
 
 `interop.sh tests` runs the ignored unit test
 `opcua::channel::tests::opcua_interop_peer_answers_hello_and_opens_a_none_channel`.
 S91 also runs `opcua::session::tests::opcua_interop_connects_and_closes_with_policy_none`
-through the public driver/registry API. The nextest filter must select exactly three tests
-(`EXPECTED_TESTS=3`). `run` and hosted CI
+through the public driver/registry API. The nextest filter must select exactly four tests
+(`EXPECTED_TESTS=4`). `run` and hosted CI
 execute it after the in-image checks and PKI step and retain `nextest.txt` beside the
 existing image identity/check/server evidence. The script supplies
 `STONECRAB_INTEROP_OPEN62541=opcua://127.0.0.1:<port>?security-policy=NONE`.
@@ -236,3 +236,12 @@ secure policies and identities.
 
 The S92 filter also selects `opcua::connection::tests::opcua_interop_reads_boolean_int32_double_and_string_with_policy_none`.
 `example.txt` records the finite public `opcua_read` example against scalar/Int32.
+
+
+S94 adds `opcua::lane::tests::opcua_interop_large_array_read_chunks_under_none` to that
+exact-count filter. It negotiates 8192-byte send/receive buffers, 24576 body bytes and
+four chunks through client Hello, then verifies all 4000 Int32 array elements and a
+600-node scalar Read through the private lane. Sequence deltas prove that the response
+and request actually span multiple chunks. It closes the session normally. This checks
+binary array decoding/reassembly; public array-to-PlcValue mapping remains S95. The
+existing server image and test namespace are unchanged.
