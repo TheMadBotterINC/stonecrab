@@ -5,6 +5,33 @@ Implementation baseline: the commit that last modified this file
 (`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
 its own commit; the slice log below records what each one landed.
 
+## OPC UA extended values, arrays and matrices (S95, 2026-11-03)
+
+S95 extracts one pure Variant mapper and adds DateTime, Guid/NodeId/QualifiedName/StatusCode
+text, supported arrays and row-major matrices. Null, empty and one-element arrays remain
+distinct. UTC DateTime preserves 100 ns ticks across the full i64 wire range, independent
+of host clock range. Guid and NodeId reuse the canonical address formatter. Checked temporal
+suffixes apply per leaf with explicit units/epochs; noninteger representations and overflow
+fail only the item. The pinned LTIME_OF_DAY constructor uses milliseconds, as documented.
+
+Shape/rank preflight and one shared response node budget bound construction. Failed mappings
+preserve the remaining budget; absent and explicit Null both consume one value node. ByteString
+and LocalizedText remain S98; other deferred kinds return named Unsupported errors without
+losing mapped batch items. No new public value variant, dependency, feature or version.
+
+Final local checks: 2296 tests, 584+5 doctests; handwritten OPC UA 6975/6975 and all coverage
+floors passed. All 59 feature combinations, semver default/all, regeneration, dependencies,
+default/fuzz Clippy, 15 fuzz targets and the 196-file package/unpacked build pass. Full
+mapper/read mutations report 64 caught/17 unviable; after the absent-value budget fix,
+affected-read mutations report 30 caught/6 unviable, no survivors. Five exact-count
+open62541 tests pass. One 32-tag public batch verifies 18 scalars, arrays, matrices and
+all 4000/10000-element array values, with six isolated named deferred-kind errors.
+Self-review under ADR-0005's waiver and [S95 evidence](docs/evidence/opcua-s95.md) record
+boundary tests, compatibility differences and hosted-platform limits. No hardware or
+publication was performed.
+
+Next: S96, discovery building blocks and endpoint selection. Normal merges preserve commits.
+
 ## OPC UA chunking and negotiated limits (S94, 2026-11-03)
 
 S94 adds policy-None MSG splitting/reassembly to the existing request lane. Whole-body
@@ -587,6 +614,7 @@ commit; gates named were run locally before that commit.
 
 | Slice | Date | Landed | Gates |
 | --- | --- | --- | --- |
+| S95 | 2026-11-03 | Pure extended value mapper, arrays/matrices, UTC tick precision, canonical Guid/NodeId text and checked temporal suffixes. Shared rank/node bounds, named per-item refusals, absent/explicit Null budget correction; 13 assigned parity rows plus two documented divergences. Self-review under ADR-0005 waiver; [evidence](docs/evidence/opcua-s95.md) | check (2296 tests), coverage (opcua 100), 59 features, 15 fuzz targets, full mutations (64 caught/17 unviable) plus affected-read rerun (30 caught/6 unviable), regen, parity/lint, semver default/all, dependencies/machete, 196-file package/unpacked build, five independent-peer cases |
 | S94 | 2026-11-03 | Bounded policy-None MSG splitting/reassembly, all encoding.* limits, request-local exact-status ABORT, aggregate partial-body budgets and cancellation/drop cleanup. Shared pure size arithmetic; no secure transforms or public array mapping yet. Eleven parity rows close. Self-review under ADR-0005 waiver; [evidence](docs/evidence/opcua-s94.md) | check (2265 tests), coverage (opcua 100), 59 features, 15 fuzz targets plus final assembler run, mutants (33 caught/2 unviable), regen, parity/lint, semver default/all, dependencies/machete, 194-file package/unpacked build, four independent-peer cases |
 | S93 | 2026-11-03 | Two verbatim upstream XML suites, 23 independently derived vectors, checked fingerprints/provenance/output/file set, and exact codec equivalence boundaries: 15 byte-exact, one existing compact NodeId canonicalization, seven named disabled-service refusals. HEL/ACK parity closes; opaque notification preservation stays distinct from semantic support. No runtime change. Self-review under ADR-0005 waiver; [evidence](docs/evidence/opcua-s93.md) | check (2239 tests), coverage (opcua 100), 59 features, regen, parity/lint with self-tests, semver default/all, dependencies/machete, 192-file package and unpacked all-feature build |
 | S34 | 2026-10-28 | Documents reconciled with the 0.2.0 publication (H02 to H06): README and SECURITY say 0.2.0 is published and show the crates.io dependency; STATUS.md start, maintainer prerequisites (P1 to P3 open, the "Basic" ruleset targets no branch, P4 approved) and continuation point at `docs/POST_ALPHA_PLAN.md` with the E1 to E7 outcomes; `docs/PROJECT_BRIEF.md` marked historical with corrected badges; CODING_STANDARDS mirrors the real package keys and owner URL; a dated addendum in `docs/evidence/alpha.md`; docs only | check |
