@@ -96,6 +96,15 @@ pub struct WriteRequest {
     cancel: Option<CancellationToken>,
 }
 
+// Rejected or abandoned operations must not recursively drop unvalidated caller List trees.
+impl Drop for WriteRequest {
+    fn drop(&mut self) {
+        for item in self.items.drain(..) {
+            crate::value::discard_tree(item.into_parts().1);
+        }
+    }
+}
+
 impl WriteRequest {
     /// Begin a request with an explicit finite item budget.
     ///

@@ -97,6 +97,27 @@ fn envelope(id: u16, body: &[u8]) -> Vec<u8> {
 
 fn vectors() -> Vec<(&'static str, u16, Vec<u8>)> {
     vec![
+        (
+            "WriteValue",
+            670,
+            [
+                vec![0, 0],
+                13_u32.to_le_bytes().to_vec(),
+                NULL.to_vec(),
+                vec![1, 6, 42, 0, 0, 0],
+            ]
+            .concat(),
+        ),
+        (
+            "WriteRequest",
+            673,
+            [request_header(), NULL.to_vec()].concat(),
+        ),
+        (
+            "WriteResponse",
+            676,
+            [response_header(), NULL.to_vec(), NULL.to_vec()].concat(),
+        ),
         ("RequestHeader", 391, request_header()),
         ("ResponseHeader", 394, response_header()),
         ("ServiceFault", 397, response_header()),
@@ -284,7 +305,7 @@ fn local(id: u32) -> ExpandedNodeId {
 #[test]
 fn opcua_every_generated_service_has_positive_and_negative_vectors() {
     let all = vectors();
-    assert_eq!(all.len(), 25, "S99 connect/read/discovery/identity closure");
+    assert_eq!(all.len(), 28, "S100 connection/read/write closure");
     for (name, id, body) in all {
         assert_eq!(
             fixture(name, false),

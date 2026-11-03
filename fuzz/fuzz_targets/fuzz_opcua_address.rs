@@ -44,7 +44,14 @@ fuzz_target!(|data: &[u8]| {
             assert_eq!(again, address, "canonical text round-trips");
             assert_eq!(again.canonical(), canonical, "canonical text is stable");
             assert_eq!(address.protocol(), "opcua");
-            assert_eq!(address.value_type_hint(), address.data_type().value_type());
+            assert_eq!(
+                address.value_type_hint(),
+                if address.index_range().is_some() {
+                    Some(stonecrab::PlcValueType::List)
+                } else {
+                    address.data_type().value_type()
+                }
+            );
         }
         Err(error) => check_error(&error),
     }

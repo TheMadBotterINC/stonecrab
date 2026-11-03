@@ -1221,3 +1221,12 @@ None requires explicit opt-in, exact token compatibility and effective token pol
 with a static warning and no weaker-policy fallback. Activation authentication statuses
 retain their device source. Certificate loading/trust and protected identity activation
 remain S103/S104/S108. [S99 evidence](../evidence/opcua-s99.md) records validation.
+
+## S100 implementation (2026-11-03)
+
+[ADR-0038](0038-staged-opcua-writes.md) records staged writes and per-request delivery
+tracking. Session metadata is bounded and reused only in that session; type precedence,
+range/List hints, exact conversions and native open62541 round-trips are implemented.
+Core exact hint validation remains intact; owned requests now discard invalid deep Lists
+iteratively. Write retries are absent. Custom definitions/writes remain S119/S120 and
+secure policy execution remains S101 onward. [S100 evidence](../evidence/opcua-s100.md).

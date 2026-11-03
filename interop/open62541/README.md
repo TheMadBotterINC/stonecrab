@@ -277,3 +277,9 @@ also proves opt-in refusal, successful username login, and wrong-password Authen
 It reads the runtime password from the ignored copied PKI, never from URI text or evidence.
 The separate in-image security checks retain their existing settings. `stop` removes the
 container and copied host PKI.
+
+S100 adds `writable/Int32Matrix` (2x3) and a ninth native test. The public driver writes
+and reads back Boolean, all eight integers, Float/Double, Unicode/NUL String, exact
+DateTime and ByteString, character-string forms, TIME, a variable-length Int32 array,
+the matrix and a single-element array range. All changes stay in the disposable writable
+namespace. Existing readonly nodes, in-image checks and credentials are unchanged.

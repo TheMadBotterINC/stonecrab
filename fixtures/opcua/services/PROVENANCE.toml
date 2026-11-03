@@ -156,3 +156,21 @@ name = "UserNameIdentityToken"
 encoding_id = 324
 valid = "UserNameIdentityToken.hex"
 negative = "UserNameIdentityToken-truncated.hex"
+
+[[vector]]
+name = "WriteValue"
+encoding_id = 670
+valid = "WriteValue.hex"
+negative = "WriteValue-truncated.hex"
+
+[[vector]]
+name = "WriteRequest"
+encoding_id = 673
+valid = "WriteRequest.hex"
+negative = "WriteRequest-truncated.hex"
+
+[[vector]]
+name = "WriteResponse"
+encoding_id = 676
+valid = "WriteResponse.hex"
+negative = "WriteResponse-truncated.hex"

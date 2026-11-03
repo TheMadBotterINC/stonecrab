@@ -449,7 +449,7 @@ struct Dimension {
 /// assert_eq!(address.index_range().as_deref(), Some("2:7"));
 /// assert_eq!(address.protocol(), "opcua");
 /// assert_eq!(address.canonical(), "ns=2;s=samples[3..8;1];DINT");
-/// assert_eq!(address.value_type_hint(), Some(PlcValueType::I32));
+/// assert_eq!(address.value_type_hint(), Some(PlcValueType::List));
 /// # Ok::<(), stonecrab::PlcError>(())
 /// ```
 ///
@@ -706,7 +706,11 @@ impl ProtocolAddress for OpcuaAddress {
     }
 
     fn value_type_hint(&self) -> Option<PlcValueType> {
-        self.data_type.value_type()
+        if self.dimensions.is_empty() {
+            self.data_type.value_type()
+        } else {
+            Some(PlcValueType::List)
+        }
     }
 }
 

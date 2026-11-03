@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::future::{Future, poll_fn};
 use std::pin::pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::Poll;
 use std::time::Duration;
@@ -155,6 +156,56 @@ impl Lane {
         deadline: Deadline,
         cancel: &'a CancellationToken,
     ) -> OpFuture<'a, Service> {
+        self.exchange_tracked(
+            authentication_token,
+            encoding_id,
+            build,
+            deadline,
+            cancel,
+            None,
+        )
+    }
+
+    pub(super) async fn write(
+        &self,
+        authentication_token: &NodeId,
+        nodes: Vec<crate::opcua::generated::write_value::WriteValue>,
+        deadline: Deadline,
+        cancel: &CancellationToken,
+        closing: &CancellationToken,
+    ) -> (Result<Service>, bool) {
+        let transmitted = AtomicBool::new(false);
+        let mut exchange = pin!(self.exchange_tracked(
+            authentication_token,
+            673,
+            |header| Service::WriteRequest {
+                request_header: header,
+                nodes_to_write: Some(nodes),
+            },
+            deadline,
+            cancel,
+            Some(&transmitted),
+        ));
+        let mut closing = pin!(closing.cancelled());
+        let result = poll_fn(|cx| {
+            if closing.as_mut().poll(cx).is_ready() {
+                return Poll::Ready(Err(error(ErrorKind::Disconnected, "connection is closing")));
+            }
+            exchange.as_mut().poll(cx)
+        })
+        .await;
+        (result, transmitted.load(Ordering::Acquire))
+    }
+
+    fn exchange_tracked<'a>(
+        &'a self,
+        authentication_token: &'a NodeId,
+        encoding_id: u32,
+        build: impl FnOnce(RequestHeader) -> Service + Send + 'a,
+        deadline: Deadline,
+        cancel: &'a CancellationToken,
+        transmitted: Option<&'a AtomicBool>,
+    ) -> OpFuture<'a, Service> {
         Box::pin(async move {
             self.check(deadline, cancel)?;
             let request = self.reserve()?;
@@ -165,7 +216,8 @@ impl Lane {
                 deadline,
             )?;
             let body = encode_service(encoding_id, &build(header), self.message_limits.bytes)?;
-            self.exchange_body(request.id, body, deadline, cancel).await
+            self.exchange_body(request.id, body, deadline, cancel, transmitted)
+                .await
         })
     }
 
@@ -175,6 +227,7 @@ impl Lane {
         body: Bytes,
         deadline: Deadline,
         cancel: &CancellationToken,
+        transmitted: Option<&AtomicBool>,
     ) -> Result<Service> {
         let (capacity, count) = self.message_limits.plan(body.len(), self.max_frame)?;
         let mut lease = match self.acquire(request_id, true, deadline, cancel).await? {
@@ -211,11 +264,12 @@ impl Lane {
                     body: Bytes::copy_from_slice(part),
                 }),
             };
-            self.until(
-                deadline,
-                cancel,
-                lease.framed()?.send_frame(&frame, deadline),
-            )
+            self.until(deadline, cancel, async {
+                if let Some(transmitted) = transmitted {
+                    transmitted.store(true, Ordering::Release);
+                }
+                lease.framed()?.send_frame(&frame, deadline).await
+            })
             .await?;
             sequence_number = sequence_number.saturating_add(1);
         }
@@ -441,6 +495,9 @@ impl Lane {
                 }
                 | Service::CloseSessionResponse { response_header }
                 | Service::ReadResponse {
+                    response_header, ..
+                }
+                | Service::WriteResponse {
                     response_header, ..
                 } => Some(response_header),
                 _ => None,

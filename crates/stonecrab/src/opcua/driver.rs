@@ -29,11 +29,12 @@ const TRANSPORTS: &str = "the only transport code of opcua is tcp";
 
 /// Factory for OPC UA TCP connections.
 ///
-/// This initial connection slice supports anonymous sessions with explicitly selected
+/// Supports anonymous or explicitly opted-in username sessions with selected
 /// `security-policy=NONE`. It sends HEL, OPN, `CreateSession` and `ActivateSession` before
-/// returning Connected. The secure default is refused until protection is implemented;
-/// credentials are also refused before I/O. Reads map scalar Boolean, integers, floats,
-/// String/XML and Null; other operations remain unsupported.
+/// returning Connected. The secure default and certificate activation are refused until
+/// their security slices. Reads map scalar Boolean, integers, floats,
+/// String/XML and Null. S100 adds staged policy-None writes with explicit read-write access;
+/// browse, native subscriptions and secure policies remain planned.
 ///
 /// The whole attempt uses `handshake-timeout-ms` (60000 by default), and close uses
 /// `request-timeout-ms` (30000). `session-timeout-ms` requests 120000 by default; the
@@ -140,6 +141,7 @@ impl OpcuaDriver {
         };
         ConnectionConfig::builder(SCHEME, endpoint)
             .timeouts(timeouts)
+            .access(options.access)
             .driver_options(Arc::new(options))
             .build()
     }
@@ -242,6 +244,7 @@ impl Driver for OpcuaDriver {
                 config.timeouts().request,
                 *config.limits(),
                 config.retry().clone(),
+                config.access(),
             ));
             Ok(connection)
         })

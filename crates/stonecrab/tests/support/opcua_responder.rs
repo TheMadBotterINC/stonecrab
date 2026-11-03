@@ -216,6 +216,8 @@ enum Fault {
 #[derive(Debug, Default)]
 struct State {
     reads: u32,
+    values: std::collections::BTreeMap<u32, i32>,
+    unknown: bool,
     faults: std::collections::VecDeque<Fault>,
 }
 
@@ -226,6 +228,9 @@ pub(super) struct Device(std::sync::Arc<std::sync::Mutex<State>>);
 impl Device {
     pub(super) fn reads(&self) -> u32 {
         self.0.lock().unwrap().reads
+    }
+    pub(super) fn unknown_after_transmit(&self) {
+        self.0.lock().unwrap().unknown = true;
     }
     pub(super) fn timeout(&self) {
         self.0.lock().unwrap().faults.push_back(Fault::Timeout);
@@ -296,7 +301,7 @@ impl Device {
                                     }
                                     _ => panic!("fixture uses numeric nodes"),
                                 };
-                                reader.read_u32(little).expect("attribute");
+                                let attribute = reader.read_u32(little).expect("attribute");
                                 for prefix in 0..2 {
                                     if prefix == 1 {
                                         reader.read_u16(little).expect("encoding namespace");
@@ -313,7 +318,26 @@ impl Device {
                                         [vec![2], 0x8034_0000_u32.to_le_bytes().to_vec()].concat(),
                                     );
                                 } else {
-                                    values.push(int32_value(i32::try_from(node).unwrap(), 0));
+                                    values.push(match attribute {
+                                        14 => vec![1, 17, 0, 6],
+                                        15 => {
+                                            [vec![1, 6], (-1_i32).to_le_bytes().to_vec()].concat()
+                                        }
+                                        16 => vec![1, 0x87, 0, 0, 0, 0],
+                                        17 => vec![1, 3, 3],
+                                        13 => int32_value(
+                                            device
+                                                .0
+                                                .lock()
+                                                .unwrap()
+                                                .values
+                                                .get(&node)
+                                                .copied()
+                                                .unwrap_or_else(|| i32::try_from(node).unwrap()),
+                                            0,
+                                        ),
+                                        _ => panic!("unexpected attribute"),
+                                    });
                                 }
                             }
                             reader.expect_eof().expect("end of read");
@@ -321,10 +345,61 @@ impl Device {
                         }
                     }
                 }
+                673 => {
+                    reader
+                        .read_bytes(29, 29)
+                        .expect("request header with short token");
+                    let count = reader.read_i32(little).expect("write count");
+
+                    for _ in 0..count {
+                        let node = match reader.read_u8().unwrap() {
+                            0 => u32::from(reader.read_u8().unwrap()),
+                            1 => {
+                                reader.read_u8().unwrap();
+                                u32::from(reader.read_u16(little).unwrap())
+                            }
+                            2 => {
+                                reader.read_u16(little).unwrap();
+                                reader.read_u32(little).unwrap()
+                            }
+                            _ => panic!("fixture uses numeric writes"),
+                        };
+                        assert_eq!(reader.read_u32(little).unwrap(), 13);
+                        assert_eq!(reader.read_i32(little).unwrap(), -1);
+                        assert_eq!(reader.read_u8().unwrap(), 1);
+                        assert_eq!(reader.read_u8().unwrap(), 6);
+                        let value = reader.read_i32(little).unwrap();
+                        device.0.lock().unwrap().values.insert(node, value);
+                    }
+                    reader.expect_eof().unwrap();
+                    let mut state = device.0.lock().unwrap();
+                    if std::mem::take(&mut state.unknown) {
+                        return Reaction::Silence;
+                    }
+                    drop(state);
+                    write_response(request, &vec![0; usize::try_from(count).unwrap()])
+                }
                 _ => panic!("unexpected service {service}"),
             };
             sequence = sequence.checked_add(1).expect("sequence");
             Reaction::Reply(message(sequence, request, 17, 29, &body))
         }
     }
+}
+
+pub(super) fn write_response(handle: u32, statuses: &[u32]) -> Vec<u8> {
+    [
+        vec![1, 0, 0xA4, 2],
+        response_header(handle, 0),
+        i32::try_from(statuses.len())
+            .unwrap()
+            .to_le_bytes()
+            .to_vec(),
+        statuses
+            .iter()
+            .flat_map(|status| status.to_le_bytes())
+            .collect(),
+        vec![0xFF; 4],
+    ]
+    .concat()
 }

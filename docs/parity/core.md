@@ -203,3 +203,8 @@ the Stonecrab column below and in the `ConnectionUri` rustdoc.
 Baseline: Apache PLC4X v1.0.0, commit `ea229918f5d07700e04d7d69ab1645da679cb700`
 (`upstream/manifest.toml`). The Modbus use of the grammar, including transport codes and
 default ports, is row `MB-TCP-TRANSPORTS` in `docs/parity/modbus.md`.
+
+S100 keeps the exact write hint contract and adds iterative owned WriteRequest disposal,
+shared with the S98 structure disposer. Regression:
+`opcua_deep_caller_values_are_rejected_and_abandoned_without_recursive_drop`.
+Ranged OPC UA addresses supply List hints; the core builder has no protocol-specific rule.

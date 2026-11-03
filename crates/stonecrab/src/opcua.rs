@@ -5,6 +5,7 @@
 use crate as library;
 
 mod address;
+mod attributes;
 mod channel;
 mod chunk;
 // The types of the binary encoding (the built-ins and the recursive types) are written and
@@ -36,6 +37,7 @@ mod service;
 #[cfg(test)]
 mod service_tests;
 mod session;
+mod write;
 // The framing is written and tested here; the secure channel of slice S90 is its first caller.
 // The fuzz entry point reaches the framer but not the constructors the channel will call.
 #[cfg_attr(

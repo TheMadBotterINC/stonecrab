@@ -1250,3 +1250,27 @@ mod tests {
         assert!(format!("{data_type:?}").contains("Real"), "data type Debug");
     }
 }
+
+#[cfg(test)]
+mod write_range_tests {
+
+    #[test]
+    fn opcua_range_hints_a_list_even_for_a_single_index() {
+        use std::sync::Arc;
+        use stonecrab::opcua::OpcuaAddress;
+        use stonecrab::{
+            PlcValue, PlcValueType, ProtocolAddress, ResourceLimits, Tag, TagId, WriteRequest,
+        };
+        for text in ["ns=2;i=42[1];DINT", "ns=2;i=42[1..2];DINT", "ns=2;i=42[1]"] {
+            let address = OpcuaAddress::parse(text).unwrap();
+            assert_eq!(address.value_type_hint(), Some(PlcValueType::List));
+            let tag = Tag::new(TagId::new("selected").unwrap(), Arc::new(address));
+            assert!(
+                WriteRequest::builder(ResourceLimits::builder().build().unwrap())
+                    .item(tag, PlcValue::List(vec![PlcValue::I32(1)]))
+                    .build()
+                    .is_ok()
+            );
+        }
+    }
+}

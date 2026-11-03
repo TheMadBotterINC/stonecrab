@@ -179,6 +179,7 @@ pub(super) struct OpcuaOptions {
     pub(super) discovery: bool,
     /// Explicit opt-in for plain username tokens; the selected token must also be None.
     pub(super) allow_insecure_credentials: bool,
+    pub(super) access: crate::AccessPolicy,
     pub(super) endpoint_host: Option<String>,
     pub(super) endpoint_port: Option<u16>,
     /// Syntactic path only until certificate loading/trust lands in S103/S104.
@@ -209,6 +210,7 @@ impl OpcuaOptions {
     ) -> Result<Self> {
         let mut discovery = true;
         let mut allow_insecure_credentials = false;
+        let mut access = crate::AccessPolicy::ReadOnly;
         let mut endpoint_host = None;
         let mut endpoint_port = None;
         let mut server_certificate_file = None;
@@ -223,6 +225,13 @@ impl OpcuaOptions {
         let mut max_chunk_count = 64;
         for (key, value) in parameters {
             match key.as_str() {
+                "access" => {
+                    access = match value.as_str() {
+                        "read-only" => crate::AccessPolicy::ReadOnly,
+                        "read-write" => crate::AccessPolicy::ReadWrite,
+                        _ => return Err(invalid("access must be read-only or read-write")),
+                    }
+                }
                 "discovery" => discovery = boolean(key, value)?,
                 "allow-insecure-credentials" => allow_insecure_credentials = boolean(key, value)?,
                 "endpoint-host" => {
@@ -306,6 +315,7 @@ impl OpcuaOptions {
             message_security,
             discovery,
             allow_insecure_credentials,
+            access,
             endpoint_host,
             endpoint_port,
             server_certificate_file,
@@ -1155,6 +1165,36 @@ mod credential_tests {
             let error = parse(Some(value)).unwrap_err();
             assert_eq!(error.kind(), ErrorKind::InvalidConfig);
             assert!(!error.to_string().contains("password-sentinel"));
+        }
+    }
+}
+
+#[cfg(test)]
+mod write_tests {
+    use super::*;
+    #[test]
+    fn opcua_config_access_is_explicit_and_defaults_to_read_only() {
+        let parse = |access: Option<&str>| {
+            OpcuaOptions::from_parameters(
+                "opc.tcp://fake:4840".into(),
+                &access
+                    .map(|value| vec![("access".to_owned(), value.to_owned())])
+                    .unwrap_or_default(),
+            )
+        };
+        assert_eq!(parse(None).unwrap().access, crate::AccessPolicy::ReadOnly);
+        assert_eq!(
+            parse(Some("read-only")).unwrap().access,
+            crate::AccessPolicy::ReadOnly
+        );
+        assert_eq!(
+            parse(Some("read-write")).unwrap().access,
+            crate::AccessPolicy::ReadWrite
+        );
+        for text in ["", "write", "READ-WRITE", "password-sentinel"] {
+            let error = parse(Some(text)).unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+            assert_eq!(error.to_string(), "access must be read-only or read-write");
         }
     }
 }

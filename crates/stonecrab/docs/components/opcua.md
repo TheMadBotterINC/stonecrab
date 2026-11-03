@@ -4,8 +4,9 @@ in neither `default` nor `full`, as `tls` is (decision E17, ADR-0034), and it ne
 `transport` feature. The module is being built in slices (milestone M3, ADR-0034). It currently has the
 address grammar, public `OpcuaDriver`, binary codecs, generated services, TCP framing,
 policy-None channel/session setup and bounded request lane. End-to-end scalar Read is available since S92; S95 adds extended values, arrays and matrices.
-S93 checks 23 pinned upstream vectors against the codec: 15 byte-exact round-trips, one
-existing numeric `NodeId` canonicalization and seven exact disabled-service refusals.
+The 23 pinned upstream vectors introduced by S93 now have 17 byte-exact round-trips,
+one existing numeric `NodeId` canonicalization and five exact disabled-service refusals
+(S100 enables the two write bodies).
 The notification envelope round-trip preserves an opaque body; full service/type support
 remains its later slices. The independent XML adapter and fixtures are repository-only;
 no runtime behavior changes in S93.
@@ -27,12 +28,13 @@ socket and starts no discovery.
 | Built-in types of the binary encoding: String, `ByteString`, Guid, `DateTime`, `StatusCode`, `NodeId`, `ExpandedNodeId`, `QualifiedName`, `LocalizedText` (crate-private) | build-tested |
 | Recursive and open types of the binary encoding: Variant (25 types, arrays, dimensions), `DataValue`, `DiagnosticInfo`, the `ExtensionObject` envelope with Raw, Xml and Null bodies, bounded in depth and in array counts (crate-private) | build-tested |
 | TCP framing: the 8-byte header, HEL, ACK, ERR, OPN, CLO and MSG bodies, the asymmetric header of policy None, the symmetric and sequence headers, and a bounded chunk `Framer` (crate-private) | build-tested |
-| Generated 25-case connection/read/discovery service bodies and 274 status names; Known `ExtensionObject` dispatch (crate-private) | build-tested |
+| Generated 28-case connection/read/write/discovery service bodies and 274 status names; Known `ExtensionObject` dispatch (crate-private) | build-tested |
 | Bounded service exchange lane: correlation, sender priority, headers, sequence/channel/token checks, ERR and `ServiceFault` (crate-private) | build-tested |
 | Policy-None HEL/ACK, OPN Issue, CLO and counter handoff (crate-private) | interoperability-tested with open62541 |
 | Public driver and anonymous None connection/session | interoperability-tested with open62541 |
 | Read (basic scalars, UTC `DateTime`, Guid/`NodeId`/`QualifiedName`/`StatusCode` text, arrays and matrices) | interoperability-tested with open62541 |
-| Write, browse, subscriptions | planned |
+| Staged scalar, array and matrix writes with explicit read-write access | interoperability-tested with open62541 |
+| Browse, subscriptions | planned |
 | Signed/encrypted security policies and certificate validation | planned |
 | Independent-server scalar Read interoperability | verified with open62541 |
 | Hardware verification | planned |
@@ -432,3 +434,38 @@ or an empty pair selects anonymous; password without username is invalid before 
 `Credentials::x509` represents certificate/key paths without loading them; certificate
 activation and protected username tokens remain S108. Eight native cases pass against
 open62541, including correct/wrong-password username sessions; no hardware claim.
+
+## Staged writes (S100)
+
+Enable `access=read-write` in the connection URI, or use a config built with
+`AccessPolicy::ReadWrite`. Read-only is the default and refuses writes before any I/O.
+Build a normal `WriteRequest` and inspect confirmed/rejected/unknown results individually.
+A suffix fixes the element type; otherwise the driver resolves `DataType`, `ValueRank`,
+`ArrayDimensions` and `AccessLevel` and caches successful metadata in that session. Cold
+nodes need a four-attribute Read, split if the item budget is smaller; cache hits need
+no metadata I/O. Capacity is the connection item limit with FIFO replacement. A new
+session has an empty cache; no cached identity/schema crosses reconnect.
+
+Ranged tags hint List even for a single index. A whole-array write without a range uses
+metadata/inference; scalar suffixes retain the core builder's exact scalar hint contract.
+Lists flatten row-major, matrices carry dimensions, and rank/shape/bounds are checked.
+Integers never truncate; floating narrowing must be exact. TIME is exact Int32 milliseconds
+and `DateTime` is checked 1601 ticks aligned to 100 ns. `ByteString` uses Bytes. Character/
+Unicode string forms use OPC String; unavailable WORD/DWORD/LWORD/WSTRING suffixes are
+not added. Other IEC calendar/time suffix writes and custom structures return typed
+errors; custom schema writes remain S120.
+
+Eligible items are sent in one `WriteRequest` after local preparation; local failures remain
+per-item rejections. `DataValue` contains only value, without invented status/timestamps.
+Device result codes remain attached to each result. A lost/unusable exchange after possible
+transmission is Unknown and is never replayed, including when close/cancellation interrupts
+it. A verified `WriteResponse` with the wrong result count returns `MalformedData`; that error
+must never be treated as permission to retry. Read retry settings do not apply to writes.
+Deep caller Lists are traversed and rejected iteratively; owned request disposal also stays
+iterative if an operation is abandoned before polling. No background task is introduced.
+
+S100 treats an unexpected correlated service reply and an Uncertain Write status as
+Unknown, preserving a device status when present. Bad statuses remain typed rejections.
+Core's existing `TimeoutAfterTransmit` reason is the fallback for an unusable confirmation;
+no new public reason variant is added. Only a verified `WriteResponse`'s wrong result count
+remains the explicit `MalformedData` error described above, with no automatic replay.

@@ -70,69 +70,67 @@ pub(super) fn response(
 }
 
 pub(super) fn nodes(request: &ReadRequest) -> Result<Vec<ReadValueId>> {
-    request
-        .items()
-        .iter()
-        .map(|tag| {
-            let address = address(tag)?;
-            if tag.count() != NonZeroU32::MIN {
-                return Err(PlcError::new(
-                    ErrorKind::InvalidConfig,
-                    "OPC UA element selection belongs in the address IndexRange",
-                ));
-            }
-            let identifier = match address.identifier() {
-                OpcuaIdentifier::Numeric(number) => Identifier::Numeric(*number),
-                OpcuaIdentifier::String(text) => Identifier::String(UaString::new(text)),
-                OpcuaIdentifier::Guid(bytes) => {
-                    let [
-                        a0,
-                        a1,
-                        a2,
-                        a3,
-                        b0,
-                        b1,
-                        c0,
-                        c1,
-                        d0,
-                        d1,
-                        d2,
-                        d3,
-                        d4,
-                        d5,
-                        d6,
-                        d7,
-                    ] = *bytes;
-                    Identifier::Guid(Guid {
-                        data1: u32::from_le_bytes([a0, a1, a2, a3]),
-                        data2: u16::from_le_bytes([b0, b1]),
-                        data3: u16::from_le_bytes([c0, c1]),
-                        data4: [d0, d1, d2, d3, d4, d5, d6, d7],
-                    })
-                }
-                OpcuaIdentifier::ByteString(bytes) => {
-                    Identifier::ByteString(UaByteString::new(bytes.clone()))
-                }
-            };
-            Ok(ReadValueId {
-                node_id: NodeId {
-                    namespace: address.namespace(),
-                    identifier,
-                },
-                attribute_id: address.attribute().number(),
-                index_range: address
-                    .index_range()
-                    .map_or_else(UaString::null, UaString::new),
-                data_encoding: QualifiedName {
-                    namespace_index: 0,
-                    name: UaString::null(),
-                },
-            })
-        })
-        .collect()
+    request.items().iter().map(node).collect()
 }
 
-fn address(tag: &Tag) -> Result<&OpcuaAddress> {
+pub(super) fn node(tag: &Tag) -> Result<ReadValueId> {
+    let address = address(tag)?;
+    if tag.count() != NonZeroU32::MIN {
+        return Err(PlcError::new(
+            ErrorKind::InvalidConfig,
+            "OPC UA element selection belongs in the address IndexRange",
+        ));
+    }
+    let identifier = match address.identifier() {
+        OpcuaIdentifier::Numeric(number) => Identifier::Numeric(*number),
+        OpcuaIdentifier::String(text) => Identifier::String(UaString::new(text)),
+        OpcuaIdentifier::Guid(bytes) => {
+            let [
+                a0,
+                a1,
+                a2,
+                a3,
+                b0,
+                b1,
+                c0,
+                c1,
+                d0,
+                d1,
+                d2,
+                d3,
+                d4,
+                d5,
+                d6,
+                d7,
+            ] = *bytes;
+            Identifier::Guid(Guid {
+                data1: u32::from_le_bytes([a0, a1, a2, a3]),
+                data2: u16::from_le_bytes([b0, b1]),
+                data3: u16::from_le_bytes([c0, c1]),
+                data4: [d0, d1, d2, d3, d4, d5, d6, d7],
+            })
+        }
+        OpcuaIdentifier::ByteString(bytes) => {
+            Identifier::ByteString(UaByteString::new(bytes.clone()))
+        }
+    };
+    Ok(ReadValueId {
+        node_id: NodeId {
+            namespace: address.namespace(),
+            identifier,
+        },
+        attribute_id: address.attribute().number(),
+        index_range: address
+            .index_range()
+            .map_or_else(UaString::null, UaString::new),
+        data_encoding: QualifiedName {
+            namespace_index: 0,
+            name: UaString::null(),
+        },
+    })
+}
+
+pub(super) fn address(tag: &Tag) -> Result<&OpcuaAddress> {
     let address: &dyn Any = tag.address();
     address.downcast_ref::<OpcuaAddress>().ok_or_else(|| {
         PlcError::new(
@@ -184,7 +182,7 @@ fn timestamp(time: Option<DateTime>, picoseconds: Option<u16>) -> Option<SystemT
     time.checked_add(Duration::from_nanos(nanos))
 }
 
-const fn protocol_status(status: StatusCode) -> ProtocolStatus {
+pub(super) const fn protocol_status(status: StatusCode) -> ProtocolStatus {
     let source = ProtocolStatus::new("opcua", status.0);
     if let Some(name) = status.name() {
         source.with_name(name)
@@ -193,7 +191,7 @@ const fn protocol_status(status: StatusCode) -> ProtocolStatus {
     }
 }
 
-const fn classify(status: StatusCode) -> ErrorKind {
+pub(super) const fn classify(status: StatusCode) -> ErrorKind {
     match status.0 {
         0x8034_0000 => ErrorKind::NotFound,
         0x8074_0000 => ErrorKind::InvalidDataType,

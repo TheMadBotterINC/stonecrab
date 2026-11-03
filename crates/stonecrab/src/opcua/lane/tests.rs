@@ -821,7 +821,7 @@ impl std::task::Wake for Reenter {
         self.wake_by_ref();
     }
     fn wake_by_ref(self: &Arc<Self>) {
-        self.wakes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.wakes.fetch_add(1, Ordering::SeqCst);
         if let Some(lane) = self.lane.upgrade() {
             let _state = lane.lock();
         }
@@ -867,7 +867,7 @@ fn opcua_send_and_reply_handoffs_wake_waiters_outside_the_lane_lock() {
     assert!(first.as_mut().poll(&mut cx).is_pending());
     assert!(second.as_mut().poll(&mut cx).is_pending());
     assert!(
-        wakes.load(std::sync::atomic::Ordering::SeqCst) > 0,
+        wakes.load(Ordering::SeqCst) > 0,
         "new sender wakes the receiver to yield"
     );
     assert!(first.as_mut().poll(&mut cx).is_pending());

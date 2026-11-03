@@ -64,6 +64,7 @@ fn check(text: &str) {
                     || key == "encoding.send-buffer-size"
                     || key == "encoding.max-message-size"
                     || key == "encoding.max-chunk-count"
+                    || key == "access"
                     || key == "discovery"
                     || key == "allow-insecure-credentials"
                     || key == "endpoint-host"
@@ -72,6 +73,9 @@ fn check(text: &str) {
             }));
             if let Some(value) = uri.option("allow-insecure-credentials") {
                 assert!(["true", "false"].contains(&value));
+            }
+            if let Some(access) = uri.option("access") {
+                assert!(["read-only", "read-write"].contains(&access));
             }
             let discovery = uri.option("discovery").is_none_or(|value| match value {
                 "true" => true,
