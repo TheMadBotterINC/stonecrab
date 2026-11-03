@@ -17,7 +17,7 @@ ExtensionObjectDefinition = [
   "ApplicationDescription", "UserTokenPolicy", "EndpointDescription",
   "GetEndpointsRequest", "GetEndpointsResponse",
   "SignedSoftwareCertificate", "SignatureData", "CreateSessionRequest", "CreateSessionResponse",
-  "AnonymousIdentityToken", "ActivateSessionRequest", "ActivateSessionResponse",
+  "AnonymousIdentityToken", "UserNameIdentityToken", "ActivateSessionRequest", "ActivateSessionResponse",
   "CloseSessionRequest", "CloseSessionResponse", "ReadValueId", "ReadRequest", "ReadResponse",
 ]
 
