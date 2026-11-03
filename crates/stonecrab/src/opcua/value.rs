@@ -2,6 +2,8 @@
 //!
 //! # Compatibility: docs/parity/opcua.md#OPCUA-READ-VALUE-MAPPING
 //! # Compatibility: docs/parity/opcua.md#OPCUA-READ-TYPE-OVERRIDE
+//! # Compatibility: docs/parity/opcua.md#OPCUA-DIV-TEMPORAL-OVERRIDE
+//! # Compatibility: docs/parity/opcua.md#OPCUA-DIV-DATETIME-PRECISION
 //! # Compatibility: docs/parity/opcua.md#OPCUA-TYPE-DATETIME
 //! # Compatibility: docs/parity/opcua.md#OPCUA-TYPE-GUID
 //! # Compatibility: docs/parity/opcua.md#OPCUA-DIV-GUID-TEXT
@@ -144,11 +146,12 @@ fn scalar(value: Scalar, target: OpcuaDataType) -> Result<PlcValue> {
         Scalar::Double(value) => PlcValue::F64(value),
         Scalar::String(value) => text(value)?.map_or(PlcValue::Null, PlcValue::String),
         Scalar::XmlElement(value) => text(value.0)?.map_or(PlcValue::Null, PlcValue::String),
-        Scalar::DateTime(value) => PlcValue::DateTime(date_time(
-            i128::from(value.0)
+        Scalar::DateTime(value) => {
+            let unix_nanos = i128::from(value.0)
                 .saturating_sub(UA_UNIX_TICKS)
-                .saturating_mul(100),
-        )?),
+                .saturating_mul(100);
+            PlcValue::DateTime(date_time(unix_nanos)?)
+        }
         Scalar::Guid(value) => PlcValue::String(guid_text(guid_bytes(value))),
         Scalar::NodeId(value) => PlcValue::String(node_text(value)?),
         Scalar::QualifiedName(value) => match text(value.name)? {

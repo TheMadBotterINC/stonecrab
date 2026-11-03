@@ -1099,3 +1099,13 @@ at most 64 List containers; this prevents nonzero outer axes with a zero inner e
 from allocating huge empty trees. Positive shapes retain every singleton axis and use
 the same response-wide node bound. The decoder takes the remaining node count from its
 real caller rather than exposing a public option or adding a policy object.
+
+S95 review: the six upstream Variant mapping cases are covered with typed Rust values;
+StaticHelperTest's namespace/URI/nonnumeric-discriminator cases exercise actual existing
+ExtensionObject body dispatch (compact numeric forms remain in the built-in vector tests;
+a missing ExpandedNodeId is not representable in the Rust envelope). No Java sources were
+vendored. Invalid array element/override regressions verify the shared budget is unchanged
+on failed mappings. The first line report flagged only the closing line of the multiline
+DateTime calendar expression; naming its Unix-nanosecond intermediate made the conversion
+clearer. All i64 tick extrema and checked calendar-override failures already have explicit
+regressions. Full coverage then reaches 100 with unchanged floors/exclusions.

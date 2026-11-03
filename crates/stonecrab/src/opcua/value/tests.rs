@@ -629,3 +629,40 @@ fn opcua_upstream_variant_mapping_cases_retain_null_and_time_semantics() {
         assert!(fresh_mapping(Variant::scalar(scalar), OpcuaDataType::Null).is_err());
     }
 }
+
+#[test]
+fn opcua_failed_array_mapping_does_not_consume_other_items_node_budget() {
+    let mut budget = 8;
+    let bad = array(
+        Array::String(Some(vec![
+            UaString::new("ok"),
+            UaString::from_bytes(vec![0xFF]),
+        ])),
+        None,
+    );
+    assert_eq!(
+        decode(bad, OpcuaDataType::Null, &mut budget)
+            .unwrap_err()
+            .kind(),
+        ErrorKind::MalformedData
+    );
+    assert_eq!(budget, 8);
+    let bad = array(Array::Int32(Some(vec![0, -1])), Some(vec![2, 1]));
+    assert_eq!(
+        decode(bad, OpcuaDataType::TimeOfDay, &mut budget)
+            .unwrap_err()
+            .kind(),
+        ErrorKind::InvalidDataType
+    );
+    assert_eq!(budget, 8);
+    assert_eq!(
+        decode(
+            array(Array::Int32(Some(vec![1, 2])), None),
+            OpcuaDataType::Null,
+            &mut budget
+        )
+        .unwrap(),
+        ints(&[1, 2])
+    );
+    assert_eq!(budget, 5);
+}
