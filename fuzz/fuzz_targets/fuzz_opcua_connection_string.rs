@@ -61,7 +61,29 @@ fn check(text: &str) {
                     || key == "handshake-timeout-ms"
                     || key == "session-timeout-ms"
                     || key == "encoding.receive-buffer-size"
+                    || key == "encoding.send-buffer-size"
+                    || key == "encoding.max-message-size"
+                    || key == "encoding.max-chunk-count"
+                    || key == "discovery"
+                    || key == "endpoint-host"
+                    || key == "endpoint-port"
+                    || key == "server-certificate-file"
             }));
+            let discovery = uri.option("discovery").map_or(true, |value| match value {
+                "true" => true,
+                "false" => false,
+                _ => panic!("an accepted discovery value is boolean"),
+            });
+            if !discovery && parsed.security_policy != "NONE" {
+                assert!(
+                    uri.option("server-certificate-file")
+                        .is_some_and(|path| !path.is_empty())
+                );
+            }
+            if let Some(value) = uri.option("endpoint-port") {
+                assert!(value.bytes().all(|byte| byte.is_ascii_digit()));
+                assert!(value.parse::<u16>().expect("valid port") > 0);
+            }
             let timeout = uri
                 .options()
                 .iter()

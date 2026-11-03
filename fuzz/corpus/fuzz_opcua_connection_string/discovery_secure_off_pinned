@@ -1,0 +1,1 @@
+opcua://fake:4840/path?discovery=false&server-certificate-file=server.der
