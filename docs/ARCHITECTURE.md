@@ -588,7 +588,7 @@ structured values wait for an ADR before their first consumer (section 11). `Byt
 PlcValueType to preserve existing ordering; add a bounded ordered-field Struct. Guid,
 NodeId, QualifiedName and StatusCode stay String representations; LocalizedText becomes
 a two-field Struct. These additions require their own ADR amending ADR-0006/ADR-0025
-and remain unimplemented through S97.
+and ship in S98 under ADR-0036.
 
 ### 3.3 Requests, responses, and errors
 
@@ -842,7 +842,8 @@ classDiagram
   events are `ReadItem`, without a separate `SubscriptionEvent` enum (S55).
   `BrowseRequest`, `BrowseResponse` and `BrowseNode` remain S111. E18's additive
   `ReadItem::server_time` and native subscription parameters/refusals/end reasons/loss
-  counters remain S98/S114, without changing `Subscription::recv`'s signature.
+  counters are staged in S98/S114, without changing `Subscription::recv`'s signature;
+  server_time ships in S98, while native subscription additions remain S114.
 
 The diagram is not redrawn.
 
@@ -2488,3 +2489,14 @@ S59, which ships RTU inside `modbus` rather than behind a `modbus-rtu` feature),
 - OPC UA client structure is decided by accepted ADR-0034 (S97); security-backend
   implementation acceptance remains ADR-0035/S101. Later-slice tests determine support.
 - The C ABI, dynamic loading, and `no_std` subsets (post-M5 extensions).
+
+## S98 value and metadata addendum
+
+ADR-0036 implements the E18 Bytes/Struct and ReadItem server-time contracts. PlcStruct
+is immutable with ordered unique fields and fixed field/depth/node limits, including
+nested lists. Type variants append Bytes then Struct after List; existing value encodings
+and coercions are unchanged. OPC UA produces Bytes and text/locale structures, preflights
+field nodes/composite depth for arrays/matrices, and attaches both optional SystemTime
+timestamps and original status to successful or failed items. Local sampled_at stays
+monotonic. Missing times are not replaced. This does not implement custom structure
+resolution, credential changes, secure discovery or native subscriptions.

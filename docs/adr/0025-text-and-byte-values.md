@@ -196,3 +196,11 @@ holds modbus at 100% lines.
 `fixtures/modbus/PROVENANCE.toml` (first-party, Apache-2.0), and the testkit test that pins
 the list of `[[file]]` entries (`golden_dir_lists_every_vector_in_provenance`) names it.
 The exception recorded under Consequences is closed.
+
+## S98 amendment (2026-11-03)
+
+[ADR-0036](0036-bytes-structures-and-read-metadata.md) resolves the byte/structure
+deferral: Bytes and Struct are appended after List in PlcValue and PlcValueType, with
+PlcStruct enforcing immutable ordered fields and depth/field/node bounds. OPC UA
+ByteString and LocalizedText are producers. Existing numeric/text/Modbus encodings,
+previous type ordering and PlcValue's lack of Ord remain unchanged. RawValue stays deferred.

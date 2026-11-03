@@ -98,3 +98,11 @@ declaration-order sorting, `BTreeSet` round trips, `Copy` and `Hash`, `Option` d
 and that each builder sets exactly one field. `crates/stonecrab/tests/public_contract.rs`
 asserts `Send + Sync + 'static` and the facade re-exports. `scripts/coverage-gate.sh`
 holds core at 100% lines.
+
+## S98 amendment (2026-11-03)
+
+[ADR-0036](0036-bytes-structures-and-read-metadata.md) resolves the byte/structure
+deferral: Bytes and Struct are appended after List in PlcValue and PlcValueType, with
+PlcStruct enforcing immutable ordered fields and depth/field/node bounds. OPC UA
+ByteString and LocalizedText are producers. Existing numeric/text/Modbus encodings,
+previous type ordering and PlcValue's lack of Ord remain unchanged. RawValue stays deferred.
