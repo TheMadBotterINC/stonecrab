@@ -144,3 +144,12 @@ and constructor compile and run. `scripts/coverage-gate.sh` holds core at 100% l
 ## Addendum (S46, 2026-10-28)
 Decision 7 is superseded for `modbus-tcp`, which now writes and reports
 `Capabilities.write = true`; see the S46 addendum of ADR-0015.
+
+## Addendum (S100, 2026-11-03)
+
+WriteRequest now disposes its owned values iteratively using the S98 core tree disposer.
+A raw caller List can exceed the OPC UA encoder's depth bound; rejecting it or abandoning
+its future must not recursively drop it. Public builder, hint, clone and accessor contracts
+are unchanged. OPC UA ranged addresses hint List, including one index; their suffix still
+fixes the element encoding, so no driver-specific relaxation enters the core builder.
+See ADR-0038 and its 100000-level/128 KiB rejection and abandonment regression test.

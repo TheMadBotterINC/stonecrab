@@ -5,6 +5,13 @@ Changelog. Stonecrab is one crate, so each release has one section. `stonecrab` 
 specification-stage placeholder.
 
 ## Unreleased
+- **Added (S100, opt-in `opcua`):** staged policy-None writes, gated by explicit read-write
+  access. Type selection uses the suffix, bounded session metadata, then explicit
+  inference. Scalars/arrays/matrices use checked conversions, exact TIME milliseconds
+  and DateTime ticks; partial ranges require lists. Device statuses stay per-item;
+  possible transmission is tracked per request and never replayed. Ranged address hints
+  now reflect List. Owned WriteRequests dispose deep caller trees iteratively, including
+  rejected and abandoned operations. Custom structures and secure policies remain planned.
 - **Added (S99):** `DriverRegistry::connect_with` and a per-cache credential provider,
   keeping secrets separate from URI text and cache keys. Additive X.509 identity paths
   preserve the published Credentials fields; activation remains S108. OPC UA username

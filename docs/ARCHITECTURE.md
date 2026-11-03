@@ -393,7 +393,7 @@ browse types; no browse or discover method is exposed yet (ADR-0001: no empty sc
 The driver owns its concurrency model: Modbus serializes through ConnectionGuard;
 OPC UA pipelines through its bounded private lane, without a spawned reader task.
 ADR-0034 decisions 6–9 define the accepted M3 target and section 5.2 separates it from
-current S99 behavior.
+current S100 behavior.
 
 `DriverRegistry` is populated at setup time: `register(&mut self, Arc<dyn Driver>)
 -> Result<()>` (a duplicate scheme is `InvalidConfig`), `driver(&str)`, `schemes()` (sorted),
@@ -1532,8 +1532,8 @@ runs the same contract suite as `stonecrab::modbus`, as the note beside the diag
 
 ### 5.2 OPC UA client and accepted M3 lifecycle (ADR-0034, S97)
 
-**Shipped through S99:** the opt-in opcua feature provides a public driver/address
-surface, binary codecs and 25 generated service cases, TCP framing, a bounded pipelined
+**Shipped through S100:** the opt-in opcua feature provides a public driver/address
+surface, binary codecs and 28 generated service cases, TCP framing, a bounded pipelined
 lane, anonymous None connect/read/close, chunking, extended scalar/array/matrix values,
 and endpoint selection/overrides. A private GetEndpoints exchange is interoperability-tested;
 automatic secure discovery remains S106. Username sessions under None require explicit
@@ -2512,3 +2512,33 @@ provider presence. Credentials preserves its public fields with a private discri
 and public CredentialIdentity; X509 paths are represented but not loaded until S103/S108.
 Plain username activation requires explicit opt-in and effective token policy None;
 protected selected token policies are refused without downgrade.
+
+### Staged OPC UA writes (S100, ADR-0038)
+
+ConnectionConfig access is authoritative, including programmatic configuration; default
+read-only refuses writes before metadata I/O. The opcua access URI option mirrors core.
+Read/write error stamping and the close-stop token are shared. Session metadata resolves
+DataType/ValueRank/ArrayDimensions/AccessLevel for unhinted tags, using bounded requests
+and an item-limited FIFO cache. No lock spans I/O and a new session starts empty. A suffix
+fixes the element encoding; missing/unsupported metadata permits explicit inference.
+Other metadata failures remain errors, never a schema guess.
+
+Pure write/value functions validate and flatten bounded rectangular lists, reserve child
+nodes before growing the traversal stack, and encode checked scalar/array values. TIME
+requires exact Int32 milliseconds; DateTime requires exact 100 ns ticks. Ranged addresses
+hint List; core exact type-hint validation remains intact. Native writes/readbacks cover
+the supported scalars, array, matrix and one-element range. Owned WriteRequest disposal
+reuses the iterative core tree disposer, avoiding recursive rejection/abandonment of deep
+caller Lists. Clone and builder contracts remain unchanged.
+
+The lane tracks possible transmission per write and races connection close while retaining
+that marker. Pre-send failures remain errors; lost/unusable exchanges after possible send
+are Unknown. Device WriteResponse results retain status/order; wrong counts are the
+explicit MalformedData error, never permission to replay. Read retries never apply to
+writes. No spawned task, dependency, public operation type or version is added.
+
+S100 treats an unexpected correlated service reply and an Uncertain Write status as
+Unknown, preserving a device status when present. Bad statuses remain typed rejections.
+Core's existing TimeoutAfterTransmit reason is the fallback for an unusable confirmation;
+no new public reason variant is added. Only a verified WriteResponse's wrong result count
+remains the explicit MalformedData error described above, with no automatic replay.

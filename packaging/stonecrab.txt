@@ -71,6 +71,8 @@ src/modbus/rtu.rs
 src/modbus/session.rs
 src/modbus.rs
 src/opcua/address.rs
+src/opcua/attributes/tests.rs
+src/opcua/attributes.rs
 src/opcua/channel/tests.rs
 src/opcua/channel.rs
 src/opcua/chunk/tests.rs
@@ -115,6 +117,7 @@ src/opcua/generated/signed_software_certificate.rs
 src/opcua/generated/timestamps_to_return.rs
 src/opcua/generated/user_token_policy.rs
 src/opcua/generated/user_token_type.rs
+src/opcua/generated/write_value.rs
 src/opcua/generated.rs
 src/opcua/identity.rs
 src/opcua/lane/tests.rs
@@ -128,6 +131,10 @@ src/opcua/session/tests.rs
 src/opcua/session.rs
 src/opcua/value/tests.rs
 src/opcua/value.rs
+src/opcua/write/tests.rs
+src/opcua/write/value/tests.rs
+src/opcua/write/value.rs
+src/opcua/write.rs
 src/opcua.rs
 src/order.rs
 src/polling.rs

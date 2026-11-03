@@ -5,6 +5,33 @@ Implementation baseline: the commit that last modified this file
 (`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
 its own commit; the slice log below records what each one landed.
 
+## Staged OPC UA writes (S100, 2026-11-03)
+
+Policy-None writes require explicit read-write access; read-only remains the default and
+refuses before I/O. Type selection uses suffix, bounded per-session metadata, then explicit
+inference. Eligible items go in one WriteRequest; local/device failures remain correlated.
+Exact integer/float conversions, TIME milliseconds, 100 ns DateTime, arrays/matrices and
+List-valued ranges are checked before Write I/O. Ranged addresses now hint List, preserving
+the core exact hint contract. Whole-array writes without ranges use metadata/inference.
+
+Per-request transmission tracking preserves Unknown after lost/unusable replies, unexpected
+service types, close/cancellation, or Uncertain device status. Device status stays attached;
+Bad results remain typed rejections. Wrong verified result counts are MalformedData and
+never authorize replay. Read retry settings do not apply to writes. Child nodes are reserved
+before traversal allocation, and owned WriteRequests dispose deep trees iteratively even
+when rejected or abandoned before polling (100000 levels on a 128 KiB thread).
+
+Ten protocol rows close: 249 total, 125 implemented/86 planned/38 deferred. No dependency,
+feature name, public operation/outcome type or version is added. All 2393 deterministic
+tests pass; core/opcua coverage is 100%. Mutation campaigns pass with no survivors (153:
+136 caught/17 unviable; final shape 38 caught; final status 22 caught/five unviable).
+All 15 fuzz targets and the nine native open62541 cases, its in-image checks and the finite
+example pass. Final feature/package/full-check evidence is tracked in
+[S100 evidence](docs/evidence/opcua-s100.md), with ADR-0038 and waiver self-review.
+
+Next: S101, cryptography backend/policy/key schedules. Secure policies and custom schema
+writes remain their planned slices; no hardware or release claim. Normal signed-off merges.
+
 ## Credential channel and explicit plain OPC UA identity (S99, 2026-11-03)
 
 Registry connect_with and a per-cache credential provider pass secrets separately from
@@ -726,6 +753,7 @@ commit; gates named were run locally before that commit.
 
 | Slice | Date | Landed | Gates |
 | --- | --- | --- | --- |
+| S100 | 2026-11-03 | Staged policy-None writes with explicit access, bounded session metadata and exact scalar/array/matrix encoding; per-item statuses, per-request delivery state, Uncertain/unexpected replies Unknown, no replay. Ranged List hints and iterative owned-request disposal; ADR-0038. [Evidence](docs/evidence/opcua-s100.md) | 2393 tests, core/opcua coverage 100, configured mutations (153 plus final shape/status campaigns) all exit 0, 15 fuzz targets, nine native peer cases, regen/semver/dependencies/parity/attributes; final features/package/full-check in evidence |
 | S99 | 2026-11-03 | Separate registry/cache credential channel, additive X509 identity representation, explicit plain username activation on None, token compatibility, redaction and Authentication source preservation; eight protocol rows, ADR-0037. [Evidence](docs/evidence/opcua-s99.md) | full check (2351 tests, 588+5 doctests), core/opcua coverage 100, mutations 31 caught/23 unviable (54 total, exit 0), strict lint, regen, semver default/all, dependencies/machete, parity/attributes, eight native peer cases, 59 features, 15 fuzz targets, 199-file fresh package and unpacked all-feature/opcua-only builds |
 | S98 | 2026-11-03 | Bytes and immutable ordered PlcStruct with field/depth/node bounds and iterative rejection; independent ReadItem server_time. OPC UA ByteString/LocalizedText and status/source/server metadata, with aggregate structured-array budgeting and Bad failure precedence preserved. Six protocol rows plus core Bytes/Struct contracts; ADR-0036. Self-review under ADR-0005 waiver; [evidence](docs/evidence/opcua-s98.md) | full check (2335 tests, 586+5 doctests), core/opcua coverage 100, 59 features, 15 fuzz targets, mutations 85 caught/23 unviable plus metadata 10/two (both exit 0), strict lint, regen, semver default/all, dependencies/machete, parity/attributes, 198-file package/unpacked all-feature build, seven independent-peer cases |
 | S97 | 2026-11-03 | Accept ADR-0034 and record seven existing maintainer outcomes; ratify S83 address accessor surface, reconcile architecture/Connection/README contracts and refresh Phase H completion. Distinguish caller-driven OPC UA session pump and typed native-subscription end from EventPump and future capability claims. Documentation only; self-review under ADR-0005 waiver; [evidence](docs/evidence/opcua-s97.md) | full check (2321 tests, 584+5 doctests), strict lint/rustdoc, no-default build, parity/self-test, attributes, documentation/relative-link consistency, executable-source comparison, unchanged 198-file package verification, DCO |
