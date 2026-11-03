@@ -94,7 +94,10 @@ fn opcua_connect_runs_hello_open_create_activate_in_order_against_the_scripted_p
     registry.register(Arc::new(driver)).unwrap();
     let connection = block_on_with(&clock, registry.connect(URI)).unwrap();
     assert_eq!(connection.state(), ConnectionState::Connected);
-    assert_eq!(connection.capabilities(), crate::Capabilities::default());
+    assert_eq!(
+        connection.capabilities(),
+        crate::opcua::connection::capabilities()
+    );
     assert_eq!(
         connection.limits(),
         ResourceLimits::builder().build().unwrap()
@@ -289,10 +292,13 @@ fn opcua_dropping_close_is_terminal_and_wakes_a_concurrent_close() {
 }
 
 #[test]
-fn opcua_data_operations_are_unsupported_until_implemented_and_disconnected_after_close() {
+fn opcua_write_is_unsupported_and_read_fails_after_close() {
     let (driver, clock, _) = driver(Script::strict(vec![Step::respond(reply)]));
     assert_eq!(driver.scheme(), "opcua");
-    assert_eq!(driver.capabilities(), crate::Capabilities::default());
+    assert_eq!(
+        driver.capabilities(),
+        crate::opcua::connection::capabilities()
+    );
     assert_eq!(
         Driver::parse_address(&driver, "ns=2;i=1", &AddressOptions::default())
             .unwrap()
@@ -317,22 +323,19 @@ fn opcua_data_operations_are_unsupported_until_implemented_and_disconnected_afte
             .item(tag.clone(), crate::PlcValue::Bool(true))
             .build()
             .unwrap();
-        let expected_read = if closed {
-            ErrorKind::Disconnected
-        } else {
-            ErrorKind::Unsupported(Operation::Read)
-        };
         let expected_write = if closed {
             ErrorKind::Disconnected
         } else {
             ErrorKind::Unsupported(Operation::Write)
         };
-        assert_eq!(
-            block_on_with(&clock, connection.read(read))
-                .unwrap_err()
-                .kind(),
-            expected_read
-        );
+        if closed {
+            assert_eq!(
+                block_on_with(&clock, connection.read(read))
+                    .unwrap_err()
+                    .kind(),
+                ErrorKind::Disconnected
+            );
+        }
         assert_eq!(
             block_on_with(&clock, connection.write(write))
                 .unwrap_err()
@@ -446,6 +449,7 @@ fn opcua_create_session_adopts_the_authentication_token_and_revised_timeout() {
         Arc::new(clock.clone()),
         Duration::from_secs(30),
         ResourceLimits::builder().build().unwrap(),
+        crate::RetryPolicy::default(),
     );
     let shown = format!("{connection:?}");
     assert!(shown.contains("54.321s"));
