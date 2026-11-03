@@ -50,8 +50,8 @@ normative and are not duplicated here. Per ADR-0004 the trunk is `master`.
   changes; authors do not approve their own PRs.
   ADR-0005 waives the two-approval rule while there is one maintainer; each PR then
   carries a self-review against the Appendix C checklist.
-- Merge (18.7): squash-merge with the PR title as the subject; no merge commits or
-  force-pushes to the trunk.
+- Merge (18.7, maintainer override 2026-11-02): normal merges preserve individual
+  signed-off commits; do not squash or force-push the trunk.
 - New drivers (18.8): capability metadata, address documentation, fixtures with
   provenance, mandatory failure-case tests, contract-suite run and support-level
   evidence, or the PR stays a draft.

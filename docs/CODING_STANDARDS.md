@@ -628,7 +628,7 @@ Types: `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`, `chore`
 
 18.6. **Review.** One maintainer approval for ordinary changes; two for changes to CI workflows, the hardware runner, release tooling, or anything executed on the hardware bench (`SPEC.md`: review of executable changes before hardware jobs run). Authors do not approve their own PRs. Review comments that request a change to a **MUST** in this document are not optional.
 
-18.7. **Merge.** Squash-merge, PR title as the commit subject, PR body as the commit body, with `Signed-off-by` preserved. No merge commits on `main`; no force-pushes to `main`; branch protection enforces required checks (§19).
+18.7. **Merge.** Maintainer override (2026-11-02): use normal merges preserving individual commits; do not squash. Signed-off development commits remain in history. This supersedes the earlier squash-only/no-merge-commit convention. Do not force-push `master`; respect required checks. Existing remote squash commits remain historical records.
 
 18.8. **Required files for a new driver PR** (from `SPEC.md` "Open-source project requirements"): capability metadata (`Capabilities` impl + crate README matrix), address documentation, fixtures with provenance, mandatory failure-case tests, contract-suite run, and the support-level evidence. A driver PR missing any of these is draft, not reviewable.
 
