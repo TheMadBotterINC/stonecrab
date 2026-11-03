@@ -5,6 +5,22 @@ Implementation baseline: the commit that last modified this file
 (`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
 its own commit; the slice log below records what each one landed.
 
+## OPC UA exchange lane (S89, 2026-11-02)
+
+S89 adds a bounded caller-driven request lane for an established policy-None channel.
+It correlates replies by request id, yields waiting receives to queued senders, builds
+headers from the session token and injected clock, validates channel/token/sequence ids,
+and preserves exact ERR/ServiceFault statuses. Dropped receives retain partial frames;
+interrupted sends fail the lane and are never replayed. `request-timeout-ms` maps to
+`Timeouts.request` (30000 ms by default). No task or dependency is added.
+
+Verification and scope are in [the S89 evidence](docs/evidence/opcua-s89.md). The complete
+local suite passes 2159 tests and 588 doctests; handwritten OPC UA coverage remains
+100% (5506/5506). Seven parity rows now describe the private lane; ERR during Hello/connect
+remains planned for S90/S91. No public connection or network Read is advertised yet.
+Next: S90, Hello/Acknowledge negotiation and the policy-None secure channel, then S91
+sessions/public connect and S92 end-to-end Read. Hardware remains unavailable.
+
 ## OPC UA service codecs (S88, 2026-11-02)
 
 The 22-case connection/read service subset is generated from the approved, pinned
