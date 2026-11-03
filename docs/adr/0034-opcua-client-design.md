@@ -1114,3 +1114,48 @@ S95 final review also caught the Good absent-value path still constructing Null 
 the new shared budget. Route both absent and explicit Null through the same decoder;
 a regression checks exact depletion and resource refusal for both forms, while Bad status
 still wins without charging a mapped value. This changes no null-value representation.
+
+## S96 implementation sketch — discovery primitives and endpoint selection
+
+GetEndpoints uses the existing generated service codec and serialized lane; a pure
+selector consumes advertised endpoints plus validated options and returns borrowed
+endpoint/token descriptions. Session activation replaces its local anonymous-policy
+search with this selector; secure-connect discovery remains S106 and None connect
+continues to use CreateSession's endpoint list.
+
+- Extend `protocols/opcua.toml` with request 428 and response 431, regenerate in a
+  separate `gen:` commit, and extend independent service vectors/fuzz seeds.
+- `opcua/endpoint.rs` owns the selector and the thin GetEndpoints exchange. Reuse the
+  existing authority parser and lane deadline, status and response-handle checks;
+  add no dependency, executor, public credential variant or public discovery API.
+  The exchange is a private building block exercised by deterministic and independent
+  peer tests; its production caller arrives in S106.
+- Match parsed host (case-insensitive DNS, normalized IPv6), numeric port and exact
+  path, plus exact policy URI, effective mode and TCP transport profile. Overrides
+  add an alternative host/port match, retaining the original match, as at the pinned
+  PLC4X commit. Rank compatible endpoint/token pairs by security level then advertised
+  token protection (null/empty token policy inherits channel policy); later equal
+  candidates win. Token compatibility uses the generated token type, without adding
+  certificate credentials ahead of S99. Preserve the existing nonempty policy-ID
+  requirement for activation.
+- Add validated `discovery` (default true), `endpoint-host`, `endpoint-port`, and
+  syntactic `server-certificate-file` options. Discovery off with a secure policy
+  requires a nonempty certificate path; loading/trust validation remains S103/S104.
+  Secure policies still fail before transport I/O. Options never cause discovery on
+  a None connection or insecure discovery for secure-connect.
+- Selection errors list at most 16 safe advertised endpoint URLs and name the two
+  override options. Reject credential-bearing, query/fragment, malformed and control
+  URLs for matching; diagnostic rendering substitutes a fixed placeholder for them
+  and bounds each URL to 256 characters. Selection success is recorded as a sanitized
+  URL in connection Debug, without widening core Diagnostics or logging token IDs.
+- Tests port EndpointSelectionTest behavior from PLC4X
+  ea229918f5d07700e04d7d69ab1645da679cb700; cover URL boundaries, overrides, token types,
+  mode/policy isolation, ranking, malformed input, redaction, service refusals, default
+  and invalid configuration, activation using the selected policy, and an explicit
+  GetEndpoints probe against pinned open62541. Keep coverage floors unchanged.
+
+Reference checks: OPC Foundation Part 4 sections
+[5.5.4](https://reference.opcfoundation.org/specs/OPC-10000-4/5.5.4) and
+[7.41](https://reference.opcfoundation.org/specs/OPC-10000-4/7.41) describe the null
+GetEndpoints authentication token, empty transport-profile filter, and token-policy
+inheritance. Ranking is an advertised preference, not proof of server identity.
