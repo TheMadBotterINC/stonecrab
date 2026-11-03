@@ -60,7 +60,7 @@ repository, not vendored; root/crate NOTICE record Apache attribution.
 | Features | All 59 combinations and no-default-feature build passed, isolated from other Cargo operations |
 | Default / fuzz-only Clippy | Passed, including all-target/all-feature `RUSTFLAGS='--cfg fuzzing'` |
 | Fuzz | All 15 targets passed with a 10-second budget (11 reported), including the extended decode/value target; no crashes |
-| Mutations | Full mapper/read scope: 81 total, 64 caught, 17 unviable, no survivors/timeouts. After the absent-value fix, read rerun: 36 total, 30 caught, 6 unviable, none survived; both unmutated baselines passed |
+| Mutations | Final mapper run: 54 total, 43 caught, 11 unviable; final read run: 36 total, 30 caught, 6 unviable. Both baselines passed, both commands exited 0, no survivors/timeouts |
 | Regeneration | Both protocols identical twice; edited/added/removed-output self-tests passed |
 | Semver | Default and all features against published 0.3.0 passed |
 | Dependencies / machete | Advisory/license/ban/source checks passed; no unused dependencies |
@@ -85,7 +85,13 @@ new exact-depletion/error-precedence regressions pass, followed by full checks, 
 independent peer and affected-read mutation reruns. The 81-mutant campaign contains 45
 value mutations (34 caught, 11 unviable), 30 read mutations (24 caught, 6 unviable) and six
 configuration struct-field mutations emitted outside the name filter, all caught. The
-final read rerun includes those six extra mutations too. No survivor exclusions were added.
+final read rerun includes those six extra mutations too. The original full-scope command
+returned an unexpected exit 143 after writing all 81 completed outcomes. No cause is
+inferred from the exit status. A fresh mapper-only campaign then completed with exit 0:
+54 total, 43 caught and 11 unviable (45 value mutations plus nine emitted struct-field
+mutations elsewhere). The final affected-read campaign also exited 0. These clean module
+runs, not the original process exit, are the final mutation gates. No survivor exclusions
+were added.
 
 ## Independent peer and limits
 
@@ -114,6 +120,6 @@ package contents, semver and coverage were checked. Normal signed-off merges pre
 commits. Hosted CI is triggered on push; no hosted result is assumed here.
 
 Logs: `/tmp/stonecrab-s95-{focused-complete,quality-final,coverage-final,features,
-default-clippy-final,fuzz-clippy-final,fuzz,mutants,read-mutants-final,regen,semver,
+default-clippy-final,fuzz-clippy-final,fuzz,mutants,value-mutants-final,read-mutants-final,regen,semver,
 semver-all,dependencies,machete,parity,lint-attrs,package,packaged-all,interop-final}.log`.
-Mutation outcomes: `/tmp/stonecrab-s95-{mutants,read-mutants-final}/mutants.out/outcomes.json`.
+Mutation outcomes: `/tmp/stonecrab-s95-{mutants,value-mutants-final,read-mutants-final}/mutants.out/outcomes.json`.
