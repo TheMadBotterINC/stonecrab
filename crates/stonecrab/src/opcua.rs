@@ -25,7 +25,7 @@ mod connection;
     expect(
         dead_code,
         unused_imports,
-        reason = "S102 and S105 consume the private policy and derivation foundation"
+        reason = "S105/S106 consume the remaining private asymmetric and symmetric channel entry points"
     )
 )]
 mod crypto;

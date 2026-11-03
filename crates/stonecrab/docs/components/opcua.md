@@ -484,3 +484,12 @@ nonce generation. Operational secure channels, message protection and trust vali
 remain later slices. The driver still refuses secure policies before I/O. No public RNG
 configuration or new feature is introduced; `opcua` stays outside default/full. Key
 formatting is redacted by Secret; this does not promise zeroization of allocations.
+
+S102 adds private `MSG`/`CLO` protection for `Sign` and `SignEncrypt`: provider-backed
+HMAC verification and AES-CBC with derived keys/IV, authenticated padding and header
+binding. Decryption and authentication precede sequence/body parsing. Current/previous
+keys are bounded by token id; installs re-derive from both nonces before replacing state.
+Previous-token expiry/scheduling belongs to S108. The public driver still rejects secure
+policies before I/O; these primitives are wired into protected connections in S105/S106.
+Malformed protected data has one authentication error without provider/parser details;
+this does not claim equal timing of the full receive path. No new dependency or feature.

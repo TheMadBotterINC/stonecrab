@@ -9,14 +9,14 @@ const POLICIES: [SecurityPolicy; 3] = [
     SecurityPolicy::Aes256Sha256RsaPss,
 ];
 
-struct Injected {
+pub(super) struct Injected {
     calls: AtomicUsize,
     fail_at: usize,
     digest_length: Option<usize>,
 }
 
 impl Injected {
-    fn new(fail_at: usize, digest_length: Option<usize>) -> Self {
+    pub(super) fn new(fail_at: usize, digest_length: Option<usize>) -> Self {
         Self {
             calls: AtomicUsize::new(0),
             fail_at,
@@ -47,9 +47,21 @@ impl Backend for Injected {
             |length| Ok(vec![0; length]),
         )
     }
+    fn verify_hmac(&self, hash: Hash, secret: &[u8], message: &[u8], tag: &[u8]) -> Result<()> {
+        self.call()?;
+        Native.verify_hmac(hash, secret, message, tag)
+    }
+    fn encrypt(&self, key: &[u8], iv: &[u8; 16], bytes: &mut [u8]) -> Result<()> {
+        self.call()?;
+        Native.encrypt(key, iv, bytes)
+    }
+    fn decrypt(&self, key: &[u8], iv: &[u8; 16], bytes: &mut [u8]) -> Result<()> {
+        self.call()?;
+        Native.decrypt(key, iv, bytes)
+    }
 }
 
-fn hex(bytes: &[u8]) -> String {
+pub(super) fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write;
     bytes.iter().fold(String::new(), |mut output, byte| {
         write!(output, "{byte:02x}").unwrap();
@@ -57,7 +69,7 @@ fn hex(bytes: &[u8]) -> String {
     })
 }
 
-fn unhex(text: &str) -> Vec<u8> {
+pub(super) fn unhex(text: &str) -> Vec<u8> {
     text.as_bytes()
         .as_chunks::<2>()
         .0
@@ -411,3 +423,27 @@ fn opcua_policy_descriptors_drive_one_chunk_size_formula() {
 }
 
 mod native;
+
+#[test]
+fn injected_backend_symmetric_methods_preserve_native_results_and_failures() {
+    let backend = Injected::new(usize::MAX, None);
+    let tag = backend
+        .hmac(Hash::Sha256, b"secret", &[b"message"])
+        .unwrap();
+    backend
+        .verify_hmac(Hash::Sha256, b"secret", b"message", &tag)
+        .unwrap();
+    let mut block = [0; 16];
+    backend.encrypt(&[1; 16], &[2; 16], &mut block).unwrap();
+    backend.decrypt(&[1; 16], &[2; 16], &mut block).unwrap();
+    assert_eq!(block, [0; 16]);
+    for operation in 0..3 {
+        let failing = Injected::new(0, None);
+        let result = match operation {
+            0 => failing.verify_hmac(Hash::Sha256, b"secret", b"message", &tag),
+            1 => failing.encrypt(&[1; 16], &[2; 16], &mut block),
+            _ => failing.decrypt(&[1; 16], &[2; 16], &mut block),
+        };
+        assert!(result.is_err());
+    }
+}

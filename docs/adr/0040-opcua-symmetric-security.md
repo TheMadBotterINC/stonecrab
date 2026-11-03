@@ -63,7 +63,7 @@ at most two token-specific key pairs, and keep the current None lane unchanged u
   examples, fresh package/unpacked feature builds and the existing native None peer gate.
   Update package inventory, evidence, plan and status. Push for hosted CI before merge.
 
-Sources: pinned PLC4X SymmetricEncryptionHandler.java and Chunk.java at
+Sources: pinned PLC4X SymmetricEncryptionHandler.java, BaseEncryptionHandler.java and Chunk.java at
 `ea229918f5d07700e04d7d69ab1645da679cb700`; OPC UA Part 6 §6.7.2.5.1 and §6.7.7:
 https://reference.opcfoundation.org/specs/OPC-10000-6/6.7.2.5.1 . AWS-LC 1.19.0 local
 hmac::verify implementation and S101's NIST CBC/HMAC adoption vectors.

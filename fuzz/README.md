@@ -67,3 +67,9 @@ mapper. Selector bits choose no suffix or one of eight temporal suffixes. Accept
 is traversed iteratively to check the aggregate value-node and List-depth bounds; codec /
 unsupported / range refusals are expected. Eight new first-party seeds cover UTC tick
 precision/extrema, overrides, matrices, zero axes and hostile rank/empty-tree expansion.
+
+`fuzz_opcua_symmetric` (S102) selects a policy/mode, authenticates a bounded raw MSG/CLO
+chunk with fixed public fixture nonces, then checks canonical protection and reopening
+with opposite directional keys. Unauthenticated bytes never reach sequence/body parsing.
+The committed seed packets are Python HMAC plus OpenSSL CBC fixtures; they contain no key
+or production nonce. Includes Sign/SignEncrypt, all MSG flags, CLO and malformed input.

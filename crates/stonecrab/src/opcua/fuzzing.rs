@@ -351,3 +351,40 @@ pub fn value(bytes: &[u8], selector: u8) -> Result<crate::PlcValue> {
     let mut budget = crate::opcua::value::MAX_VALUE_NODES;
     crate::opcua::value::decode(value, target, &mut budget)
 }
+
+/// Authenticate one bounded symmetric chunk, then re-protect and reopen it with peer keys.
+/// Two selector bytes choose the policy and `Sign`/`SignEncrypt`; the rest is complete wire data.
+/// Nonces are fixed public fuzz fixtures, never production defaults.
+///
+/// # Errors
+/// The outer result refuses malformed/untrusted input. An accepted chunk's inner result
+/// must succeed and be true: it checks the canonical protection/peer reopening invariant.
+pub fn symmetric_chunk(input: &[u8]) -> Result<Result<bool>> {
+    use crate::opcua::crypto::{Native, Symmetric};
+    use crate::opcua::options::{MessageSecurity, SecurityPolicy};
+    let (selector, input) = input.split_first().ok_or(ParseError::Truncated {
+        needed: 1,
+        available: 0,
+    })?;
+    let policy = match selector % 3 {
+        0 => SecurityPolicy::Basic256Sha256,
+        1 => SecurityPolicy::Aes128Sha256RsaOaep,
+        _ => SecurityPolicy::Aes256Sha256RsaPss,
+    };
+    let (mode, bytes) = input.split_first().ok_or(ParseError::Truncated {
+        needed: 1,
+        available: 0,
+    })?;
+    let mode = if mode % 2 == 0 {
+        MessageSecurity::Sign
+    } else {
+        MessageSecurity::SignEncrypt
+    };
+    let client = Symmetric::new(&Native, policy, mode, 17, 29, &[1; 32], &[2; 32])?;
+    let frame = client.open(&Native, bytes, 16_384)?;
+    Ok((|| {
+        let rewritten = client.seal(&Native, &frame, 16_384)?;
+        let peer = Symmetric::new(&Native, policy, mode, 17, 29, &[2; 32], &[1; 32])?;
+        Ok(peer.open(&Native, &rewritten, 16_384)? == frame)
+    })())
+}
