@@ -20,7 +20,7 @@ use bytes::Bytes;
 
 use crate::future::{WakerSlots, wake_all};
 use crate::opcua::channel::Channel;
-use crate::opcua::chunk::{Assembly, MessageLimits, abort, limited};
+use crate::opcua::chunk::{Assembly, MessageLimits, abort, check_growth};
 use crate::opcua::codec::NodeId;
 use crate::opcua::frame::{Body, ChunkType, Frame, OpcuaFramer, SecureChunk, SequenceHeader};
 use crate::opcua::generated::extension_object_definition::ExtensionObjectDefinition as Service;
@@ -419,12 +419,7 @@ impl Lane {
             pending.reply = Some(Err(problem));
             return Ok(());
         }
-        let total = retained
-            .checked_add(chunk.body.len())
-            .ok_or_else(|| limited("aggregate receive size overflow"))?;
-        if total > self.max_buffered {
-            return Err(limited("aggregate receive budget exceeded"));
-        }
+        check_growth(retained, chunk.body.len(), self.max_buffered)?;
         let Some(body) = pending.assembly.push(
             &chunk.body,
             frame.chunk == ChunkType::Final,

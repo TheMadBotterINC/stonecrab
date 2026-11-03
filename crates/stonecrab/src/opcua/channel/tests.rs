@@ -936,6 +936,6 @@ fn opcua_hello_applies_all_encoding_options_and_local_memory_bounds() {
         proposed_limits(ResourceLimits::builder().build().unwrap(), &defaults)
             .unwrap()
             .max_message_size,
-        262144
+        262_144
     );
 }

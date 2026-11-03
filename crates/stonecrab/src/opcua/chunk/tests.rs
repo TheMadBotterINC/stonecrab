@@ -171,3 +171,32 @@ fn opcua_abort_bodies_are_checked_without_echoing_the_reason() {
     trailing.push(0);
     assert!(abort(&trailing).is_err());
 }
+
+#[test]
+fn opcua_receive_growth_checks_arithmetic_and_exact_budget_before_allocating() {
+    assert_eq!(check_growth(2, 3, 5).unwrap(), 5);
+    assert_eq!(
+        check_growth(2, 4, 5).unwrap_err().kind(),
+        ErrorKind::ResourceLimit
+    );
+    assert_eq!(
+        check_growth(usize::MAX, 1, usize::MAX).unwrap_err().kind(),
+        ErrorKind::ResourceLimit
+    );
+    assert_eq!(
+        check_growth(usize::MAX - 1, 1, usize::MAX).unwrap(),
+        usize::MAX
+    );
+}
+
+#[test]
+fn opcua_unrepresentable_allocation_is_a_resource_error_without_partial_growth() {
+    let mut assembly = Assembly::default();
+    assembly.body.extend_from_slice(b"retained");
+    let capacity = assembly.body.capacity();
+    let problem = assembly.reserve(usize::MAX).unwrap_err();
+    assert_eq!(problem.kind(), ErrorKind::ResourceLimit);
+    assert!(problem.to_string().contains("allocation failed"));
+    assert_eq!(assembly.body, b"retained");
+    assert_eq!(assembly.body.capacity(), capacity);
+}

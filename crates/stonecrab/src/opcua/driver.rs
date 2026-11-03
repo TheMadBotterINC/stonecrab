@@ -95,7 +95,10 @@ impl OpcuaDriver {
     /// `message-security`. The request timeout is `request-timeout-ms` (30000 ms by default),
     /// `handshake-timeout-ms` maps to the whole connect bound (60000 ms by default),
     /// `session-timeout-ms` requests 120000 ms,
-    /// and `encoding.receive-buffer-size` selects the incoming chunk ceiling (65535 by default).
+    /// `encoding.receive-buffer-size` and `encoding.send-buffer-size` select the chunk
+    /// ceilings (65535 each by default), and `encoding.max-message-size` and
+    /// `encoding.max-chunk-count` select whole-body limits (2097152 bytes and 64 chunks,
+    /// additionally bounded by local resource budgets).
     ///
     /// # Errors
     /// Returns [`ErrorKind::InvalidConfig`] for text that is not a valid connection string,

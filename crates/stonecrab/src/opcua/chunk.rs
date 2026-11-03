@@ -83,6 +83,12 @@ impl Assembly {
         self.body.len()
     }
 
+    fn reserve(&mut self, additional: usize) -> Result<()> {
+        self.body
+            .try_reserve_exact(additional)
+            .map_err(|_allocation| limited("message allocation failed"))
+    }
+
     /// Checks both bounds before reserving; failure leaves the partial message untouched.
     pub(super) fn push(
         &mut self,
@@ -94,15 +100,9 @@ impl Assembly {
             .chunks
             .checked_add(1)
             .ok_or_else(|| limited("chunk count overflow"))?;
-        let length = self
-            .body
-            .len()
-            .checked_add(bytes.len())
-            .ok_or_else(|| limited("message size overflow"))?;
+        let length = check_growth(self.body.len(), bytes.len(), limits.bytes)?;
         limits.check(length, count)?;
-        self.body
-            .try_reserve_exact(bytes.len())
-            .map_err(|_allocation| limited("message allocation failed"))?;
+        self.reserve(bytes.len())?;
         self.body.extend_from_slice(bytes);
         self.chunks = count;
         if final_chunk {
@@ -112,6 +112,14 @@ impl Assembly {
             Ok(None)
         }
     }
+}
+
+/// Shared by per-message and aggregate receive budgets; rejects overflow before allocation.
+pub(super) fn check_growth(current: usize, additional: usize, maximum: usize) -> Result<usize> {
+    current
+        .checked_add(additional)
+        .filter(|length| *length <= maximum)
+        .ok_or_else(|| limited("receive byte budget exceeded"))
 }
 
 /// A peer ABORT is request-local and retains its exact status, never its reason text.
