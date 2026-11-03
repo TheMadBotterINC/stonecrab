@@ -20,17 +20,24 @@ fuzz_target!(|input: &[u8]| {
     // A refusal is the codec doing its job; only what parsed is checked further.
     let kind = RecursiveType::from_selector(*selector);
     if let Ok(decoded) = decode(kind, bytes) {
-        if kind == RecursiveType::Variant {
-            if let Ok(mapped) = value(bytes.get(..decoded.consumed).expect("parsed prefix"), selector / 4) {
-                let mut pending = vec![(mapped, 1_usize)];
-                let mut nodes = 0_usize;
-                while let Some((value, depth)) = pending.pop() {
-                    nodes = nodes.checked_add(1).expect("bounded node count");
-                    assert!(nodes <= 1_048_576);
-                    if let stonecrab::PlcValue::List(values) = value {
-                        assert!(depth <= 64);
-                        pending.extend(values.into_iter().map(|value| (value, depth.checked_add(1).expect("bounded depth"))));
-                    }
+        if kind == RecursiveType::Variant
+            && let Ok(mapped) = value(
+                bytes.get(..decoded.consumed).expect("parsed prefix"),
+                selector / 4,
+            )
+        {
+            let mut pending = vec![(mapped, 1_usize)];
+            let mut nodes = 0_usize;
+            while let Some((value, depth)) = pending.pop() {
+                nodes = nodes.checked_add(1).expect("bounded node count");
+                assert!(nodes <= 1_048_576);
+                if let stonecrab::PlcValue::List(values) = value {
+                    assert!(depth <= 64);
+                    pending.extend(
+                        values
+                            .into_iter()
+                            .map(|value| (value, depth.checked_add(1).expect("bounded depth"))),
+                    );
                 }
             }
         }

@@ -69,7 +69,7 @@ fn check(text: &str) {
                     || key == "endpoint-port"
                     || key == "server-certificate-file"
             }));
-            let discovery = uri.option("discovery").map_or(true, |value| match value {
+            let discovery = uri.option("discovery").is_none_or(|value| match value {
                 "true" => true,
                 "false" => false,
                 _ => panic!("an accepted discovery value is boolean"),

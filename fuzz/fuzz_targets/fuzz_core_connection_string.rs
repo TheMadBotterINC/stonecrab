@@ -22,7 +22,10 @@ fn check(text: &str) {
             keys.sort_unstable();
             keys.dedup();
             assert_eq!(keys.len(), count, "keys are unique");
-            assert!(keys.first().is_none_or(|key| !key.is_empty()), "keys are non-empty");
+            assert!(
+                keys.first().is_none_or(|key| !key.is_empty()),
+                "keys are non-empty"
+            );
 
             let shown = uri.to_string();
             let again = ConnectionUri::parse(&shown).expect("canonical text parses");

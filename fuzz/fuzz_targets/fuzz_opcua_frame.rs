@@ -47,7 +47,10 @@ fuzz_target!(|input: &[u8]| {
                 match error {
                     FrameError::Malformed => {}
                     FrameError::Oversized(size) => {
-                        assert!(size > limit, "oversized names a size over the receive buffer");
+                        assert!(
+                            size > limit,
+                            "oversized names a size over the receive buffer"
+                        );
                     }
                     other => panic!("decode returned {other:?}"),
                 }
