@@ -5,6 +5,34 @@ Implementation baseline: the commit that last modified this file
 (`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
 its own commit; the slice log below records what each one landed.
 
+## OPC UA scalar Read (S92, 2026-11-03)
+
+S92 makes anonymous policy-None OPC UA useful for reads: one service per batch, caller
+order retained, scalar Boolean/eight integer widths/Float/Double/String/XML/Null, and
+exact status codes on successes and failures. Unknown nodes map NotFound; type/access
+refusals get the new InvalidDataType/AccessDenied classifications. Bad result counts fail
+the call; invalid UTF-8 fails only its item. Both timestamps are requested and a supplied
+null source timestamp stays absent. Arrays, extended types/coercions, writes, browse,
+subscriptions, secure policies and reconnect remain their assigned later slices.
+
+Reads use existing lane correlation, bounded deadlines and explicit RetryPolicy attempts
+without reconnect/replaying writes. Close cancels pending reads with Disconnected.
+StateCell conditional publication prevents late read errors overwriting terminal states;
+the shared contract suite now retains driver options when rebuilding configurations.
+The public suite reports 23 passes and 10 named unsupported-operation skips. Independent
+open62541 tests now select exactly three cases, including the scalar batch/unknown node;
+the finite opcua_read example also passes and is recorded in example.txt.
+
+Final local checks: 2232 tests, 584+5 doctests, handwritten OPC UA 6544/6544 and all
+required coverage floors passed; 59 feature combinations, default/all-feature semver,
+regeneration, dependency/unused checks, 14 fuzz targets, 192-file verified archive plus
+all-feature unpacked build, and mutations (30 caught, 8 unviable, no survivors). The
+mutation run exposed missing item-diagnostic assertions, now added; review also caught
+the null-timestamp case and its regression passed after the implementation was corrected.
+Details: [S92 evidence](docs/evidence/opcua-s92.md). No hardware or publication was performed.
+
+Next: S93, upstream OPC UA vectors and suite evidence; chunking follows in S94.
+
 ## OPC UA public session connect (S91, 2026-11-03)
 
 S91 adds public `OpcuaDriver` with the existing clock/transport injection pattern and

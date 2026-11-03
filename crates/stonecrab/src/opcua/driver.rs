@@ -32,7 +32,8 @@ const TRANSPORTS: &str = "the only transport code of opcua is tcp";
 /// This initial connection slice supports anonymous sessions with explicitly selected
 /// `security-policy=NONE`. It sends HEL, OPN, `CreateSession` and `ActivateSession` before
 /// returning Connected. The secure default is refused until protection is implemented;
-/// credentials are also refused before I/O. Data operations currently return Unsupported.
+/// credentials are also refused before I/O. Reads map scalar Boolean, integers, floats,
+/// String/XML and Null; other operations remain unsupported.
 ///
 /// The whole attempt uses `handshake-timeout-ms` (60000 by default), and close uses
 /// `request-timeout-ms` (30000). `session-timeout-ms` requests 120000 by default; the
@@ -174,7 +175,7 @@ impl Driver for OpcuaDriver {
         SCHEME
     }
     fn capabilities(&self) -> Capabilities {
-        Capabilities::default()
+        crate::opcua::connection::capabilities()
     }
     fn parse_config(&self, uri: &str) -> Result<ConnectionConfig> {
         Self::configuration(uri)
@@ -239,6 +240,7 @@ impl Driver for OpcuaDriver {
                 Arc::clone(&self.clock),
                 config.timeouts().request,
                 *config.limits(),
+                config.retry().clone(),
             ));
             Ok(connection)
         })

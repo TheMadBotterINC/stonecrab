@@ -27,7 +27,7 @@ const TCP_PROFILE: &str = "http://opcfoundation.org/UA-Profile/Transport/uatcp-u
 
 pub(super) struct Session {
     pub(super) lane: Lane,
-    authentication_token: NodeId,
+    pub(super) authentication_token: NodeId,
     pub(super) revised_timeout: Duration,
 }
 

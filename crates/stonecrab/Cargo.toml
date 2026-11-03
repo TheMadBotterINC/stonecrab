@@ -31,7 +31,7 @@ transport = ["dep:tokio"]
 # rustls on the ring provider, TLS 1.3 and 1.2, trust anchors from the caller (ADR-0032). Off by
 # default; needs the transport.
 tls = ["transport", "dep:rustls", "dep:tokio-rustls"]
-# The OPC UA client (`stonecrab::opcua`, ADR-0034): addresses and private channel/service code. Off by
+# The OPC UA client (`stonecrab::opcua`, ADR-0034): public anonymous None connect/read/close. Off by
 # default and not part of `full`, as `tls` is (decision E17); needs the transport. The
 # cryptography dependencies of the security policies join it with their slices (ADR-0035).
 opcua = ["transport", "dep:getrandom"]
@@ -61,6 +61,10 @@ testkit = ["transport", "dep:serde", "dep:serde_json", "dep:toml", "tokio/macros
 # Each example needs the driver it exercises, so a build without that feature skips it
 # instead of failing; CI builds them all with --all-features.
 [[example]]
+name = "opcua_read"
+required-features = ["opcua"]
+
+[[example]]
 name = "sim_read"
 required-features = ["sim"]
 
@@ -84,6 +88,11 @@ required-features = ["full"]
 # plain `cargo test` skips it (cargo prints no notice) instead of building an empty test binary;
 # naming one with `--test` reports the missing feature. The gates run `--all-features` and so
 # run every file; this list must match each file's `#![cfg(...)]`.
+[[test]]
+name = "opcua_contract"
+path = "tests/opcua_contract.rs"
+required-features = ["opcua", "testkit"]
+
 [[test]]
 name = "boards_adxl345"
 required-features = ["boards", "testkit"]

@@ -1,6 +1,8 @@
 //! First-party, policy-None wire constructions independent of the generated codec.
 //! Integers follow OPC UA Part 6 little-endian field order; no upstream captures.
 
+use super::library;
+
 pub(super) fn message(
     sequence: u32,
     request: u32,
@@ -182,4 +184,147 @@ pub(super) fn activate_response(handle: u32, status: u32) -> Vec<u8> {
 
 pub(super) fn close_response(handle: u32, status: u32) -> Vec<u8> {
     [vec![1, 0, 0xDC, 1], response_header(handle, status)].concat()
+}
+
+pub(super) fn read_results(handle: u32, values: &[Vec<u8>]) -> Vec<u8> {
+    [
+        vec![1, 0, 0x7A, 2],
+        response_header(handle, 0),
+        i32::try_from(values.len()).unwrap().to_le_bytes().to_vec(),
+        values.concat(),
+        vec![0xFF; 4],
+    ]
+    .concat()
+}
+
+pub(super) fn int32_value(value: i32, status: u32) -> Vec<u8> {
+    [
+        vec![3, 6],
+        value.to_le_bytes().to_vec(),
+        status.to_le_bytes().to_vec(),
+    ]
+    .concat()
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Fault {
+    Timeout,
+    Disconnect,
+    Exception,
+}
+
+#[derive(Debug, Default)]
+struct State {
+    reads: u32,
+    faults: std::collections::VecDeque<Fault>,
+}
+
+/// First-party policy-None session/read responder, independent of generated codecs.
+#[derive(Debug, Clone, Default)]
+pub(super) struct Device(std::sync::Arc<std::sync::Mutex<State>>);
+
+impl Device {
+    pub(super) fn reads(&self) -> u32 {
+        self.0.lock().unwrap().reads
+    }
+    pub(super) fn timeout(&self) {
+        self.0.lock().unwrap().faults.push_back(Fault::Timeout);
+    }
+    pub(super) fn disconnect(&self) {
+        self.0.lock().unwrap().faults.push_back(Fault::Disconnect);
+    }
+    pub(super) fn exception(&self) {
+        self.0.lock().unwrap().faults.push_back(Fault::Exception);
+    }
+
+    pub(super) fn reactor(
+        &self,
+    ) -> impl FnMut(&[u8]) -> library::testkit::Reaction + Send + 'static {
+        let device = self.clone();
+        let mut sequence = 41_u32;
+        move |bytes| {
+            use library::{ByteOrder, codec::BoundedReader, testkit::Reaction};
+            let little = ByteOrder::LittleEndian;
+            if bytes.starts_with(b"HEL") {
+                return Reaction::Reply(acknowledge(65535, 65535, 0, 0));
+            }
+            if bytes.starts_with(b"OPN") {
+                return Reaction::Reply(open_response(41, 1, 17, 29, 120_000, 0));
+            }
+            if bytes.starts_with(b"CLO") {
+                return Reaction::Silence;
+            }
+            let mut reader = BoundedReader::new(bytes);
+            reader.read_bytes(20, 20).expect("MSG header");
+            let request = reader.read_u32(little).expect("request id");
+            assert_eq!(reader.read_u8().expect("type encoding"), 1);
+            assert_eq!(reader.read_u8().expect("type namespace"), 0);
+            let service = reader.read_u16(little).expect("service id");
+            let body = match service {
+                461 => create_response(request, 120_000.0, 0),
+                467 => activate_response(request, 0),
+                473 => {
+                    device.0.lock().unwrap().faults.clear();
+                    close_response(request, 0)
+                }
+                631 => {
+                    let mut state = device.0.lock().unwrap();
+                    state.reads = state.reads.saturating_add(1);
+                    let fault = state.faults.pop_front();
+                    drop(state);
+                    match fault {
+                        Some(Fault::Timeout) => return Reaction::Silence,
+                        Some(Fault::Disconnect) => return Reaction::Close,
+                        Some(Fault::Exception) => service_fault(request, 0x8001_0000),
+                        None => {
+                            reader
+                                .read_bytes(29, 29)
+                                .expect("request header with short token");
+                            reader.read_bytes(12, 12).expect("maxAge and timestamps");
+                            let count = reader.read_i32(little).expect("node count");
+                            let mut values = Vec::new();
+                            for _ in 0..count {
+                                let node = match reader.read_u8().expect("node encoding") {
+                                    0 => u32::from(reader.read_u8().expect("node id")),
+                                    1 => {
+                                        reader.read_u8().expect("namespace");
+                                        u32::from(reader.read_u16(little).expect("node id"))
+                                    }
+                                    2 => {
+                                        reader.read_u16(little).expect("namespace");
+                                        reader.read_u32(little).expect("node id")
+                                    }
+                                    _ => panic!("fixture uses numeric nodes"),
+                                };
+                                reader.read_u32(little).expect("attribute");
+                                for prefix in 0..2 {
+                                    if prefix == 1 {
+                                        reader.read_u16(little).expect("encoding namespace");
+                                    }
+                                    let length = reader.read_i32(little).expect("string length");
+                                    if length >= 0 {
+                                        reader
+                                            .read_bytes(usize::try_from(length).unwrap(), 8192)
+                                            .expect("string");
+                                    }
+                                }
+                                if node == 65535 {
+                                    values.push(
+                                        [vec![2], 0x8034_0000_u32.to_le_bytes().to_vec()].concat(),
+                                    );
+                                } else {
+                                    values.push(int32_value(i32::try_from(node).unwrap(), 0));
+                                }
+                            }
+                            reader.expect_eof().expect("end of read");
+                            read_results(request, &values)
+                        }
+                    }
+                }
+                _ => panic!("unexpected service {service}"),
+            };
+            sequence = sequence.checked_add(1).expect("sequence");
+            Reaction::Reply(message(sequence, request, 17, 29, &body))
+        }
+    }
 }

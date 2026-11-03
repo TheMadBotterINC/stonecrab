@@ -122,13 +122,6 @@ impl Lane {
     }
 
     /// Sends once; receiving, cancelling or dropping never replays a request.
-    #[cfg_attr(
-        not(all(test, feature = "testkit")),
-        expect(
-            dead_code,
-            reason = "ordinary data requests start in S92; session setup uses the absolute connect deadline"
-        )
-    )]
     pub(super) fn exchange<'a>(
         &'a self,
         authentication_token: &'a NodeId,
@@ -474,6 +467,10 @@ impl Lane {
         drop(framed);
         self.stopped.cancel();
         wake_all(wakers);
+    }
+
+    pub(super) fn is_failed(&self) -> bool {
+        self.lock().failure.is_some()
     }
 
     /// Continue the lane's counters for CLO and shut down without awaiting a reply.

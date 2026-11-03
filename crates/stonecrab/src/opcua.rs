@@ -1,5 +1,9 @@
 #![doc = include_str!("../docs/components/opcua.md")]
 
+#[cfg(test)]
+#[cfg(feature = "testkit")]
+use crate as library;
+
 mod address;
 mod channel;
 // The types of the binary encoding (the built-ins and the recursive types) are written and
@@ -42,6 +46,7 @@ mod frame;
 #[cfg(fuzzing)]
 pub mod fuzzing;
 mod options;
+mod read;
 
 pub use driver::OpcuaDriver;
 

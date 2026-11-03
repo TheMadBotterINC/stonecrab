@@ -105,6 +105,21 @@ impl StateCell {
         wake_all(wakers);
     }
 
+    /// Publish only if no competing lifecycle transition replaced `expected`.
+    #[cfg(feature = "opcua")]
+    pub(crate) fn set_if(&self, expected: ConnectionState, state: ConnectionState) {
+        let wakers = {
+            let mut latest = self.shared.lock();
+            if latest.state != expected {
+                return;
+            }
+            latest.state = state;
+            latest.version = latest.version.wrapping_add(1);
+            latest.waiters.drain()
+        };
+        wake_all(wakers);
+    }
+
     /// The latest state.
     ///
     /// # Examples

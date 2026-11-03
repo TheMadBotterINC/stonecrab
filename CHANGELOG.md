@@ -5,6 +5,12 @@ Changelog. Stonecrab is one crate, so each release has one section. `stonecrab` 
 specification-stage placeholder.
 
 ## Unreleased
+- **Added (opt-in `opcua`; S92):** one-batch scalar Read with ordered partial results,
+  exact integer widths/float bits, UTF-8 validation, status preservation and bounded
+  cancellation/retry/close behavior. New ErrorKind classifications NotFound,
+  InvalidDataType and AccessDenied distinguish device refusals. The public contract
+  suite and independent open62541 scalar batch/example pass. Arrays/extended values,
+  writes, subscriptions and secure policies remain later slices.
 - **Added (opt-in `opcua` feature; slice S91):** public `OpcuaDriver` with clock/transport
   injection, anonymous None session connect/close, fresh OS nonce generation through
   optional getrandom, handshake/session timeout options and adopted server token/timeout.
