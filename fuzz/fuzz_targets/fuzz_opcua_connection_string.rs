@@ -17,6 +17,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
+use std::time::Duration;
 use stonecrab::opcua::fuzzing::parse_config;
 use stonecrab::{ConnectionUri, Endpoint, ErrorKind};
 
@@ -40,8 +41,13 @@ fn check(text: &str) {
                 );
             }
             assert!(
-                ["NONE", "Basic256Sha256", "Aes128_Sha256_RsaOaep", "Aes256_Sha256_RsaPss"]
-                    .contains(&parsed.security_policy)
+                [
+                    "NONE",
+                    "Basic256Sha256",
+                    "Aes128_Sha256_RsaOaep",
+                    "Aes256_Sha256_RsaPss"
+                ]
+                .contains(&parsed.security_policy)
             );
             assert!(["NONE", "SIGN", "SIGN_ENCRYPT"].contains(&parsed.message_security));
             assert!(
@@ -49,15 +55,29 @@ fn check(text: &str) {
                 "a secure policy signs or encrypts"
             );
             assert!(uri.options().iter().all(|(key, _value)| {
-                key == "security-policy" || key == "message-security"
+                key == "security-policy" || key == "message-security" || key == "request-timeout-ms"
             }));
+            let timeout = uri
+                .options()
+                .iter()
+                .find(|(key, _)| key == "request-timeout-ms")
+                .map_or(Duration::from_secs(30), |(_, value)| {
+                    assert!(value.bytes().all(|byte| byte.is_ascii_digit()));
+                    let millis = value.parse::<u64>().expect("positive integer timeout");
+                    assert!(millis > 0);
+                    Duration::from_millis(millis)
+                });
+            assert_eq!(parsed.config.timeouts().request, timeout);
             let shown = parsed.config.redacted_display();
             assert!(!shown.chars().any(char::is_control), "one clean line");
         }
         Err(error) => {
             assert_eq!(error.kind(), ErrorKind::InvalidConfig, "only InvalidConfig");
             let message = error.to_string();
-            assert!(!message.chars().any(char::is_control), "no control characters");
+            assert!(
+                !message.chars().any(char::is_control),
+                "no control characters"
+            );
             // A key name may be echoed between quotes, shortened with "..."; the authority
             // and the values never are. Templates are ASCII without quotes, so a non-ASCII
             // part outside the quotes cannot appear unless it was echoed.
@@ -72,7 +92,9 @@ fn check(text: &str) {
                 if let Some(shown) = quoted {
                     let shown = shown.strip_suffix("...").unwrap_or(shown);
                     assert!(
-                        uri.options().iter().any(|(key, _value)| key.starts_with(shown)),
+                        uri.options()
+                            .iter()
+                            .any(|(key, _value)| key.starts_with(shown)),
                         "only a key, or its beginning, is quoted"
                     );
                 }
