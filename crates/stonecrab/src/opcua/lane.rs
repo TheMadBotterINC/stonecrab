@@ -326,7 +326,7 @@ impl Lane {
         if frame.chunk != ChunkType::Final {
             return Err(error(
                 ErrorKind::MalformedData,
-                "multi-chunk services require S94",
+                "multi-chunk service messages are not supported",
             ));
         }
         if chunk.channel_id != self.channel_id || chunk.token_id != self.token_id {
