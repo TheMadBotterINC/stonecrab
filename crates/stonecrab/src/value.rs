@@ -153,6 +153,8 @@ pub enum PlcValue {
 /// byte/string payload lengths remain the responsibility of the caller or wire decoder.
 /// Fields cannot be mutated without validating a new structure (ADR-0036).
 ///
+/// # Compatibility: docs/parity/core.md#CORE-VALUE-STRUCT
+///
 /// # Examples
 /// ```
 /// use stonecrab::{PlcStruct, PlcValue, PlcValueType};
@@ -1597,6 +1599,18 @@ mod tests {
         let structure = PlcStruct::new(vec![("root".to_owned(), value)]).unwrap();
         assert_eq!(
             PlcStruct::new(vec![("over".to_owned(), PlcValue::Struct(structure))])
+                .unwrap_err()
+                .kind(),
+            ErrorKind::ResourceLimit
+        );
+        let mut nested = PlcValue::Struct(PlcStruct::new(vec![]).unwrap());
+        for _ in 0..62 {
+            nested = PlcValue::List(vec![nested]);
+        }
+        assert!(PlcStruct::new(vec![("exact-depth".to_owned(), nested.clone())]).is_ok());
+        let over = PlcValue::List(vec![nested]);
+        assert_eq!(
+            PlcStruct::new(vec![("over-depth".to_owned(), over)])
                 .unwrap_err()
                 .kind(),
             ErrorKind::ResourceLimit

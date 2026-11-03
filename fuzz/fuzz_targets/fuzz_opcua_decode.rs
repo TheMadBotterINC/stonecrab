@@ -34,13 +34,19 @@ fuzz_target!(|input: &[u8]| {
                 match value {
                     stonecrab::PlcValue::List(values) => {
                         assert!(depth <= 64);
-                        pending.extend(values.into_iter().map(|value| (value, depth.checked_add(1).expect("bounded depth"))));
+                        pending.extend(
+                            values
+                                .into_iter()
+                                .map(|value| (value, depth.checked_add(1).expect("bounded depth"))),
+                        );
                     }
                     stonecrab::PlcValue::Struct(value) => {
                         assert!(depth <= 64);
-                        pending.extend(value.into_fields().into_iter().map(|(_,value)| (value,depth.checked_add(1).expect("bounded depth"))));
+                        pending.extend(value.into_fields().into_iter().map(|(_, value)| {
+                            (value, depth.checked_add(1).expect("bounded depth"))
+                        }));
                     }
-                    _ => {},
+                    _ => {}
                 }
             }
         }
