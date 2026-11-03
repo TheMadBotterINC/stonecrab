@@ -904,3 +904,10 @@ suite preserves parsed driver options during config rebuilds and reports exactly
 passes plus 10 named unsupported-operation skips. The finite example runs with the
 independent peer, where the existing CI job has a server; the examples task builds it.
 No new dependency, public trait, runtime task, reconnect or data-write support is added.
+
+
+S92 final review: a supplied null (zero) source timestamp must remain absent at the
+ReadItem boundary, rather than appear as 1601-01-01. Add the sentinel filter and regression
+assertion while leaving actual DateTime value mapping to S95. The mutation campaign also
+exposed missing assertions for per-item diagnostic state/category; add both. SourceTimestamp
+null semantics: https://reference.opcfoundation.org/specs/OPC-10000-4/7.11.3.

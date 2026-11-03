@@ -147,6 +147,14 @@ fn opcua_bad_statuses_keep_their_classification_and_exact_number() {
             assert_eq!(error.status().unwrap().code(), code);
             assert_eq!(error.status().unwrap().name(), StatusCode(code).name());
             assert_eq!(error.error().diagnostics().operation, Some(Operation::Read));
+            assert_eq!(
+                error.error().diagnostics().connection_state,
+                Some(crate::ConnectionState::Connected)
+            );
+            assert_eq!(
+                error.error().diagnostics().category,
+                Some(crate::FailureCategory::Protocol)
+            );
             assert!(std::error::Error::source(error.error()).is_some());
         }
     }
@@ -172,6 +180,14 @@ fn opcua_uncertain_with_a_value_is_ok_with_its_status_and_source_time() {
         .unwrap_err()
         .kind(),
         ErrorKind::DeviceException
+    );
+    assert_eq!(
+        mapped(DataValue {
+            source_timestamp: Some(DateTime(0)),
+            ..data(Scalar::Int32(42))
+        })
+        .source_time(),
+        None
     );
 }
 

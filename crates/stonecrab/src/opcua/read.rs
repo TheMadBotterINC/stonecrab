@@ -152,7 +152,11 @@ pub(super) fn item(tag: TagId, data: DataValue, sampled: Instant) -> ReadItem {
         }))
     });
     let mut item = ReadItem::new(tag, outcome, sampled).with_status(protocol_status(status));
-    if let Some(time) = data.source_timestamp.and_then(DateTime::to_system_time) {
+    if let Some(time) = data
+        .source_timestamp
+        .filter(|timestamp| timestamp.0 != 0)
+        .and_then(DateTime::to_system_time)
+    {
         item = item.with_source_time(time);
     }
     item
