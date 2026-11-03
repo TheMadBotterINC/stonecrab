@@ -41,6 +41,12 @@ pub enum ErrorKind {
     Backpressure,
     /// An internal invariant could not be maintained.
     Internal,
+    /// The device could not find the requested node or resource.
+    NotFound,
+    /// The device value or requested type is incompatible with the operation.
+    InvalidDataType,
+    /// The device denied access to the requested resource.
+    AccessDenied,
 }
 
 /// Observable connection lifecycle, without an executor dependency.
@@ -203,6 +209,9 @@ mod tests {
             ErrorKind::ResourceLimit,
             ErrorKind::Backpressure,
             ErrorKind::Internal,
+            ErrorKind::NotFound,
+            ErrorKind::InvalidDataType,
+            ErrorKind::AccessDenied,
         ];
         let mut reversed = declared;
         reversed.reverse();

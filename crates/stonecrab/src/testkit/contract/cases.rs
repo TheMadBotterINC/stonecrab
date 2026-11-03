@@ -221,6 +221,9 @@ impl Env<'_> {
         if let Some(name) = base.address_options().convention() {
             builder = builder.address_convention(name);
         }
+        if let Some(options) = base.driver_options() {
+            builder = builder.driver_options(Arc::clone(options));
+        }
         builder.build().must("rebuilding the configuration")
     }
 

@@ -1225,7 +1225,10 @@ const fn unknown_reason(kind: ErrorKind) -> UnknownReason {
         | ErrorKind::DeviceException
         | ErrorKind::ResourceLimit
         | ErrorKind::Backpressure
-        | ErrorKind::Internal => UNCONFIRMED,
+        | ErrorKind::Internal
+        | ErrorKind::NotFound
+        | ErrorKind::InvalidDataType
+        | ErrorKind::AccessDenied => UNCONFIRMED,
     }
 }
 
