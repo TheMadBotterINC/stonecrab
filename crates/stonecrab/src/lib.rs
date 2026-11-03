@@ -126,6 +126,8 @@ pub use subscribe_request::{
 pub use subscription::{LossCounters, Subscription, SubscriptionSender};
 pub use tag::{ProtocolAddress, Tag, TagId};
 pub use uri::ConnectionUri;
-pub use value::{PlcDate, PlcDateTime, PlcSignedDuration, PlcTimeOfDay, PlcValue, PlcValueType};
+pub use value::{
+    PlcDate, PlcDateTime, PlcSignedDuration, PlcStruct, PlcTimeOfDay, PlcValue, PlcValueType,
+};
 pub use write_request::{WriteItem, WriteRequest, WriteRequestBuilder};
 pub use write_response::{WriteResponse, WriteResponseBuilder, WriteResult};

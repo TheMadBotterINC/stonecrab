@@ -171,6 +171,7 @@ pub struct ReadItem {
     outcome: std::result::Result<PlcValue, ItemError>,
     sampled_at: Instant,
     source_time: Option<SystemTime>,
+    server_time: Option<SystemTime>,
     successful_status: Option<ProtocolStatus>,
 }
 
@@ -199,6 +200,7 @@ impl ReadItem {
             outcome,
             sampled_at,
             source_time: None,
+            server_time: None,
             successful_status: None,
         }
     }
@@ -207,6 +209,13 @@ impl ReadItem {
     #[must_use]
     pub const fn with_source_time(mut self, source_time: SystemTime) -> Self {
         self.source_time = Some(source_time);
+        self
+    }
+
+    /// Attach the timestamp actually supplied by the server, independently of source time.
+    #[must_use]
+    pub const fn with_server_time(mut self, server_time: SystemTime) -> Self {
+        self.server_time = Some(server_time);
         self
     }
 
@@ -244,6 +253,24 @@ impl ReadItem {
     #[must_use]
     pub const fn source_time(&self) -> Option<SystemTime> {
         self.source_time
+    }
+
+    /// Actual server timestamp, absent when none was supplied or representable.
+    ///
+    /// # Examples
+    /// ```
+    /// use std::time::{Instant, UNIX_EPOCH};
+    /// use stonecrab::{PlcValue, ReadItem, TagId};
+    /// let item = ReadItem::new(TagId::new("value")?, Ok(PlcValue::Null), Instant::now());
+    /// assert!(item.server_time().is_none());
+    /// let item = item.with_server_time(UNIX_EPOCH);
+    /// assert_eq!(item.server_time(), Some(UNIX_EPOCH));
+    /// assert!(item.source_time().is_none());
+    /// # Ok::<(), stonecrab::PlcError>(())
+    /// ```
+    #[must_use]
+    pub const fn server_time(&self) -> Option<SystemTime> {
+        self.server_time
     }
 
     /// Original status, using the item error's status for a failed read.
@@ -477,5 +504,29 @@ mod tests {
             matches!(rejection, WriteOutcome::Rejected(error) if error.kind() == ErrorKind::InvalidConfig),
             "explicit rejection retained"
         );
+    }
+    #[test]
+    fn read_item_server_time_is_absent_by_default() {
+        let sampled = Instant::now();
+        let source = SystemTime::UNIX_EPOCH;
+        let server = source + Duration::from_nanos(123);
+        let item = ReadItem::new(id(), Ok(PlcValue::Null), sampled);
+        assert_eq!(item.server_time(), None);
+        let item = item.with_server_time(server).with_source_time(source);
+        assert_eq!(item.server_time(), Some(server));
+        assert_eq!(item.source_time(), Some(source));
+        assert_eq!(item.sampled_at(), sampled);
+        let item = ReadItem::new(
+            id(),
+            Err(ItemError::new(PlcError::new(
+                ErrorKind::NotFound,
+                "missing",
+            ))),
+            sampled,
+        )
+        .with_server_time(server);
+        assert_eq!(item.server_time(), Some(server));
+        assert_eq!(item.source_time(), None);
+        assert!(item.outcome().is_err());
     }
 }

@@ -647,6 +647,8 @@ mod tests {
             PlcValueType::TimeOfDay,
             PlcValueType::DateTime,
             PlcValueType::List,
+            PlcValueType::Bytes,
+            PlcValueType::Struct,
         ] {
             assert_eq!(
                 SimAddress::new(SimArea::State, "x", refused)

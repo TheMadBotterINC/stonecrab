@@ -421,7 +421,9 @@ const fn bit_width(value_type: PlcValueType) -> Option<u8> {
         | PlcValueType::Date
         | PlcValueType::TimeOfDay
         | PlcValueType::DateTime
-        | PlcValueType::List => None,
+        | PlcValueType::List
+        | PlcValueType::Bytes
+        | PlcValueType::Struct => None,
     }
 }
 

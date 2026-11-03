@@ -86,7 +86,9 @@ impl XorShift {
             | PlcValueType::Date
             | PlcValueType::TimeOfDay
             | PlcValueType::DateTime
-            | PlcValueType::List => Err(PlcError::new(
+            | PlcValueType::List
+            | PlcValueType::Bytes
+            | PlcValueType::Struct => Err(PlcError::new(
                 ErrorKind::InvalidConfig,
                 "RANDOM generates only the scalar types bool, i8..i64, u8..u64, f32 and f64",
             )),
@@ -253,6 +255,8 @@ mod tests {
             PlcValueType::TimeOfDay,
             PlcValueType::DateTime,
             PlcValueType::List,
+            PlcValueType::Bytes,
+            PlcValueType::Struct,
         ] {
             let mut rng = XorShift::new(1);
             let error = rng.value(refused).err().map(|e| e.kind());
