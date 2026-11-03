@@ -66,3 +66,8 @@ redaction/no-blocking expectations as existing caller-supplied drivers and callb
 Reference: [OPC Foundation UserNameIdentityToken](https://reference.opcfoundation.org/specs/OPC-10000-4/7.40.4)
 defines the unencrypted UTF-8 password and empty/null encryption algorithm. The existing
 peer's allowNonePolicyPassword setting is confined to this explicit software test path.
+
+S99 feature validation found that the new static warning needs the existing optional
+tracing dependency when opcua is enabled alone. The opcua feature now enables dep:tracing,
+as sim/modbus already do. No dependency/package or lockfile entry is added. Feature-only
+builds and archive verification must be repeated after this manifest correction.
