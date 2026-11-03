@@ -790,6 +790,6 @@ changes the entries above.
   getrandom/getentropy/Windows ProcessPrng, etc.). First-party code never handles raw
   pointers; failures surface as a fixed error without a fallback. No bundled C or crypto
   backend. Entropy is requested before protocol I/O, never synthesized from clock/jitter.
-- Maintenance: current documentation resolves to 0.4.3 on 2026-11-03; RustCrypto/rust-random
+- Maintenance: current documentation resolves to 0.4.3 on 2026-11-03; rust-random
   maintained OS entropy crate. Advisory/license checks are repeated by the dependency gate.
 - Review date: 2026-11-03. This is a trust boundary review, not a memory-safety certification.

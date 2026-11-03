@@ -2,9 +2,8 @@
 The OPC UA client of Stonecrab (`stonecrab::opcua`), behind the opt-in `opcua` feature. It is
 in neither `default` nor `full`, as `tls` is (decision E17, ADR-0034), and it needs the
 `transport` feature. The module is being built in slices (milestone M3, ADR-0034). It currently has the
-address grammar and private connection-string parser, binary codecs, generated services,
-TCP framing, policy-None channel handshake and bounded request lane. Public driver and
-session integration follow in S91, with end-to-end Read in S92.
+address grammar, public `OpcuaDriver`, binary codecs, generated services, TCP framing,
+policy-None channel/session setup and bounded request lane. End-to-end Read follows in S92.
 
 This module offers `OpcuaAddress`, a validated `ProtocolAddress` for the tag text
 `ns=<n>;<i|s|g|b>=<id>[range][;a=<attribute>][;TYPE][|key=value,...]`, with the types its
@@ -15,17 +14,17 @@ socket and starts no discovery.
 | --- | --- |
 | Tag address parse and canonical text (`OpcuaAddress`) | build-tested |
 | Browse query parse (`OpcuaAddress::parse_query`) | build-tested |
-| Connection string and driver options (crate-private until the driver) | build-tested |
+| Connection string and driver-owned options (`OpcuaDriver`) | build-tested |
 | Built-in types of the binary encoding: String, `ByteString`, Guid, `DateTime`, `StatusCode`, `NodeId`, `ExpandedNodeId`, `QualifiedName`, `LocalizedText` (crate-private) | build-tested |
 | Recursive and open types of the binary encoding: Variant (25 types, arrays, dimensions), `DataValue`, `DiagnosticInfo`, the `ExtensionObject` envelope with Raw, Xml and Null bodies, bounded in depth and in array counts (crate-private) | build-tested |
 | TCP framing: the 8-byte header, HEL, ACK, ERR, OPN, CLO and MSG bodies, the asymmetric header of policy None, the symmetric and sequence headers, and a single-chunk `Framer` (crate-private) | build-tested |
 | Generated 22-case connection/read service bodies and 274 status names; Known `ExtensionObject` dispatch (crate-private) | build-tested |
 | Bounded service exchange lane: correlation, sender priority, headers, sequence/channel/token checks, ERR and `ServiceFault` (crate-private) | build-tested |
 | Policy-None HEL/ACK, OPN Issue, CLO and counter handoff (crate-private) | interoperability-tested with open62541 |
-| Driver, connection, session | planned |
+| Public driver and anonymous None connection/session | interoperability-tested with open62541 |
 | Read, write, browse, subscriptions | planned |
 | Signed/encrypted security policies and certificate validation | planned |
-| Independent-server session/read interoperability | planned |
+| Independent-server Read interoperability | planned |
 | Hardware verification | planned |
 
 Build-tested here means unit tests, a property test and a fuzz target on the address text, a
@@ -256,8 +255,8 @@ Dropping or cancelling a receive releases its slot and retains partial frame byt
 other callers. Interrupting a send can leave partial bytes on the wire and fails the
 whole lane. Deterministic tests exercise both outcomes, out-of-order replies, simultaneous
 waiters, sender priority, reentrant wake-ups, resource bounds and fake-clock deadlines.
-S90 supplies Hello/channel negotiation and independent-server channel evidence; sessions
-and public connect/read remain the next slices.
+S90 supplies Hello/channel negotiation; S91 adds public connect and anonymous sessions.
+Read remains S92.
 
 ## Policy-None channel
 Since S90, the private channel owner exchanges Hello/Acknowledge, sends `OpenSecureChannel`
@@ -271,12 +270,36 @@ at least 8192 bytes; message size and chunk-count zero mean unlimited. Negotiati
 buffered bytes and the framer enforces each direction separately. Message-body bounds
 apply before service decoding/encoding. The current requested channel lifetime is
 3600000 ms; configurable lifetime and renewal arrive in S109. One caller deadline and
-cancellation token bound the handshake, including silent peers; S91 adds the named
-handshake-timeout option and public connection assembly.
+cancellation token bound the handshake, including silent peers. `handshake-timeout-ms`
+maps to the whole connect bound since S91.
 
-Before handing ownership to the lane, the channel can send `CloseSecureChannel` once and
-close its transport without waiting for a reply. Handoff preserves request/sequence
-counters and negotiated bounds. One exact-count ignored test against open62541 v1.5.9
-proves HEL/OPN/CLO and counter continuation into a request refused for having no session.
-Its evidence is recorded by `interop/open62541/interop.sh tests` and CI. Full session
-activation and usable Read follow in S91/S92; chunk reassembly follows in S94.
+Handoff preserves request/sequence counters and negotiated bounds. The lane sends
+`CloseSecureChannel` without waiting for a reply. Two exact-count ignored tests against
+open62541 v1.5.9 prove channel counter continuation and public session connect/close.
+Evidence is recorded by `interop/open62541/interop.sh tests` and CI; usable Read follows
+in S92 and chunk reassembly in S94.
+
+
+## Public connect and anonymous session
+
+Register `Arc::new(OpcuaDriver::new())` with `DriverRegistry`, then connect to
+`opcua://host:4840/path?security-policy=NONE`. The port is required. Secure policies keep
+the secure default but are currently refused before I/O; username/password credentials
+are also refused. No data-operation capability is advertised yet.
+
+TCP, HEL/ACK, OPN Issue, `CreateSession` and anonymous `ActivateSession` share one
+`handshake-timeout-ms` deadline (60000 by default, exposed as `Timeouts.connect`). The
+`CreateSession` request carries a fresh 32-byte OS nonce and `session-timeout-ms` (120000
+by default). The returned authentication token and valid revised timeout are retained.
+Activation uses the advertised anonymous policy id on a None/None UA TCP endpoint;
+full endpoint selection/discovery/overrides remain S96. Connection becomes Connected
+only after successful activation. `with_clock` and `with_transport_factory` follow the
+other drivers' deterministic injection pattern.
+
+Close sends `CloseSession` (`deleteSubscriptions=true`, timeoutHint 50000), then CLO and
+transport shutdown without a CLO response wait. The whole sequence is bounded by
+`request-timeout-ms` (30000); timeout, failure or dropping close leaves Closed and wakes
+state observers. Concurrent and repeated closes are bounded/idempotent. Dropping the
+connection releases its transport and publishes Closed. No service is replayed. The
+independent peer test proves a full anonymous None session using the public registry API;
+this supplies no evidence for secure policies, renewal, data operations or hardware.

@@ -5,6 +5,12 @@ Changelog. Stonecrab is one crate, so each release has one section. `stonecrab` 
 specification-stage placeholder.
 
 ## Unreleased
+- **Added (opt-in `opcua` feature; slice S91):** public `OpcuaDriver` with clock/transport
+  injection, anonymous None session connect/close, fresh OS nonce generation through
+  optional getrandom, handshake/session timeout options and adopted server token/timeout.
+  Connected requires successful activation. Close is bounded, terminal on timeout/drop,
+  and idempotent. Deterministic tests and two exact-count open62541 tests cover lifecycle;
+  reads/writes remain unsupported until their roadmap slices. Secure defaults fail closed.
 - **Added (opt-in `opcua` feature; slice S90):** private policy-None HEL/ACK negotiation,
   OpenSecureChannel Issue with a null nonce, exact server token/lifetime adoption and
   fire-and-forget CloseSecureChannel. Directional frame/message bounds and continued lane
