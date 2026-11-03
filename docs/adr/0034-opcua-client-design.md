@@ -671,3 +671,34 @@ Compliance: `crates/stonecrab/src/opcua/frame.rs` and `frame/properties.rs`;
 `opcua_asymmetric_header_is_59_bytes_for_policy_none` and
 `opcua_unknown_message_type_is_a_protocol_error`;
 `fuzz/fuzz_targets/fuzz_opcua_frame.rs`; `mutants.toml` lists the files.
+
+
+## S88 implementation sketch (2026-11-02)
+
+Scope: the next service-codec slice of Phase H. Generated request/response bodies use
+existing bounded external codecs; the ExtensionObject envelope dispatches recognized
+namespace-zero binary bodies and retains unsupported bodies as raw bytes. No connection
+or read capability is advertised before S91/S92, and no network task or dependency is added.
+
+Files: vendor the three approved mspec files and their hashes/notices; add the OPC UA
+protocol options and generated modules; connect ExtensionObject to the generated dispatch;
+add first-party positive/negative vectors, bounded-body and recursive-budget tests,
+a fuzz target, and package/parity/status evidence. Reuse the existing bit-run helpers at
+the codec layer when generated production code needs them; Modbus and OPC UA share them.
+Do not hand-edit generated code or replace the existing scalar codecs.
+
+The generated numeric-enum metadata needs code-to-source-name lookup for diagnostics.
+Add a generic enum lookup method with generator fixtures, rather than maintaining a
+second status table by hand or special-casing OPC UA in the generator. Its output-version
+bump regenerates Modbus metadata too; Modbus wire behavior must remain byte-identical.
+The unknown status number stays intact. Decode known bodies inside their declared slice,
+refuse trailing bytes and depth exhaustion, and fall back to Raw only when a type is
+unsupported, never when a recognized body is malformed. Preserve encoding identity:
+only a local namespace-zero numeric id dispatches into the namespace-zero table.
+
+Validation: generated output reproducible twice; one valid and negative vector per
+22-case service set; unknown/disabled/custom-body round trips; shared recursion and
+bounds on parse/serialize/length; 100% hand-written OPC UA line coverage; full quality,
+feature, semver, parity, fuzz, packaging and generator gates. Each source/options change
+and generated output gets its own signed-off commit. Future merges preserve individual
+commits as requested by the maintainer; this overrides the squash-merge convention.

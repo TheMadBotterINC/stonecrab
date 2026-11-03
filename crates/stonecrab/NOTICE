@@ -20,3 +20,41 @@ The NOTICE file of Apache PLC4X at that commit reads:
     The Apache Software Foundation (http://www.apache.org/).
 
 Any future adapted material must retain its original notices and provenance.
+
+OPC UA service model (S88, maintainer decision E13)
+
+The three protocol descriptions under upstream/mspec/opcua/ are unmodified Apache PLC4X
+v1.0.0 files from commit ea229918f5d07700e04d7d69ab1645da679cb700. They retain their ASF
+headers; upstream/manifest.toml records each path, git blob and SHA-256. Generated service
+code derives from these descriptions and retains source attribution in every file.
+The NodeSet revision used to produce PLC4X's generated mspec is not recorded upstream.
+The protocol descriptions are repository data; the generated Rust is included in the crate.
+
+As approved in E13, the OPC Foundation UA-Nodeset notice is retained below. This text was
+retrieved from OPCFoundation/UA-Nodeset at commit
+3313849cda734434c0e9892478c474fb99916d54, LICENSE.md (git blob
+75a522829f99a25d42b53beb7e3a8354b8fb0afb). It does not identify the NodeSet version used by
+PLC4X. OPC UA is a registered trademark of the OPC Foundation; Stonecrab is independent
+and is not endorsed by the OPC Foundation.
+
+## MIT License
+
+Copyright (c) 2005-2026, OPC Federation AISBL, All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
