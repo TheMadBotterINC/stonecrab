@@ -5,6 +5,13 @@ Changelog. Stonecrab is one crate, so each release has one section. `stonecrab` 
 specification-stage placeholder.
 
 ## Unreleased
+- **Added (opt-in `opcua`; S95):** extended scalar values, null/empty/one-element arrays,
+  row-major matrices and checked temporal suffixes. UTC DateTime preserves every 100 ns
+  tick; Guid/NodeId/QualifiedName/StatusCode use explicit text forms. Shared rank/node
+  bounds prevent metadata-driven tree expansion, and mapping errors stay per item.
+  Public open62541 reads cover 18 scalars, arrays, matrices and 4000/10000-element arrays;
+  ByteString, LocalizedText and other deferred kinds return named errors. No new public
+  value variant or dependency.
 - **Added (opt-in `opcua`; S94):** bounded policy-None MSG chunking for large requests
   and responses, with negotiated body/chunk limits checked before growth or sending.
   Peer ABORT preserves its status and fails only its request. Partial receives survive

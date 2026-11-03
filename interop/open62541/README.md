@@ -219,8 +219,8 @@ a few minutes natively and longer under emulation.
 `interop.sh tests` runs the ignored unit test
 `opcua::channel::tests::opcua_interop_peer_answers_hello_and_opens_a_none_channel`.
 S91 also runs `opcua::session::tests::opcua_interop_connects_and_closes_with_policy_none`
-through the public driver/registry API. The nextest filter must select exactly four tests
-(`EXPECTED_TESTS=4`). `run` and hosted CI
+through the public driver/registry API. The nextest filter must select exactly five tests
+(`EXPECTED_TESTS=5`). `run` and hosted CI
 execute it after the in-image checks and PKI step and retain `nextest.txt` beside the
 existing image identity/check/server evidence. The script supplies
 `STONECRAB_INTEROP_OPEN62541=opcua://127.0.0.1:<port>?security-policy=NONE`.
@@ -245,3 +245,11 @@ four chunks through client Hello, then verifies all 4000 Int32 array elements an
 and request actually span multiple chunks. It closes the session normally. This checks
 binary array decoding/reassembly; public array-to-PlcValue mapping remains S95. The
 existing server image and test namespace are unchanged.
+
+
+S95 adds `opcua::connection::tests::opcua_interop_reads_every_builtin_scalar_array_and_matrix_node`.
+A single public Read under 8192-byte buffers verifies 18 supported built-in scalars, four
+arrays, 2D/3D matrices and every element of the 4000/10000-element arrays. The same batch
+requires six named per-item refusals (ByteString, ExpandedNodeId, LocalizedText, DataValue,
+DiagnosticInfo and custom ExtensionObject) without losing mapped items. ByteString and
+LocalizedText remain S98; custom structure mapping remains later. Session close follows.

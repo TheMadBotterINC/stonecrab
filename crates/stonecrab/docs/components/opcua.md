@@ -3,7 +3,7 @@ The OPC UA client of Stonecrab (`stonecrab::opcua`), behind the opt-in `opcua` f
 in neither `default` nor `full`, as `tls` is (decision E17, ADR-0034), and it needs the
 `transport` feature. The module is being built in slices (milestone M3, ADR-0034). It currently has the
 address grammar, public `OpcuaDriver`, binary codecs, generated services, TCP framing,
-policy-None channel/session setup and bounded request lane. End-to-end scalar Read is available since S92.
+policy-None channel/session setup and bounded request lane. End-to-end scalar Read is available since S92; S95 adds extended values, arrays and matrices.
 S93 checks 23 pinned upstream vectors against the codec: 15 byte-exact round-trips, one
 existing numeric `NodeId` canonicalization and seven exact disabled-service refusals.
 The notification envelope round-trip preserves an opaque body; full service/type support
@@ -31,7 +31,7 @@ socket and starts no discovery.
 | Bounded service exchange lane: correlation, sender priority, headers, sequence/channel/token checks, ERR and `ServiceFault` (crate-private) | build-tested |
 | Policy-None HEL/ACK, OPN Issue, CLO and counter handoff (crate-private) | interoperability-tested with open62541 |
 | Public driver and anonymous None connection/session | interoperability-tested with open62541 |
-| Scalar Read (Boolean, eight integer widths, Float/Double, String/XML, Null) | interoperability-tested with open62541 |
+| Read (basic scalars, UTC `DateTime`, Guid/`NodeId`/`QualifiedName`/`StatusCode` text, arrays and matrices) | interoperability-tested with open62541 |
 | Write, browse, subscriptions | planned |
 | Signed/encrypted security policies and certificate validation | planned |
 | Independent-server scalar Read interoperability | verified with open62541 |
@@ -292,9 +292,9 @@ cancellation token bound the handshake, including silent peers. `handshake-timeo
 maps to the whole connect bound since S91.
 
 Handoff preserves request/sequence counters and negotiated bounds. The lane sends
-`CloseSecureChannel` without waiting for a reply. Four exact-count ignored tests against
+`CloseSecureChannel` without waiting for a reply. Five exact-count ignored tests against
 open62541 v1.5.9 prove channel counter continuation, public session connect/close, scalar Read
-and large array/Read-batch chunking under 8192-byte buffers. Public array mapping remains S95.
+and large array/Read-batch chunking under 8192-byte buffers. S95 also verifies extended public scalar/array/matrix mapping.
 Evidence is recorded by `interop/open62541/interop.sh tests` and CI.
 
 
@@ -324,16 +324,37 @@ independent peer test proves a full anonymous None session using the public regi
 this supplies no evidence for secure policies, renewal or hardware.
 
 
-## Scalar reads
+## Read values
 
 `Connection::read` sends one service request for all tags, with `maxAge=0` and both
 source/server timestamps requested. Results remain in tag order; a result-count mismatch
 is `MalformedData` for the whole call. Any standard attribute id and `IndexRange` are sent
 as configured. Scalars map by their wire type: Boolean, eight integer widths/signs,
 Float/Double bit patterns, UTF-8 String/XML, and Null. Invalid UTF-8 fails only its item;
-strings keep NUL, whitespace and BOM. Arrays, other built-ins and explicit type coercions
-remain later slices and currently yield per-item Unsupported. Source time is attached
-only when supplied by the server and convertible; extended metadata remains S98.
+strings keep NUL, whitespace and BOM. S95 maps `DateTime` directly to UTC `PlcDateTime`
+fields with 100 ns precision across the full wire range, including the 1601 epoch and
+negative ticks, independently of host clock range. Guid is canonical lower-case text;
+`NodeId` text reuses address escaping/base64 and parses back; `QualifiedName` is
+`ns=<n>;s=<name>` (null name is Null); `StatusCode` text carries its name and hex code.
+Source time is attached only when supplied and convertible; extended metadata remains S98.
+
+Arrays of supported types become Lists, retaining one-element, empty and null distinctions;
+matrices become nested row-major Lists; zero-length axes produce empty Lists. Dimension/count mismatch
+fails only the item. Rank is at most 64, all items share 1048576 values/List containers,
+and an empty matrix creates at most 64 Lists. Bounds are checked before building the tree;
+failed mappings leave the remaining node budget available to other items.
+
+The eight temporal suffixes apply per leaf to exact integer counts. `TIME` is milliseconds,
+`LTIME` nanoseconds; `DATE` counts days since 1990, `LDATE` and `DATE_AND_TIME` seconds since
+1990, and `LDATE_AND_TIME` milliseconds since 1990. Both `TIME_OF_DAY` and `LTIME_OF_DAY`
+use milliseconds since midnight, matching the pinned upstream constructors. Null and
+already temporal values remain unchanged. Float/Boolean/text counts, integer wrapping and
+calendar/duration overflow are refused as per-item `InvalidDataType`; other suffixes leave
+the actual server type unchanged. No numeric truncation is performed.
+
+`ByteString` and `LocalizedText` await S98. `ExpandedNodeId`, `DataValue`, Variant,
+`DiagnosticInfo` and custom `ExtensionObject` values remain named per-item Unsupported;
+this includes null/empty arrays of deferred kinds. They do not fail mapped batch items.
 
 `BadNodeIdUnknown` maps to `NotFound`, `BadTypeMismatch` to `InvalidDataType`, `BadNotWritable`
 and `BadUserAccessDenied` to `AccessDenied`, and `BadAttributeIdInvalid`/`BadIndexRangeNoData`
@@ -352,5 +373,6 @@ lease until resumed/dropped; the close itself still has its request-timeout boun
 
 The 33-case shared contract suite passes 23 cases with 10 named skips for unsupported
 write, supported-ping and polling-subscription behavior. The independent peer verifies
-Boolean, Int32, Double and String plus an unknown node in one batch, and runs the finite
+18 scalar types, arrays, 2D/3D matrices and large arrays plus named deferred-kind errors
+in one batch. It also checks an unknown node and runs the finite
 `opcua_read` example against `ns=1;s=scalar/Int32`.
