@@ -93,6 +93,16 @@ pub(crate) enum ExtensionObjectDefinition {
         transport_profile_uri: PascalString,
         security_level: u8,
     },
+    GetEndpointsRequest {
+        request_header: RequestHeader,
+        endpoint_url: PascalString,
+        locale_ids: Option<Vec<PascalString>>,
+        profile_uris: Option<Vec<PascalString>>,
+    },
+    GetEndpointsResponse {
+        response_header: ResponseHeader,
+        endpoints: Option<Vec<EndpointDescription>>,
+    },
     ChannelSecurityToken {
         channel_id: u32,
         token_id: u32,
@@ -799,14 +809,8 @@ impl ExtensionObjectDefinition {
             }),
             306 => Self::parse_user_token_policy(reader, depth),
             314 => Self::parse_endpoint_description(reader, depth),
-            428 => Err(ParseError::InvalidDiscriminator {
-                field: "ExtensionObjectDefinition.GetEndpointsRequest (disabled)",
-                value: i64::from(extension_id).cast_unsigned(),
-            }),
-            431 => Err(ParseError::InvalidDiscriminator {
-                field: "ExtensionObjectDefinition.GetEndpointsResponse (disabled)",
-                value: i64::from(extension_id).cast_unsigned(),
-            }),
+            428 => Self::parse_get_endpoints_request(reader, depth),
+            431 => Self::parse_get_endpoints_response(reader, depth),
             434 => Err(ParseError::InvalidDiscriminator {
                 field: "ExtensionObjectDefinition.RegisteredServer (disabled)",
                 value: i64::from(extension_id).cast_unsigned(),
@@ -1782,6 +1786,148 @@ impl ExtensionObjectDefinition {
         })
     }
 
+    fn parse_get_endpoints_request(
+        reader: &mut BoundedReader<'_>,
+        depth: Depth,
+    ) -> Result<Self, ParseError> {
+        let request_header = RequestHeader::parse(reader, depth, 391)?;
+        let endpoint_url = PascalString::parse(reader, depth)?;
+        let no_of_locale_ids = reader.read_i32(ByteOrder::LittleEndian)?;
+        let locale_ids = {
+            let array_count = i64::from(no_of_locale_ids);
+            if array_count == -1 {
+                None
+            } else {
+                let array_count = usize::try_from(array_count).map_err(|_overflow| {
+                    ParseError::InvalidDiscriminator {
+                        field: "localeIds",
+                        value: array_count.unsigned_abs(),
+                    }
+                })?;
+                if array_count > reader.remaining() {
+                    return Err(ParseError::CountLimit {
+                        field: "localeIds",
+                        count: array_count,
+                        max: reader.remaining(),
+                    });
+                }
+                let mut array_items = Vec::new();
+                for _ in 0..array_count {
+                    array_items.push(PascalString::parse(reader, depth)?);
+                }
+                Some(array_items)
+            }
+        };
+        let no_of_profile_uris = reader.read_i32(ByteOrder::LittleEndian)?;
+        let profile_uris = {
+            let array_count = i64::from(no_of_profile_uris);
+            if array_count == -1 {
+                None
+            } else {
+                let array_count = usize::try_from(array_count).map_err(|_overflow| {
+                    ParseError::InvalidDiscriminator {
+                        field: "profileUris",
+                        value: array_count.unsigned_abs(),
+                    }
+                })?;
+                if array_count > reader.remaining() {
+                    return Err(ParseError::CountLimit {
+                        field: "profileUris",
+                        count: array_count,
+                        max: reader.remaining(),
+                    });
+                }
+                let mut array_items = Vec::new();
+                for _ in 0..array_count {
+                    array_items.push(PascalString::parse(reader, depth)?);
+                }
+                Some(array_items)
+            }
+        };
+        if i64::from(no_of_locale_ids)
+            != (if locale_ids.is_none() {
+                -1_i64
+            } else {
+                i64::try_from(locale_ids.as_ref().map_or(0, Vec::len))
+                    .map_err(|_overflow| ParseError::Overflow)?
+            })
+        {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "noOfLocaleIds",
+                value: u64::from(no_of_locale_ids.unsigned_abs()),
+            });
+        }
+        if i64::from(no_of_profile_uris)
+            != (if profile_uris.is_none() {
+                -1_i64
+            } else {
+                i64::try_from(profile_uris.as_ref().map_or(0, Vec::len))
+                    .map_err(|_overflow| ParseError::Overflow)?
+            })
+        {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "noOfProfileUris",
+                value: u64::from(no_of_profile_uris.unsigned_abs()),
+            });
+        }
+        Ok(Self::GetEndpointsRequest {
+            request_header,
+            endpoint_url,
+            locale_ids,
+            profile_uris,
+        })
+    }
+
+    fn parse_get_endpoints_response(
+        reader: &mut BoundedReader<'_>,
+        depth: Depth,
+    ) -> Result<Self, ParseError> {
+        let response_header = ResponseHeader::parse(reader, depth, 394)?;
+        let no_of_endpoints = reader.read_i32(ByteOrder::LittleEndian)?;
+        let endpoints = {
+            let array_count = i64::from(no_of_endpoints);
+            if array_count == -1 {
+                None
+            } else {
+                let array_count = usize::try_from(array_count).map_err(|_overflow| {
+                    ParseError::InvalidDiscriminator {
+                        field: "endpoints",
+                        value: array_count.unsigned_abs(),
+                    }
+                })?;
+                if array_count > reader.remaining() {
+                    return Err(ParseError::CountLimit {
+                        field: "endpoints",
+                        count: array_count,
+                        max: reader.remaining(),
+                    });
+                }
+                let mut array_items = Vec::new();
+                for _ in 0..array_count {
+                    array_items.push(EndpointDescription::parse(reader, depth, 314)?);
+                }
+                Some(array_items)
+            }
+        };
+        if i64::from(no_of_endpoints)
+            != (if endpoints.is_none() {
+                -1_i64
+            } else {
+                i64::try_from(endpoints.as_ref().map_or(0, Vec::len))
+                    .map_err(|_overflow| ParseError::Overflow)?
+            })
+        {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "noOfEndpoints",
+                value: u64::from(no_of_endpoints.unsigned_abs()),
+            });
+        }
+        Ok(Self::GetEndpointsResponse {
+            response_header,
+            endpoints,
+        })
+    }
+
     fn parse_channel_security_token(reader: &mut BoundedReader<'_>) -> Result<Self, ParseError> {
         let channel_id = reader.read_u32(ByteOrder::LittleEndian)?;
         let token_id = reader.read_u32(ByteOrder::LittleEndian)?;
@@ -2384,6 +2530,10 @@ impl ExtensionObjectDefinition {
             Self::ServiceFault { .. } => self.serialize_service_fault(writer, depth),
             Self::UserTokenPolicy { .. } => self.serialize_user_token_policy(writer, depth),
             Self::EndpointDescription { .. } => self.serialize_endpoint_description(writer, depth),
+            Self::GetEndpointsRequest { .. } => self.serialize_get_endpoints_request(writer, depth),
+            Self::GetEndpointsResponse { .. } => {
+                self.serialize_get_endpoints_response(writer, depth)
+            }
             Self::ChannelSecurityToken { .. } => self.serialize_channel_security_token(writer),
             Self::OpenSecureChannelRequest { .. } => {
                 self.serialize_open_secure_channel_request(writer, depth)
@@ -2613,6 +2763,86 @@ impl ExtensionObjectDefinition {
         }
         transport_profile_uri.serialize(writer, depth)?;
         writer.write_u8(*security_level)
+    }
+
+    fn serialize_get_endpoints_request(
+        &self,
+        writer: &mut BoundedWriter,
+        depth: Depth,
+    ) -> Result<(), ParseError> {
+        let Self::GetEndpointsRequest {
+            request_header,
+            endpoint_url,
+            locale_ids,
+            profile_uris,
+        } = self
+        else {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "ExtensionObjectDefinition.GetEndpointsRequest",
+                value: 0,
+            });
+        };
+        request_header.serialize(writer, depth)?;
+        endpoint_url.serialize(writer, depth)?;
+        let no_of_locale_ids = i32::try_from(if locale_ids.is_none() {
+            -1_i64
+        } else {
+            i64::try_from(locale_ids.as_ref().map_or(0, Vec::len))
+                .map_err(|_overflow| ParseError::Overflow)?
+        })
+        .map_err(|_overflow| ParseError::Overflow)?;
+        writer.write_i32(no_of_locale_ids, ByteOrder::LittleEndian)?;
+        if let Some(array_items) = locale_ids {
+            for array_item in array_items {
+                array_item.serialize(writer, depth)?;
+            }
+        }
+        let no_of_profile_uris = i32::try_from(if profile_uris.is_none() {
+            -1_i64
+        } else {
+            i64::try_from(profile_uris.as_ref().map_or(0, Vec::len))
+                .map_err(|_overflow| ParseError::Overflow)?
+        })
+        .map_err(|_overflow| ParseError::Overflow)?;
+        writer.write_i32(no_of_profile_uris, ByteOrder::LittleEndian)?;
+        if let Some(array_items) = profile_uris {
+            for array_item in array_items {
+                array_item.serialize(writer, depth)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn serialize_get_endpoints_response(
+        &self,
+        writer: &mut BoundedWriter,
+        depth: Depth,
+    ) -> Result<(), ParseError> {
+        let Self::GetEndpointsResponse {
+            response_header,
+            endpoints,
+        } = self
+        else {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "ExtensionObjectDefinition.GetEndpointsResponse",
+                value: 0,
+            });
+        };
+        response_header.serialize(writer, depth)?;
+        let no_of_endpoints = i32::try_from(if endpoints.is_none() {
+            -1_i64
+        } else {
+            i64::try_from(endpoints.as_ref().map_or(0, Vec::len))
+                .map_err(|_overflow| ParseError::Overflow)?
+        })
+        .map_err(|_overflow| ParseError::Overflow)?;
+        writer.write_i32(no_of_endpoints, ByteOrder::LittleEndian)?;
+        if let Some(array_items) = endpoints {
+            for array_item in array_items {
+                array_item.serialize(writer, depth)?;
+            }
+        }
+        Ok(())
     }
 
     fn serialize_channel_security_token(
