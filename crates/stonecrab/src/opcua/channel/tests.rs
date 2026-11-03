@@ -6,6 +6,7 @@ use super::*;
 use crate::OpFuture;
 use crate::codec::BoundedReader;
 use crate::opcua::codec::Depth;
+use crate::opcua::frame::SecureChunk;
 use crate::opcua::generated::timestamps_to_return::TimestampsToReturn;
 use crate::opcua::lane::Lane;
 use crate::opcua::responder::{
@@ -278,7 +279,11 @@ fn opcua_policy_none_ignores_the_configured_message_security() {
 fn opcua_policy_none_sends_unsigned_unencrypted_chunks() {
     let mut rig = Rig::new(Rig::healthy());
     let channel = rig.open().unwrap();
-    block_on_with(&rig.clock, channel.close(rig.deadline, &rig.cancel)).unwrap();
+    block_on_with(
+        &rig.clock,
+        Lane::from_channel(channel, Duration::from_secs(30)).close(rig.deadline, &rig.cancel),
+    )
+    .unwrap();
     let sent = rig.probe.sent();
     let Body::Close(chunk) = frame(sent.get(2).unwrap()).body else {
         panic!("CLO")
@@ -309,7 +314,11 @@ fn opcua_close_secure_channel_expects_no_reply() {
     let mut rig = Rig::new(Rig::healthy());
     let channel = rig.open().unwrap();
     let now = rig.clock.now();
-    block_on_with(&rig.clock, channel.close(rig.deadline, &rig.cancel)).unwrap();
+    block_on_with(
+        &rig.clock,
+        Lane::from_channel(channel, Duration::from_secs(30)).close(rig.deadline, &rig.cancel),
+    )
+    .unwrap();
     assert_eq!(rig.clock.now(), now);
     assert!(rig.probe.is_shut_down());
     assert_eq!(rig.probe.sent().len(), 3);
@@ -745,9 +754,12 @@ fn opcua_a_cancelled_or_expired_close_never_sends_clo() {
     let channel = rig.open().unwrap();
     rig.cancel.cancel();
     assert_eq!(
-        block_on_with(&rig.clock, channel.close(rig.deadline, &rig.cancel))
-            .unwrap_err()
-            .kind(),
+        block_on_with(
+            &rig.clock,
+            Lane::from_channel(channel, Duration::from_secs(30)).close(rig.deadline, &rig.cancel)
+        )
+        .unwrap_err()
+        .kind(),
         ErrorKind::Cancelled
     );
     assert_eq!(rig.probe.sent().len(), 2);
@@ -756,7 +768,8 @@ fn opcua_a_cancelled_or_expired_close_never_sends_clo() {
     assert_eq!(
         block_on_with(
             &rig.clock,
-            channel.close(Deadline::at(rig.clock.now()), &rig.cancel)
+            Lane::from_channel(channel, Duration::from_secs(30))
+                .close(Deadline::at(rig.clock.now()), &rig.cancel)
         )
         .unwrap_err()
         .kind(),
@@ -826,7 +839,7 @@ async fn opcua_interop_peer_answers_hello_and_opens_a_none_channel() {
     use crate::opcua::driver::OpcuaDriver;
     use crate::transport::{SystemClock, TcpFactory, TransportFactory};
     let uri = std::env::var("STONECRAB_INTEROP_OPEN62541").expect("interop endpoint");
-    let config = OpcuaDriver::parse_config(&uri).unwrap();
+    let config = OpcuaDriver::configuration(&uri).unwrap();
     let options = config.driver_options_as::<OpcuaOptions>().unwrap();
     let clock: Arc<dyn Clock> = Arc::new(SystemClock::default());
     let deadline = Deadline::after(clock.now(), Duration::from_secs(5)).unwrap();
@@ -847,7 +860,10 @@ async fn opcua_interop_peer_answers_hello_and_opens_a_none_channel() {
         channel.limits.receive_buffer_size,
         channel.limits.send_buffer_size
     );
-    channel.close(deadline, &cancel).await.unwrap();
+    Lane::from_channel(channel, Duration::from_secs(30))
+        .close(deadline, &cancel)
+        .await
+        .unwrap();
     let transport = TcpFactory::default()
         .open(config.endpoint(), *config.limits(), deadline)
         .await

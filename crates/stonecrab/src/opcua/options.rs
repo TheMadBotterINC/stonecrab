@@ -1,7 +1,7 @@
 //! `OpcuaOptions`: the driver-owned connection parameters of the `opcua` scheme, and the
 //! endpoint of its connection string.
 //!
-//! Everything here is crate-private until the driver arrives (slice S91). A key and a value
+//! Options stay driver-owned. A key and a value
 //! are read exactly: names are case-sensitive, and an error message names a key (shortened)
 //! or a fixed reason, never a value, the host or the endpoint path.
 
@@ -15,6 +15,8 @@ const SECURITY_POLICY: &str = "security-policy";
 const MESSAGE_SECURITY: &str = "message-security";
 /// The request deadline and header timeout hint in milliseconds.
 const REQUEST_TIMEOUT: &str = "request-timeout-ms";
+const HANDSHAKE_TIMEOUT: &str = "handshake-timeout-ms";
+const SESSION_TIMEOUT: &str = "session-timeout-ms";
 /// The largest incoming chunk advertised by Hello.
 const RECEIVE_BUFFER: &str = "encoding.receive-buffer-size";
 
@@ -68,6 +70,7 @@ impl SecurityPolicy {
     }
 
     /// The name `security-policy` takes for this policy.
+    #[cfg(any(test, fuzzing))]
     pub(super) const fn name(self) -> &'static str {
         match self {
             Self::None => "NONE",
@@ -129,6 +132,8 @@ impl MessageSecurity {
 /// | `endpoint_url` | the authority: `opc.tcp://host:port` and the path | none, the port is required |
 /// | `security_policy` | `security-policy` | `Basic256Sha256` |
 /// | `message_security` | `message-security` | `SIGN_ENCRYPT` |
+/// | `handshake_timeout` | `handshake-timeout-ms` | 60000 ms |
+/// | `session_timeout` | `session-timeout-ms` | 120000 ms |
 /// | `request_timeout` | `request-timeout-ms` | 30000 ms |
 /// | `receive_buffer_size` | `encoding.receive-buffer-size` | 65535 bytes |
 ///
@@ -148,6 +153,8 @@ pub(super) struct OpcuaOptions {
     pub(super) message_security: MessageSecurity,
     /// `request-timeout-ms`, shared with `Timeouts.request`.
     pub(super) request_timeout: Duration,
+    pub(super) handshake_timeout: Duration,
+    pub(super) session_timeout: Duration,
     /// The configured receive ceiling before applying `ResourceLimits`.
     pub(super) receive_buffer_size: u32,
 }
@@ -168,20 +175,27 @@ impl OpcuaOptions {
         let mut security_policy = SecurityPolicy::Basic256Sha256;
         let mut message_security = MessageSecurity::SignEncrypt;
         let mut request_timeout = Duration::from_secs(30);
+        let mut handshake_timeout = Duration::from_secs(60);
+        let mut session_timeout = Duration::from_secs(120);
         let mut receive_buffer_size = 65535;
         for (key, value) in parameters {
             match key.as_str() {
                 SECURITY_POLICY => security_policy = SecurityPolicy::from_name(value)?,
                 MESSAGE_SECURITY => message_security = MessageSecurity::from_name(value)?,
-                REQUEST_TIMEOUT => {
+                REQUEST_TIMEOUT | HANDSHAKE_TIMEOUT | SESSION_TIMEOUT => {
                     let millis = value.parse::<u64>().ok().filter(|millis| *millis > 0);
                     if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
-                        return Err(invalid("request-timeout-ms must be a positive integer"));
+                        return Err(invalid(format!("{key} must be a positive integer")));
                     }
-                    request_timeout =
-                        Duration::from_millis(millis.ok_or_else(|| {
-                            invalid("request-timeout-ms must be a positive integer")
-                        })?);
+                    let duration = Duration::from_millis(
+                        millis
+                            .ok_or_else(|| invalid(format!("{key} must be a positive integer")))?,
+                    );
+                    match key.as_str() {
+                        HANDSHAKE_TIMEOUT => handshake_timeout = duration,
+                        SESSION_TIMEOUT => session_timeout = duration,
+                        _ => request_timeout = duration,
+                    }
                 }
                 RECEIVE_BUFFER => {
                     let parsed = value.parse::<u32>().ok();
@@ -207,6 +221,8 @@ impl OpcuaOptions {
             security_policy,
             message_security,
             request_timeout,
+            handshake_timeout,
+            session_timeout,
             receive_buffer_size,
         })
     }

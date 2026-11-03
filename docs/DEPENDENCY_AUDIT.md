@@ -778,3 +778,18 @@ changes the entries above.
 - Unsafe: one line with the keyword on 2026-10-30; the `Zeroize` implementations of its key
   types clear them only when the owner calls `zeroize` (see the `tls` entry).
 - Review date: 2026-10-30 (draft).
+
+## getrandom 0.4.3 (optional OPC UA runtime dependency)
+- Purpose: fresh 32-byte CreateSession nonce; std has no portable cryptographic OS random
+  API, and the transport's jitter explicitly is not cryptographic. ADR-0034 S91 records
+  this boundary. Deterministic session tests inject the nonce value, without an RNG trait.
+- License: MIT OR Apache-2.0. No default features enabled. Only the `opcua` feature enables
+  it; default/full builds retain their existing runtime graph. Already present as a dev
+  transitive dependency; no additional resolved version is introduced.
+- Unsafe boundary: the safe `fill` API encapsulates target-specific OS calls (Linux
+  getrandom/getentropy/Windows ProcessPrng, etc.). First-party code never handles raw
+  pointers; failures surface as a fixed error without a fallback. No bundled C or crypto
+  backend. Entropy is requested before protocol I/O, never synthesized from clock/jitter.
+- Maintenance: current documentation resolves to 0.4.3 on 2026-11-03; RustCrypto/rust-random
+  maintained OS entropy crate. Advisory/license checks are repeated by the dependency gate.
+- Review date: 2026-11-03. This is a trust boundary review, not a memory-safety certification.

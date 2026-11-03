@@ -58,6 +58,8 @@ fn check(text: &str) {
                 key == "security-policy"
                     || key == "message-security"
                     || key == "request-timeout-ms"
+                    || key == "handshake-timeout-ms"
+                    || key == "session-timeout-ms"
                     || key == "encoding.receive-buffer-size"
             }));
             let timeout = uri
@@ -71,6 +73,18 @@ fn check(text: &str) {
                     Duration::from_millis(millis)
                 });
             assert_eq!(parsed.config.timeouts().request, timeout);
+            for (key, default, actual) in [
+                ("handshake-timeout-ms", 60000, parsed.config.timeouts().connect),
+                ("session-timeout-ms", 120000, parsed.session_timeout),
+            ] {
+                let millis = uri.options().iter().find(|(name, _)| name == key)
+                    .map_or(default, |(_, value)| {
+                        assert!(value.bytes().all(|byte| byte.is_ascii_digit()));
+                        value.parse::<u64>().expect("positive integer")
+                    });
+                assert!(millis > 0);
+                assert_eq!(actual, Duration::from_millis(millis));
+            }
             let receive = uri
                 .options()
                 .iter()

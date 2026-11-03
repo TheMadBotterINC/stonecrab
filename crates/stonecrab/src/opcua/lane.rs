@@ -122,6 +122,13 @@ impl Lane {
     }
 
     /// Sends once; receiving, cancelling or dropping never replays a request.
+    #[cfg_attr(
+        not(all(test, feature = "testkit")),
+        expect(
+            dead_code,
+            reason = "ordinary data requests start in S92; session setup uses the absolute connect deadline"
+        )
+    )]
     pub(super) fn exchange<'a>(
         &'a self,
         authentication_token: &'a NodeId,
@@ -134,6 +141,21 @@ impl Lane {
             let now = self.clock.now();
             let default = Deadline::after(now, self.request_timeout)?;
             let deadline = deadline.unwrap_or(default).min(default);
+            self.exchange_until(authentication_token, encoding_id, build, deadline, cancel)
+                .await
+        })
+    }
+
+    /// Session setup shares the whole connect bound, independently of request timeouts.
+    pub(super) fn exchange_until<'a>(
+        &'a self,
+        authentication_token: &'a NodeId,
+        encoding_id: u32,
+        build: impl FnOnce(RequestHeader) -> Service + Send + 'a,
+        deadline: Deadline,
+        cancel: &'a CancellationToken,
+    ) -> OpFuture<'a, Service> {
+        Box::pin(async move {
             self.check(deadline, cancel)?;
             let request = self.reserve()?;
             let header = request_header(
@@ -325,6 +347,10 @@ impl Lane {
         }
     }
 
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "validate headers of supported session/data responses; callers reject wrong service types"
+    )]
     fn dispatch(&self, frame: Frame) -> Result<()> {
         if let Body::Error(server) = frame.body {
             return Err(status_error(server.error));
@@ -377,7 +403,25 @@ impl Lane {
                 "unsolicited or duplicate response",
             ));
         }
-        pending.reply = Some(decode_service(&chunk.body));
+        pending.reply = Some(decode_service(&chunk.body).and_then(|service| {
+            let header = match &service {
+                Service::CreateSessionResponse {
+                    response_header, ..
+                }
+                | Service::ActivateSessionResponse {
+                    response_header, ..
+                }
+                | Service::CloseSessionResponse { response_header }
+                | Service::ReadResponse {
+                    response_header, ..
+                } => Some(response_header),
+                _ => None,
+            };
+            if header.is_some_and(|header| header.request_handle != chunk.sequence.request_id) {
+                return Err(error(ErrorKind::MalformedData, "foreign response handle"));
+            }
+            Ok(service)
+        }));
         drop(state);
         Ok(())
     }
@@ -420,7 +464,7 @@ impl Lane {
         .await
     }
 
-    fn fail(&self, problem: PlcError) {
+    pub(super) fn fail(&self, problem: PlcError) {
         let problem = Arc::new(problem);
         let (framed, wakers) = {
             let mut state = self.lock();
@@ -430,6 +474,50 @@ impl Lane {
         drop(framed);
         self.stopped.cancel();
         wake_all(wakers);
+    }
+
+    /// Continue the lane's counters for CLO and shut down without awaiting a reply.
+    pub(super) async fn close(&self, deadline: Deadline, cancel: &CancellationToken) -> Result<()> {
+        self.check(deadline, cancel)?;
+        let request = self.reserve()?;
+        let mut lease = match self.acquire(request.id, true, deadline, cancel).await? {
+            Acquired::Transport(lease) => lease,
+            Acquired::Reply(_) => {
+                return Err(error(ErrorKind::MalformedData, "unsolicited close reply"));
+            }
+        };
+        let header = request_header(
+            self.clock.as_ref(),
+            &NodeId::numeric(0, 0),
+            request.id,
+            deadline,
+        )?;
+        let body = encode_service(
+            452,
+            &Service::CloseSecureChannelRequest {
+                request_header: header,
+            },
+            self.max_frame.saturating_sub(24),
+        )?;
+        let frame = Frame::single(Body::Close(SecureChunk {
+            channel_id: self.channel_id,
+            token_id: self.token_id,
+            sequence: SequenceHeader {
+                sequence_number: self.next_sequence()?,
+                request_id: request.id,
+            },
+            body,
+        }));
+        lease.sending = true;
+        self.until(
+            deadline,
+            cancel,
+            lease.framed()?.send_frame(&frame, deadline),
+        )
+        .await?;
+        lease.sending = false;
+        self.until(deadline, cancel, lease.framed()?.shutdown(deadline))
+            .await
     }
 }
 

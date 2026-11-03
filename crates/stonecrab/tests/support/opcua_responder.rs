@@ -120,3 +120,66 @@ pub(super) fn open_response(
     .concat();
     open(sequence, request, channel, &body)
 }
+
+fn string(value: &str) -> Vec<u8> {
+    [
+        i32::try_from(value.len()).unwrap().to_le_bytes().to_vec(),
+        value.as_bytes().to_vec(),
+    ]
+    .concat()
+}
+
+pub(super) fn create_response(handle: u32, timeout: f64, status: u32) -> Vec<u8> {
+    let application = [
+        string("urn:peer"),
+        string("urn:peer:product"),
+        vec![0],
+        vec![0; 4],
+        vec![0xFF; 8],
+        vec![0xFF; 4],
+    ]
+    .concat();
+    let endpoint = [
+        string("opc.tcp://fake:4840/path"),
+        application,
+        vec![0xFF; 4],
+        1_u32.to_le_bytes().to_vec(),
+        string("http://opcfoundation.org/UA/SecurityPolicy#None"),
+        1_i32.to_le_bytes().to_vec(),
+        string("anonymous-policy"),
+        vec![0; 4],
+        vec![0xFF; 12],
+        string("http://opcfoundation.org/UA-Profile/Transport/uatcp-uasc-uabinary"),
+        vec![0],
+    ]
+    .concat();
+    [
+        vec![1, 0, 0xD0, 1],
+        response_header(handle, status),
+        vec![0, 123],
+        vec![0, 77],
+        timeout.to_le_bytes().to_vec(),
+        string("session-nonce"),
+        vec![0xFF; 4],
+        1_i32.to_le_bytes().to_vec(),
+        endpoint,
+        vec![0xFF; 4],
+        vec![0xFF; 8],
+        vec![0; 4],
+    ]
+    .concat()
+}
+
+pub(super) fn activate_response(handle: u32, status: u32) -> Vec<u8> {
+    [
+        vec![1, 0, 0xD6, 1],
+        response_header(handle, status),
+        string("activated-nonce"),
+        vec![0xFF; 8],
+    ]
+    .concat()
+}
+
+pub(super) fn close_response(handle: u32, status: u32) -> Vec<u8> {
+    [vec![1, 0, 0xDC, 1], response_header(handle, status)].concat()
+}

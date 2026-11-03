@@ -26,6 +26,8 @@ pub struct Parsed {
     pub message_security: &'static str,
     /// The configured receive buffer advertised before the resource cap.
     pub receive_buffer_size: u32,
+    /// Requested session timeout, independent of connect and request bounds.
+    pub session_timeout: std::time::Duration,
 }
 
 /// Parse an `opcua` connection string as the driver does and report what was attached.
@@ -34,7 +36,7 @@ pub struct Parsed {
 /// As `OpcuaDriver::parse_config`: [`ErrorKind::InvalidConfig`](crate::ErrorKind) for text
 /// that is not a valid `opcua` connection string.
 pub fn parse_config(uri: &str) -> Result<Parsed> {
-    let config = OpcuaDriver::parse_config(uri)?;
+    let config = OpcuaDriver::configuration(uri)?;
     let options = config.driver_options_as::<OpcuaOptions>().ok_or_else(|| {
         crate::PlcError::new(
             crate::ErrorKind::Internal,
@@ -47,12 +49,14 @@ pub fn parse_config(uri: &str) -> Result<Parsed> {
         options.message_security.name(),
     );
     let receive_buffer_size = options.receive_buffer_size;
+    let session_timeout = options.session_timeout;
     Ok(Parsed {
         config,
         endpoint_url,
         security_policy,
         message_security,
         receive_buffer_size,
+        session_timeout,
     })
 }
 

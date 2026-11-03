@@ -951,3 +951,51 @@ fn opcua_an_oversized_local_request_does_not_consume_a_wire_sequence() {
     assert_eq!(value(block_on_with(&rig.clock, rig.request()).unwrap()), 42);
     assert_eq!(rig.lane.lock().sent_sequence, 1);
 }
+
+#[test]
+fn opcua_lane_leaves_unexpected_service_types_for_the_session_to_reject() {
+    let body = encode_service(
+        458,
+        &Service::SignatureData {
+            algorithm: UaString::null(),
+            signature: crate::opcua::codec::UaByteString::null(),
+        },
+        100,
+    )
+    .unwrap();
+    let rig = Rig::new(
+        Script::strict(vec![Step::respond(move |_| {
+            Some(message(1, 1, 17, 29, &body))
+        })]),
+        1,
+    );
+    assert!(matches!(
+        block_on_with(&rig.clock, rig.request()).unwrap(),
+        Service::SignatureData { .. }
+    ));
+}
+
+#[test]
+fn opcua_lane_close_cannot_complete_from_an_unsolicited_reply() {
+    let rig = Rig::new(Script::default(), 1);
+    let framed = rig.lane.lock().framed.take();
+    let deadline = Deadline::after(rig.clock.now(), Duration::from_secs(1)).unwrap();
+    let mut close = Box::pin(rig.lane.close(deadline, &rig.cancel));
+    assert!(
+        close
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending()
+    );
+    let mut state = rig.lane.lock();
+    let id = state.request_id;
+    state.pending.get_mut(&id).unwrap().reply =
+        Some(Err(error(ErrorKind::MalformedData, "unsolicited reply")));
+    state.framed = framed;
+    drop(state);
+    assert_eq!(
+        block_on_with(&rig.clock, close).unwrap_err().kind(),
+        ErrorKind::MalformedData
+    );
+    assert_eq!(rig.probe.sent().len(), 0);
+}

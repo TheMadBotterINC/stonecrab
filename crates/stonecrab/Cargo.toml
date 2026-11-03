@@ -34,7 +34,7 @@ tls = ["transport", "dep:rustls", "dep:tokio-rustls"]
 # The OPC UA client (`stonecrab::opcua`, ADR-0034): addresses and private channel/service code. Off by
 # default and not part of `full`, as `tls` is (decision E17); needs the transport. The
 # cryptography dependencies of the security policies join it with their slices (ADR-0035).
-opcua = ["transport"]
+opcua = ["transport", "dep:getrandom"]
 # The serial transport on a blocking worker thread (`stonecrab::transport::SerialTransport`).
 # Needs the transport. `modbus` enables it for Modbus RTU (ADR-0024).
 serial = ["transport", "dep:serial2"]
@@ -414,6 +414,7 @@ harness = false
 required-features = ["modbus", "testkit"]
 
 [dependencies]
+getrandom = { workspace = true, optional = true }
 thiserror.workspace = true
 bytes.workspace = true
 tokio = { workspace = true, optional = true, features = ["rt", "net", "time", "sync", "io-util"] }
