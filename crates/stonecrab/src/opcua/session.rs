@@ -13,7 +13,6 @@ use crate::opcua::codec::{
 use crate::opcua::generated::application_description::ApplicationDescription;
 use crate::opcua::generated::application_type::ApplicationType;
 use crate::opcua::generated::extension_object_definition::ExtensionObjectDefinition as Service;
-use crate::opcua::generated::message_security_mode::MessageSecurityMode;
 use crate::opcua::generated::response_header::ResponseHeader;
 use crate::opcua::generated::signature_data::SignatureData;
 use crate::opcua::generated::user_token_type::UserTokenType;
@@ -23,12 +22,12 @@ use crate::opcua::service::status_error;
 use crate::{CancellationToken, Deadline, ErrorKind, PlcError, Result};
 
 pub(super) const NONE_POLICY: &str = "http://opcfoundation.org/UA/SecurityPolicy#None";
-const TCP_PROFILE: &str = "http://opcfoundation.org/UA-Profile/Transport/uatcp-uasc-uabinary";
 
 pub(super) struct Session {
     pub(super) lane: Lane,
     pub(super) authentication_token: NodeId,
     pub(super) revised_timeout: Duration,
+    pub(super) selected_endpoint: String,
 }
 
 impl Session {
@@ -87,26 +86,14 @@ impl Session {
             .ok()
             .filter(|duration| !duration.is_zero())
             .ok_or_else(|| malformed("invalid revised session timeout"))?;
-        let policy_id = server_endpoints
-            .into_iter()
-            .flatten()
-            .filter(|endpoint| {
-                endpoint.security_mode == MessageSecurityMode::MessageSecurityModeNone
-                    && endpoint.security_policy_uri == UaString::new(NONE_POLICY)
-                    && endpoint.transport_profile_uri == UaString::new(TCP_PROFILE)
-            })
-            .flat_map(|endpoint| endpoint.user_identity_tokens.into_iter().flatten())
-            .find(|policy| {
-                policy.token_type == UserTokenType::UserTokenTypeAnonymous
-                    && policy.policy_id.as_bytes().is_some_and(|id| !id.is_empty())
-            })
-            .map(|policy| policy.policy_id)
-            .ok_or_else(|| {
-                PlcError::new(
-                    ErrorKind::Authentication,
-                    "OPC UA server advertises no compatible anonymous policy",
-                )
-            })?;
+        let endpoints = server_endpoints.unwrap_or_default();
+        let (endpoint, policy) = crate::opcua::endpoint::select(
+            &endpoints,
+            options,
+            UserTokenType::UserTokenTypeAnonymous,
+        )?;
+        let selected_endpoint = crate::opcua::endpoint::display_url(&endpoint.endpoint_url);
+        let policy_id = policy.policy_id.clone();
         let reply = lane
             .exchange_until(
                 &authentication_token,
@@ -139,6 +126,7 @@ impl Session {
             lane,
             authentication_token,
             revised_timeout,
+            selected_endpoint,
         })
     }
 

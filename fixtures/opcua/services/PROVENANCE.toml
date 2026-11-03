@@ -138,3 +138,15 @@ name = "ReadResponse"
 encoding_id = 634
 valid = "ReadResponse.hex"
 negative = "ReadResponse-truncated.hex"
+
+[[vector]]
+name = "GetEndpointsRequest"
+encoding_id = 428
+valid = "GetEndpointsRequest.hex"
+negative = "GetEndpointsRequest-truncated.hex"
+
+[[vector]]
+name = "GetEndpointsResponse"
+encoding_id = 431
+valid = "GetEndpointsResponse.hex"
+negative = "GetEndpointsResponse-truncated.hex"

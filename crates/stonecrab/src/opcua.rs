@@ -20,6 +20,7 @@ mod chunk;
 mod codec;
 mod connection;
 mod driver;
+mod endpoint;
 #[expect(
     dead_code,
     reason = "generated metadata and service constructors are consumed incrementally by S89–S92"

@@ -262,6 +262,7 @@ impl std::fmt::Debug for OpcuaConnection {
             .field("state", &self.state())
             .field("configured_policy", &"None")
             .field("effective_mode", &"None")
+            .field("selected_endpoint", &self.session.selected_endpoint)
             .field("revised_session_timeout", &self.session.revised_timeout)
             .finish_non_exhaustive()
     }
