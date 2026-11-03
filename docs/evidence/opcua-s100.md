@@ -74,8 +74,16 @@ one established NodeId canonicalization and five exact disabled-service refusals
   ranges. Fuzz exercises parsers/codecs; write delivery/conversion semantics are covered
   by deterministic and mutation tests. Default/all-feature semver, dependency policy,
   machete and default/fuzz Clippy pass. Parity and attribute checks pass.
-- Final full check, isolated feature matrix and fresh package/unpacked archive identity
-  are recorded in the completion note after those gates finish.
+- Final full check passes: 2393 tests, 588 normal/five compile-fail doctests, fmt,
+  strict all-target/all-feature Clippy, rustdoc and no-default-features check.
+- All 59 feature combinations plus the no-default-features check pass in isolation,
+  after other Cargo operations completed; the temporary manifest/lock edits restore cleanly.
+- Fresh-CARGO_HOME package verification and the reviewed 206-file inventory pass.
+  The unpacked archive builds with all features and no-default-features/opcua alone.
+  Source 6aa7e4d7574492e1303443026c5876ac4227491c; archive 842994 bytes, SHA-256
+  8abbf89d43bb60ea1b8bad64e58cefc70600c0d7f3fedb3460a5c513c7aeab70.
+  No fixture, XML adapter or vendored model is shipped. Final dependency/semver/parity,
+  attribute and signed-off/diff checks pass.
 
 ## Independent peer
 
@@ -88,7 +96,10 @@ array, a 2x3 matrix, and one selected array element. It uses only the disposable
 namespace; existing readonly nodes remain unchanged. A native request-builder failure
 exposed the old scalar hint on ranged tags; fixing the hint preserved the core builder's
 exact validation instead of weakening it. The stale address doctest was updated too.
-Docker is stopped and copied host PKI removed; no key/password is in evidence. Native
+The nine native tests and finite example were repeated after the final allocation,
+disposal and disposition changes on source 6aa7e4d; the same immutable image's in-image
+checks had already passed. Docker is stopped and copied host PKI removed; no key/password
+is in evidence. Native
 software-peer evidence does not claim hardware, secure writes or custom structure support.
 
 ## Review and handoff
@@ -107,7 +118,9 @@ trust loading, secure discovery/activation and custom schema support remain thei
 
 Logs: /tmp/stonecrab-s100-{check-complete,coverage-complete,clippy,interop-final,
 mutants-final,shape-mutants-final,status-mutants-final,regen,fuzz,semver,semver-all,
-dependencies,machete,default-clippy,fuzz-clippy,parity,lint-attrs}.log.
+dependencies,machete,default-clippy,fuzz-clippy,parity-final,lint-attrs-final,
+features,package,packaged-all,packaged-opcua-only,semver-complete,
+semver-all-complete,dco-complete}.log.
 Mutation outcomes are in /tmp/stonecrab-s100-{mutants-final,shape-mutants-final,
 status-mutants-final}/mutants.out/outcomes.json. Native evidence is under
- target/interop-evidence/open62541/ (no private keys).
+target/interop-evidence/open62541/ (no private keys).

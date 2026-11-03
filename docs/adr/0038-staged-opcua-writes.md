@@ -2,8 +2,9 @@
 
 ## Status
 
-Accepted design for S100 (2026-11-03), under ADR-0034 and ADR-0010. Implementation
-and evidence must pass before merge. No new public value/operation type, feature,
+Accepted and implemented S100 (2026-11-03), under ADR-0034 and ADR-0010.
+[S100 evidence](../evidence/opcua-s100.md) records the completed checks, archive and
+software-peer validation. No new public value/operation type, feature,
 dependency or version. Normal signed-off commits and merge preserve review history.
 
 ## Design
