@@ -713,3 +713,32 @@ by a bounded encoding into a temporary writer (16 MiB maximum), since the servic
 has no generated size function. It cannot allocate from a declared count unchecked;
 read, serialize and length share the same 64-entry recursion budget. The enclosing
 private codec constructor must pair a Known body with its matching encoding id.
+
+## S89 implementation sketch (2026-11-02)
+
+A private request lane reserves a bounded reply slot, builds the request header from the
+injected clock and session token, then sends under a short transport lease. Any waiting
+caller can receive for all slots; a newly queued sender interrupts the cancel-safe receive
+and takes the lease before another receive begins, so waiting for a response never holds
+the send path hostage. The transport trait's single mutable owner prevents independent
+send/receive locks; this interruptible lease refines decision 6 without splitting or
+changing `Transport` or `FramedTransport`.
+
+New code: `opcua/lane.rs` owns correlation, sequence/channel/token validation, bounded
+pending entries and leases. Request guards release entries on completion or drop; an
+armed send lease fails the channel on drop because partial sends are unsafe, whereas a
+dropped read lease restores the framed transport with its buffered bytes. Existing
+`WakerSlots`, `CancellationToken`, `Clock`, bounded codecs and generated services are
+reused; no executor, task, dependency, generic lock or alternate transport is introduced.
+ServiceFault and ERR preserve the numeric status and known name in a typed error source;
+unknown request ids are discarded and counted. IDs never wrap into an outstanding request;
+sequence wrap remains unverified pending S106 and exhaustion fails explicitly.
+
+Also touch options/driver parsing for `request-timeout-ms` (30000 by default), parity,
+component/status/evidence docs, packaging and the mutation file list. First-party scripted
+responder support belongs under `tests/support/opcua_responder.rs`, shared with private
+lane unit tests now and public connection tests in S91. Tests cover out-of-order replies,
+simultaneous waiters, sender priority, dropped/cancelled/timed-out receives, partial frames,
+partial sends, limits, foreign identifiers, ERR/ServiceFault and fake-clock deadlines.
+All existing coverage floors remain unchanged. S90 owns HEL/OPN negotiation; S91 owns
+connection lifecycle/reconnect, so S89 adds no public driver or support claim.
