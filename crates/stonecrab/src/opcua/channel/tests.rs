@@ -133,7 +133,11 @@ fn opcua_hello_limits_merge_to_the_smaller_of_client_and_server() {
 
 #[test]
 fn opcua_a_zero_server_limit_means_no_limit() {
-    let client = proposed_limits(ResourceLimits::builder().build().unwrap(), 65535).unwrap();
+    let client = proposed_limits(
+        ResourceLimits::builder().build().unwrap(),
+        &Rig::new(Script::default()).options,
+    )
+    .unwrap();
     let server = TransportLimits {
         receive_buffer_size: 100_000,
         send_buffer_size: 100_000,
@@ -181,7 +185,7 @@ fn opcua_hello_advertises_the_configured_receive_buffer_within_the_resource_cap(
         .build()
         .unwrap();
     assert_eq!(
-        proposed_limits(resources, 65535)
+        proposed_limits(resources, &rig.options)
             .unwrap()
             .receive_buffer_size,
         8192
@@ -463,7 +467,11 @@ fn opcua_cancelling_a_pending_handshake_releases_all_timers() {
 
 #[test]
 fn opcua_negotiation_rejects_invalid_buffers_and_protocol_versions() {
-    let proposed = proposed_limits(ResourceLimits::builder().build().unwrap(), 65535).unwrap();
+    let proposed = proposed_limits(
+        ResourceLimits::builder().build().unwrap(),
+        &Rig::new(Script::default()).options,
+    )
+    .unwrap();
     for (receive, send) in [(0, 8192), (8192, 0), (8191, 8192), (8192, 1)] {
         assert_eq!(
             negotiate(
@@ -485,7 +493,7 @@ fn opcua_negotiation_rejects_invalid_buffers_and_protocol_versions() {
                 .max_frame_bytes(8191)
                 .build()
                 .unwrap(),
-            65535
+            &Rig::new(Script::default()).options
         )
         .unwrap_err()
         .kind(),
@@ -885,5 +893,49 @@ async fn opcua_interop_peer_answers_hello_and_opens_a_none_channel() {
     );
     println!(
         "CLO completed without a reply; continued lane counters reached the session-required service check"
+    );
+}
+
+#[test]
+fn opcua_hello_applies_all_encoding_options_and_local_memory_bounds() {
+    let options = OpcuaOptions::from_parameters(
+        "opc.tcp://fake:4840".to_owned(),
+        &[
+            (
+                "encoding.receive-buffer-size".to_owned(),
+                "16384".to_owned(),
+            ),
+            ("encoding.send-buffer-size".to_owned(), "8192".to_owned()),
+            ("encoding.max-message-size".to_owned(), "65536".to_owned()),
+            ("encoding.max-chunk-count".to_owned(), "3".to_owned()),
+        ],
+    )
+    .unwrap();
+    let resources = ResourceLimits::builder()
+        .max_frame_bytes(8192)
+        .max_buffered_bytes(32768)
+        .build()
+        .unwrap();
+    assert_eq!(
+        proposed_limits(resources, &options).unwrap(),
+        TransportLimits {
+            receive_buffer_size: 8192,
+            send_buffer_size: 8192,
+            max_message_size: 32768,
+            max_chunk_count: 3,
+        }
+    );
+    let defaults = Rig::new(Script::default()).options;
+    let mut small_send = defaults.clone();
+    small_send.send_buffer_size = 8191;
+    assert_eq!(
+        proposed_limits(resources, &small_send).unwrap_err().kind(),
+        ErrorKind::InvalidConfig
+    );
+    assert_eq!(
+        proposed_limits(ResourceLimits::builder().build().unwrap(), &defaults)
+            .unwrap()
+            .max_message_size,
+        262_144
     );
 }

@@ -52,3 +52,11 @@ remaining bytes are a service body. Twenty-two first-party service seeds plus di
 unknown and oversized-array cases exercise canonical rewrite stability, counts and
 shared depth bounds. Provenance and positive/negative body hex fixtures are retained
 under `fixtures/opcua/services/`; no upstream captured test suite is copied here.
+
+
+`fuzz_opcua_chunk_reassembly` (S94) reads three byte/count settings bytes followed by
+concatenated MSG C/F/A frames. The production framer/assembler enforce small bounds;
+accepted bodies must equal independent fragment concatenation, and partial/completed
+bodies must stay within the selected byte limit. Seven first-party seeds cover single
+and split messages, ABORT/reset, size/count limits, malformed ABORT and incomplete input.
+No captured upstream traffic is used as a seed.

@@ -20,6 +20,7 @@ use bytes::Bytes;
 
 use crate::future::{WakerSlots, wake_all};
 use crate::opcua::channel::Channel;
+use crate::opcua::chunk::{Assembly, MessageLimits, abort, check_growth};
 use crate::opcua::codec::NodeId;
 use crate::opcua::frame::{Body, ChunkType, Frame, OpcuaFramer, SecureChunk, SequenceHeader};
 use crate::opcua::generated::extension_object_definition::ExtensionObjectDefinition as Service;
@@ -33,6 +34,7 @@ type Framed = FramedTransport<Frame, OpcuaFramer>;
 struct Pending {
     queued: bool,
     reply: Option<Result<Service>>,
+    assembly: Assembly,
 }
 
 struct State {
@@ -55,7 +57,8 @@ pub(super) struct Lane {
     request_timeout: Duration,
     max_pending: usize,
     max_frame: usize,
-    max_response: usize,
+    message_limits: MessageLimits,
+    max_buffered: usize,
     channel_id: u32,
     token_id: u32,
 }
@@ -87,7 +90,11 @@ impl Lane {
             request_timeout,
             max_pending: limits.max_pending_requests().get(),
             max_frame,
-            max_response: usize::MAX,
+            message_limits: MessageLimits {
+                bytes: limits.max_buffered_bytes().get(),
+                chunks: 64,
+            },
+            max_buffered: limits.max_buffered_bytes().get(),
             channel_id,
             token_id,
         }
@@ -106,13 +113,13 @@ impl Lane {
             .max_frame
             .min(usize::try_from(channel.limits.send_buffer_size).unwrap_or(usize::MAX));
         if channel.limits.max_message_size != 0 {
-            lane.max_response =
-                usize::try_from(channel.limits.max_message_size).unwrap_or(usize::MAX);
-            lane.max_frame = lane.max_frame.min(
-                usize::try_from(channel.limits.max_message_size)
-                    .unwrap_or(usize::MAX)
-                    .saturating_add(24),
-            );
+            lane.message_limits.bytes = lane
+                .message_limits
+                .bytes
+                .min(usize::try_from(channel.limits.max_message_size).unwrap_or(usize::MAX));
+        }
+        if channel.limits.max_chunk_count != 0 {
+            lane.message_limits.chunks = channel.limits.max_chunk_count;
         }
         let state = lane.state.get_mut().unwrap_or_else(PoisonError::into_inner);
         state.request_id = 1;
@@ -157,11 +164,7 @@ impl Lane {
                 request.id,
                 deadline,
             )?;
-            let body = encode_service(
-                encoding_id,
-                &build(header),
-                self.max_frame.saturating_sub(24),
-            )?;
+            let body = encode_service(encoding_id, &build(header), self.message_limits.bytes)?;
             self.exchange_body(request.id, body, deadline, cancel).await
         })
     }
@@ -173,27 +176,49 @@ impl Lane {
         deadline: Deadline,
         cancel: &CancellationToken,
     ) -> Result<Service> {
+        let (capacity, count) = self.message_limits.plan(body.len(), self.max_frame)?;
         let mut lease = match self.acquire(request_id, true, deadline, cancel).await? {
             Acquired::Transport(lease) => lease,
             Acquired::Reply(reply) => return *reply,
         };
-        let sequence_number = self.next_sequence()?;
-        let frame = Frame::single(Body::Message(SecureChunk {
-            channel_id: self.channel_id,
-            token_id: self.token_id,
-            sequence: SequenceHeader {
-                sequence_number,
-                request_id,
-            },
-            body,
-        }));
+        let first = {
+            let mut state = self.lock();
+            let first = state.sent_sequence.checked_add(1).ok_or_else(exhausted)?;
+            let last = state
+                .sent_sequence
+                .checked_add(count)
+                .ok_or_else(exhausted)?;
+            state.sent_sequence = last;
+            first
+        };
+        let mut sequence_number = first;
+        let mut parts = body.chunks(capacity).peekable();
         lease.sending = true;
-        self.until(
-            deadline,
-            cancel,
-            lease.framed()?.send_frame(&frame, deadline),
-        )
-        .await?;
+        while let Some(part) = parts.next() {
+            let frame = Frame {
+                chunk: if parts.peek().is_some() {
+                    ChunkType::Intermediate
+                } else {
+                    ChunkType::Final
+                },
+                body: Body::Message(SecureChunk {
+                    channel_id: self.channel_id,
+                    token_id: self.token_id,
+                    sequence: SequenceHeader {
+                        sequence_number,
+                        request_id,
+                    },
+                    body: Bytes::copy_from_slice(part),
+                }),
+            };
+            self.until(
+                deadline,
+                cancel,
+                lease.framed()?.send_frame(&frame, deadline),
+            )
+            .await?;
+            sequence_number = sequence_number.saturating_add(1);
+        }
         lease.sending = false;
         drop(lease);
         self.receive(request_id, deadline, cancel).await
@@ -221,6 +246,7 @@ impl Lane {
                 Pending {
                     queued: true,
                     reply: None,
+                    assembly: Assembly::default(),
                 },
             );
             (id, state.receiver.clone())
@@ -354,22 +380,10 @@ impl Lane {
                 "expected a service message",
             ));
         };
-        if frame.chunk != ChunkType::Final {
-            return Err(error(
-                ErrorKind::MalformedData,
-                "multi-chunk service messages are not supported",
-            ));
-        }
         if chunk.channel_id != self.channel_id || chunk.token_id != self.token_id {
             return Err(error(
                 ErrorKind::MalformedData,
                 "foreign channel or token id",
-            ));
-        }
-        if chunk.body.len() > self.max_response {
-            return Err(error(
-                ErrorKind::ResourceLimit,
-                "response exceeds negotiated message size",
             ));
         }
         let mut state = self.lock();
@@ -385,6 +399,9 @@ impl Lane {
             ));
         }
         state.received_sequence = Some(sequence);
+        let retained = state.pending.values().fold(0_usize, |total, pending| {
+            total.saturating_add(pending.assembly.len())
+        });
         let Some(pending) = state.pending.get_mut(&chunk.sequence.request_id) else {
             state.discarded = state.discarded.saturating_add(1);
             drop(state);
@@ -396,7 +413,22 @@ impl Lane {
                 "unsolicited or duplicate response",
             ));
         }
-        pending.reply = Some(decode_service(&chunk.body).and_then(|service| {
+        if frame.chunk == ChunkType::Abort {
+            let problem = abort(&chunk.body)?;
+            pending.assembly = Assembly::default();
+            pending.reply = Some(Err(problem));
+            return Ok(());
+        }
+        check_growth(retained, chunk.body.len(), self.max_buffered)?;
+        let Some(body) = pending.assembly.push(
+            &chunk.body,
+            frame.chunk == ChunkType::Final,
+            self.message_limits,
+        )?
+        else {
+            return Ok(());
+        };
+        pending.reply = Some(decode_service(&body).and_then(|service| {
             let header = match &service {
                 Service::CreateSessionResponse {
                     response_header, ..
@@ -462,6 +494,9 @@ impl Lane {
         let (framed, wakers) = {
             let mut state = self.lock();
             state.failure.get_or_insert_with(|| Arc::clone(&problem));
+            for pending in state.pending.values_mut() {
+                pending.assembly = Assembly::default();
+            }
             (state.framed.take(), state.waiters.drain())
         };
         drop(framed);
@@ -494,7 +529,9 @@ impl Lane {
             &Service::CloseSecureChannelRequest {
                 request_header: header,
             },
-            self.max_frame.saturating_sub(24),
+            self.max_frame
+                .saturating_sub(24)
+                .min(self.message_limits.bytes),
         )?;
         let frame = Frame::single(Body::Close(SecureChunk {
             channel_id: self.channel_id,

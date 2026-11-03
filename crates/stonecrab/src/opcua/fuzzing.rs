@@ -254,3 +254,67 @@ fn measure_service(value: &Service, depth: Depth) -> core::result::Result<usize,
     serialize_service(value, &mut writer, depth)?;
     Ok(writer.as_slice().len())
 }
+
+/// Completed bodies and independently concatenated inputs from a bounded chunk stream.
+#[derive(Debug)]
+pub struct Chunked {
+    /// Each completed body's output and its input fragments, in wire order.
+    pub bodies: Vec<(Vec<u8>, Vec<u8>)>,
+    /// Largest partial body retained during this run.
+    pub peak: usize,
+    /// Configured body bound for this run.
+    pub limit: usize,
+}
+
+/// Exercise the production assembler with framed C/F/A inputs and small byte/count limits.
+/// The first two bytes select 1..=4096 body bytes; the third selects 1..=16 chunks.
+///
+/// # Errors
+/// Returns typed framing, annotation or message-limit errors for rejected streams.
+pub fn chunk_reassembly(input: &[u8]) -> Result<Chunked> {
+    use crate::opcua::chunk::{Assembly, MessageLimits, abort, limited};
+    use crate::opcua::frame::{Body, ChunkType};
+    let Some((&[low, high, count], stream)) = input.split_first_chunk::<3>() else {
+        return Err(limited("missing fuzz settings"));
+    };
+    if stream.len() > 65536 {
+        return Err(limited("fuzz stream bound"));
+    }
+    let limits = MessageLimits {
+        bytes: usize::from(u16::from_le_bytes([low, high]) % 4096) + 1,
+        chunks: u32::from(count % 16) + 1,
+    };
+    let resources = ResourceLimits::builder().build()?;
+    let mut framer = OpcuaFramer::new(8192, resources);
+    let mut buffer = BytesMut::from(stream);
+    let mut assembly = Assembly::default();
+    let mut expected = Vec::new();
+    let mut result = Chunked {
+        bodies: Vec::new(),
+        peak: 0,
+        limit: limits.bytes,
+    };
+    while let Some(frame) = framer.decode(&mut buffer).map_err(crate::PlcError::from)? {
+        let Body::Message(chunk) = frame.body else {
+            return Err(crate::PlcError::new(
+                crate::ErrorKind::MalformedData,
+                "fuzz stream expects MSG",
+            ));
+        };
+        if frame.chunk == ChunkType::Abort {
+            let _problem = abort(&chunk.body)?;
+            assembly = Assembly::default();
+            expected.clear();
+        } else {
+            let complete = assembly.push(&chunk.body, frame.chunk == ChunkType::Final, limits)?;
+            expected.extend_from_slice(&chunk.body);
+            result.peak = result.peak.max(assembly.len());
+            if let Some(body) = complete {
+                result
+                    .bodies
+                    .push((body.to_vec(), std::mem::take(&mut expected)));
+            }
+        }
+    }
+    Ok(result)
+}

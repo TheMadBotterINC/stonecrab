@@ -958,3 +958,75 @@ round-trip for encoding id 811 remains explicitly Raw; S116/S123 must add semant
 The seven refusals belong to Write (S100), MonitoringParameters (S114), and notification /
 Publish (S116, with event content S118). Corpus scope, corrections and reproduction are in
 fixtures/opcua/UPSTREAM.md. No product behavior was changed to satisfy the corpus.
+
+## S94 implementation sketch (2026-11-03)
+
+Keep TCP frame boundaries in OpcuaFramer; a pure private chunk.rs owns checked payload
+capacity, whole-message send preflight and bounded body accumulation. The existing lane
+sends all chunks under its transport lease and retains a partial assembly in each pending
+request, so receive cancellation restores the transport without losing assembled bytes;
+dropping a request releases that assembly, and an interrupted multi-chunk send fails the
+lane without replay. The old single-frame send/receive restriction is removed.
+
+Files/concepts: chunk.rs and chunk/tests.rs introduce MessageLimits (size/count), the
+policy size data (signature/plain/cipher/padding; only None is active, S101 extends it),
+and Assembly (bytes/count). Lane Pending gains its Assembly; the lane checks aggregate
+partial bytes against ResourceLimits.max_buffered_bytes before append and frees them on
+completion, ABORT, drop and terminal failure. Unknown request ids are sequence-checked
+and discarded without allocation. Channel/token/sequence validation precedes every
+append or ABORT. No new task, public API, trait or dependency is needed.
+
+options.rs accepts the other three encoding.* options, decimal positive bounded u32;
+send/receive buffers keep the non-ECC minimum 8192 and Int32 maximum, max-message-size
+and max-chunk-count are positive. Defaults stay 65535/65535/2097152/64. Channel Hello
+caps buffers to max_frame_bytes and its message body limit to max_buffered_bytes; ACK
+keeps the existing conservative smaller-of-peer/client limits (zero peer limit is
+unbounded only up to local limits). Per-message and aggregate reassembly bounds are
+separate; the default configured 2 MiB message limit is advertised at the smaller local
+receive budget (262144 by default). CLO and OPN remain single-frame protocol messages.
+
+Message body capacity for active None is send_buffer_size minus the 12-byte message
+header, 4-byte symmetric security header and 8-byte sequence header. The pure size table
+also accounts for cipher/plain blocks, signatures and padding; secure-policy execution
+remains unavailable until S101. Before any send, encode under the message bound, check
+the total chunk count and reserve enough sequence numbers. Every chunk keeps its request
+id, increments sequence, and uses C then F, never A. Chunk size remains independent of
+message size. Multi-chunk receives count each C/F and check growth before allocation.
+An A chunk parses its UInt32 error and String reason without retaining/echoing the reason,
+discards only its request's assembly and delivers the exact status through StatusFault;
+it consumes neither message-byte nor chunk-count allowance. Malformed/security/limit
+failures remain typed lane failures; ordinary peer ABORT leaves the lane usable.
+
+Sources reviewed 2026-11-03: OPC Foundation online Part 6 (v1.05.07 after the v104 URLs
+redirect), 6.7.2.2 (only MSG has C/A, other message types F), 6.7.2.5 (header/block/footer
+sizes), 6.7.3 (ABORT body and request-local failure), 7.1.2.3/4 (limits apply to the
+unencrypted message body, excluding chunk headers/signatures):
+https://reference.opcfoundation.org/specs/OPC-10000-6/6.7.2.2
+https://reference.opcfoundation.org/specs/OPC-10000-6/6.7.2.5
+https://reference.opcfoundation.org/specs/OPC-10000-6/6.7.3
+https://reference.opcfoundation.org/specs/OPC-10000-6/7.1.2
+No upstream calculation fixtures or implementation text will be copied.
+
+Tests: boundary/overflow/body arithmetic and exact reassembly; request send preflight
+(no bytes/sequence consumed); independent C/F wire bytes, multiple requests and ABORT;
+partial cancellation/drop and failure cleanup; configuration prefix/defaults/invalid
+values and Hello clamping. Add the planned fuzz target with structured chunk seeds and
+budget invariants, and focused chunk mutations. The existing open62541 image already
+has large arrays and small-buffer settings; extend its exact-count suite to exercise a
+large array through the private lane under 8192-byte chunks (public array mapping is S95).
+Run all required coverage floors, full tests/docs/lints, isolated features, regen, fuzz,
+semver/dependency checks and reviewed package list; record evidence, then normal signed-off
+merge and push. No hardware, crate/tag publication or new crypto stack is involved.
+
+
+S94 review: aggregate receive growth and per-message growth share one checked byte-budget
+function. A small allocation boundary takes a requested additional capacity so a real
+TryReserveError can be exercised with usize::MAX without exhausting memory or using an
+allocator shim. The initial coverage run found those error closures unexercised; the
+refinement tests both arithmetic overflow and allocation failure while preserving partial
+bytes. No coverage floor or exclusion changes. Request assemblies live directly in the
+existing pending table; aggregate retained length is summed over that bounded table,
+avoiding a second map or a redundant counter to synchronize on drop/failure. The named
+send parity regression uses a large Read until Write arrives in S100; the same test checks
+C/F flags, no ABORT, exact NodeIds, chunk bounds and per-chunk sequences. Secure size rows
+and cryptographic transforms remain S101; only policy None is executable here.

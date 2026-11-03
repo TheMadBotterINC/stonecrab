@@ -5,6 +5,34 @@ Implementation baseline: the commit that last modified this file
 (`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
 its own commit; the slice log below records what each one landed.
 
+## OPC UA chunking and negotiated limits (S94, 2026-11-03)
+
+S94 adds policy-None MSG splitting/reassembly to the existing request lane. Whole-body
+size, chunk count and sequence availability are checked before sending; every chunk keeps
+its request id, advances sequence and uses C then F. Partial responses stay in their
+pending request, bounded by message/count limits and an aggregate receive budget before
+allocation. Receive cancellation preserves other work; request drop releases its partial
+body. ABORT delivers the exact peer status only to its request and leaves the lane usable.
+
+All four encoding.* options now parse. Configured defaults are 65535-byte buffers,
+2097152 message-body bytes and 64 chunks. Hello advertises the smaller local resource
+bounds (262144 body bytes by default); peer zero never removes local limits. The shared
+size data is ready for S101 to extend; secure transforms remain unavailable. Public array
+value mapping remains S95. No new public API, dependency, feature or version change.
+
+Final local checks: 2265 tests, 584+5 doctests; handwritten OPC UA 6743/6743 and all coverage
+floors passed. All 59 feature combinations, semver in both configurations, regeneration,
+dependencies, default/fuzz Clippy, 15 fuzz targets plus a final 1.2-million-input assembler
+run, and mutations (33 caught, 2 unviable, none survived) pass. The 194-file archive passes
+its reviewed list and unpacked all-feature build. The four exact-count open62541 cases
+pass, including all 4000 array values over two response chunks and a 600-node Read over
+three request chunks, under 8192-byte negotiated buffers. Self-review under ADR-0005's
+waiver records the boundary tests, package-list correction and explicit security/array
+scope. [S94 evidence](docs/evidence/opcua-s94.md) records commands and limits. No hardware
+or publication was performed.
+
+Next: S95, extended OPC UA value/array mapping. Normal merges preserve all commits.
+
 ## OPC UA upstream vectors (S93, 2026-11-03)
 
 S93 retains two pinned Apache PLC4X suites verbatim and derives 23 vectors through a
@@ -559,6 +587,7 @@ commit; gates named were run locally before that commit.
 
 | Slice | Date | Landed | Gates |
 | --- | --- | --- | --- |
+| S94 | 2026-11-03 | Bounded policy-None MSG splitting/reassembly, all encoding.* limits, request-local exact-status ABORT, aggregate partial-body budgets and cancellation/drop cleanup. Shared pure size arithmetic; no secure transforms or public array mapping yet. Eleven parity rows close. Self-review under ADR-0005 waiver; [evidence](docs/evidence/opcua-s94.md) | check (2265 tests), coverage (opcua 100), 59 features, 15 fuzz targets plus final assembler run, mutants (33 caught/2 unviable), regen, parity/lint, semver default/all, dependencies/machete, 194-file package/unpacked build, four independent-peer cases |
 | S93 | 2026-11-03 | Two verbatim upstream XML suites, 23 independently derived vectors, checked fingerprints/provenance/output/file set, and exact codec equivalence boundaries: 15 byte-exact, one existing compact NodeId canonicalization, seven named disabled-service refusals. HEL/ACK parity closes; opaque notification preservation stays distinct from semantic support. No runtime change. Self-review under ADR-0005 waiver; [evidence](docs/evidence/opcua-s93.md) | check (2239 tests), coverage (opcua 100), 59 features, regen, parity/lint with self-tests, semver default/all, dependencies/machete, 192-file package and unpacked all-feature build |
 | S34 | 2026-10-28 | Documents reconciled with the 0.2.0 publication (H02 to H06): README and SECURITY say 0.2.0 is published and show the crates.io dependency; STATUS.md start, maintainer prerequisites (P1 to P3 open, the "Basic" ruleset targets no branch, P4 approved) and continuation point at `docs/POST_ALPHA_PLAN.md` with the E1 to E7 outcomes; `docs/PROJECT_BRIEF.md` marked historical with corrected badges; CODING_STANDARDS mirrors the real package keys and owner URL; a dated addendum in `docs/evidence/alpha.md`; docs only | check |
 | S38 | 2026-10-28 | `stonecrab::sensors` denies `clippy::indexing_slicing` like codec, modbus, sim and transport (finding G04): the outer attribute on its module declaration, the `sensors` row of `scripts/lint-attrs.sh` and its self-test fixtures, CODING_STANDARDS 5.1 and 5.5, an ADR-0018 addendum. The module had no indexing or slicing, so no code changed and sensors stays at 100% lines; a probe proved the lint is live | check, coverage, lint-attrs, fuzz (fuzz_sensors_profile_toml, 60 s) |

@@ -1,5 +1,5 @@
 //! The OPC UA TCP framing (OPC UA Part 6, 6.7 and 7.1): the 8-byte message header, the six
-//! message types and the [`OpcuaFramer`] that finds single-chunk messages in a byte stream.
+//! message types and the [`OpcuaFramer`] that finds individual message chunks in a byte stream.
 //!
 //! Every message starts with a header of a three-character message type (`HEL`, `ACK`, `ERR`,
 //! `OPN`, `CLO` or `MSG`), a one-character chunk flag (`C` intermediate, `F` final, `A` abort)
@@ -9,7 +9,7 @@
 //! header in front of the payload: `OpenSecureChannel` the asymmetric header (the policy URI,
 //! the sender certificate and the receiver certificate thumbprint, 59 bytes for the policy
 //! None), `CloseSecureChannel` and Message the symmetric one (the token id). The payload stays
-//! bytes here; the chunking slice (S94) reassembles chunks and the generated service layer
+//! bytes here; the lane reassembles chunks and the generated service layer
 //! (S88) reads the payload.
 //!
 //! The framer takes the size from the header and compares it with the receive buffer and
