@@ -27,7 +27,7 @@ socket and starts no discovery.
 | Built-in types of the binary encoding: String, `ByteString`, Guid, `DateTime`, `StatusCode`, `NodeId`, `ExpandedNodeId`, `QualifiedName`, `LocalizedText` (crate-private) | build-tested |
 | Recursive and open types of the binary encoding: Variant (25 types, arrays, dimensions), `DataValue`, `DiagnosticInfo`, the `ExtensionObject` envelope with Raw, Xml and Null bodies, bounded in depth and in array counts (crate-private) | build-tested |
 | TCP framing: the 8-byte header, HEL, ACK, ERR, OPN, CLO and MSG bodies, the asymmetric header of policy None, the symmetric and sequence headers, and a bounded chunk `Framer` (crate-private) | build-tested |
-| Generated 24-case connection/read/discovery service bodies and 274 status names; Known `ExtensionObject` dispatch (crate-private) | build-tested |
+| Generated 25-case connection/read/discovery service bodies and 274 status names; Known `ExtensionObject` dispatch (crate-private) | build-tested |
 | Bounded service exchange lane: correlation, sender priority, headers, sequence/channel/token checks, ERR and `ServiceFault` (crate-private) | build-tested |
 | Policy-None HEL/ACK, OPN Issue, CLO and counter handoff (crate-private) | interoperability-tested with open62541 |
 | Public driver and anonymous None connection/session | interoperability-tested with open62541 |
@@ -414,3 +414,21 @@ supplies a value. Both source and server timestamps stay attached on either outc
 They are `SystemTime`, separate from monotonic `sampled_at`; absent/zero/unrepresentable
 times remain None. 10 ps refinements clamp at 9999 then truncate to whole ns; without
 a timestamp they are ignored. No native subscription or custom structure mapping is added.
+
+## Credential channel and plain username sessions (S99)
+
+Use `DriverRegistry::connect_with(uri, Credentials::new(username, password))`, or
+`ConnectionCache::builder(...).credential_provider(...)`, to supply credentials separately.
+URI username/password keys remain invalid. One cache uses one identity policy; remove or
+close its sessions before rotating credentials. Provider callbacks run outside locks only
+on new opens, must be nonblocking, and must return redacted errors; None retains the
+parsed driver's config, and failure never retries as anonymous.
+
+Username sessions on policy None require `allow-insecure-credentials=true`, default false.
+The driver emits a static warning and sends plain UTF-8 password bytes only for effective
+token policy None. Selected protected policies are refused without downgrade. The device's
+identity/access refusals map to Authentication with the source retained. Missing credentials
+or an empty pair selects anonymous; password without username is invalid before I/O.
+`Credentials::x509` represents certificate/key paths without loading them; certificate
+activation and protected username tokens remain S108. Eight native cases pass against
+open62541, including correct/wrong-password username sessions; no hardware claim.

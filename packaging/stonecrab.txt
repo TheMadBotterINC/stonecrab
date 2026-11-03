@@ -116,6 +116,7 @@ src/opcua/generated/timestamps_to_return.rs
 src/opcua/generated/user_token_policy.rs
 src/opcua/generated/user_token_type.rs
 src/opcua/generated.rs
+src/opcua/identity.rs
 src/opcua/lane/tests.rs
 src/opcua/lane.rs
 src/opcua/options.rs

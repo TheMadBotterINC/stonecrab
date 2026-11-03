@@ -270,3 +270,10 @@ extended-value test now has 28 mapped results and four named deferred-kind error
 ByteString/LocalizedText join its mapped results. The server namespace and policy-None
 connection flow are unchanged. No secure identity, native subscription or custom schema
 mapping is claimed by this probe.
+
+S99 enables `OPCUA_ALLOW_NONE_PASSWORD=1` only for the native Stonecrab test server,
+which advertises the plain UserName token policy explicitly. The native eight-test suite
+also proves opt-in refusal, successful username login, and wrong-password Authentication.
+It reads the runtime password from the ignored copied PKI, never from URI text or evidence.
+The separate in-image security checks retain their existing settings. `stop` removes the
+container and copied host PKI.
