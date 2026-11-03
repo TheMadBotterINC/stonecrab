@@ -6,9 +6,11 @@ use bytes::BytesMut;
 use super::*;
 use crate::opcua::OpcuaDriver;
 use crate::opcua::channel::Channel;
+use crate::opcua::codec::{ExpandedNodeId, ExtensionBody};
 use crate::opcua::connection::OpcuaConnection;
 use crate::opcua::frame::{Body, Frame, OpcuaFramer};
 use crate::opcua::generated::message_security_mode::MessageSecurityMode;
+use crate::opcua::generated::user_token_type::UserTokenType;
 use crate::opcua::responder::{
     acknowledge, activate_response, close_response, create_response, message, open_response,
     service_fault,
@@ -237,8 +239,13 @@ fn opcua_connect_fails_when_activate_session_is_refused() {
             }
         })]));
         let problem = connect(&driver, &clock).err().unwrap();
-        assert_eq!(problem.kind(), ErrorKind::DeviceException);
-        assert!(problem.to_string().contains("0x801F0000"));
+        assert_eq!(problem.kind(), ErrorKind::Authentication);
+        assert!(
+            std::error::Error::source(&problem)
+                .unwrap()
+                .to_string()
+                .contains("0x801F0000")
+        );
     }
 }
 
@@ -432,6 +439,7 @@ fn opcua_create_session_adopts_the_authentication_token_and_revised_timeout() {
         Session::open(
             Lane::from_channel(channel, Duration::from_millis(1)),
             options,
+            Identity::Anonymous,
             [0xA5; 32],
             deadline,
             &cancel,
@@ -795,6 +803,7 @@ fn opcua_session_cancellation_and_drop_never_activate_a_half_open_session() {
             let mut session = Box::pin(Session::open(
                 Lane::from_channel(channel, Duration::from_secs(30)),
                 options,
+                Identity::Anonymous,
                 [7; 32],
                 deadline,
                 &cancel,
@@ -893,4 +902,364 @@ fn opcua_anonymous_session_activates_with_an_anonymous_identity_token() {
         }))
     );
     block_on_with(&clock, connection.close()).unwrap();
+}
+
+fn user_response(policy_uri: UaString) -> Vec<u8> {
+    let mut response = decode_service(&create_response(2, 54321.0, 0)).unwrap();
+    let Service::CreateSessionResponse {
+        server_endpoints, ..
+    } = &mut response
+    else {
+        panic!("fixture")
+    };
+    let policies = server_endpoints
+        .as_mut()
+        .unwrap()
+        .first_mut()
+        .unwrap()
+        .user_identity_tokens
+        .as_mut()
+        .unwrap();
+    let mut policy = policies.first().unwrap().clone();
+    policy.policy_id = UaString::new("selected-user");
+    policy.token_type = UserTokenType::UserTokenTypeUserName;
+    policy.security_policy_uri = policy_uri;
+    policies.push(policy);
+    encode(&response)
+}
+
+fn registry(driver: OpcuaDriver) -> DriverRegistry {
+    let mut registry = DriverRegistry::new();
+    registry.register(Arc::new(driver)).unwrap();
+    registry
+}
+
+// covers: OPCUA-CFG-PASSWORD / OPCUA-CFG-USERNAME
+#[test]
+fn opcua_config_password_is_redacted_in_display_and_debug() {
+    let config =
+        OpcuaDriver::configuration(URI)
+            .unwrap()
+            .with_credentials(crate::Credentials::new(
+                "operator-sentinel",
+                "password-sentinel",
+            ));
+    for text in [format!("{config:?}"), config.redacted_display()] {
+        assert!(!text.contains("operator-sentinel"));
+        assert!(!text.contains("password-sentinel"));
+    }
+    for key in ["username", "password"] {
+        let (driver, clock, factory) = driver(Script::strict(vec![]));
+        let registry = registry(driver);
+        let error = block_on_with(
+            &clock,
+            registry.connect_with(
+                &format!("{URI}&{key}=password-sentinel"),
+                crate::Credentials::new("operator-sentinel", "password-sentinel"),
+            ),
+        )
+        .err()
+        .unwrap();
+        assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+        assert!(!format!("{error:?}").contains("password-sentinel"));
+        assert_eq!(factory.opens().len(), 0);
+    }
+}
+
+// covers: OPCUA-AUTH-RESOLVE
+#[test]
+fn opcua_credentials_come_only_from_the_config() {
+    for token_uri in [
+        UaString::null(),
+        UaString::new(""),
+        UaString::new(crate::opcua::options::SecurityPolicy::None.uri()),
+    ] {
+        let (driver, clock, factory) = driver(scripted_response(2, user_response(token_uri)));
+        let registry = registry(driver);
+        let connection = block_on_with(
+            &clock,
+            registry.connect_with(
+                &format!("{URI}&allow-insecure-credentials=true"),
+                crate::Credentials::new("operator-sentinel", "пароль\0sentinel"),
+            ),
+        )
+        .unwrap();
+        let sent = factory.probes().remove(0).sent();
+        let Service::ActivateSessionRequest {
+            user_identity_token,
+            ..
+        } = payload(sent.get(3).unwrap())
+        else {
+            panic!("activate")
+        };
+        assert_eq!(
+            user_identity_token.type_id,
+            ExpandedNodeId::local(NodeId::numeric(0, 324))
+        );
+        let ExtensionBody::Known(body) = user_identity_token.body else {
+            panic!("known token")
+        };
+        assert_eq!(
+            *body,
+            Service::UserNameIdentityToken {
+                policy_id: UaString::new("selected-user"),
+                user_name: UaString::new("operator-sentinel"),
+                password: UaByteString::new("пароль\0sentinel".as_bytes().to_vec()),
+                encryption_algorithm: UaString::null()
+            }
+        );
+        block_on_with(&clock, connection.close()).unwrap();
+    }
+}
+
+#[test]
+fn opcua_no_credentials_means_anonymous() {
+    for credentials in [None, Some(crate::Credentials::new("", ""))] {
+        let (driver, clock, factory) = driver(Script::strict(vec![Step::respond(reply)]));
+        let registry = registry(driver);
+        let connection = if let Some(credentials) = credentials {
+            block_on_with(&clock, registry.connect_with(URI, credentials)).unwrap()
+        } else {
+            block_on_with(&clock, registry.connect(URI)).unwrap()
+        };
+        let sent = factory.probes().remove(0).sent();
+        let Service::ActivateSessionRequest {
+            user_identity_token,
+            ..
+        } = payload(sent.get(3).unwrap())
+        else {
+            panic!("activate")
+        };
+        assert_eq!(
+            user_identity_token.type_id,
+            ExpandedNodeId::local(NodeId::numeric(0, 321))
+        );
+        block_on_with(&clock, connection.close()).unwrap();
+    }
+}
+
+// covers: OPCUA-AUTH-INSECURE / OPCUA-CFG-ALLOW-INSECURE-CREDENTIALS
+#[test]
+fn opcua_credentials_over_an_unprotected_token_policy_fail_before_sending() {
+    for flag in ["", "&allow-insecure-credentials=false"] {
+        let (driver, clock, factory) = driver(Script::strict(vec![]));
+        let registry = registry(driver);
+        let problem = block_on_with(
+            &clock,
+            registry.connect_with(
+                &format!("{URI}{flag}"),
+                crate::Credentials::new("operator", "password-sentinel"),
+            ),
+        )
+        .err()
+        .unwrap();
+        assert_eq!(problem.kind(), ErrorKind::Authentication);
+        assert!(!problem.to_string().contains("password-sentinel"));
+        assert_eq!(factory.opens().len(), 0);
+    }
+}
+
+struct CapturedLog(Arc<std::sync::Mutex<Vec<u8>>>);
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CapturedLog {
+    type Writer = tracing_subscriber::fmt::writer::MutexGuardWriter<'a, Vec<u8>>;
+    fn make_writer(&'a self) -> Self::Writer {
+        tracing_subscriber::fmt::MakeWriter::make_writer(self.0.as_ref())
+    }
+}
+
+#[test]
+fn opcua_allow_insecure_credentials_sends_the_user_name_and_warns() {
+    let output = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+    let subscriber = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .without_time()
+        .with_max_level(tracing::Level::TRACE)
+        .with_writer(CapturedLog(Arc::clone(&output)))
+        .finish();
+    tracing::subscriber::with_default(subscriber, || {
+        let (driver, clock, _) = driver(scripted_response(2, user_response(UaString::null())));
+        let registry = registry(driver);
+        let connection = block_on_with(
+            &clock,
+            registry.connect_with(
+                &format!("{URI}&allow-insecure-credentials=true"),
+                crate::Credentials::new("operator-sentinel", "password-sentinel"),
+            ),
+        )
+        .unwrap();
+        block_on_with(&clock, connection.close()).unwrap();
+    });
+    let text = String::from_utf8(output.lock().unwrap().clone()).unwrap();
+    assert!(text.contains("WARN"));
+    assert!(text.contains("allow-insecure-credentials=true"));
+    assert!(!text.contains("operator-sentinel"));
+    assert!(!text.contains("password-sentinel"));
+}
+
+// covers: OPCUA-AUTH-TOKEN-POLICY
+#[test]
+fn opcua_an_endpoint_without_a_matching_user_token_policy_is_not_selected() {
+    let (driver, clock, factory) = driver(Script::strict(vec![Step::respond(reply)]));
+    let registry = registry(driver);
+    let problem = block_on_with(
+        &clock,
+        registry.connect_with(
+            &format!("{URI}&allow-insecure-credentials=true"),
+            crate::Credentials::new("operator", "password-sentinel"),
+        ),
+    )
+    .err()
+    .unwrap();
+    assert_eq!(problem.kind(), ErrorKind::Authentication);
+    assert_eq!(factory.probes().remove(0).sent().len(), 3);
+    assert!(!problem.to_string().contains("password-sentinel"));
+}
+
+#[test]
+fn opcua_protected_username_policy_is_never_downgraded_to_plain() {
+    for token_uri in [
+        "http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256",
+        "unrecognized-protected-policy",
+    ] {
+        let (driver, clock, factory) = driver(scripted_response(
+            2,
+            user_response(UaString::new(token_uri)),
+        ));
+        let registry = registry(driver);
+        let problem = block_on_with(
+            &clock,
+            registry.connect_with(
+                &format!("{URI}&allow-insecure-credentials=true"),
+                crate::Credentials::new("operator", "password-sentinel"),
+            ),
+        )
+        .err()
+        .unwrap();
+        assert_eq!(problem.kind(), ErrorKind::Unsupported(Operation::Connect));
+        assert_eq!(factory.probes().remove(0).sent().len(), 3);
+        assert!(!problem.to_string().contains("password-sentinel"));
+    }
+}
+
+// covers: OPCUA-DIV-PASSWORD-WITHOUT-USER / OPCUA-AUTH-TYPES
+#[test]
+fn opcua_a_password_without_a_user_name_is_invalid_config() {
+    let (driver, clock, factory) = driver(Script::strict(vec![]));
+    let registry = registry(driver);
+    let error = block_on_with(
+        &clock,
+        registry.connect_with(URI, crate::Credentials::new("", "password-sentinel")),
+    )
+    .err()
+    .unwrap();
+    assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+    assert!(!error.to_string().contains("password-sentinel"));
+    assert_eq!(factory.opens().len(), 0);
+}
+#[test]
+fn opcua_an_unsupported_credential_kind_is_invalid_config() {
+    let (driver, clock, factory) = driver(Script::strict(vec![]));
+    let registry = registry(driver);
+    let error = block_on_with(
+        &clock,
+        registry.connect_with(
+            URI,
+            crate::Credentials::x509("certificate-sentinel", "key-sentinel"),
+        ),
+    )
+    .err()
+    .unwrap();
+    assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+    assert!(!format!("{error:?}").contains("sentinel"));
+    assert_eq!(factory.opens().len(), 0);
+}
+
+#[test]
+fn opcua_identity_refusals_are_authentication_with_the_device_source_preserved() {
+    use crate::opcua::codec::StatusCode;
+    use crate::opcua::service::StatusFault;
+    use std::error::Error;
+    for code in [0x801F_0000, 0x8020_0000, 0x8021_0000, 0x8057_0000] {
+        for wrapped in [false, true] {
+            let device = status_error(StatusCode(code));
+            let problem = if wrapped {
+                PlcError::new(ErrorKind::Disconnected, "wrapped source").with_source(device)
+            } else {
+                device
+            };
+            let error = activation_error(problem);
+            assert_eq!(error.kind(), ErrorKind::Authentication);
+            let mut source = error.source();
+            let mut found = None;
+            while let Some(current) = source {
+                if let Some(status) = current.downcast_ref::<StatusFault>() {
+                    found = Some(status.code);
+                }
+                source = current.source();
+            }
+            assert_eq!(found, Some(code));
+        }
+    }
+    assert_eq!(
+        activation_error(PlcError::new(ErrorKind::Timeout, "deadline")).kind(),
+        ErrorKind::Timeout
+    );
+    assert_eq!(
+        activation_error(status_error(StatusCode(0x8001_0000))).kind(),
+        ErrorKind::DeviceException
+    );
+    for reply in [
+        activate_response(3, 0x801F_0000),
+        service_fault(3, 0x8020_0000),
+    ] {
+        let (driver, clock, _) = driver(scripted_response(3, reply));
+        assert_eq!(
+            connect(&driver, &clock).err().unwrap().kind(),
+            ErrorKind::Authentication
+        );
+    }
+}
+
+#[tokio::test]
+#[expect(
+    clippy::disallowed_macros,
+    reason = "ignored independent peer test records only nonsensitive login/refusal outcomes"
+)]
+#[ignore = "needs the independent open62541 peer; interop/open62541/interop.sh tests"]
+async fn opcua_interop_username_over_none_requires_opt_in_and_wrong_password_is_authentication() {
+    let uri = std::env::var("STONECRAB_INTEROP_OPEN62541").expect("endpoint");
+    let file =
+        std::env::var("STONECRAB_INTEROP_OPEN62541_PASSWORD_FILE").expect("runtime password file");
+    let password = std::fs::read_to_string(file).expect("runtime PKI password");
+    let mut registry = DriverRegistry::new();
+    registry.register(Arc::new(OpcuaDriver::new())).unwrap();
+    assert_eq!(
+        registry
+            .connect_with(&uri, crate::Credentials::new("stonecrab", password.clone()))
+            .await
+            .err()
+            .unwrap()
+            .kind(),
+        ErrorKind::Authentication
+    );
+    let uri = format!("{uri}&allow-insecure-credentials=true");
+    let connection = registry
+        .connect_with(&uri, crate::Credentials::new("stonecrab", password.clone()))
+        .await
+        .unwrap();
+    assert_eq!(connection.state(), ConnectionState::Connected);
+    connection.close().await.unwrap();
+    let error = registry
+        .connect_with(
+            &uri,
+            crate::Credentials::new("stonecrab", format!("{password}\0wrong")),
+        )
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), ErrorKind::Authentication);
+    assert!(!format!("{error:?}").contains(&password));
+    println!(
+        "public username/None opt-in connect/close passed; missing opt-in and wrong password refused without credential disclosure"
+    );
 }

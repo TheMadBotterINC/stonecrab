@@ -26,6 +26,7 @@ mod endpoint;
     reason = "generated metadata and service constructors are consumed incrementally by S89–S92"
 )]
 mod generated;
+mod identity;
 mod lane;
 #[cfg(test)]
 #[cfg(feature = "testkit")]

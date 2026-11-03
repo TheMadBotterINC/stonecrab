@@ -210,12 +210,10 @@ impl Driver for OpcuaDriver {
                     "OPC UA secure policy is not implemented; select None explicitly",
                 ));
             }
-            if config.credentials().is_some() {
-                return Err(PlcError::new(
-                    ErrorKind::Authentication,
-                    "OPC UA currently supports anonymous sessions only",
-                ));
-            }
+            let identity = crate::opcua::identity::Identity::resolve(
+                config.credentials().map(crate::Secret::expose),
+                options,
+            )?;
             let deadline = Deadline::after(self.clock.now(), config.timeouts().connect)?;
             let cancel = CancellationToken::new();
             let mut nonce = [0; 32];
@@ -237,7 +235,7 @@ impl Driver for OpcuaDriver {
             )
             .await?;
             let lane = Lane::from_channel(channel, config.timeouts().request);
-            let session = Session::open(lane, options, nonce, deadline, &cancel).await?;
+            let session = Session::open(lane, options, identity, nonce, deadline, &cancel).await?;
             let connection: Box<dyn Connection> = Box::new(OpcuaConnection::new(
                 session,
                 Arc::clone(&self.clock),

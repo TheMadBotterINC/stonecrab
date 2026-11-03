@@ -1379,6 +1379,7 @@ async fn opcua_interop_large_array_read_chunks_under_none() {
     let session = Session::open(
         Lane::from_channel(channel, Duration::from_secs(5)),
         options,
+        crate::opcua::identity::Identity::Anonymous,
         [7; 32],
         deadline,
         &cancel,

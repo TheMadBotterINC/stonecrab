@@ -12,14 +12,19 @@ mod tests {
     use stonecrab::testkit::{FakeClock, block_on_with};
     use stonecrab::{
         AddressOptions, Capabilities, Connection, ConnectionCache, ConnectionConfig,
-        CredentialIdentity, Credentials, Driver, DriverRegistry, ErrorKind, OpFuture, PlcError,
-        ProtocolAddress, Result,
+        CredentialIdentity, Credentials, Driver, DriverOptions, DriverRegistry, ErrorKind,
+        OpFuture, PlcError, ProtocolAddress, Result,
     };
 
     const URI: &str = "sim://credential-bench";
     type Record = (Option<(String, String)>, String, String, bool);
+    #[derive(Debug)]
+    struct ProbeOptions;
+    impl DriverOptions for ProbeOptions {}
+
     struct RecordingDriver {
         driver: SimDriver,
+        configured_identity: bool,
         records: Arc<Mutex<Vec<Record>>>,
     }
     impl Driver for RecordingDriver {
@@ -30,7 +35,14 @@ mod tests {
             self.driver.capabilities()
         }
         fn parse_config(&self, uri: &str) -> Result<ConnectionConfig> {
-            self.driver.parse_config(uri)
+            let parsed = self.driver.parse_config(uri)?;
+            let mut builder = ConnectionConfig::builder(parsed.scheme(), parsed.endpoint().clone())
+                .driver_options(Arc::new(ProbeOptions));
+            if self.configured_identity {
+                builder =
+                    builder.credentials(Credentials::new("configured", "configured-password"));
+            }
+            builder.build()
         }
         fn parse_address(
             &self,
@@ -48,7 +60,7 @@ mod tests {
                 credentials,
                 format!("{config:?}"),
                 config.redacted_display(),
-                config.driver_options().is_some(),
+                config.driver_options_as::<ProbeOptions>().is_some(),
             ));
             self.driver.connect(config)
         }
@@ -63,6 +75,7 @@ mod tests {
         registry
             .register(Arc::new(RecordingDriver {
                 driver,
+                configured_identity: false,
                 records: Arc::clone(&records),
             }))
             .unwrap();
@@ -102,7 +115,10 @@ mod tests {
             assert!(!text.contains("operator-sentinel"));
             assert!(!text.contains("password-sentinel"));
         }
-        assert!(!*options, "sim keeps latency in its custom endpoint");
+        assert!(
+            *options,
+            "driver-owned options survive credential attachment"
+        );
         assert!(debug.contains("latency-ms=3"));
         drop(seen);
         block_on_with(&clock, connection.close()).unwrap();
@@ -161,6 +177,48 @@ mod tests {
         ));
         assert_eq!(username.username, "new");
         assert!(format!("{username:?}").contains("UserNamePassword"));
+    }
+
+    #[test]
+    fn cache_none_preserves_configured_credentials_and_registry_credentials_replace_them() {
+        let clock = FakeClock::default();
+        let records = Arc::new(Mutex::new(Vec::new()));
+        let mut registry = DriverRegistry::new();
+        registry
+            .register(Arc::new(RecordingDriver {
+                driver: SimDriver::new()
+                    .with_device("credential-bench", SimDevice::new())
+                    .unwrap()
+                    .with_clock(Arc::new(clock.clone())),
+                configured_identity: true,
+                records: Arc::clone(&records),
+            }))
+            .unwrap();
+        let registry = Arc::new(registry);
+        let cache = ConnectionCache::builder(Arc::clone(&registry), Arc::new(clock.clone()))
+            .credential_provider(|_| Ok(None))
+            .build()
+            .unwrap();
+        let lease = block_on_with(&clock, cache.get(URI)).unwrap();
+        drop(lease);
+        block_on_with(&clock, cache.close()).unwrap();
+        let connection = block_on_with(
+            &clock,
+            registry.connect_with(URI, Credentials::new("supplied", "supplied-password")),
+        )
+        .unwrap();
+        block_on_with(&clock, connection.close()).unwrap();
+        let seen = records.lock().unwrap();
+        assert_eq!(
+            seen.first().unwrap().0,
+            Some(("configured".to_owned(), "configured-password".to_owned()))
+        );
+        assert_eq!(
+            seen.last().unwrap().0,
+            Some(("supplied".to_owned(), "supplied-password".to_owned()))
+        );
+        assert!(seen.iter().all(|record| record.3));
+        drop(seen);
     }
 
     // covers: TOOL-CC-CACHE
