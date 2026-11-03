@@ -3,7 +3,7 @@ The OPC UA client of Stonecrab (`stonecrab::opcua`), behind the opt-in `opcua` f
 in neither `default` nor `full`, as `tls` is (decision E17, ADR-0034), and it needs the
 `transport` feature. The module is being built in slices (milestone M3, ADR-0034). It currently has the
 address grammar, public `OpcuaDriver`, binary codecs, generated services, TCP framing,
-policy-None channel/session setup and bounded request lane. End-to-end Read follows in S92.
+policy-None channel/session setup and bounded request lane. End-to-end scalar Read is available since S92.
 
 This module offers `OpcuaAddress`, a validated `ProtocolAddress` for the tag text
 `ns=<n>;<i|s|g|b>=<id>[range][;a=<attribute>][;TYPE][|key=value,...]`, with the types its
@@ -22,9 +22,10 @@ socket and starts no discovery.
 | Bounded service exchange lane: correlation, sender priority, headers, sequence/channel/token checks, ERR and `ServiceFault` (crate-private) | build-tested |
 | Policy-None HEL/ACK, OPN Issue, CLO and counter handoff (crate-private) | interoperability-tested with open62541 |
 | Public driver and anonymous None connection/session | interoperability-tested with open62541 |
-| Read, write, browse, subscriptions | planned |
+| Scalar Read (Boolean, eight integer widths, Float/Double, String/XML, Null) | interoperability-tested with open62541 |
+| Write, browse, subscriptions | planned |
 | Signed/encrypted security policies and certificate validation | planned |
-| Independent-server Read interoperability | planned |
+| Independent-server scalar Read interoperability | verified with open62541 |
 | Hardware verification | planned |
 
 Build-tested here means unit tests, a property test and a fuzz target on the address text, a
@@ -256,7 +257,7 @@ other callers. Interrupting a send can leave partial bytes on the wire and fails
 whole lane. Deterministic tests exercise both outcomes, out-of-order replies, simultaneous
 waiters, sender priority, reentrant wake-ups, resource bounds and fake-clock deadlines.
 S90 supplies Hello/channel negotiation; S91 adds public connect and anonymous sessions.
-Read remains S92.
+Scalar Read is available since S92.
 
 ## Policy-None channel
 Since S90, the private channel owner exchanges Hello/Acknowledge, sends `OpenSecureChannel`
@@ -274,10 +275,10 @@ cancellation token bound the handshake, including silent peers. `handshake-timeo
 maps to the whole connect bound since S91.
 
 Handoff preserves request/sequence counters and negotiated bounds. The lane sends
-`CloseSecureChannel` without waiting for a reply. Two exact-count ignored tests against
-open62541 v1.5.9 prove channel counter continuation and public session connect/close.
-Evidence is recorded by `interop/open62541/interop.sh tests` and CI; usable Read follows
-in S92 and chunk reassembly in S94.
+`CloseSecureChannel` without waiting for a reply. Three exact-count ignored tests against
+open62541 v1.5.9 prove channel counter continuation, public session connect/close and scalar Read.
+Evidence is recorded by `interop/open62541/interop.sh tests` and CI; chunk reassembly
+follows in S94.
 
 
 ## Public connect and anonymous session
@@ -285,7 +286,7 @@ in S92 and chunk reassembly in S94.
 Register `Arc::new(OpcuaDriver::new())` with `DriverRegistry`, then connect to
 `opcua://host:4840/path?security-policy=NONE`. The port is required. Secure policies keep
 the secure default but are currently refused before I/O; username/password credentials
-are also refused. No data-operation capability is advertised yet.
+are also refused. Read is advertised; write, ping, browse and subscriptions remain unsupported.
 
 TCP, HEL/ACK, OPN Issue, `CreateSession` and anonymous `ActivateSession` share one
 `handshake-timeout-ms` deadline (60000 by default, exposed as `Timeouts.connect`). The
@@ -300,6 +301,39 @@ Close sends `CloseSession` (`deleteSubscriptions=true`, timeoutHint 50000), then
 transport shutdown without a CLO response wait. The whole sequence is bounded by
 `request-timeout-ms` (30000); timeout, failure or dropping close leaves Closed and wakes
 state observers. Concurrent and repeated closes are bounded/idempotent. Dropping the
-connection releases its transport and publishes Closed. No service is replayed. The
+connection releases its transport and publishes Closed. Reads are sent once by default;
+explicit `RetryPolicy` behavior is described below. The
 independent peer test proves a full anonymous None session using the public registry API;
-this supplies no evidence for secure policies, renewal, data operations or hardware.
+this supplies no evidence for secure policies, renewal or hardware.
+
+
+## Scalar reads
+
+`Connection::read` sends one service request for all tags, with `maxAge=0` and both
+source/server timestamps requested. Results remain in tag order; a result-count mismatch
+is `MalformedData` for the whole call. Any standard attribute id and `IndexRange` are sent
+as configured. Scalars map by their wire type: Boolean, eight integer widths/signs,
+Float/Double bit patterns, UTF-8 String/XML, and Null. Invalid UTF-8 fails only its item;
+strings keep NUL, whitespace and BOM. Arrays, other built-ins and explicit type coercions
+remain later slices and currently yield per-item Unsupported. Source time is attached
+only when supplied by the server and convertible; extended metadata remains S98.
+
+`BadNodeIdUnknown` maps to `NotFound`, `BadTypeMismatch` to `InvalidDataType`, `BadNotWritable`
+and `BadUserAccessDenied` to `AccessDenied`, and `BadAttributeIdInvalid`/`BadIndexRangeNoData`
+to `InvalidAddress`. Unknown failure codes map to `Internal`; other known failures map
+to `DeviceException`. Every item retains its exact status code and known symbolic name.
+An Uncertain value succeeds with its status attached; an Uncertain item without a value
+fails. Good absent/Null values and null strings map to Null.
+
+A read uses the earlier of its explicit deadline and the per-attempt request timeout.
+The default is one attempt; an explicit `RetryPolicy` permits bounded safe reads while the
+same lane is usable and the explicit deadline has time left. Writes are not replayed and
+reconnect remains S110. Cancelling/dropping receives preserves partial buffered bytes;
+interrupted sends fail the lane. Close cancels pending reads with Disconnected, and a
+late read failure cannot replace Closing/Closed. An unpolled read may hold its transport
+lease until resumed/dropped; the close itself still has its request-timeout bound.
+
+The 33-case shared contract suite passes 23 cases with 10 named skips for unsupported
+write, supported-ping and polling-subscription behavior. The independent peer verifies
+Boolean, Int32, Double and String plus an unknown node in one batch, and runs the finite
+`opcua_read` example against `ns=1;s=scalar/Int32`.
