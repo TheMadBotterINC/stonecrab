@@ -32,7 +32,9 @@ too; an unknown write outcome is never collapsed into a rejection or replayed.
 | Browse and discover | not supported |
 | Calendar values: `PlcSignedDuration`, `PlcDate`, `PlcTimeOfDay`, `PlcDateTime` (ADR-0021) | build-tested (unit and property tests); no driver decodes them yet |
 | Lists: `PlcValue::List`, `PlcValueType::List` (ADR-0022) | simulator-tested (unit tests; the Modbus driver reads and writes them through array selections over the fake transport) |
-| Byte and raw values (`RawValue`) | not supported |
+| Bytes and bounded ordered structures: `PlcValue::Bytes`, `PlcValue::Struct`, `PlcStruct` (ADR-0036) | build-tested; OPC UA ByteString/LocalizedText interoperability-tested |
+| Independent source/server timestamps: `ReadItem::source_time`, `ReadItem::server_time` | build-tested; OPC UA interoperability-tested |
+| Raw values (`RawValue`) | not supported |
 | Hardware verification | planned |
 
 `simulator-tested` means the driver contract suite of the `testkit` feature runs against
@@ -260,3 +262,19 @@ assert_eq!(cache.active_leases(), 0);
 # #[cfg(not(all(feature = "sim", feature = "testkit")))]
 # fn main() {}
 ```
+
+## Bytes, structures and server time (S98)
+
+`PlcValue::Bytes(Vec<u8>)` preserves opaque octets, including empty bytes, separately
+from Null and List of U8. `PlcValue::Struct(PlcStruct)` holds ordered named fields.
+Construct with `PlcStruct::new(Vec<(String, PlcValue)>)`; inspect with `fields()` or
+`get()`, or take ownership with `into_fields()`. Duplicate names are `InvalidConfig`;
+more than 1024 fields, 64 composite levels through lists/structures, or 1048576 nodes
+within the structure are `ResourceLimit`. Validation and rejected-tree disposal are
+iterative. Existing caller-created top-level Lists remain caller-owned data. Neither
+new value coerces to a number or Boolean. Type ordering appends Bytes then Struct after
+List; values retain only partial equality because they can contain floats.
+
+`ReadItem::server_time()` defaults to None, and `with_server_time()` attaches a server's
+actual timestamp independently of source_time and local monotonic sampled_at. Both
+successful and failed reads can retain these timestamps and their original status.

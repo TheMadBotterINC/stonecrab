@@ -338,11 +338,13 @@ fields with 100 ns precision across the full wire range, including the 1601 epoc
 negative ticks, independently of host clock range. Guid is canonical lower-case text;
 `NodeId` text reuses address escaping/base64 and parses back; `QualifiedName` is
 `ns=<n>;s=<name>` (null name is Null); `StatusCode` text carries its name and hex code.
-Source time is attached only when supplied and convertible; extended metadata remains S98.
+S98 attaches source and server times independently when supplied and convertible, on
+successful values and item errors. Missing or zero timestamps stay None. Picosecond
+refinements are clamped and truncated to whole nanoseconds; no local/epoch substitute.
 
 Arrays of supported types become Lists, retaining one-element, empty and null distinctions;
 matrices become nested row-major Lists; zero-length axes produce empty Lists. Dimension/count mismatch
-fails only the item. Rank is at most 64, all items share 1048576 values/List containers,
+fails only the item. Rank is at most 64, all items share 1048576 value/container nodes,
 and an empty matrix creates at most 64 Lists. Bounds are checked before building the tree;
 failed mappings leave the remaining node budget available to other items.
 
@@ -354,7 +356,7 @@ already temporal values remain unchanged. Float/Boolean/text counts, integer wra
 calendar/duration overflow are refused as per-item `InvalidDataType`; other suffixes leave
 the actual server type unchanged. No numeric truncation is performed.
 
-`ByteString` and `LocalizedText` await S98. `ExpandedNodeId`, `DataValue`, Variant,
+S98 maps `ByteString` and `LocalizedText`. `ExpandedNodeId`, `DataValue`, Variant,
 `DiagnosticInfo` and custom `ExtensionObject` values remain named per-item Unsupported;
 this includes null/empty arrays of deferred kinds. They do not fail mapped batch items.
 
@@ -396,3 +398,19 @@ lane exchange are implemented; S106 wires them into secure connect. None connect
 `CreateSession`'s endpoint list and skips `GetEndpoints`. An explicit private probe against
 open62541 verifies all seven advertised policy/mode combinations and token types; it
 makes no certificate-trust or secure-channel claim.
+
+## Byte strings, localized text and metadata (S98)
+
+`ByteString` maps to `PlcValue::Bytes`, without text conversion or cloning. Null is Null,
+empty is empty Bytes. `LocalizedText` maps to `PlcValue::Struct` with exactly `text` then
+`locale` fields; missing/null fields are Null, explicit empty fields empty String.
+Delimiters remain ordinary text. Arrays/matrices keep these values and their shape;
+invalid UTF-8 fails only that item. Each localized value uses three shared budget nodes,
+and its structure counts toward the 64-composite-level bound before tree construction.
+
+Quality remains the exact item `ProtocolStatus` code/name. Good and value-bearing
+Uncertain items keep their decoded value; Bad remains an item error even when the server
+supplies a value. Both source and server timestamps stay attached on either outcome.
+They are `SystemTime`, separate from monotonic `sampled_at`; absent/zero/unrepresentable
+times remain None. 10 ps refinements clamp at 9999 then truncate to whole ns; without
+a timestamp they are ignored. No native subscription or custom structure mapping is added.

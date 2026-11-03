@@ -5,7 +5,7 @@ use crate::{ErrorKind, PlcError, Result};
 
 /// The exact representation of a [`PlcValue`].
 ///
-/// Byte-buffer and structured representations are deferred; they will not be silently
+/// Bytes and bounded ordered structures keep their exact representation; neither is
 /// substituted with strings or floating-point numbers. Calendar values have the four
 /// representations of ADR-0021 and a list of elements has [`List`](Self::List)
 /// (ADR-0022), whatever its elements are.
@@ -54,6 +54,10 @@ pub enum PlcValueType {
     /// An ordered list of values, such as the elements of an array selection (ADR-0022).
     /// The element type is the tag's, not part of this one.
     List,
+    /// An opaque ordered octet string, distinct from a list of integer values.
+    Bytes,
+    /// An immutable ordered set of named fields validated by [`PlcStruct`].
+    Struct,
 }
 
 /// Exact-width scalar data, and lists of it, independent of a protocol, sensor or runtime.
@@ -135,6 +139,193 @@ pub enum PlcValue {
     /// # Compatibility: docs/parity/core.md#CORE-VALUE-LIST
     /// Upstream `PlcList` holds a `java.util.List<PlcValue>` and reports `PlcValueType.List`.
     List(Vec<Self>),
+    /// Opaque bytes, retaining empty values and every octet without text conversion.
+    ///
+    /// # Compatibility: docs/parity/core.md#CORE-VALUE-BYTES
+    Bytes(Vec<u8>),
+    /// Ordered named fields, with construction bounds enforced by [`PlcStruct`].
+    Struct(PlcStruct),
+}
+
+/// An immutable structure preserving the caller's field order and exact values.
+///
+/// Names are unique and compared exactly. Bounds include nested structures and lists;
+/// byte/string payload lengths remain the responsibility of the caller or wire decoder.
+/// Fields cannot be mutated without validating a new structure (ADR-0036).
+///
+/// # Compatibility: docs/parity/core.md#CORE-VALUE-STRUCT
+///
+/// # Examples
+/// ```
+/// use stonecrab::{PlcStruct, PlcValue, PlcValueType};
+/// let text = PlcStruct::new(vec![
+///     ("text".to_owned(), PlcValue::String("ready".to_owned())),
+///     ("locale".to_owned(), PlcValue::Null),
+/// ])?;
+/// assert_eq!(text.get("text"), Some(&PlcValue::String("ready".to_owned())));
+/// assert_eq!(text.fields().first().map(|(name, _)| name.as_str()), Some("text"));
+/// assert_eq!(PlcValue::Struct(text).value_type(), PlcValueType::Struct);
+/// # Ok::<(), stonecrab::PlcError>(())
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct PlcStruct {
+    fields: Vec<(String, PlcValue)>,
+}
+
+impl PlcStruct {
+    /// Maximum fields in one structure.
+    pub const MAX_FIELDS: usize = 1024;
+    /// Maximum composite containers on any path, including this structure.
+    pub const MAX_DEPTH: usize = 64;
+    /// Maximum scalar values and composite containers in the complete structure.
+    pub const MAX_NODES: usize = 1_048_576;
+
+    /// Validate already-owned fields, retaining their order and exact representations.
+    ///
+    /// # Errors
+    /// [`ErrorKind::InvalidConfig`] for duplicate field names; [`ErrorKind::ResourceLimit`]
+    /// for too many fields, composite depth or value nodes. Validation and rejection use
+    /// iterative traversal, including for caller-created deeply nested lists.
+    pub fn new(fields: Vec<(String, PlcValue)>) -> Result<Self> {
+        if let Err(error) = validate_structure(&fields) {
+            for (_, value) in fields {
+                discard_tree(value);
+            }
+            return Err(error);
+        }
+        Ok(Self { fields })
+    }
+
+    /// All fields in their original order.
+    #[must_use]
+    pub fn fields(&self) -> &[(String, PlcValue)] {
+        &self.fields
+    }
+
+    /// Find one exact field name without changing order or coercing its value.
+    #[must_use]
+    pub fn get(&self, name: &str) -> Option<&PlcValue> {
+        self.fields
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value)
+    }
+
+    /// Take ownership of the original fields.
+    #[must_use]
+    pub fn into_fields(self) -> Vec<(String, PlcValue)> {
+        self.fields
+    }
+}
+
+fn structure_limit() -> PlcError {
+    PlcError::new(
+        ErrorKind::ResourceLimit,
+        "structure field/depth/node limit exceeded",
+    )
+}
+
+fn validate_structure(fields: &[(String, PlcValue)]) -> Result<()> {
+    if fields.len() > PlcStruct::MAX_FIELDS {
+        return Err(structure_limit());
+    }
+    let mut names = std::collections::HashSet::new();
+    for (name, _) in fields {
+        if !names.insert(name) {
+            return Err(PlcError::new(
+                ErrorKind::InvalidConfig,
+                "duplicate structure field name",
+            ));
+        }
+    }
+    let mut pending: Vec<_> = fields.iter().map(|(_, value)| (value, 1_usize)).collect();
+    let mut nodes = 1_usize;
+    while let Some((value, depth)) = pending.pop() {
+        nodes = nodes.saturating_add(1);
+        match value {
+            PlcValue::List(values) => push_children(&mut pending, values.iter(), depth, nodes)?,
+            PlcValue::Struct(value) => push_children(
+                &mut pending,
+                value.fields.iter().map(|(_, value)| value),
+                depth,
+                nodes,
+            )?,
+            PlcValue::Null
+            | PlcValue::Bool(_)
+            | PlcValue::I8(_)
+            | PlcValue::I16(_)
+            | PlcValue::I32(_)
+            | PlcValue::I64(_)
+            | PlcValue::U8(_)
+            | PlcValue::U16(_)
+            | PlcValue::U32(_)
+            | PlcValue::U64(_)
+            | PlcValue::F32(_)
+            | PlcValue::F64(_)
+            | PlcValue::Char(_)
+            | PlcValue::String(_)
+            | PlcValue::Duration(_)
+            | PlcValue::SignedDuration(_)
+            | PlcValue::Date(_)
+            | PlcValue::TimeOfDay(_)
+            | PlcValue::DateTime(_)
+            | PlcValue::Bytes(_) => {}
+        }
+    }
+    Ok(())
+}
+
+fn push_children<'a>(
+    pending: &mut Vec<(&'a PlcValue, usize)>,
+    children: impl ExactSizeIterator<Item = &'a PlcValue>,
+    depth: usize,
+    nodes: usize,
+) -> Result<()> {
+    let depth = depth
+        .checked_add(1)
+        .filter(|depth| *depth <= PlcStruct::MAX_DEPTH)
+        .ok_or_else(structure_limit)?;
+    nodes
+        .checked_add(pending.len())
+        .and_then(|nodes| nodes.checked_add(children.len()))
+        .filter(|nodes| *nodes <= PlcStruct::MAX_NODES)
+        .ok_or_else(structure_limit)?;
+    pending.extend(children.map(|value| (value, depth)));
+    Ok(())
+}
+
+/// Rejecting caller-owned List trees must not recursively drop an unvalidated depth.
+fn discard_tree(value: PlcValue) {
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
+        match value {
+            PlcValue::List(values) => pending.extend(values),
+            PlcValue::Struct(value) => {
+                pending.extend(value.into_fields().into_iter().map(|(_, value)| value));
+            }
+            PlcValue::Null
+            | PlcValue::Bool(_)
+            | PlcValue::I8(_)
+            | PlcValue::I16(_)
+            | PlcValue::I32(_)
+            | PlcValue::I64(_)
+            | PlcValue::U8(_)
+            | PlcValue::U16(_)
+            | PlcValue::U32(_)
+            | PlcValue::U64(_)
+            | PlcValue::F32(_)
+            | PlcValue::F64(_)
+            | PlcValue::Char(_)
+            | PlcValue::String(_)
+            | PlcValue::Duration(_)
+            | PlcValue::SignedDuration(_)
+            | PlcValue::Date(_)
+            | PlcValue::TimeOfDay(_)
+            | PlcValue::DateTime(_)
+            | PlcValue::Bytes(_) => {}
+        }
+    }
 }
 
 impl PlcValue {
@@ -162,6 +353,8 @@ impl PlcValue {
             Self::TimeOfDay(_) => PlcValueType::TimeOfDay,
             Self::DateTime(_) => PlcValueType::DateTime,
             Self::List(_) => PlcValueType::List,
+            Self::Bytes(_) => PlcValueType::Bytes,
+            Self::Struct(_) => PlcValueType::Struct,
         }
     }
 
@@ -200,7 +393,9 @@ impl PlcValue {
             | Self::Date(_)
             | Self::TimeOfDay(_)
             | Self::DateTime(_)
-            | Self::List(_) => None,
+            | Self::List(_)
+            | Self::Bytes(_)
+            | Self::Struct(_) => None,
         }
     }
 
@@ -229,7 +424,9 @@ impl PlcValue {
             | Self::Date(_)
             | Self::TimeOfDay(_)
             | Self::DateTime(_)
-            | Self::List(_) => None,
+            | Self::List(_)
+            | Self::Bytes(_)
+            | Self::Struct(_) => None,
         }
     }
 
@@ -259,7 +456,9 @@ impl PlcValue {
             | Self::Date(_)
             | Self::TimeOfDay(_)
             | Self::DateTime(_)
-            | Self::List(_) => None,
+            | Self::List(_)
+            | Self::Bytes(_)
+            | Self::Struct(_) => None,
         }
     }
 }
@@ -772,6 +971,8 @@ mod tests {
             PlcValueType::TimeOfDay,
             PlcValueType::DateTime,
             PlcValueType::List,
+            PlcValueType::Bytes,
+            PlcValueType::Struct,
         ];
         let mut reversed = declared;
         reversed.reverse();
@@ -1310,6 +1511,165 @@ mod tests {
             assert_eq!(value.as_i64(), None, "no numeric coercion");
             assert_eq!(value.as_u64(), None, "no numeric coercion");
             assert_eq!(value.as_f64(), None, "no numeric coercion");
+        }
+    }
+    #[test]
+    fn value_bytes_round_trips_and_orders_after_list() {
+        assert!(PlcValueType::List < PlcValueType::Bytes);
+        assert!(PlcValueType::Bytes < PlcValueType::Struct);
+        for bytes in [vec![], vec![0, 1, 254, 255]] {
+            let value = PlcValue::Bytes(bytes.clone());
+            assert_eq!(value.clone(), value);
+            assert_eq!(value.value_type(), PlcValueType::Bytes);
+            assert_eq!(value.as_bool(), None);
+            assert_eq!(value.as_i64(), None);
+            assert_eq!(value.as_u64(), None);
+            assert_eq!(value.as_f64(), None);
+            assert_eq!(value, PlcValue::Bytes(bytes));
+        }
+        assert_ne!(PlcValue::Bytes(vec![]), PlcValue::Null);
+        assert_ne!(
+            PlcValue::Bytes(vec![1]),
+            PlcValue::List(vec![PlcValue::U8(1)])
+        );
+    }
+
+    #[test]
+    fn value_struct_preserves_exact_order_names_and_values() {
+        let fields = vec![
+            ("z".to_owned(), PlcValue::Bytes(vec![255])),
+            ("A".to_owned(), PlcValue::Null),
+            ("a".to_owned(), PlcValue::I32(1)),
+        ];
+        let structure = PlcStruct::new(fields.clone()).unwrap();
+        assert_eq!(structure.fields(), fields);
+        assert_eq!(structure.get("z"), Some(&PlcValue::Bytes(vec![255])));
+        assert_eq!(structure.get("absent"), None);
+        assert_eq!(structure.clone().into_fields(), fields);
+        let value = PlcValue::Struct(structure.clone());
+        assert_eq!(value.value_type(), PlcValueType::Struct);
+        assert_eq!(value.as_bool(), None);
+        assert_eq!(value.as_i64(), None);
+        assert_eq!(value.as_u64(), None);
+        assert_eq!(value.as_f64(), None);
+        assert_eq!(value.clone(), value);
+        assert!(format!("{structure:?}").contains("fields"));
+        let mut reversed = fields;
+        reversed.reverse();
+        assert_ne!(structure, PlcStruct::new(reversed).unwrap());
+        assert_eq!(PlcStruct::new(vec![]).unwrap().fields(), []);
+        let outer = PlcStruct::new(vec![(
+            "inner".to_owned(),
+            PlcValue::Struct(structure.clone()),
+        )])
+        .unwrap();
+        assert_eq!(outer.get("inner"), Some(&PlcValue::Struct(structure)));
+    }
+
+    #[test]
+    fn value_struct_rejects_too_many_fields() {
+        let fields = |n| (0..n).map(|i| (i.to_string(), PlcValue::Null)).collect();
+        assert_eq!(PlcStruct::MAX_FIELDS, 1024);
+        assert_eq!(PlcStruct::new(fields(1024)).unwrap().fields().len(), 1024);
+        assert_eq!(
+            PlcStruct::new(fields(1025)).unwrap_err().kind(),
+            ErrorKind::ResourceLimit
+        );
+        let nested = PlcStruct::new(vec![("nested".to_owned(), PlcValue::Bool(true))]).unwrap();
+        let error = PlcStruct::new(vec![
+            ("private".to_owned(), PlcValue::Struct(nested)),
+            (
+                "private".to_owned(),
+                PlcValue::List(vec![PlcValue::Bytes(vec![255])]),
+            ),
+        ])
+        .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+        assert!(!error.to_string().contains("private"));
+    }
+
+    #[test]
+    fn value_struct_bounds_mixed_list_structure_depth_and_nodes() {
+        assert_eq!(PlcStruct::MAX_DEPTH, 64);
+        assert_eq!(PlcStruct::MAX_NODES, 1_048_576);
+        let mut value = PlcValue::Null;
+        for _ in 0..63 {
+            value = PlcValue::List(vec![value]);
+        }
+        let structure = PlcStruct::new(vec![("root".to_owned(), value)]).unwrap();
+        assert_eq!(
+            PlcStruct::new(vec![("over".to_owned(), PlcValue::Struct(structure))])
+                .unwrap_err()
+                .kind(),
+            ErrorKind::ResourceLimit
+        );
+        let mut nested = PlcValue::Struct(PlcStruct::new(vec![]).unwrap());
+        for _ in 0..62 {
+            nested = PlcValue::List(vec![nested]);
+        }
+        assert!(PlcStruct::new(vec![("exact-depth".to_owned(), nested.clone())]).is_ok());
+        let over = PlcValue::List(vec![nested]);
+        assert_eq!(
+            PlcStruct::new(vec![("over-depth".to_owned(), over)])
+                .unwrap_err()
+                .kind(),
+            ErrorKind::ResourceLimit
+        );
+        let exact = PlcValue::List(vec![PlcValue::Null; PlcStruct::MAX_NODES - 2]);
+        assert_eq!(
+            PlcStruct::new(vec![("exact".to_owned(), exact)])
+                .unwrap()
+                .fields()
+                .len(),
+            1
+        );
+        let over = PlcValue::List(vec![PlcValue::Null; PlcStruct::MAX_NODES - 1]);
+        assert_eq!(
+            PlcStruct::new(vec![("over".to_owned(), over)])
+                .unwrap_err()
+                .kind(),
+            ErrorKind::ResourceLimit
+        );
+        // Pending siblings count against the node budget before any child references grow.
+        let almost = PlcValue::List(vec![PlcValue::Null; PlcStruct::MAX_NODES - 2]);
+        assert_eq!(
+            PlcStruct::new(vec![
+                ("one".to_owned(), PlcValue::Null),
+                ("two".to_owned(), almost)
+            ])
+            .unwrap_err()
+            .kind(),
+            ErrorKind::ResourceLimit
+        );
+    }
+
+    #[test]
+    fn value_struct_rejects_a_deep_caller_tree_without_recursive_drop() {
+        std::thread::Builder::new()
+            .stack_size(128 * 1024)
+            .spawn(|| {
+                let mut value = PlcValue::Null;
+                for _ in 0..100_000 {
+                    value = PlcValue::List(vec![value]);
+                }
+                assert_eq!(
+                    PlcStruct::new(vec![("deep".to_owned(), value)])
+                        .unwrap_err()
+                        .kind(),
+                    ErrorKind::ResourceLimit
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    proptest! {
+        #[test]
+        fn value_bytes_and_struct_fields_preserve_owned_data(values in prop::collection::vec(prop::collection::vec(any::<u8>(),0..32),0..16)) {
+            let fields:Vec<_>=values.into_iter().enumerate().map(|(i,bytes)|(i.to_string(),PlcValue::Bytes(bytes))).collect();
+            let structure=PlcStruct::new(fields.clone()).unwrap();
+            prop_assert_eq!(structure.into_fields(),fields);
         }
     }
 }

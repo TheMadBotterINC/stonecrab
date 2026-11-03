@@ -5,6 +5,36 @@ Implementation baseline: the commit that last modified this file
 (`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
 its own commit; the slice log below records what each one landed.
 
+## Bytes, bounded structures and OPC UA metadata (S98, 2026-11-03)
+
+S98 appends exact Bytes and bounded Struct values without changing previous type order.
+Public PlcStruct preserves immutable ordered unique fields, bounded to 1024 fields,
+64 composite levels and 1048576 nodes, including lists. Validation and rejected-tree
+cleanup are iterative; a 100000-level caller List is rejected without recursive drop.
+Neither new value coerces to a number/Boolean. ReadItem gains independent optional
+server_time alongside source_time and monotonic sampled_at (ADR-0036, approved E18).
+
+OPC UA moves ByteString bytes without cloning and maps LocalizedText to text/locale fields,
+preserving null/empty distinctions. Arrays/matrices preflight the extra fields' node/depth
+cost against the shared response budget. Good/Uncertain values and item failures retain
+exact status plus both optional timestamps; Bad remains an item failure. Missing/zero or
+unrepresentable timestamps stay None, and 10 ps refinements clamp/truncate to whole ns.
+Six OPC UA rows and CORE-VALUE-BYTES close; CORE-VALUE-STRUCT records the bounded contract.
+
+Full check passes (2335 tests, 586+5 doctests); core 6916/6916 and handwritten OPC UA
+7276/7276 are 100%, with every other coverage floor unchanged and passing. All 59 feature
+combinations, 15 fuzz targets, default/fuzz lint, regeneration, semver default/all,
+dependencies/machete, parity/attributes and 198-file package/unpacked all-feature build
+pass. Mutation runs report 85 caught/23 unviable and 10 caught/two unviable, both exit 0,
+with no survivors/timeouts. Seven exact-count open62541 tests and the finite example pass;
+the extended 32-tag batch now maps 28 items and names four deferred-kind refusals.
+
+Self-review under ADR-0005's waiver and [S98 evidence](docs/evidence/opcua-s98.md) record
+the design, limits, initial verification corrections and final gates. No new dependency,
+feature, version, hardware or publication; opcua remains opt-in outside default/full.
+
+Next: S99, credential API/channel additions. Normal merges preserve all signed-off commits.
+
 ## OPC UA client design accepted (S97, 2026-11-03)
 
 ADR-0034 is Accepted, recording the existing E13/E14/E17/E18/E19/E21/E22 approvals and
@@ -668,6 +698,7 @@ commit; gates named were run locally before that commit.
 
 | Slice | Date | Landed | Gates |
 | --- | --- | --- | --- |
+| S98 | 2026-11-03 | Bytes and immutable ordered PlcStruct with field/depth/node bounds and iterative rejection; independent ReadItem server_time. OPC UA ByteString/LocalizedText and status/source/server metadata, with aggregate structured-array budgeting and Bad failure precedence preserved. Six protocol rows plus core Bytes/Struct contracts; ADR-0036. Self-review under ADR-0005 waiver; [evidence](docs/evidence/opcua-s98.md) | full check (2335 tests, 586+5 doctests), core/opcua coverage 100, 59 features, 15 fuzz targets, mutations 85 caught/23 unviable plus metadata 10/two (both exit 0), strict lint, regen, semver default/all, dependencies/machete, parity/attributes, 198-file package/unpacked all-feature build, seven independent-peer cases |
 | S97 | 2026-11-03 | Accept ADR-0034 and record seven existing maintainer outcomes; ratify S83 address accessor surface, reconcile architecture/Connection/README contracts and refresh Phase H completion. Distinguish caller-driven OPC UA session pump and typed native-subscription end from EventPump and future capability claims. Documentation only; self-review under ADR-0005 waiver; [evidence](docs/evidence/opcua-s97.md) | full check (2321 tests, 584+5 doctests), strict lint/rustdoc, no-default build, parity/self-test, attributes, documentation/relative-link consistency, executable-source comparison, unchanged 198-file package verification, DCO |
 | S96 | 2026-11-03 | Parsed endpoint matching and host/port overrides, exact policy/mode/token compatibility, security-level ranking and token-protection tie-break, bounded sanitized diagnostics and selected URL Debug. GetEndpoints codecs/private exchange; discovery configuration with fail-closed off/secure/no-path rule. Ten assigned parity rows; secure execution/trust retain later slices. Runner propagates test/example failures. Self-review under ADR-0005 waiver; [evidence](docs/evidence/opcua-s96.md) | check (2321 tests), coverage (opcua 100), 59 feature combinations, 15 fuzz targets, mutants 126 caught/10 unviable plus final selector 57 caught/two unviable (both exit 0), regen, parity/lint, semver default/all, dependencies/machete, 198-file package/unpacked build, six independent-peer cases, three negative runner probes |
 | S95 | 2026-11-03 | Pure extended value mapper, arrays/matrices, UTC tick precision, canonical Guid/NodeId text and checked temporal suffixes. Shared rank/node bounds, named per-item refusals, absent/explicit Null budget correction; 13 assigned parity rows plus two documented divergences. Self-review under ADR-0005 waiver; [evidence](docs/evidence/opcua-s95.md) | check (2296 tests), coverage (opcua 100), 59 features, 15 fuzz targets, final mapper mutations (43 caught/11 unviable) and affected-read rerun (30 caught/6 unviable), both exit 0, regen, parity/lint, semver default/all, dependencies/machete, 196-file package/unpacked build, five independent-peer cases |

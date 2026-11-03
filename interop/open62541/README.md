@@ -219,8 +219,8 @@ a few minutes natively and longer under emulation.
 `interop.sh tests` runs the ignored unit test
 `opcua::channel::tests::opcua_interop_peer_answers_hello_and_opens_a_none_channel`.
 S91 also runs `opcua::session::tests::opcua_interop_connects_and_closes_with_policy_none`
-through the public driver/registry API. The nextest filter must select exactly six tests
-(`EXPECTED_TESTS=6`). `run` and hosted CI
+through the public driver/registry API. The nextest filter must select exactly seven tests
+(`EXPECTED_TESTS=7`). `run` and hosted CI
 execute it after the in-image checks and PKI step and retain `nextest.txt` beside the
 existing image identity/check/server evidence. The script supplies
 `STONECRAB_INTEROP_OPEN62541=opcua://127.0.0.1:<port>?security-policy=NONE`.
@@ -262,3 +262,11 @@ and a server certificate (including the None endpoint in this configured peer). 
 checks discovery decoding, not certificate trust or native secure-connect behavior.
 The runner returns failure immediately for a failed nextest command or example even
 when invoked from run_all's shell conditional; it cannot mask a test failure.
+
+S98 adds `opcua::connection::tests::opcua_interop_reads_bytes_localized_text_and_both_timestamps`.
+Public Read verifies ByteString's exact 00/01/FE/FF bytes, separate LocalizedText text/locale,
+Good item status, and independently present source/server timestamps. The existing 32-tag
+extended-value test now has 28 mapped results and four named deferred-kind errors;
+ByteString/LocalizedText join its mapped results. The server namespace and policy-None
+connection flow are unchanged. No secure identity, native subscription or custom schema
+mapping is claimed by this probe.

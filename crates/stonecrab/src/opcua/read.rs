@@ -13,7 +13,7 @@
 
 use std::any::Any;
 use std::num::NonZeroU32;
-use std::time::Instant;
+use std::time::{Duration, Instant, SystemTime};
 
 use crate::opcua::codec::{
     DataValue, DateTime, Guid, Identifier, NodeId, QualifiedName, StatusCode, UaByteString,
@@ -168,14 +168,20 @@ fn item(
         }))
     });
     let mut item = ReadItem::new(tag, outcome, sampled).with_status(protocol_status(status));
-    if let Some(time) = data
-        .source_timestamp
-        .filter(|timestamp| timestamp.0 != 0)
-        .and_then(DateTime::to_system_time)
-    {
+    if let Some(time) = timestamp(data.source_timestamp, data.source_picoseconds) {
         item = item.with_source_time(time);
     }
+    if let Some(time) = timestamp(data.server_timestamp, data.server_picoseconds) {
+        item = item.with_server_time(time);
+    }
     item
+}
+
+/// `SystemTime` cannot represent the remaining fraction below one nanosecond.
+fn timestamp(time: Option<DateTime>, picoseconds: Option<u16>) -> Option<SystemTime> {
+    let time = time.filter(|time| time.0 != 0)?.to_system_time()?;
+    let nanos = u64::from(picoseconds.unwrap_or(0).min(9999)).div_euclid(100);
+    time.checked_add(Duration::from_nanos(nanos))
 }
 
 const fn protocol_status(status: StatusCode) -> ProtocolStatus {

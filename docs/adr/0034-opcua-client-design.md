@@ -1198,3 +1198,14 @@ reads named batches on connections or cache leases and is unrelated. S109/S110/S
 implement the accepted lifecycle, with parity evidence required before support claims.
 E13's redistribution approval and E14's generator evidence are recorded in the plan's
 outcome table and STATUS, alongside E17/E18/E19/E21/E22. Acceptance authorizes no release.
+
+## S98 implementation (2026-11-03)
+
+ADR-0036 implements the approved core Bytes/Struct and server_time additions. PlcStruct
+is the public immutable wrapper that enforces Struct construction limits; its fields/get/
+into_fields accessors and fixed limits are part of decision 9's bounded structure surface.
+LocalizedText uses text then locale fields, preserving null/empty parts without concatenation;
+ByteString uses Bytes. Bad status keeps the existing item failure precedence per OPC UA
+Part 4, with status and both timestamps retained on the failure. Good/Uncertain decoded
+values retain the same metadata. Core and per-response node/depth bounds are independently
+enforced. Custom structure mapping remains S119/S120; credentials remain S99/S108.

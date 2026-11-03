@@ -588,9 +588,7 @@ fn opcua_an_unmapped_variant_kind_is_a_per_item_unsupported_error_naming_the_kin
             }
         }};
     }
-    refused!(ByteString, UaByteString::null());
     refused!(ExpandedNodeId, ExpandedNodeId::local(NodeId::numeric(0, 1)));
-    refused!(LocalizedText, LocalizedText::default());
     refused!(
         ExtensionObject,
         ExtensionObject {
@@ -665,4 +663,181 @@ fn opcua_failed_array_mapping_does_not_consume_other_items_node_budget() {
         ints(&[1, 2])
     );
     assert_eq!(budget, 5);
+}
+
+// covers: OPCUA-TYPE-BYTE-STRING
+#[test]
+fn opcua_a_null_byte_string_is_distinct_from_an_empty_one() {
+    assert_eq!(
+        mapped(Variant::scalar(Scalar::ByteString(UaByteString::null()))),
+        PlcValue::Null
+    );
+    assert_eq!(
+        mapped(Variant::scalar(Scalar::ByteString(UaByteString::new(
+            vec![]
+        )))),
+        PlcValue::Bytes(vec![])
+    );
+}
+#[test]
+fn opcua_byte_string_decodes_to_bytes() {
+    let bytes = vec![0, 1, 254, 255];
+    assert_eq!(
+        mapped(Variant::scalar(Scalar::ByteString(UaByteString::new(
+            bytes.clone()
+        )))),
+        PlcValue::Bytes(bytes)
+    );
+    assert_eq!(
+        mapped(array(
+            Array::ByteString(Some(vec![
+                UaByteString::null(),
+                UaByteString::new(vec![]),
+                UaByteString::new(vec![255])
+            ])),
+            None
+        )),
+        PlcValue::List(vec![
+            PlcValue::Null,
+            PlcValue::Bytes(vec![]),
+            PlcValue::Bytes(vec![255])
+        ])
+    );
+    assert_eq!(mapped(array(Array::ByteString(None), None)), PlcValue::Null);
+    assert_eq!(
+        mapped(array(Array::ByteString(Some(vec![])), None)),
+        PlcValue::List(vec![])
+    );
+}
+// covers: OPCUA-TYPE-LOCALIZED-TEXT / OPCUA-QUIRK-LOCALIZED-TEXT / OPCUA-DIV-LOCALIZED-TEXT
+#[test]
+fn opcua_localized_text_decodes_text_and_locale() {
+    for (text, locale) in [
+        (None, None),
+        (Some(UaString::null()), Some(UaString::null())),
+        (Some(UaString::new("")), Some(UaString::new(""))),
+        (
+            Some(UaString::new("ready|等待")),
+            Some(UaString::new("en-US")),
+        ),
+    ] {
+        let expected = PlcValue::Struct(
+            PlcStruct::new(vec![
+                (
+                    "text".to_owned(),
+                    text.clone()
+                        .and_then(|s| s.text().map(|s| s.unwrap().to_owned()))
+                        .map_or(PlcValue::Null, PlcValue::String),
+                ),
+                (
+                    "locale".to_owned(),
+                    locale
+                        .clone()
+                        .and_then(|s| s.text().map(|s| s.unwrap().to_owned()))
+                        .map_or(PlcValue::Null, PlcValue::String),
+                ),
+            ])
+            .unwrap(),
+        );
+        assert_eq!(
+            mapped(Variant::scalar(Scalar::LocalizedText(LocalizedText {
+                locale,
+                text
+            }))),
+            expected
+        );
+    }
+    for value in [
+        LocalizedText {
+            text: Some(UaString::from_bytes(vec![255])),
+            locale: None,
+        },
+        LocalizedText {
+            text: None,
+            locale: Some(UaString::from_bytes(vec![255])),
+        },
+    ] {
+        let mut budget = 3;
+        assert_eq!(
+            decode(
+                Variant::scalar(Scalar::LocalizedText(value)),
+                OpcuaDataType::Null,
+                &mut budget
+            )
+            .unwrap_err()
+            .kind(),
+            ErrorKind::MalformedData
+        );
+        assert_eq!(budget, 3);
+    }
+}
+#[test]
+fn opcua_localized_text_arrays_and_matrices_charge_field_nodes_before_construction() {
+    let value = LocalizedText::default();
+    let expected = mapped(Variant::scalar(Scalar::LocalizedText(value.clone())));
+    let variant = array(
+        Array::LocalizedText(Some(vec![value.clone(), value.clone()])),
+        Some(vec![1, 2]),
+    );
+    let mut budget = 8;
+    assert_eq!(
+        decode(variant.clone(), OpcuaDataType::Null, &mut budget).unwrap(),
+        PlcValue::List(vec![PlcValue::List(vec![expected.clone(), expected])])
+    );
+    assert_eq!(budget, 0);
+    let mut budget = 7;
+    assert_eq!(
+        decode(variant, OpcuaDataType::Null, &mut budget)
+            .unwrap_err()
+            .kind(),
+        ErrorKind::ResourceLimit
+    );
+    assert_eq!(budget, 7);
+    let mut budget = 3;
+    assert!(
+        decode(
+            Variant::scalar(Scalar::LocalizedText(value.clone())),
+            OpcuaDataType::Null,
+            &mut budget
+        )
+        .is_ok()
+    );
+    assert_eq!(budget, 0);
+    let mut budget = 2;
+    assert_eq!(
+        decode(
+            Variant::scalar(Scalar::LocalizedText(value)),
+            OpcuaDataType::Null,
+            &mut budget
+        )
+        .unwrap_err()
+        .kind(),
+        ErrorKind::ResourceLimit
+    );
+    assert_eq!(budget, 2);
+    assert_eq!(
+        mapped(array(Array::LocalizedText(None), None)),
+        PlcValue::Null
+    );
+    assert_eq!(
+        mapped(array(Array::LocalizedText(Some(vec![])), None)),
+        PlcValue::List(vec![])
+    );
+}
+
+#[test]
+fn opcua_localized_text_matrix_composite_depth_is_bounded() {
+    let make = |rank| {
+        array(
+            Array::LocalizedText(Some(vec![LocalizedText::default()])),
+            Some(vec![1; rank]),
+        )
+    };
+    assert!(fresh_mapping(make(63), OpcuaDataType::Null).is_ok());
+    assert_eq!(
+        fresh_mapping(make(64), OpcuaDataType::Null)
+            .unwrap_err()
+            .kind(),
+        ErrorKind::ResourceLimit
+    );
 }

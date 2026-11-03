@@ -784,6 +784,17 @@ async fn opcua_interop_reads_every_builtin_scalar_array_and_matrix_node() {
         ("scalar/Float", PlcValue::F32(1.5)),
         ("scalar/Double", PlcValue::F64(std::f64::consts::E)),
         ("scalar/String", PlcValue::String("stonecrab".to_owned())),
+        ("scalar/ByteString", PlcValue::Bytes(vec![0, 1, 254, 255])),
+        (
+            "scalar/LocalizedText",
+            PlcValue::Struct(
+                crate::PlcStruct::new(vec![
+                    ("text".to_owned(), PlcValue::String("text".to_owned())),
+                    ("locale".to_owned(), PlcValue::String("en-US".to_owned())),
+                ])
+                .unwrap(),
+            ),
+        ),
         (
             "scalar/DateTime",
             PlcValue::DateTime(PlcDateTime::new(
@@ -837,9 +848,7 @@ async fn opcua_interop_reads_every_builtin_scalar_array_and_matrix_node() {
         ),
     ];
     let refused = [
-        ("scalar/ByteString", "ByteString"),
         ("scalar/ExpandedNodeId", "ExpandedNodeId"),
-        ("scalar/LocalizedText", "LocalizedText"),
         ("scalar/DataValue", "DataValue"),
         ("scalar/DiagnosticInfo", "DiagnosticInfo"),
         ("structure", "ExtensionObject"),
@@ -862,8 +871,8 @@ async fn opcua_interop_reads_every_builtin_scalar_array_and_matrix_node() {
     }
     let reply = connection.read(request.build().unwrap()).await.unwrap();
     assert_eq!(reply.items().len(), 32);
-    assert_eq!(reply.iter_ok().count(), 26);
-    assert_eq!(reply.iter_failed().count(), 6);
+    assert_eq!(reply.iter_ok().count(), 28);
+    assert_eq!(reply.iter_failed().count(), 4);
     for ((name, expected), item) in expected.iter().zip(reply.items()) {
         assert_eq!(item.tag().as_str(), *name);
         assert_eq!(item.outcome().as_ref().unwrap(), expected, "{name}");
@@ -899,4 +908,55 @@ async fn opcua_interop_reads_every_builtin_scalar_array_and_matrix_node() {
     println!(
         "public Read: 18 mapped scalars, four arrays, 2D/3D matrices and 4000/10000-element arrays exact; six named deferred-kind errors isolated; 8192-byte buffers; close passed"
     );
+}
+
+#[tokio::test]
+#[expect(
+    clippy::disallowed_macros,
+    reason = "ignored independent peer test records non-secret value/metadata checks"
+)]
+#[ignore = "needs the independent open62541 peer; interop/open62541/interop.sh tests"]
+async fn opcua_interop_reads_bytes_localized_text_and_both_timestamps() {
+    let uri = std::env::var("STONECRAB_INTEROP_OPEN62541").expect("URI");
+    let driver = OpcuaDriver::new();
+    let connection = driver
+        .connect(driver.parse_config(&uri).unwrap())
+        .await
+        .unwrap();
+    let mut request = ReadRequest::builder(connection.limits());
+    for name in ["ByteString", "LocalizedText"] {
+        request = request.tag(Tag::new(
+            TagId::new(name).unwrap(),
+            Arc::new(OpcuaAddress::parse(&format!("ns=1;s=scalar/{name}")).unwrap()),
+        ));
+    }
+    let reply = connection.read(request.build().unwrap()).await.unwrap();
+    assert_eq!(reply.items().len(), 2);
+    assert_eq!(
+        reply.items().first().unwrap().outcome().as_ref().unwrap(),
+        &PlcValue::Bytes(vec![0, 1, 254, 255])
+    );
+    let PlcValue::Struct(text) = reply.items().get(1).unwrap().outcome().as_ref().unwrap() else {
+        panic!("localized text structure")
+    };
+    assert_eq!(text.get("text"), Some(&PlcValue::String("text".to_owned())));
+    assert_eq!(
+        text.get("locale"),
+        Some(&PlcValue::String("en-US".to_owned()))
+    );
+    for item in reply.items() {
+        assert_eq!(item.status().unwrap().code(), 0);
+        assert!(
+            item.source_time()
+                .is_some_and(|time| time > std::time::UNIX_EPOCH)
+        );
+        assert!(
+            item.server_time()
+                .is_some_and(|time| time > std::time::UNIX_EPOCH)
+        );
+    }
+    println!(
+        "ByteString exact octets, LocalizedText text/locale and both typed timestamps verified through public Read"
+    );
+    connection.close().await.unwrap();
 }

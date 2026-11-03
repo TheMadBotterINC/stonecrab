@@ -22,8 +22,8 @@ use crate::opcua::codec::{
 };
 use crate::opcua::{OpcuaAddress, OpcuaDataType, OpcuaIdentifier};
 use crate::{
-    ErrorKind, Operation, PlcDate, PlcDateTime, PlcError, PlcSignedDuration, PlcTimeOfDay,
-    PlcValue, Result,
+    ErrorKind, Operation, PlcDate, PlcDateTime, PlcError, PlcSignedDuration, PlcStruct,
+    PlcTimeOfDay, PlcValue, Result,
 };
 
 /// Aggregate values and List containers in one Read response, independent of wire length.
@@ -41,9 +41,36 @@ pub(super) fn decode(
 ) -> Result<PlcValue> {
     let (value, used) = match variant.value {
         VariantValue::Null => (PlcValue::Null, 1),
-        VariantValue::Scalar(value) => (scalar(value, target)?, 1),
+        VariantValue::Scalar(value) => {
+            let used = if matches!(&value, Scalar::LocalizedText(_)) {
+                3
+            } else {
+                1
+            };
+            if used > *budget {
+                return Err(resource());
+            }
+            (scalar(value, target)?, used)
+        }
         VariantValue::Array(array) => {
             let (partitions, used) = shape(variant.dimensions.as_deref(), array.len(), *budget)?;
+            let extra = if let Array::LocalizedText(Some(values)) = &array {
+                if !values.is_empty()
+                    && variant
+                        .dimensions
+                        .as_ref()
+                        .is_some_and(|dims| dims.len() >= PlcStruct::MAX_DEPTH)
+                {
+                    return Err(resource());
+                }
+                values.len().checked_mul(2).ok_or_else(resource)?
+            } else {
+                0
+            };
+            let used = used
+                .checked_add(extra)
+                .filter(|used| *used <= *budget)
+                .ok_or_else(resource)?;
             let value = array_values(array, target)?;
             let Some(mut values) = value else {
                 charge(budget, 1)?;
@@ -126,8 +153,8 @@ fn array_values(array: Array, target: OpcuaDataType) -> Result<Option<Vec<PlcVal
     }
     arrays! {
         mapped: Boolean, SByte, Byte, Int16, UInt16, Int32, UInt32, Int64, UInt64,
-        Float, Double, String, DateTime, Guid, XmlElement, NodeId, StatusCode, QualifiedName;
-        refused: ByteString, ExpandedNodeId, LocalizedText, ExtensionObject, DataValue, Variant, DiagnosticInfo
+        Float, Double, String, DateTime, Guid, XmlElement, NodeId, StatusCode, QualifiedName, ByteString, LocalizedText;
+        refused: ExpandedNodeId, ExtensionObject, DataValue, Variant, DiagnosticInfo
     }
 }
 
@@ -163,9 +190,20 @@ fn scalar(value: Scalar, target: OpcuaDataType) -> Result<PlcValue> {
             value.name().unwrap_or("unknown"),
             value.0
         )),
-        Scalar::ByteString(_) => return Err(unsupported("ByteString")),
+        Scalar::ByteString(value) => value.0.map_or(PlcValue::Null, PlcValue::Bytes),
         Scalar::ExpandedNodeId(_) => return Err(unsupported("ExpandedNodeId")),
-        Scalar::LocalizedText(_) => return Err(unsupported("LocalizedText")),
+        Scalar::LocalizedText(value) => {
+            let fields = [("text", value.text), ("locale", value.locale)]
+                .into_iter()
+                .map(|(name, value)| {
+                    Ok((
+                        name.to_owned(),
+                        text(value.unwrap_or_default())?.map_or(PlcValue::Null, PlcValue::String),
+                    ))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            PlcValue::Struct(PlcStruct::new(fields)?)
+        }
         Scalar::ExtensionObject(_) => return Err(unsupported("ExtensionObject")),
         Scalar::DataValue(_) => return Err(unsupported("DataValue")),
         Scalar::Variant(_) => return Err(unsupported("Variant")),

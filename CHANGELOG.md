@@ -5,6 +5,12 @@ Changelog. Stonecrab is one crate, so each release has one section. `stonecrab` 
 specification-stage placeholder.
 
 ## Unreleased
+- **Added (S98):** exact Bytes and bounded ordered Struct values, with immutable
+  `PlcStruct` fields and iterative construction/rejection checks. Type ordering is
+  preserved; neither representation coerces to numbers. `ReadItem` gains independent
+  optional server timestamps. OPC UA maps ByteString and LocalizedText, preserves both
+  timestamps and status on success/failure, and charges structured array/matrix fields
+  against its shared node budget. Bad remains an item failure. No dependency or version change.
 - **Added (opt-in `opcua`; S96):** parsed endpoint URL matching, exact policy/mode/token
   compatibility, security-level ranking and endpoint host/port overrides. Anonymous
   activation uses the selected token policy; bounded diagnostics exclude credential URLs.
