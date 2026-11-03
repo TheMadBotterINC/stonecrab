@@ -1159,3 +1159,19 @@ Reference checks: OPC Foundation Part 4 sections
 [7.41](https://reference.opcfoundation.org/specs/OPC-10000-4/7.41) describe the null
 GetEndpoints authentication token, empty transport-profile filter, and token-policy
 inheritance. Ranking is an advertised preference, not proof of server identity.
+
+## S97 acceptance plan (2026-11-03)
+
+Ratify the existing E13/E14/E17/E18/E19/E21/E22 outcomes and the S83 address accessor
+surface, then reconcile the architecture and Connection rustdoc with decisions 6–9.
+This slice changes documentation only: current S96 behavior stays distinct from the
+accepted S109–S118 renewal, reconnect and native-subscription contracts.
+
+Update this ADR's status/compliance, the plan's outcome and slice tables, STATUS's
+maintainer decisions/handoff, both README support descriptions, ARCHITECTURE's module,
+trait, value, lifecycle, connect/reconnect and feature descriptions, and Connection's
+in-flight-state wording. The private OPC UA session pump is `opcua::pump`, separate
+from ADR-0031's public batch-reading EventPump. E15/E16/E20 implementation acceptance
+remains S101/S103/S122. Validate doc-only changes, table/link consistency, parity and
+attribute checks, strict Clippy/rustdoc, doctests and the existing full suite. Runtime
+coverage evidence remains S96's; add no behavioral tests or new capability claims.
