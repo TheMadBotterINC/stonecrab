@@ -6,6 +6,8 @@ on:
   schedule:
     # Weekly, Monday 04:17 UTC. Runs every job below plus the "scheduled" skeleton.
     - cron: "17 4 * * 1"
+env:
+  AWS_LC_SYS_USE_SYSTEM: "0"
 permissions:
   contents: read
 concurrency:
@@ -34,6 +36,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+      - uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b # v1.5.2
+        if: runner.os == 'Windows'
+        with:
+          version: 2.16.03
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
         with:
           toolchain: ${{ matrix.rust }}
@@ -73,6 +79,18 @@ jobs:
           path: |
             target/coverage.lcov
             target/coverage-summary.txt
+  feature-footprint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
+        with:
+          toolchain: "1.99.1"
+      - run: scripts/feature-footprint.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: feature-footprint
+          path: target/feature-footprint/
   cross:
     # ring (feature tls, ADR-0032) compiles C and assembly in its build script, so even a
     # cargo check of these targets needs their C cross compilers and C library headers; cc
@@ -98,6 +116,7 @@ jobs:
         with:
           tool: cargo-deny@0.20.2
       - run: cargo deny --locked check
+      - run: scripts/dependency-trees.sh
   package:
     runs-on: ubuntu-latest
     steps:

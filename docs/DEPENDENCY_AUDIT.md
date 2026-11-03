@@ -663,16 +663,18 @@ Initial review: 2026-10-27. Versions are resolved in `Cargo.lock`.
 - Features: `zeroize` with `alloc`; `subtle` with none. No build script in either.
 - Review date: 2026-10-29.
 
-## Drafts for S101 (OPC UA cryptography, ADR-0035): not adopted
+## S101 adoption (2026-11-03, OPC UA cryptography, ADR-0035/0039)
 
-The four entries below were written by slice S82 from the probe on the unmerged branch
-`spike/s82-crypto-probe` (ADR-0035, status Proposed). None of these crates is in `Cargo.toml`
-or `Cargo.lock` of this repository for the `opcua` feature: that happens in slice S101, which
-turns each draft into a dated entry (or corrects it) in the same change that adds the
-dependency. Until then they are drafts, review dates are the probe's, and nothing here
-changes the entries above.
+The S82 drafts below are adopted with the four optional dependencies and their locked
+versions in S101. Source observations were repeated on 2026-11-03: keyword-line counts
+remain aws-lc-rs 381, aws-lc-sys 11254, webpki 0 and pki-types 1. Root and fuzz cargo-deny
+policies are unchanged. Native HMAC and OS entropy back the private foundation; AES/RSA
+and providerless webpki are exercised by adoption tests, with runtime protection/trust
+remaining S102–S108. No new first-party DER or PKCS #1 runtime loader is introduced.
+[D23 output](evidence/opcua-s101-dependency-trees.txt) records the actual root graph;
+[validation record](evidence/opcua-s101.md) tracks the current build and gate evidence.
 
-### aws-lc-rs 1.19.0 (DRAFT for S101: stonecrab, feature `opcua`)
+### aws-lc-rs 1.19.0 (stonecrab, feature `opcua`)
 - Purpose: the cryptography of the OPC UA security policies (decision E15, ADR-0035): RSA-OAEP
   with SHA-1 and SHA-256, RSA PKCS #1 v1.5 and PSS signatures with SHA-256, AES-CBC with a
   caller IV and no padding, HMAC-SHA1 and HMAC-SHA256, SHA-1 and SHA-256 digests, and the RSA
@@ -703,9 +705,9 @@ changes the entries above.
 - Maintenance: 1.19.0 was published 2026-10-28; 1.18.2 (2026-10-12, with `aws-lc-sys` 0.46.0)
   is the recorded fallback. `cargo deny` with the root `deny.toml` reports no advisory for the
   probe's graph on 2026-10-30.
-- Review date: 2026-10-30 (draft).
+- Review date: 2026-11-03.
 
-### aws-lc-sys 0.47.0 (DRAFT for S101: stonecrab, feature `opcua`, native code)
+### aws-lc-sys 0.47.0 (stonecrab, feature `opcua`, native code)
 - Purpose: the FFI bindings and the build of AWS-LC, the C cryptographic library under
   `aws-lc-rs`. A direct dependency is declared only to set the feature `disable-prebuilt-nasm`.
 - License: `ISC AND (Apache-2.0 OR ISC) AND Apache-2.0 AND MIT AND BSD-3-Clause AND
@@ -736,16 +738,17 @@ changes the entries above.
 - Banned crates: the D23 check (`cargo tree --locked --all-features --target all -e
   normal,dev,build -i <name>`) matches no package for `once_cell`, `lazy_static`, `log`, `time`
   and `chrono` in the probe's graph, with no new `deny.toml` wrapper. S101 repeats it on
-  `-p stonecrab --all-features` and pastes the output.
+  `-p stonecrab --all-features`: once_cell and lazy_static retain their existing allowed
+  rustls/tracing paths; log, time and chrono are absent. No new wrapper is added.
 - Advisories: RUSTSEC-2026-0044 to 0048 exist for `aws-lc-sys` (checked in the cargo-deny
   advisory database on 2026-10-30): 0045 (AES-CCM tag timing), 0046 and 0047 (`PKCS7_verify`
   bypasses) are patched from 0.38.0, 0044 (name constraints) and 0048 (CRL scope) from 0.39.0.
   0.47.0 is past every patched version, and `cargo deny` reports none for it.
 - Alternatives: as for `aws-lc-rs`; the `aws-lc-fips-sys` FIPS build (needs Go and CMake,
   out of scope).
-- Review date: 2026-10-30 (draft).
+- Review date: 2026-11-03.
 
-### rustls-webpki 0.103.16 (DRAFT for S101: addendum for feature `opcua`; entry above stands)
+### rustls-webpki 0.103.16 (addendum for feature `opcua`; entry above stands)
 - Purpose under `opcua`: validating the server's application certificate against the operator's
   trust list (S104), and verifying a signature with a certificate's public key
   (`EndEntityCert::verify_signature`), with no TLS involved.
@@ -765,9 +768,9 @@ changes the entries above.
   may be accepted; dated 2026-10-20, checked in the cargo-deny advisory database on 2026-10-30)
   is patched from 0.103.16, so this is the first release without it and the pin must not go
   lower.
-- Review date: 2026-10-30 (draft).
+- Review date: 2026-11-03.
 
-### rustls-pki-types 1.15.1 (DRAFT for S101: addendum for feature `opcua`; entry above stands)
+### rustls-pki-types 1.15.1 (addendum for feature `opcua`; entry above stands)
 - Purpose under `opcua`: the `CertificateDer`, `TrustAnchor`, `UnixTime` and `AlgorithmIdentifier`
   types webpki takes, `SignatureVerificationAlgorithm` (the trait the first-party algorithm
   implements), and the PEM parser that classifies a key store by label (`PRIVATE KEY` to
@@ -777,12 +780,13 @@ changes the entries above.
   file-reading helpers that `tls` already enables.
 - Unsafe: one line with the keyword on 2026-10-30; the `Zeroize` implementations of its key
   types clear them only when the owner calls `zeroize` (see the `tls` entry).
-- Review date: 2026-10-30 (draft).
+- Review date: 2026-11-03.
 
 ## getrandom 0.4.3 (optional OPC UA runtime dependency)
 - Purpose: fresh 32-byte CreateSession nonce; std has no portable cryptographic OS random
   API, and the transport's jitter explicitly is not cryptographic. ADR-0034 S91 records
-  this boundary. Deterministic session tests inject the nonce value, without an RNG trait.
+  this boundary. S101 moves OS entropy behind the private crypto backend; deterministic tests inject
+  the source and exercise failure before transport open. Session fixtures still accept a nonce.
 - License: MIT OR Apache-2.0. No default features enabled. Only the `opcua` feature enables
   it; default/full builds retain their existing runtime graph. Already present as a dev
   transitive dependency; no additional resolved version is introduced.

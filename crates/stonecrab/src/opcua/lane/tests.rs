@@ -1369,9 +1369,16 @@ async fn opcua_interop_large_array_read_chunks_under_none() {
         .open(config.endpoint(), *config.limits(), deadline)
         .await
         .unwrap();
-    let channel = Channel::open_none(transport, options, Arc::clone(&clock), deadline, &cancel)
-        .await
-        .unwrap();
+    let channel = Channel::open_none(
+        transport,
+        options,
+        Arc::clone(&clock),
+        deadline,
+        &cancel,
+        &crate::opcua::crypto::Native,
+    )
+    .await
+    .unwrap();
     assert_eq!(channel.limits.receive_buffer_size, 8192);
     assert_eq!(channel.limits.send_buffer_size, 8192);
     assert_eq!(channel.limits.max_message_size, 24576);

@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crate::opcua::OpcuaAddress;
 use crate::opcua::channel::{Channel, within};
 use crate::opcua::connection::OpcuaConnection;
+use crate::opcua::crypto::{self, Backend, Native};
 use crate::opcua::lane::Lane;
 use crate::opcua::options::SecurityPolicy;
 use crate::opcua::options::{OpcuaOptions, endpoint};
@@ -60,6 +61,7 @@ const TRANSPORTS: &str = "the only transport code of opcua is tcp";
 pub struct OpcuaDriver {
     clock: Arc<dyn Clock>,
     factory: Arc<dyn TransportFactory>,
+    crypto: Arc<dyn Backend>,
 }
 
 impl OpcuaDriver {
@@ -69,6 +71,7 @@ impl OpcuaDriver {
         Self {
             clock: Arc::new(SystemClock::default()),
             factory: Arc::new(TcpFactory::default()),
+            crypto: Arc::new(Native),
         }
     }
 
@@ -218,8 +221,7 @@ impl Driver for OpcuaDriver {
             )?;
             let deadline = Deadline::after(self.clock.now(), config.timeouts().connect)?;
             let cancel = CancellationToken::new();
-            let mut nonce = [0; 32];
-            nonce_result(getrandom::fill(&mut nonce))?;
+            let nonce = crypto::session_nonce(self.crypto.as_ref())?;
             let transport = within(
                 self.clock.as_ref(),
                 deadline,
@@ -234,6 +236,7 @@ impl Driver for OpcuaDriver {
                 Arc::clone(&self.clock),
                 deadline,
                 &cancel,
+                self.crypto.as_ref(),
             )
             .await?;
             let lane = Lane::from_channel(channel, config.timeouts().request);
@@ -249,11 +252,6 @@ impl Driver for OpcuaDriver {
             Ok(connection)
         })
     }
-}
-
-fn nonce_result(result: std::result::Result<(), getrandom::Error>) -> Result<()> {
-    result
-        .map_err(|_error| PlcError::new(ErrorKind::InvalidConfig, "OPC UA nonce generation failed"))
 }
 
 #[cfg(test)]
@@ -560,16 +558,55 @@ mod tests {
 }
 
 #[cfg(test)]
+#[cfg(feature = "testkit")]
 mod nonce_tests {
     use super::*;
+    use crate::opcua::crypto::Hash;
+    use crate::testkit::{FakeClock, FakeTransportFactory, block_on_with};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct RejectEntropy(AtomicUsize);
+
+    impl Backend for RejectEntropy {
+        fn fill_random(&self, _output: &mut [u8]) -> Result<()> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Err(PlcError::new(
+                ErrorKind::InvalidConfig,
+                "injected entropy failure",
+            ))
+        }
+
+        fn hmac(&self, hash: Hash, secret: &[u8], pieces: &[&[u8]]) -> Result<Vec<u8>> {
+            Native.hmac(hash, secret, pieces)
+        }
+    }
+
     #[test]
-    fn opcua_nonce_generation_failure_has_no_fallback() {
-        assert_eq!(
-            nonce_result(Err(getrandom::Error::UNSUPPORTED))
-                .unwrap_err()
-                .kind(),
-            ErrorKind::InvalidConfig
-        );
+    fn opcua_injected_entropy_failure_prevents_transport_open() {
+        let clock = FakeClock::default();
+        let factory = FakeTransportFactory::new(clock.clone());
+        let backend = Arc::new(RejectEntropy(AtomicUsize::new(0)));
+        let mut driver = OpcuaDriver::new()
+            .with_clock(Arc::new(clock.clone()))
+            .with_transport_factory(Arc::new(factory.clone()));
+        driver.crypto = Arc::<RejectEntropy>::clone(&backend);
         assert_eq!(OpcuaDriver::default().scheme(), "opcua");
+        assert_eq!(
+            backend
+                .hmac(Hash::Sha256, b"secret", &[b"seed"])
+                .unwrap()
+                .len(),
+            32
+        );
+        for (uri, expected) in [
+            ("opcua://fake:4840?security-policy=NONE", 1),
+            ("opcua://fake:4840", 1),
+        ] {
+            let config = driver.parse_config(uri).unwrap();
+            let error = block_on_with(&clock, driver.connect(config)).err().unwrap();
+            assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+            assert_eq!(backend.0.load(Ordering::SeqCst), expected);
+            assert_eq!(factory.opens().len(), 0);
+        }
     }
 }

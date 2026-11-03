@@ -71,6 +71,9 @@
 # fuzz run) and "mise run branch-coverage" (report only; its CI step is in the weekly
 # "scheduled" job).
 
+[env]
+AWS_LC_SYS_USE_SYSTEM = "0"
+
 [tools]
 rust = "1.99.1"
 "aqua:EmbarkStudios/cargo-deny" = "0.20.2"

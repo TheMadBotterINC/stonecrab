@@ -1,15 +1,11 @@
 # 0035: OPC UA cryptography
 ## Status
-Proposed (2026-10-30), as slice S82 of docs/POST_ALPHA_PLAN.md ("Cryptography probe across the
-CI matrix, as evidence for E15"). It is the evidence and the design for decision E15 (which
-cryptography dependency carries the OPC UA security policies), accepted as recommended on
-2026-10-30 on the condition that the probe is green on all five targets with `cargo deny`
-unchanged, and for the part of E16 that depends on what the library can sign. Slice S101
-("Adopt the E15 backend and accept the S82 ADR") accepts this ADR and adds the dependencies;
-nothing here changes `Cargo.toml`, `Cargo.lock`, `deny.toml` or any code of the crate, and
-ADR-0034 (the client design, slice S76) is a separate document. Every statement of what a
-build or a test did is about the unmerged branch `spike/s82-crypto-probe`, whose results are
-copied below so that they outlive the branch.
+Accepted in S101 (2026-11-03), following the five-target S82 probe recorded below.
+S101 adopts the four optional dependencies and the private backend/key schedule described
+in [ADR-0039](0039-opcua-crypto-foundation.md). Its root/fuzz/hosted validation is tracked
+separately in [S101 evidence](../evidence/opcua-s101.md); the branch must pass those gates
+before merge. The evidence section below remains the historical unmerged S82 probe,
+not a claim about the root implementation. ADR-0034 remains the client design.
 
 ## Context
 The OPC UA security policies need, on the client side: RSA-OAEP with SHA-1 and with SHA-256

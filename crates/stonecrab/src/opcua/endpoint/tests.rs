@@ -465,9 +465,16 @@ async fn opcua_interop_get_endpoints_lists_the_independent_servers_policies() {
         .open(config.endpoint(), *config.limits(), deadline)
         .await
         .unwrap();
-    let channel = Channel::open_none(transport, options, clock, deadline, &cancel)
-        .await
-        .unwrap();
+    let channel = Channel::open_none(
+        transport,
+        options,
+        clock,
+        deadline,
+        &cancel,
+        &crate::opcua::crypto::Native,
+    )
+    .await
+    .unwrap();
     let lane = Lane::from_channel(channel, config.timeouts().request);
     let endpoints = get_endpoints(&lane, options, deadline, &cancel)
         .await

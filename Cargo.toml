@@ -13,6 +13,10 @@ keywords = ["plc", "industrial", "modbus", "sensors", "protocols"]
 categories = ["network-programming", "embedded"]
 
 [workspace.dependencies]
+aws-lc-rs = { version = "1.19.0", default-features = false, features = ["aws-lc-sys", "alloc"] }
+aws-lc-sys = { version = "0.47.0", default-features = false, features = ["disable-prebuilt-nasm"] }
+rustls-webpki = { version = "0.103.16", default-features = false, features = ["alloc"] }
+rustls-pki-types = { version = "1.15.1", default-features = false, features = ["alloc"] }
 getrandom = { version = "0.4", default-features = false }
 thiserror = { version = "2.0", default-features = false, features = ["std"] }
 bytes = { version = "1.10", default-features = false, features = ["std"] }

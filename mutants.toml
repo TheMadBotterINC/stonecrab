@@ -41,6 +41,8 @@ examine_globs = [
   "crates/stonecrab/src/opcua/attributes.rs",
   "crates/stonecrab/src/opcua/value.rs",
   "crates/stonecrab/src/opcua/chunk.rs",
+  "crates/stonecrab/src/opcua/crypto.rs",
+  "crates/stonecrab/src/opcua/crypto/*.rs",
   # sensors: the measurement scaling module.
   "crates/stonecrab/src/sensors/measurement/scale.rs",
 ]
