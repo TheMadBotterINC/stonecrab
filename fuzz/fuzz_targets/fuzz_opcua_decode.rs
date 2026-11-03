@@ -31,13 +31,16 @@ fuzz_target!(|input: &[u8]| {
             while let Some((value, depth)) = pending.pop() {
                 nodes = nodes.checked_add(1).expect("bounded node count");
                 assert!(nodes <= 1_048_576);
-                if let stonecrab::PlcValue::List(values) = value {
-                    assert!(depth <= 64);
-                    pending.extend(
-                        values
-                            .into_iter()
-                            .map(|value| (value, depth.checked_add(1).expect("bounded depth"))),
-                    );
+                match value {
+                    stonecrab::PlcValue::List(values) => {
+                        assert!(depth <= 64);
+                        pending.extend(values.into_iter().map(|value| (value, depth.checked_add(1).expect("bounded depth"))));
+                    }
+                    stonecrab::PlcValue::Struct(value) => {
+                        assert!(depth <= 64);
+                        pending.extend(value.into_fields().into_iter().map(|(_,value)| (value,depth.checked_add(1).expect("bounded depth"))));
+                    }
+                    _ => {},
                 }
             }
         }

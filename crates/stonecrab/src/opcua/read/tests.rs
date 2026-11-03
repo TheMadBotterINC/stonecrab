@@ -1,10 +1,11 @@
 use super::*;
 use crate::opcua::codec::{
-    DateTime, DiagnosticInfo, ExpandedNodeId, ExtensionBody, ExtensionObject, LocalizedText,
-    Scalar, Variant, XmlElement,
+    DateTime, DiagnosticInfo, ExpandedNodeId, ExtensionBody, ExtensionObject, Scalar, Variant,
+    XmlElement,
 };
 use crate::{PlcValue, ReadRequest, ResourceLimits, Tag};
 use std::sync::Arc;
+use std::time::Duration;
 
 fn data(scalar: Scalar) -> DataValue {
     DataValue {
@@ -201,9 +202,7 @@ fn opcua_uncertain_with_a_value_is_ok_with_its_status_and_source_time() {
 #[test]
 fn opcua_later_value_mappings_are_explicit_per_item_unsupported_errors() {
     let scalars = vec![
-        Scalar::ByteString(UaByteString::null()),
         Scalar::ExpandedNodeId(ExpandedNodeId::local(NodeId::numeric(0, 1))),
-        Scalar::LocalizedText(LocalizedText::default()),
         Scalar::ExtensionObject(ExtensionObject {
             type_id: ExpandedNodeId::local(NodeId::numeric(0, 0)),
             body: ExtensionBody::Null,
@@ -326,4 +325,70 @@ fn opcua_good_absent_and_explicit_null_values_share_the_response_node_budget() {
         ErrorKind::NotFound
     );
     assert_eq!(budget, 0);
+}
+
+// covers: OPCUA-READ-METADATA / OPCUA-DIV-READ-METADATA
+#[test]
+fn opcua_read_item_carries_quality_and_both_timestamps() {
+    for code in [0, 0x4000_0000, 0x8034_0000] {
+        let result = mapped(DataValue {
+            status: Some(StatusCode(code)),
+            source_timestamp: Some(DateTime(116_444_736_000_000_001)),
+            server_timestamp: Some(DateTime(116_444_736_000_000_002)),
+            source_picoseconds: Some(123),
+            server_picoseconds: Some(9999),
+            ..data(Scalar::Int32(42))
+        });
+        assert_eq!(
+            result.source_time(),
+            Some(std::time::UNIX_EPOCH + Duration::from_nanos(101))
+        );
+        assert_eq!(
+            result.server_time(),
+            Some(std::time::UNIX_EPOCH + Duration::from_nanos(299))
+        );
+        assert_eq!(result.status().unwrap().code(), code);
+        assert_eq!(result.status().unwrap().name(), StatusCode(code).name());
+        if code == 0x8034_0000 {
+            assert_eq!(
+                result.outcome().as_ref().unwrap_err().kind(),
+                ErrorKind::NotFound
+            );
+        } else {
+            assert_eq!(result.outcome().as_ref().unwrap(), &PlcValue::I32(42));
+        }
+    }
+}
+#[test]
+fn opcua_a_missing_timestamp_is_absent_not_zero() {
+    for time in [None, Some(DateTime(0))] {
+        let result = mapped(DataValue {
+            source_timestamp: time,
+            server_timestamp: time,
+            source_picoseconds: Some(65535),
+            server_picoseconds: Some(65535),
+            ..data(Scalar::Int32(1))
+        });
+        assert_eq!(result.source_time(), None);
+        assert_eq!(result.server_time(), None);
+    }
+    for (picos, nanos) in [
+        (None, 0),
+        (Some(0), 0),
+        (Some(99), 0),
+        (Some(100), 1),
+        (Some(9999), 99),
+        (Some(10000), 99),
+        (Some(65535), 99),
+    ] {
+        let result = timestamp(Some(DateTime(116_444_736_000_000_000)), picos);
+        assert_eq!(
+            result,
+            Some(std::time::UNIX_EPOCH + Duration::from_nanos(nanos))
+        );
+    }
+    assert_eq!(
+        timestamp(Some(DateTime(116_444_735_999_999_999)), Some(100)),
+        Some(std::time::UNIX_EPOCH - Duration::from_nanos(99))
+    );
 }

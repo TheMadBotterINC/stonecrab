@@ -1523,10 +1523,7 @@ mod tests {
             assert_eq!(value.as_i64(), None);
             assert_eq!(value.as_u64(), None);
             assert_eq!(value.as_f64(), None);
-            let PlcValue::Bytes(roundtrip) = value else {
-                panic!("bytes")
-            };
-            assert_eq!(roundtrip, bytes);
+            assert_eq!(value, PlcValue::Bytes(bytes));
         }
         assert_ne!(PlcValue::Bytes(vec![]), PlcValue::Null);
         assert_ne!(
@@ -1559,6 +1556,12 @@ mod tests {
         reversed.reverse();
         assert_ne!(structure, PlcStruct::new(reversed).unwrap());
         assert_eq!(PlcStruct::new(vec![]).unwrap().fields(), []);
+        let outer = PlcStruct::new(vec![(
+            "inner".to_owned(),
+            PlcValue::Struct(structure.clone()),
+        )])
+        .unwrap();
+        assert_eq!(outer.get("inner"), Some(&PlcValue::Struct(structure)));
     }
 
     #[test]

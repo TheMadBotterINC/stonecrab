@@ -47,6 +47,7 @@ mod tests {
         assert_send_sync::<PlcDate>();
         assert_send_sync::<PlcDateTime>();
         assert_send_sync::<PlcSignedDuration>();
+        assert_send_sync::<PlcStruct>();
         assert_send_sync::<PlcTimeOfDay>();
         assert_send_sync::<PlcValue>();
         assert_send_sync::<PlcValueType>();
