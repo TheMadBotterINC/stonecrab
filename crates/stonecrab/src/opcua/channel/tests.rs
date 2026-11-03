@@ -380,6 +380,35 @@ fn opcua_a_silent_open_secure_channel_times_out_on_the_same_deadline() {
 }
 
 #[test]
+fn opcua_a_delayed_ack_does_not_restart_the_handshake_deadline() {
+    let mut rig = Rig::new(Script::strict(vec![
+        Step::LateReply(Duration::from_secs(2)),
+        Step::respond(|bytes| {
+            if bytes.starts_with(b"HEL") {
+                Some(acknowledge(65535, 65535, 0, 0))
+            } else {
+                None
+            }
+        }),
+    ]));
+    let start = rig.clock.now();
+    assert_eq!(rig.open().unwrap_err().kind(), ErrorKind::Timeout);
+    assert_eq!(
+        rig.clock.now().duration_since(start),
+        Duration::from_secs(5)
+    );
+    let sent = rig.probe.sent();
+    let Body::Open(chunk) = frame(sent.get(1).unwrap()).body else {
+        panic!("OPN")
+    };
+    let Service::OpenSecureChannelRequest { request_header, .. } = service(&chunk.body, 446) else {
+        panic!("Issue")
+    };
+    assert_eq!(request_header.timeout_hint, 3000);
+    assert_eq!(rig.clock.sleeper_count(), 0);
+}
+
+#[test]
 fn opcua_none_channel_never_falls_back_from_a_secure_policy() {
     let mut rig = Rig::new(Rig::healthy());
     rig.options.security_policy = SecurityPolicy::Basic256Sha256;
@@ -514,6 +543,10 @@ fn opcua_open_secure_channel_rejects_foreign_ids_policy_and_zero_tokens() {
     *bad_policy.get_mut(62).unwrap() = b'X';
     let mut bad_channel = normal.clone();
     *bad_channel.get_mut(8).unwrap() = 18;
+    let mut bad_handle = normal.clone();
+    *bad_handle.get_mut(91).unwrap() = 2;
+    let mut bad_version = normal.clone();
+    *bad_version.get_mut(107).unwrap() = 1;
     for response in [
         open_response(0, 1, 17, 29, 12345, 0),
         open_response(41, 9, 17, 29, 12345, 0),
@@ -522,6 +555,8 @@ fn opcua_open_secure_channel_rejects_foreign_ids_policy_and_zero_tokens() {
         open_response(41, 1, 17, 29, 0, 0),
         bad_policy,
         bad_channel,
+        bad_handle,
+        bad_version,
     ] {
         let mut rig = Rig::new(Script::strict(vec![Step::respond(move |bytes| {
             if bytes.starts_with(b"HEL") {
