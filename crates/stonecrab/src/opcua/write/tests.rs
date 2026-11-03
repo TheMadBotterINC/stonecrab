@@ -7,7 +7,7 @@ use crate::testkit::{
     FakeClock, FakeTransportFactory, FixtureAddress, Reaction, Script, Step, block_on_with,
 };
 use crate::{
-    CancellationToken, Connection, ConnectionConfig, ConnectionState, Driver, PlcValue,
+    CancellationToken, Clock, Connection, ConnectionConfig, ConnectionState, Driver, PlcValue,
     ResourceLimits, Tag,
 };
 use std::sync::Arc;
@@ -644,7 +644,7 @@ fn opcua_write_deadline_and_encoded_size_failures_precede_transmission() {
     block_on_with(&rig.clock, connection.close()).unwrap();
 }
 #[test]
-fn opcua_wrong_write_response_type_and_service_failure_are_typed_errors() {
+fn opcua_wrong_write_reply_is_unknown_and_service_failure_is_typed() {
     for mode in 0..2 {
         let rig = Rig::mapped(move |service, reaction| {
             if let Service::WriteRequest { request_header, .. } = service {
@@ -668,19 +668,15 @@ fn opcua_wrong_write_response_type_and_service_failure_are_typed_errors() {
             }
         });
         let connection = rig.connect();
-        let error = block_on_with(
+        let result = block_on_with(
             &rig.clock,
             connection.write(request(&*connection, "ns=2;i=42;DINT", PlcValue::I32(1))),
-        )
-        .unwrap_err();
-        assert_eq!(
-            error.kind(),
-            if mode == 0 {
-                ErrorKind::MalformedData
-            } else {
-                ErrorKind::DeviceException
-            }
         );
+        if mode == 0 {
+            assert_eq!(result.unwrap().unknown_count(), 1);
+        } else {
+            assert_eq!(result.unwrap_err().kind(), ErrorKind::DeviceException);
+        }
         assert_eq!(rig.writes(), 1);
         block_on_with(&rig.clock, connection.close()).unwrap();
     }
@@ -740,7 +736,8 @@ fn opcua_write_per_tag_status_is_reported_per_tag() {
         .unwrap();
     let response = block_on_with(&rig.clock, connection.write(batch)).unwrap();
     assert_eq!(response.confirmed_count(), 2);
-    assert_eq!(response.rejected_count(), 2);
+    assert_eq!(response.rejected_count(), 1);
+    assert_eq!(response.unknown_count(), 1);
     assert_eq!(
         response
             .results()
@@ -793,4 +790,26 @@ fn opcua_deep_caller_values_are_rejected_and_abandoned_without_recursive_drop() 
         .unwrap()
         .join()
         .unwrap();
+}
+
+#[test]
+fn opcua_write_mapper_refuses_a_non_write_service() {
+    let rig = Rig::new();
+    let connection = rig.connect();
+    let request = request(&*connection, "ns=2;i=42;DINT", PlcValue::I32(1));
+    let reply = decode_service(&crate::opcua::responder::close_response(1, 0)).unwrap();
+    assert_eq!(
+        response(
+            &request,
+            vec![TagId::new("setpoint").unwrap()],
+            vec![],
+            reply,
+            rig.clock.now(),
+            rig.clock.now()
+        )
+        .unwrap_err()
+        .kind(),
+        ErrorKind::MalformedData
+    );
+    block_on_with(&rig.clock, connection.close()).unwrap();
 }

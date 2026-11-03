@@ -91,6 +91,11 @@ pub(super) fn response(
     for (tag, status) in tags.into_iter().zip(results) {
         let result = if status.0 & 0xC000_0000 == 0 {
             WriteResult::new(tag, WriteOutcome::Confirmed)
+        } else if status.0 & 0x8000_0000 == 0 {
+            WriteResult::new(
+                tag,
+                WriteOutcome::Unknown(UnknownReason::TimeoutAfterTransmit),
+            )
         } else {
             let source = crate::opcua::service::status_error(status);
             rejected(

@@ -29,10 +29,10 @@ const TRANSPORTS: &str = "the only transport code of opcua is tcp";
 
 /// Factory for OPC UA TCP connections.
 ///
-/// This initial connection slice supports anonymous sessions with explicitly selected
+/// Supports anonymous or explicitly opted-in username sessions with selected
 /// `security-policy=NONE`. It sends HEL, OPN, `CreateSession` and `ActivateSession` before
-/// returning Connected. The secure default is refused until protection is implemented;
-/// credentials are also refused before I/O. Reads map scalar Boolean, integers, floats,
+/// returning Connected. The secure default and certificate activation are refused until
+/// their security slices. Reads map scalar Boolean, integers, floats,
 /// String/XML and Null. S100 adds staged policy-None writes with explicit read-write access;
 /// browse, native subscriptions and secure policies remain planned.
 ///

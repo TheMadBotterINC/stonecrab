@@ -102,3 +102,9 @@ nested raw List and encoding rejects it, or drops the operation before polling. 
 S98's discard_tree in a private WriteRequest destructor; preserve its public fields,
 builder, clone and accessors. Tests cover 100000 levels on a 128 KiB thread, both rejected
 encoding and abandoned futures. Builder/explicit Clone behavior is unchanged.
+
+Final disposition review makes an unexpected correlated service type and an Uncertain
+Write status Unknown, rather than a rejection implying a definite refusal. The latter
+keeps its exact device status; core's existing fallback reason is TimeoutAfterTransmit
+because no unusable-reply reason exists. No new public variant is introduced. A verified
+WriteResponse with a wrong result count remains the explicit roadmap MalformedData error.

@@ -143,10 +143,13 @@ fn check_shape(
         if dimensions != wanted {
             return Err(invalid());
         }
-        if attributes
-            .rank
-            .is_some_and(|rank| rank > 0 && usize::try_from(rank).ok() != Some(dimensions.len()))
-        {
+        if attributes.rank.is_some_and(|rank| {
+            if rank == -3 {
+                dimensions.len() > 1
+            } else {
+                rank > 0 && usize::try_from(rank).ok() != Some(dimensions.len())
+            }
+        }) {
             return Err(invalid());
         }
         return Ok(());

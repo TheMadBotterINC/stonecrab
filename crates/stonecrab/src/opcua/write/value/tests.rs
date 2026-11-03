@@ -611,3 +611,19 @@ fn opcua_rank_zero_accepts_arrays_and_ranges_but_never_a_scalar() {
     );
     assert_eq!(budget.nodes, 2);
 }
+
+#[test]
+fn opcua_scalar_or_one_dimension_metadata_rejects_a_matrix_range() {
+    let attributes = Attributes {
+        rank: Some(-3),
+        ..Attributes::default()
+    };
+    convert(
+        &PlcValue::List(vec![PlcValue::I32(1)]),
+        "[0];DINT",
+        &attributes,
+    )
+    .unwrap();
+    let matrix = PlcValue::List(vec![PlcValue::List(vec![PlcValue::I32(1)])]);
+    assert!(convert(&matrix, "[0][0];DINT", &attributes).is_err());
+}

@@ -289,7 +289,13 @@ impl OpcuaConnection {
             )
             .await;
         match reply {
-            Ok(reply) => write::response(request, tags, local, reply, started, self.clock.now()),
+            Ok(reply @ Service::WriteResponse { .. }) => {
+                write::response(request, tags, local, reply, started, self.clock.now())
+            }
+            Ok(_) => {
+                local.extend(write::unknown(tags, ErrorKind::MalformedData));
+                write::finish(request, local, started, self.clock.now())
+            }
             Err(error) if transmitted => {
                 if self.session.lane.is_failed() {
                     self.state.set_if(
