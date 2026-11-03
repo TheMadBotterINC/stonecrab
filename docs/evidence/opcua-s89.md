@@ -31,7 +31,7 @@ explicitly pending S106; no request id can wrap into an outstanding slot.
 | Fuzz-only strict Clippy | Passed with `RUSTFLAGS='--cfg fuzzing'` |
 | Regeneration | Both protocols byte-identical twice; edited/added/removed-output self-checks passed |
 | Parity / lint attributes | Passed; 262 implemented/automated-verified rows resolve |
-| Package | Verified archive build; reviewed 183-file list matches; 753,587 bytes compressed in the measured archive at `02cd884` (3.2 MiB unpacked); no test helpers, fixtures or fuzz data shipped |
+| Package | Verified archive build; reviewed 183-file list matches; 753,587 bytes compressed in the measured archive at `02cd884` (3.2 MiB unpacked); the external `tests/support` responder, fixtures and fuzz data are excluded |
 
 The default mutation scope continues to exclude I/O. The focused command was
 `cargo mutants --config mutants.toml --file crates/stonecrab/src/opcua/lane.rs --re
@@ -56,3 +56,8 @@ dropped outside the state lock. Device reason strings/session tokens are not ech
 Seven implemented parity rows describe the internal lane only; the overall ERR row
 still awaits Hello/connect handling in S90/S91. Public connect, session, Read, multi-chunk
 reassembly, secure policies and reconnect remain their later slices.
+
+Integration: normal merge `261b281` preserves the five signed-off branch commits. Its
+tree matches the feature branch, and `mise run check` passed again on the merged tree
+(`/tmp/stonecrab-s89-merge-check.log`). Hosted CI is triggered by the push; no hosted
+result is assumed here.
