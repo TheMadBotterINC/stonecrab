@@ -307,14 +307,20 @@ jobs:
     # commit with its OpenSSL backend on a Debian trixie image pinned by digest (slice S81).
     # Its server (interop/open62541/main.c) serves a test namespace under policies None,
     # Basic256Sha256, Aes128Sha256RsaOaep and Aes256Sha256RsaPss with anonymous, user name and
-    # X.509 identities; its PKI is made at run time inside the container and never stored. No
-    # Stonecrab OPC UA code exists yet: the job runs open62541's own client from the image
-    # against it (slice S90 adds the driver's tests). Its own job, apart from the TCP peers
+    # X.509 identities; its PKI is made at run time inside the container and never stored.
+    # S90 tests Stonecrab's policy-None HEL/OPN/CLO and counter handoff, plus open62541's
+    # in-image checks. No public session driver is registered yet. Its own job, apart from the TCP peers
     # and not part of `mise run interop`. The steps are the subcommands of
     # interop/open62541/interop.sh, which `mise run interop-opcua` also runs.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 tag, 2026-10-16
+        with:
+          toolchain: "1.99.1"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.148
       # docker build -f interop/open62541/Dockerfile -t stonecrab-interop-open62541:local .
       # Fails if the v1.5.9 tag names any commit but the pinned one.
       - run: interop/open62541/interop.sh build
@@ -330,6 +336,7 @@ jobs:
       # The client side of the running container's PKI to target/interop-pki/open62541/
       # (never uploaded; `stop` removes it).
       - run: interop/open62541/interop.sh pki
+      - run: interop/open62541/interop.sh tests
       # Image id, versions, the check output and the server log; never a key.
       - run: interop/open62541/interop.sh evidence
         if: ${{ always() }}

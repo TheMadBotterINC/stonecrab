@@ -3,16 +3,17 @@ use std::task::{Context, Poll, Waker};
 
 use super::*;
 use crate::ResourceLimits;
+use crate::codec::BoundedReader;
+use crate::opcua::codec::{DateTime, Depth, UaString};
 use crate::opcua::codec::{Scalar, VariantValue};
 use crate::opcua::generated::timestamps_to_return::TimestampsToReturn;
+use crate::opcua::service::StatusFault;
 use crate::testkit::{
     FakeClock, FakeTransport, FakeTransportProbe, Reaction, Script, Step, block_on_with,
 };
 use crate::transport::Framer;
 
-#[path = "../../../tests/support/opcua_responder.rs"]
-mod responder;
-use responder::{message, read_response, server_error, service_fault};
+use crate::opcua::responder::{message, read_response, server_error, service_fault};
 
 struct Rig {
     lane: Lane,

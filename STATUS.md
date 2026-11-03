@@ -1,9 +1,29 @@
 # Stonecrab status and engineering handoff
 
-Updated: 2026-11-02.
+Updated: 2026-11-03.
 Implementation baseline: the commit that last modified this file
 (`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
 its own commit; the slice log below records what each one landed.
+
+## OPC UA policy-None channel (S90, 2026-11-03)
+
+S90 adds private HEL/ACK negotiation, OPN Issue and fire-and-forget CLO. Directional
+buffers and message bounds are enforced, buffered input survives negotiation, and the
+lane continues the channel's request/sequence counters. The receive-buffer option now
+parses with default 65535, minimum 8192 and a resource cap. Shared pure service functions
+live in `opcua/service.rs`. Public session/connect is S91; usable Read is S92.
+
+The exact-count open62541 test passed locally, including counter handoff to a request
+correctly refused for lacking a session. The peer revised the requested 3600000 ms
+lifetime to 600000 ms, which the channel retained. The existing interop script and CI job
+run this test alongside the peer's own checks and retain evidence. The full local suite,
+100% handwritten OPC UA coverage, fuzz/feature/compatibility/package checks are recorded
+in [S90 evidence](docs/evidence/opcua-s90.md). Hardware remains unavailable.
+
+Validation workflow: run `mise run features` separately from other Cargo metadata,
+packaging or mutation work. Its `cargo hack --no-dev-deps` command temporarily rewrites
+Cargo.toml; the initial concurrent mutation baseline copied that temporary manifest.
+A sequenced rerun on the restored tree passed. All future integration uses normal merges.
 
 ## OPC UA exchange lane (S89, 2026-11-02)
 

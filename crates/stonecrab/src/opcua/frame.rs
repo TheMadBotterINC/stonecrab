@@ -636,8 +636,9 @@ const fn frame_error(error: ParseError) -> FrameError {
 /// The [`Framer`] of the OPC UA TCP protocol: finds messages in a byte stream and writes them
 /// back.
 ///
-/// It holds only the largest message it accepts or writes, which is the smaller of the
-/// receive buffer that Hello declares, `ResourceLimits::max_frame_bytes` and `Int32::MAX`. The rules, in the
+/// It holds the receive and send ceilings separately, each capped by
+/// `ResourceLimits::max_frame_bytes` and `Int32::MAX`. Before negotiation they are equal;
+/// afterward each follows its directional buffer. The rules, in the
 /// order `decode` applies them:
 /// 1. Fewer than 8 bytes buffered: `Ok(None)`, wait for the header.
 /// 2. The header is judged as soon as it is complete: an unknown message type or chunk flag
@@ -656,16 +657,24 @@ const fn frame_error(error: ParseError) -> FrameError {
 /// the receive buffer of Hello and `ResourceLimits::max_frame_bytes`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct OpcuaFramer {
-    /// The largest message in bytes, the header included.
+    /// The largest received message in bytes, the header included.
     max_frame_bytes: u32,
+    /// The independent negotiated outbound ceiling.
+    send_frame_bytes: u32,
 }
 
 impl OpcuaFramer {
     /// A framer for a connection whose receive buffer is `receive_buffer_size` bytes.
     pub(super) fn new(receive_buffer_size: u32, limits: ResourceLimits) -> Self {
+        Self::with_buffers(receive_buffer_size, receive_buffer_size, limits)
+    }
+
+    /// Directional negotiated ceilings, each capped by the transport resource budget.
+    pub(super) fn with_buffers(receive: u32, send: u32, limits: ResourceLimits) -> Self {
         let configured = u32::try_from(limits.max_frame_bytes().get()).unwrap_or(u32::MAX);
         Self {
-            max_frame_bytes: receive_buffer_size.min(configured).min(MAX_SIZE),
+            max_frame_bytes: receive.min(configured).min(MAX_SIZE),
+            send_frame_bytes: send.min(configured).min(MAX_SIZE),
         }
     }
 }
@@ -698,7 +707,7 @@ impl Framer<Frame> for OpcuaFramer {
     fn encode(&mut self, frame: &Frame, out: &mut BytesMut) -> Result<(), FrameError> {
         let total = frame.length_in_bytes().map_err(frame_error)?;
         let size = match u32::try_from(total) {
-            Ok(size) if size <= self.max_frame_bytes => size,
+            Ok(size) if size <= self.send_frame_bytes => size,
             _ => return Err(FrameError::Oversized(total)),
         };
         let mut writer = BoundedWriter::new(total);
@@ -709,7 +718,7 @@ impl Framer<Frame> for OpcuaFramer {
     }
 
     fn max_frame_bytes(&self) -> usize {
-        usize::try_from(self.max_frame_bytes).unwrap_or(usize::MAX)
+        usize::try_from(self.max_frame_bytes.max(self.send_frame_bytes)).unwrap_or(usize::MAX)
     }
 }
 

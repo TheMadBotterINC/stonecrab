@@ -24,6 +24,8 @@ pub struct Parsed {
     pub security_policy: &'static str,
     /// The name `message-security` takes for the parsed mode.
     pub message_security: &'static str,
+    /// The configured receive buffer advertised before the resource cap.
+    pub receive_buffer_size: u32,
 }
 
 /// Parse an `opcua` connection string as the driver does and report what was attached.
@@ -44,11 +46,13 @@ pub fn parse_config(uri: &str) -> Result<Parsed> {
         options.security_policy.name(),
         options.message_security.name(),
     );
+    let receive_buffer_size = options.receive_buffer_size;
     Ok(Parsed {
         config,
         endpoint_url,
         security_policy,
         message_security,
+        receive_buffer_size,
     })
 }
 

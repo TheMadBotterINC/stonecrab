@@ -31,7 +31,7 @@ transport = ["dep:tokio"]
 # rustls on the ring provider, TLS 1.3 and 1.2, trust anchors from the caller (ADR-0032). Off by
 # default; needs the transport.
 tls = ["transport", "dep:rustls", "dep:tokio-rustls"]
-# The OPC UA client (`stonecrab::opcua`, ADR-0034): the tag address grammar so far. Off by
+# The OPC UA client (`stonecrab::opcua`, ADR-0034): addresses and private channel/service code. Off by
 # default and not part of `full`, as `tls` is (decision E17); needs the transport. The
 # cryptography dependencies of the security policies join it with their slices (ADR-0035).
 opcua = ["transport"]

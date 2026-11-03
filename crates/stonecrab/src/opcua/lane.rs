@@ -18,15 +18,13 @@ use std::time::Duration;
 
 use bytes::Bytes;
 
-use crate::codec::{BoundedReader, BoundedWriter};
 use crate::future::{WakerSlots, wake_all};
-use crate::opcua::codec::{
-    DateTime, Depth, ExpandedNodeId, ExtensionBody, ExtensionObject, Identifier, NodeId,
-    StatusCode, UaString,
-};
+use crate::opcua::channel::Channel;
+use crate::opcua::codec::NodeId;
 use crate::opcua::frame::{Body, ChunkType, Frame, OpcuaFramer, SecureChunk, SequenceHeader};
 use crate::opcua::generated::extension_object_definition::ExtensionObjectDefinition as Service;
 use crate::opcua::generated::request_header::RequestHeader;
+use crate::opcua::service::{decode_service, encode_service, request_header, status_error};
 use crate::transport::FramedTransport;
 use crate::{CancellationToken, Clock, Deadline, ErrorKind, OpFuture, PlcError, Result};
 
@@ -57,6 +55,7 @@ pub(super) struct Lane {
     request_timeout: Duration,
     max_pending: usize,
     max_frame: usize,
+    max_response: usize,
     channel_id: u32,
     token_id: u32,
 }
@@ -88,9 +87,38 @@ impl Lane {
             request_timeout,
             max_pending: limits.max_pending_requests().get(),
             max_frame,
+            max_response: usize::MAX,
             channel_id,
             token_id,
         }
+    }
+
+    /// Continue the handshake's identifiers and apply its negotiated outbound ceiling.
+    pub(super) fn from_channel(channel: Channel, request_timeout: Duration) -> Self {
+        let mut lane = Self::new(
+            channel.framed,
+            channel.clock,
+            request_timeout,
+            channel.token.channel_id,
+            channel.token.token_id,
+        );
+        lane.max_frame = lane
+            .max_frame
+            .min(usize::try_from(channel.limits.send_buffer_size).unwrap_or(usize::MAX));
+        if channel.limits.max_message_size != 0 {
+            lane.max_response =
+                usize::try_from(channel.limits.max_message_size).unwrap_or(usize::MAX);
+            lane.max_frame = lane.max_frame.min(
+                usize::try_from(channel.limits.max_message_size)
+                    .unwrap_or(usize::MAX)
+                    .saturating_add(24),
+            );
+        }
+        let state = lane.state.get_mut().unwrap_or_else(PoisonError::into_inner);
+        state.request_id = 1;
+        state.sent_sequence = 1;
+        state.received_sequence = Some(channel.received_sequence);
+        lane
     }
 
     /// Sends once; receiving, cancelling or dropping never replays a request.
@@ -108,11 +136,17 @@ impl Lane {
             let deadline = deadline.unwrap_or(default).min(default);
             self.check(deadline, cancel)?;
             let request = self.reserve()?;
-            let header = self.header(authentication_token, request.id, deadline)?;
-            let mut writer = BoundedWriter::new(self.max_frame.saturating_sub(24));
-            NodeId::numeric(0, encoding_id).serialize(&mut writer, Depth::new())?;
-            build(header).serialize(&mut writer, Depth::new())?;
-            let body = Bytes::from(writer.into_bytes());
+            let header = request_header(
+                self.clock.as_ref(),
+                authentication_token,
+                request.id,
+                deadline,
+            )?;
+            let body = encode_service(
+                encoding_id,
+                &build(header),
+                self.max_frame.saturating_sub(24),
+            )?;
             self.exchange_body(request.id, body, deadline, cancel).await
         })
     }
@@ -180,28 +214,6 @@ impl Lane {
             receiver.cancel();
         }
         Ok(Request { lane: self, id })
-    }
-
-    fn header(&self, token: &NodeId, id: u32, deadline: Deadline) -> Result<RequestHeader> {
-        let timestamp = DateTime::from_system_time(self.clock.wall_now())
-            .ok_or_else(|| error(ErrorKind::InvalidConfig, "clock timestamp is out of range"))?;
-        let remaining = deadline
-            .instant()
-            .saturating_duration_since(self.clock.now());
-        Ok(RequestHeader {
-            authentication_token: token.clone(),
-            timestamp: timestamp.0,
-            request_handle: id,
-            return_diagnostics: 0,
-            audit_entry_id: UaString::null(),
-            timeout_hint: u32::try_from(remaining.as_millis())
-                .unwrap_or(u32::MAX)
-                .max(1),
-            additional_header: ExtensionObject {
-                type_id: ExpandedNodeId::local(NodeId::numeric(0, 0)),
-                body: ExtensionBody::Null,
-            },
-        })
     }
 
     fn next_sequence(&self) -> Result<u32> {
@@ -333,6 +345,12 @@ impl Lane {
             return Err(error(
                 ErrorKind::MalformedData,
                 "foreign channel or token id",
+            ));
+        }
+        if chunk.body.len() > self.max_response {
+            return Err(error(
+                ErrorKind::ResourceLimit,
+                "response exceeds negotiated message size",
             ));
         }
         let mut state = self.lock();
@@ -481,47 +499,6 @@ impl Drop for TransportLease<'_> {
         };
         wake_all(wakers);
     }
-}
-
-fn decode_service(body: &[u8]) -> Result<Service> {
-    let mut reader = BoundedReader::new(body);
-    let id = NodeId::parse(&mut reader, Depth::new())?;
-    let Identifier::Numeric(id_value) = id.identifier else {
-        return Err(error(
-            ErrorKind::MalformedData,
-            "non-numeric service encoding id",
-        ));
-    };
-    if id.namespace != 0 {
-        return Err(error(
-            ErrorKind::MalformedData,
-            "non-zero service namespace",
-        ));
-    }
-    let id = i32::try_from(id_value)
-        .map_err(|_range| error(ErrorKind::MalformedData, "service encoding id out of range"))?;
-    let service = Service::parse(&mut reader, Depth::new(), id)?;
-    reader.expect_eof()?;
-    if let Service::ServiceFault { response_header } = &service {
-        return Err(status_error(response_header.service_result));
-    }
-    Ok(service)
-}
-
-/// Exact device status, also retained through a channel-wide failure's source chain.
-#[derive(Debug, thiserror::Error)]
-#[error("OPC UA status 0x{code:08X} ({name})")]
-pub(super) struct StatusFault {
-    pub(super) code: u32,
-    pub(super) name: &'static str,
-}
-
-fn status_error(status: StatusCode) -> PlcError {
-    let source = StatusFault {
-        code: status.0,
-        name: status.name().unwrap_or("unknown"),
-    };
-    PlcError::new(ErrorKind::DeviceException, source.to_string()).with_source(source)
 }
 
 fn failure(state: &State) -> Result<()> {

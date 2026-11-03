@@ -15,6 +15,8 @@ const SECURITY_POLICY: &str = "security-policy";
 const MESSAGE_SECURITY: &str = "message-security";
 /// The request deadline and header timeout hint in milliseconds.
 const REQUEST_TIMEOUT: &str = "request-timeout-ms";
+/// The largest incoming chunk advertised by Hello.
+const RECEIVE_BUFFER: &str = "encoding.receive-buffer-size";
 
 /// The most key characters an error message repeats.
 const KEY_ECHO_LIMIT: usize = 32;
@@ -128,6 +130,7 @@ impl MessageSecurity {
 /// | `security_policy` | `security-policy` | `Basic256Sha256` |
 /// | `message_security` | `message-security` | `SIGN_ENCRYPT` |
 /// | `request_timeout` | `request-timeout-ms` | 30000 ms |
+/// | `receive_buffer_size` | `encoding.receive-buffer-size` | 65535 bytes |
 ///
 /// `message_security` is the mode as configured. With policy `NONE` the channel ignores it
 /// (`OPCUA-MODE-POLICY-NONE`, slice S90); a secure policy with mode `NONE` is refused here.
@@ -145,6 +148,8 @@ pub(super) struct OpcuaOptions {
     pub(super) message_security: MessageSecurity,
     /// `request-timeout-ms`, shared with `Timeouts.request`.
     pub(super) request_timeout: Duration,
+    /// The configured receive ceiling before applying `ResourceLimits`.
+    pub(super) receive_buffer_size: u32,
 }
 
 impl DriverOptions for OpcuaOptions {}
@@ -153,8 +158,8 @@ impl OpcuaOptions {
     /// Read the query parameters of a connection string for the endpoint `endpoint_url`.
     ///
     /// The core grammar has already refused duplicate and empty keys, so each key appears
-    /// once. Only `security-policy`, `message-security` and `request-timeout-ms` are accepted; this
-    /// refuses the keys the framework fills, credentials a URI must not carry and the
+    /// once. The policy, message security, request timeout and receive-buffer options are
+    /// accepted. This refuses the keys the framework fills, credentials a URI must not carry and the
     /// upstream names that later slices implement or that have gone.
     pub(super) fn from_parameters(
         endpoint_url: String,
@@ -163,6 +168,7 @@ impl OpcuaOptions {
         let mut security_policy = SecurityPolicy::Basic256Sha256;
         let mut message_security = MessageSecurity::SignEncrypt;
         let mut request_timeout = Duration::from_secs(30);
+        let mut receive_buffer_size = 65535;
         for (key, value) in parameters {
             match key.as_str() {
                 SECURITY_POLICY => security_policy = SecurityPolicy::from_name(value)?,
@@ -176,6 +182,16 @@ impl OpcuaOptions {
                         Duration::from_millis(millis.ok_or_else(|| {
                             invalid("request-timeout-ms must be a positive integer")
                         })?);
+                }
+                RECEIVE_BUFFER => {
+                    let parsed = value.parse::<u32>().ok();
+                    if !value.bytes().all(|byte| byte.is_ascii_digit()) {
+                        return Err(invalid(
+                            "encoding.receive-buffer-size must be an integer from 8192 through 2147483647",
+                        ));
+                    }
+                    receive_buffer_size = parsed.filter(|size| (8192..=0x7FFF_FFFF).contains(size))
+                        .ok_or_else(|| invalid("encoding.receive-buffer-size must be an integer from 8192 through 2147483647"))?;
                 }
                 other => return Err(unknown_key(other)),
             }
@@ -191,6 +207,7 @@ impl OpcuaOptions {
             security_policy,
             message_security,
             request_timeout,
+            receive_buffer_size,
         })
     }
 }

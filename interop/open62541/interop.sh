@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: interop/open62541/interop.sh build|start|wait|check|pki|evidence|stop|run
+# Usage: interop/open62541/interop.sh build|start|wait|check|pki|tests|evidence|stop|run
 #
 # Drives the open62541 interoperability run (slice S81): an OPC UA server on open62541 v1.5.9
 # in Docker, the independent peer of the OPC UA driver (milestone M3). The CI job
@@ -21,9 +21,10 @@
 #             certificate and the user password) into target/interop-pki/open62541/, for
 #             the Stonecrab tests that run before `stop`
 #   evidence  write the image digest, versions and the server log to the evidence dir
+#   tests     run the exact-count Stonecrab policy-None channel test against the running peer
 #   stop      remove the container and the `pki` files (no error when they are not there; no
 #             key is kept after a run)
-#   run       build, start, wait, check, pki, evidence, stop; the exit status is the first
+#   run       build, start, wait, check, pki, tests, evidence, stop; the exit status is the first
 #             failure (the container is always stopped; the evidence is written whenever it
 #             started)
 #
@@ -45,6 +46,8 @@ PORT="${INTEROP_OPEN62541_PORT:-4840}"
 HOST="127.0.0.1"
 EVIDENCE="${INTEROP_EVIDENCE_DIR:-$ROOT/target/interop-evidence}/open62541"
 PKI_OUT="${INTEROP_PKI_DIR:-$ROOT/target/interop-pki/open62541}"
+FILTER='binary(stonecrab) & test(/^opcua::channel::tests::opcua_interop_/)'
+EXPECTED_TESTS=1
 
 die() {
   echo "interop: $*" >&2
@@ -153,6 +156,19 @@ copy_pki() {
   echo "interop: client side of the PKI in $PKI_OUT (not committed; git ignores target/)"
 }
 
+run_tests() {
+  mkdir -p "$EVIDENCE"
+  cd "$ROOT"
+  export STONECRAB_INTEROP_OPEN62541="opcua://${HOST}:${PORT}?security-policy=NONE"
+  local listed
+  listed="$(cargo nextest list --locked -p stonecrab --all-features \
+    --run-ignored ignored-only -E "$FILTER" --message-format oneline | grep -c 'opcua::channel::tests::opcua_interop_' || true)"
+  [ "$listed" = "$EXPECTED_TESTS" ] ||
+    die "expected $EXPECTED_TESTS Stonecrab interop tests, the filter selects $listed"
+  cargo nextest run --locked -p stonecrab --all-features \
+    --run-ignored ignored-only -E "$FILTER" --test-threads 1 --no-capture 2>&1 | tee "$EVIDENCE/nextest.txt"
+}
+
 evidence() {
   need_docker
   mkdir -p "$EVIDENCE"
@@ -176,7 +192,7 @@ run_all() {
   need_docker
   mkdir -p "$EVIDENCE"
   # Remove only the files this script writes, never the directory itself.
-  (cd "$EVIDENCE" && rm -f image-digest.txt check.txt server.log)
+  (cd "$EVIDENCE" && rm -f image-digest.txt check.txt nextest.txt server.log)
   trap stop EXIT
   local status=0
   # Subshells, because die exits: a failed step must still reach the evidence step.
@@ -185,6 +201,7 @@ run_all() {
   if [ "$status" -eq 0 ]; then (wait_ready) || status=$?; fi
   if [ "$status" -eq 0 ]; then (run_check) || status=$?; fi
   if [ "$status" -eq 0 ]; then (copy_pki) || status=$?; fi
+  if [ "$status" -eq 0 ]; then (run_tests) || status=$?; fi
   (evidence) || { rc=$?; [ "$status" -ne 0 ] || status=$rc; }
   return "$status"
 }
@@ -195,8 +212,9 @@ case "${1:-}" in
   wait) wait_ready ;;
   check) run_check ;;
   pki) copy_pki ;;
+  tests) run_tests ;;
   evidence) evidence ;;
   stop) stop ;;
   run) run_all ;;
-  *) die "usage: interop.sh build|start|wait|check|pki|evidence|stop|run" ;;
+  *) die "usage: interop.sh build|start|wait|check|pki|tests|evidence|stop|run" ;;
 esac

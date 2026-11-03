@@ -71,6 +71,8 @@ src/modbus/rtu.rs
 src/modbus/session.rs
 src/modbus.rs
 src/opcua/address.rs
+src/opcua/channel/tests.rs
+src/opcua/channel.rs
 src/opcua/codec/data_value.rs
 src/opcua/codec/date_time.rs
 src/opcua/codec/diagnostic_info.rs
@@ -111,6 +113,7 @@ src/opcua/generated.rs
 src/opcua/lane/tests.rs
 src/opcua/lane.rs
 src/opcua/options.rs
+src/opcua/service.rs
 src/opcua/service_tests.rs
 src/opcua.rs
 src/order.rs
