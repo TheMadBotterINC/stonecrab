@@ -5,6 +5,33 @@ Implementation baseline: the commit that last modified this file
 (`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
 its own commit; the slice log below records what each one landed.
 
+## OPC UA Basic256Sha256 connections (S106, 2026-11-04)
+
+The public driver now connects anonymous Basic256Sha256 sessions in SIGN and
+SIGN_ENCRYPT. OPN is signed/encrypted; MSG and CLO use the selected symmetric mode on
+all chunks. Secure discovery runs on the same channel and verifies the returned
+certificate. Provisioned peer binding, trust and session application proofs precede
+activation; invalid signatures, substituted certificates and invalid/reused nonces reject.
+CreateSession carries the client certificate chain and nonce; its schema has no client
+signature field. ActivateSession carries clientSignature. No fallback or second socket.
+
+All 2533 tests and 588+5 doctests pass. Core 6978/6978 and handwritten OPC UA
+10023/10023 lines remain 100%, with unchanged floors/exclusions. Standalone OPC UA
+passes 556 library tests (382 OPC UA) and strict Clippy. All 59 feature combinations,
+18 fuzz targets for at least 60 seconds, fresh 230-file package and unpacked builds,
+regen, dependencies/machete, examples, semver, parity/attributes/DCO pass. Native
+open62541 passes all 12 tests, both modes/discovery settings, a chunked 10000-item read,
+write/read-back/close and client/server certificate refusals. Temporary peer/keys are removed.
+
+Focused mutation campaign: 34 caught/five unviable, no survivors/timeouts. Hosted source CI passes all 33 executed jobs; scheduled-only skipped:
+https://github.com/TheMadBotterINC/stonecrab/actions/runs/41788054600 on d6b72be.
+[Evidence](docs/evidence/opcua-s106.md). Nine rows close: 249 OPC UA total,
+156 implemented/55 planned/38 deferred. No dependency, feature, public API or version change.
+RSA2048/8192-byte buffers are native-tested; other RSA bounds and sequence wrap remain
+independently UNVERIFIED. Renewal remains S109; current sessions end when their channel
+token expires. Protected user tokens remain S108. Next: S107, remaining policies.
+Normal signed-off merges retain every commit.
+
 ## OPC UA asymmetric OPN protection (S105, 2026-11-04)
 
 The private OPN engine signs headers, sequence, payload and padding, then encrypts exact
