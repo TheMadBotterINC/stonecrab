@@ -52,6 +52,34 @@ impl SignatureVerificationAlgorithm for RsaSha256 {
     }
 }
 
+/// The wire carries concatenated DER certificates, never PEM or an unbounded issuer list.
+pub(in crate::opcua) fn chain(bytes: &[u8]) -> Result<Vec<CertificateDer<'_>>> {
+    if bytes.is_empty() || bytes.len() > MAX_CERT_BYTES {
+        return Err(untrusted());
+    }
+    let mut remaining = bytes;
+    let mut chain = Vec::new();
+    while !remaining.is_empty() {
+        if chain.len() >= 16 {
+            return Err(untrusted());
+        }
+        let mut reader = BoundedReader::new(remaining);
+        let (tag, _value) = tlv(&mut reader).ok_or_else(untrusted)?;
+        if tag != 0x30 {
+            return Err(untrusted());
+        }
+        let length = remaining.len().saturating_sub(reader.remaining());
+        let certificate = remaining.get(..length).ok_or_else(untrusted)?;
+        let der = CertificateDer::from(certificate);
+        webpki::EndEntityCert::try_from(&der)
+            .ok()
+            .ok_or_else(untrusted)?;
+        chain.push(der);
+        remaining = remaining.get(length..).ok_or_else(untrusted)?;
+    }
+    Ok(chain)
+}
+
 /// Trust bypass never supplies a non-RSA or out-of-policy key to the later OPN code.
 pub(in crate::opcua) fn server_key(
     der: &CertificateDer<'_>,

@@ -1,4 +1,4 @@
-//! Caller-driven service exchanges on one established policy-None channel.
+//! Caller-driven service exchanges on one established policy-bound channel.
 //!
 //! # Compatibility: docs/parity/opcua.md#OPCUA-WIRE-REQUEST-MATCH
 //! # Compatibility: docs/parity/opcua.md#OPCUA-WIRE-SEQUENCE
@@ -23,14 +23,14 @@ use crate::future::{WakerSlots, wake_all};
 use crate::opcua::channel::Channel;
 use crate::opcua::chunk::{Assembly, MessageLimits, abort, check_growth};
 use crate::opcua::codec::NodeId;
-use crate::opcua::frame::{Body, ChunkType, Frame, OpcuaFramer, SecureChunk, SequenceHeader};
+use crate::opcua::frame::{Body, ChunkType, Frame, SecureChunk, SequenceHeader};
 use crate::opcua::generated::extension_object_definition::ExtensionObjectDefinition as Service;
 use crate::opcua::generated::request_header::RequestHeader;
 use crate::opcua::service::{decode_service, encode_service, request_header, status_error};
-use crate::transport::FramedTransport;
+use crate::opcua::wire::Wire;
 use crate::{CancellationToken, Clock, Deadline, ErrorKind, OpFuture, PlcError, Result};
 
-type Framed = FramedTransport<Frame, OpcuaFramer>;
+type Framed = Wire;
 
 struct Pending {
     queued: bool,
@@ -229,11 +229,12 @@ impl Lane {
         cancel: &CancellationToken,
         transmitted: Option<&AtomicBool>,
     ) -> Result<Service> {
-        let (capacity, count) = self.message_limits.plan(body.len(), self.max_frame)?;
         let mut lease = match self.acquire(request_id, true, deadline, cancel).await? {
             Acquired::Transport(lease) => lease,
             Acquired::Reply(reply) => return *reply,
         };
+        let capacity = lease.framed()?.max_body(self.max_frame)?;
+        let (capacity, count) = self.message_limits.plan(body.len(), capacity)?;
         let first = {
             let mut state = self.lock();
             let first = state.sent_sequence.checked_add(1).ok_or_else(exhausted)?;
@@ -276,6 +277,10 @@ impl Lane {
         lease.sending = false;
         drop(lease);
         self.receive(request_id, deadline, cancel).await
+    }
+
+    pub(super) fn wall_now(&self) -> std::time::SystemTime {
+        self.clock.wall_now()
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -394,7 +399,7 @@ impl Lane {
             let read = {
                 let interrupt = lease.interrupt.clone();
                 let mut interrupted = pin!(interrupt.cancelled());
-                let mut incoming = lease.framed()?.next_frame(deadline);
+                let mut incoming = pin!(lease.framed()?.next_frame(deadline));
                 let read = poll_fn(|cx| {
                     if interrupted.as_mut().poll(cx).is_ready() {
                         return Poll::Ready(Ok(None));
@@ -589,8 +594,9 @@ impl Lane {
             &Service::CloseSecureChannelRequest {
                 request_header: header,
             },
-            self.max_frame
-                .saturating_sub(24)
+            lease
+                .framed()?
+                .max_body(self.max_frame)?
                 .min(self.message_limits.bytes),
         )?;
         let frame = Frame::single(Body::Close(SecureChunk {

@@ -1,4 +1,4 @@
-//! Policy-None channel establishment before ownership transfers to the request lane.
+//! Policy-bound channel establishment before ownership transfers to the request lane.
 //!
 //! # Compatibility: docs/parity/opcua.md#OPCUA-LIFE-HELLO
 //! # Compatibility: docs/parity/opcua.md#OPCUA-LIFE-OPEN
@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use crate::opcua::codec::{NodeId, UaByteString, UaString};
+use crate::opcua::crypto::{Backend, Security, Symmetric};
 use crate::opcua::frame::{
     AsymmetricHeader, Body, ChunkType, Frame, Hello, OpcuaFramer, OpenChunk, SequenceHeader,
     TransportLimits,
@@ -22,16 +23,19 @@ use crate::opcua::generated::channel_security_token::ChannelSecurityToken;
 use crate::opcua::generated::extension_object_definition::ExtensionObjectDefinition as Service;
 use crate::opcua::generated::message_security_mode::MessageSecurityMode;
 use crate::opcua::generated::security_token_request_type::SecurityTokenRequestType;
-use crate::opcua::options::{MessageSecurity, OpcuaOptions, SecurityPolicy};
+#[cfg(test)]
+use crate::opcua::options::SecurityPolicy;
+use crate::opcua::options::{MessageSecurity, OpcuaOptions};
 use crate::opcua::service::{decode_service, encode_service, request_header, status_error};
-use crate::transport::{FramedTransport, Transport};
+use crate::opcua::wire::Wire;
+use crate::transport::Transport;
 use crate::{CancellationToken, Clock, Deadline, ErrorKind, PlcError, ResourceLimits, Result};
 
 const MIN_BUFFER: u32 = 8192;
 const DEFAULT_LIFETIME: u32 = 3_600_000;
 
 pub(super) struct Channel {
-    pub(super) framed: FramedTransport<Frame, OpcuaFramer>,
+    pub(super) framed: Wire,
     pub(super) clock: Arc<dyn Clock>,
     pub(super) limits: TransportLimits,
     pub(super) token: ChannelSecurityToken,
@@ -39,7 +43,7 @@ pub(super) struct Channel {
         not(test),
         expect(
             dead_code,
-            reason = "None needs no channel keys; secure key derivation arrives in S101"
+            reason = "server nonce is retained for operation-driven renewal in S109"
         )
     )]
     pub(super) server_nonce: UaByteString,
@@ -48,15 +52,16 @@ pub(super) struct Channel {
 }
 
 impl Channel {
-    pub(super) async fn open_none(
+    pub(super) async fn open(
         transport: Box<dyn Transport>,
         options: &OpcuaOptions,
         clock: Arc<dyn Clock>,
         deadline: Deadline,
         cancel: &CancellationToken,
-        crypto: &dyn crate::opcua::crypto::Backend,
+        crypto: Arc<dyn Backend>,
+        secure: Option<&Security>,
     ) -> Result<Self> {
-        if options.security_policy != SecurityPolicy::None {
+        if options.security_policy.is_secure() != secure.is_some() {
             return Err(error(
                 ErrorKind::InvalidConfig,
                 "policy None must be selected explicitly",
@@ -69,7 +74,7 @@ impl Channel {
             proposed.send_buffer_size,
             resources,
         );
-        let mut framed = FramedTransport::new(transport, framer);
+        let mut framed = Wire::new(transport, framer, Arc::clone(&crypto));
         let hello = Frame::single(Body::Hello(Hello {
             protocol_version: 0,
             limits: proposed,
@@ -105,18 +110,46 @@ impl Channel {
             limits.send_buffer_size,
             resources,
         ));
-        let security = AsymmetricHeader::none();
+        let security = if let Some(secure) = secure {
+            framed.asymmetric(Arc::clone(&secure.asymmetric));
+            secure.asymmetric.header()
+        } else {
+            AsymmetricHeader::none()
+        };
         let overhead = security.length_in_bytes()?.saturating_add(20);
         let header = request_header(clock.as_ref(), &NodeId::numeric(0, 0), 1, deadline)?;
+        let client_nonce =
+            crate::opcua::crypto::channel_nonce(crypto.as_ref(), options.security_policy)?;
         let request = Service::OpenSecureChannelRequest {
             request_header: header,
             client_protocol_version: 0,
             request_type: SecurityTokenRequestType::SecurityTokenRequestTypeIssue,
-            security_mode: MessageSecurityMode::MessageSecurityModeNone,
-            client_nonce: crate::opcua::crypto::channel_nonce(crypto, options.security_policy)?,
+            security_mode: if secure.is_none() {
+                MessageSecurityMode::MessageSecurityModeNone
+            } else {
+                match options.message_security {
+                    MessageSecurity::None => MessageSecurityMode::MessageSecurityModeNone,
+                    MessageSecurity::Sign => MessageSecurityMode::MessageSecurityModeSign,
+                    MessageSecurity::SignEncrypt => {
+                        MessageSecurityMode::MessageSecurityModeSignAndEncrypt
+                    }
+                }
+            },
+            client_nonce: client_nonce.clone(),
             requested_lifetime: DEFAULT_LIFETIME,
         };
-        let body = encode_service(446, &request, body_budget(limits, overhead))?;
+        let budget = if secure.is_some() {
+            framed
+                .max_body(usize::try_from(limits.send_buffer_size).unwrap_or(usize::MAX))?
+                .min(if limits.max_message_size == 0 {
+                    usize::MAX
+                } else {
+                    usize::try_from(limits.max_message_size).unwrap_or(usize::MAX)
+                })
+        } else {
+            body_budget(limits, overhead)
+        };
+        let body = encode_service(446, &request, budget)?;
         let open = Frame::single(Body::Open(OpenChunk {
             channel_id: 0,
             security,
@@ -147,7 +180,7 @@ impl Channel {
                 "expected OpenSecureChannel",
             ));
         };
-        if chunk.security != AsymmetricHeader::none()
+        if (secure.is_none() && chunk.security != AsymmetricHeader::none())
             || chunk.sequence.request_id != 1
             || chunk.sequence.sequence_number == 0
         {
@@ -155,6 +188,16 @@ impl Channel {
                 ErrorKind::MalformedData,
                 "unexpected OpenSecureChannel header",
             ));
+        }
+        if let Some(secure) = secure {
+            secure.verify(
+                chunk
+                    .security
+                    .sender_certificate
+                    .as_bytes()
+                    .unwrap_or_default(),
+                clock.wall_now(),
+            )?;
         }
         if limits.max_message_size != 0
             && chunk.body.len() > usize::try_from(limits.max_message_size).unwrap_or(usize::MAX)
@@ -190,6 +233,33 @@ impl Channel {
                 ErrorKind::MalformedData,
                 "invalid channel response parameters",
             ));
+        }
+        if secure.is_some() {
+            let server = server_nonce
+                .as_bytes()
+                .filter(|bytes| {
+                    bytes.len() == options.security_policy.descriptor().nonce
+                        && bytes.iter().any(|byte| *byte != 0)
+                        && Some(*bytes) != client_nonce.as_bytes()
+                })
+                .ok_or_else(|| {
+                    error(
+                        ErrorKind::Authentication,
+                        "invalid secure channel server nonce",
+                    )
+                })?;
+            let client = client_nonce
+                .as_bytes()
+                .ok_or_else(|| error(ErrorKind::Authentication, "missing client nonce"))?;
+            framed.symmetric(Symmetric::new(
+                crypto.as_ref(),
+                options.security_policy,
+                options.message_security,
+                security_token.channel_id,
+                security_token.token_id,
+                client,
+                server,
+            )?);
         }
         Ok(Self {
             framed,
@@ -309,7 +379,14 @@ impl fmt::Debug for Channel {
         f.debug_struct("Channel")
             .field("limits", &self.limits)
             .field("configured_message_security", &self.configured_mode.name())
-            .field("effective_message_security", &"NONE")
+            .field(
+                "effective_message_security",
+                &if self.framed.is_protected() {
+                    self.configured_mode.name()
+                } else {
+                    "NONE"
+                },
+            )
             .field("channel_id", &self.token.channel_id)
             .finish_non_exhaustive()
     }

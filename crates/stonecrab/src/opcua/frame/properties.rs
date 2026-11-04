@@ -22,6 +22,47 @@ fn wide() -> OpcuaFramer {
     OpcuaFramer::new(1 << 20, limits)
 }
 
+#[test]
+fn opcua_raw_framer_preserves_partial_coalesced_and_rejected_buffers() {
+    use super::RawFramer;
+    use crate::transport::FrameError;
+    let bytes = Bytes::from_static(b"ERRF\x10\0\0\0\0\0\0\0\xff\xff\xff\xff");
+    let mut framer = RawFramer(wide());
+    for cut in 0..bytes.len() {
+        let mut partial = BytesMut::from(bytes.get(..cut).unwrap());
+        let before = partial.clone();
+        assert_eq!(framer.decode(&mut partial), Ok(None));
+        assert_eq!(partial, before);
+    }
+    let mut coalesced = BytesMut::from([bytes.as_ref(), bytes.as_ref()].concat().as_slice());
+    assert_eq!(framer.decode(&mut coalesced), Ok(Some(bytes.clone())));
+    assert_eq!(framer.decode(&mut coalesced), Ok(Some(bytes.clone())));
+    let mut out = BytesMut::new();
+    framer.encode(&bytes, &mut out).unwrap();
+    assert_eq!(out.as_ref(), bytes.as_ref());
+    let mut narrow = RawFramer(OpcuaFramer::new(
+        15,
+        ResourceLimits::builder().build().unwrap(),
+    ));
+    assert_eq!(narrow.max_frame_bytes(), 15);
+    assert_eq!(
+        narrow.encode(&bytes, &mut out),
+        Err(FrameError::Oversized(16))
+    );
+    assert_eq!(narrow.decode(&mut out), Err(FrameError::Oversized(16)));
+    assert_eq!(out.as_ref(), bytes.as_ref());
+    for malformed in [
+        Bytes::from_static(b"X"),
+        Bytes::from_static(b"ERRF\x11\0\0\0"),
+        Bytes::from_static(b"ERRF\x08\0\0\0X"),
+    ] {
+        let before = out.clone();
+        assert!(framer.encode(&malformed, &mut out).is_err());
+        assert!(Frame::parse(&malformed).is_err());
+        assert_eq!(out, before);
+    }
+}
+
 fn ua_string() -> impl Strategy<Value = UaString> {
     prop::option::of(prop::collection::vec(any::<u8>(), 0..40)).prop_map(UaString)
 }

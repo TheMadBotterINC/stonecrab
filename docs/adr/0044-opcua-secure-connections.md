@@ -19,8 +19,9 @@ session activation, deleting the public Basic256Sha256 connect refusal.
   symmetric), retaining the injected Backend. No new provider interface. Errors from
   authentication stay PlcError::Authentication, not FrameError::Malformed. ERR remains
   a bounded transport-level error; unexpected unprotected traffic cannot bypass crypto.
-- Extend OpcuaFramer with raw Bytes framing, sharing its header/size/buffer judgement
-  with the existing typed Frame implementation used by fixtures and codec fuzzing. Both
+- Add a private RawFramer view of OpcuaFramer for Bytes, sharing its header/size/buffer
+  judgement with typed Frame framing. Distinct concrete types avoid ambiguous trait
+  inference throughout the existing typed codec fixtures and fuzzing. Both
   implementations obey unchanged-buffer-on-error. Add only a crate-private framer borrow
   to FramedTransport; no public transport/error API change or discarded coalesced bytes.
 - Wire exposes exact outbound body capacity using the existing SecuritySizes table and
@@ -34,8 +35,8 @@ session activation, deleting the public Basic256Sha256 connect refusal.
   tls.verify=false skips trust acceptance, not key/certificate/signature binding.
 - Generalize channel establishment to the selected policy. HEL/ACK remains plain, OPN
   uses Asymmetric even in SIGN mode, and authenticated response parameters/nonces are
-  checked before deriving directional keys and installing symmetric protection. Preserve
-  None entry points still used by fixtures, with one shared implementation. Do not activate
+  checked before deriving directional keys and installing symmetric protection. Migrate
+  None fixtures to the same policy-bound entry point, with no compatibility alias. Do not activate
   the other RSA policies publicly ahead of S107.
 - Session uses certificate SAN application URI and the client certificate chain under
   secure policy. GetEndpoints runs only when secure plus discovery=true, on that same

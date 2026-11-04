@@ -8,6 +8,7 @@ use crate::opcua::channel::{Channel, within};
 use crate::opcua::connection::OpcuaConnection;
 use crate::opcua::crypto::{self, Backend, Native};
 use crate::opcua::lane::Lane;
+#[cfg(test)]
 use crate::opcua::options::SecurityPolicy;
 use crate::opcua::options::{OpcuaOptions, endpoint};
 use crate::opcua::session::Session;
@@ -209,22 +210,7 @@ impl Driver for OpcuaDriver {
                     "OPC UA requires parsed driver options",
                 )
             })?;
-            if options.security_policy != SecurityPolicy::None {
-                if options.server_certificate_file.is_none() {
-                    return Err(PlcError::new(
-                        ErrorKind::InvalidConfig,
-                        "OPC UA secure policy requires server-certificate-file before I/O; tls.trust-store or tls.verify=false alone cannot bootstrap it; select security-policy=NONE explicitly for an unprotected connection",
-                    ));
-                }
-                let material = crypto::KeyMaterial::load(options.keystore.as_deref())?;
-                let (server, _verifier) = crypto::Verifier::prepare(options)?;
-                let _asymmetric =
-                    crypto::Asymmetric::new(options.security_policy, material, server)?;
-                return Err(PlcError::new(
-                    ErrorKind::InvalidConfig,
-                    "OPC UA secure policy is not implemented; select None explicitly",
-                ));
-            }
+            let security = crypto::Security::prepare(options, self.clock.wall_now())?;
             let identity = crate::opcua::identity::Identity::resolve(
                 config.credentials().map(crate::Secret::expose),
                 options,
@@ -240,17 +226,27 @@ impl Driver for OpcuaDriver {
                     .open(config.endpoint(), *config.limits(), deadline),
             )
             .await?;
-            let channel = Channel::open_none(
+            let channel = Channel::open(
                 transport,
                 options,
                 Arc::clone(&self.clock),
                 deadline,
                 &cancel,
-                self.crypto.as_ref(),
+                Arc::clone(&self.crypto),
+                security.as_ref(),
             )
             .await?;
             let lane = Lane::from_channel(channel, config.timeouts().request);
-            let session = Session::open(lane, options, identity, nonce, deadline, &cancel).await?;
+            let session = Session::open(
+                lane,
+                options,
+                identity,
+                nonce,
+                deadline,
+                &cancel,
+                security.as_ref(),
+            )
+            .await?;
             let connection: Box<dyn Connection> = Box::new(OpcuaConnection::new(
                 session,
                 Arc::clone(&self.clock),
@@ -684,7 +680,7 @@ mod nonce_tests {
     }
 
     #[test]
-    fn opcua_client_keys_are_checked_before_network_and_do_not_enable_secure_connect_yet() {
+    fn opcua_client_keys_are_checked_before_network_and_none_ignores_them() {
         use crate::opcua::pki;
         let scratch = pki::Scratch::new();
         let clock = FakeClock::default();
@@ -705,23 +701,33 @@ mod nonce_tests {
         let valid = scratch.write("valid.pem", &text);
         let server = scratch.write("server.pem", &pki::pem("CERTIFICATE", &cert));
         let missing = scratch.path().join("sensitive-missing.pem");
-        for (path, reason) in [
-            (&valid, "secure policy is not implemented"),
-            (&missing, "tls.keystore could not be read"),
-        ] {
-            let config = driver
-                .parse_config(&format!(
-                    "opcua://fake:4840?tls.keystore={}&server-certificate-file={}",
-                    path.display(),
-                    server.display()
-                ))
-                .unwrap();
-            let error = block_on_with(&clock, driver.connect(config)).err().unwrap();
-            assert_eq!(error.kind(), ErrorKind::InvalidConfig);
-            assert!(error.to_string().contains(reason));
-            assert!(!error.to_string().contains("sensitive"));
-        }
+        clock.set_wall_now(std::time::UNIX_EPOCH + std::time::Duration::from_secs(pki::NOW));
+        let config = driver
+            .parse_config(&format!(
+                "opcua://fake:4840?tls.keystore={}&server-certificate-file={}",
+                missing.display(),
+                server.display()
+            ))
+            .unwrap();
+        let error = block_on_with(&clock, driver.connect(config)).err().unwrap();
+        assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+        assert!(error.to_string().contains("tls.keystore could not be read"));
+        assert!(!error.to_string().contains("sensitive"));
         assert_eq!(factory.opens().len(), 0);
+        let config = driver
+            .parse_config(&format!(
+                "opcua://fake:4840?tls.keystore={}&server-certificate-file={}",
+                valid.display(),
+                server.display()
+            ))
+            .unwrap();
+        let error = block_on_with(&clock, driver.connect(config)).err().unwrap();
+        assert!(
+            !error
+                .to_string()
+                .contains("secure policy is not implemented")
+        );
+        assert_eq!(factory.opens().len(), 1);
         // None never opens the missing key store; it reaches the transport boundary.
         let config = driver
             .parse_config(&format!(
@@ -731,7 +737,7 @@ mod nonce_tests {
             .unwrap();
         let error = block_on_with(&clock, driver.connect(config)).err().unwrap();
         assert!(!error.to_string().contains("tls.keystore"));
-        assert_eq!(factory.opens().len(), 1);
+        assert_eq!(factory.opens().len(), 2);
     }
 
     struct RejectEntropy(AtomicUsize);

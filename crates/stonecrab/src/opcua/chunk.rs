@@ -77,9 +77,11 @@ impl MessageLimits {
     }
 
     /// Preflight the whole body before a caller emits any chunk or consumes sequences.
-    pub(super) fn plan(self, bytes: usize, buffer: usize) -> Result<(usize, u32)> {
-        let capacity = SecuritySizes::NONE.max_body(buffer, 4)?;
-        let count = bytes.div_ceil(capacity);
+    pub(super) fn plan(self, bytes: usize, capacity: usize) -> Result<(usize, u32)> {
+        let count = bytes
+            .checked_div(capacity)
+            .ok_or_else(|| limited("send buffer cannot hold a message body"))?
+            .saturating_add(usize::from(!bytes.is_multiple_of(capacity)));
         let count = u32::try_from(count).map_err(|_range| limited("chunk count overflow"))?;
         self.check(bytes, count)?;
         Ok((capacity, count))

@@ -41,9 +41,9 @@ fn limited() -> PlcError {
 }
 
 pub(in crate::opcua) struct Asymmetric {
-    policy: SecurityPolicy,
-    local: KeyMaterial,
-    peer: CertificateDer<'static>,
+    pub(super) policy: SecurityPolicy,
+    pub(super) local: KeyMaterial,
+    pub(super) peer: CertificateDer<'static>,
     encrypting: OaepPublicEncryptingKey,
     decrypting: Secret<OaepPrivateDecryptingKey>,
     sizes: SecuritySizes,
@@ -174,18 +174,7 @@ impl Asymmetric {
         if overhead == 2 {
             writer.write_u8(high)?;
         }
-        let mut signature = vec![0; signature_size];
-        self.local
-            .signing
-            .expose()
-            .sign(
-                self.encoding(),
-                &SystemRandom::new(),
-                writer.as_slice(),
-                &mut signature,
-            )
-            .ok()
-            .ok_or_else(rejected)?;
+        let signature = self.sign(writer.as_slice())?;
         writer.write_bytes(&signature)?;
         let plaintext = writer.as_slice().get(clear..).ok_or_else(invalid)?;
         let mut out = BoundedWriter::new(total);
@@ -200,6 +189,22 @@ impl Asymmetric {
             out.write_bytes(encrypted)?;
         }
         Ok(Bytes::from(out.into_bytes()))
+    }
+
+    pub(super) fn sign(&self, message: &[u8]) -> Result<Vec<u8>> {
+        let mut signature = vec![0; self.local.signing.expose().public_modulus_len()];
+        self.local
+            .signing
+            .expose()
+            .sign(
+                self.encoding(),
+                &SystemRandom::new(),
+                message,
+                &mut signature,
+            )
+            .ok()
+            .ok_or_else(rejected)?;
+        Ok(signature)
     }
 
     pub(in crate::opcua) fn open(&self, bytes: &[u8], maximum: usize) -> Result<Frame> {
@@ -277,7 +282,7 @@ impl Asymmetric {
         })
     }
 
-    fn verify(&self, message: &[u8], signature: &[u8]) -> Result<()> {
+    pub(super) fn verify(&self, message: &[u8], signature: &[u8]) -> Result<()> {
         let algorithm = if self.policy == SecurityPolicy::Aes256Sha256RsaPss {
             &PSS_SHA256
         } else {

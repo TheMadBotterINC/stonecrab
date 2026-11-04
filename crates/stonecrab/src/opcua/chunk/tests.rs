@@ -59,18 +59,18 @@ fn opcua_send_plan_checks_exact_message_and_chunk_boundaries() {
         bytes: 100,
         chunks: 3,
     };
-    assert_eq!(limits.plan(99, 57).unwrap(), (33, 3));
-    assert_eq!(limits.plan(100, 58).unwrap(), (34, 3));
+    assert_eq!(limits.plan(99, 33).unwrap(), (33, 3));
+    assert_eq!(limits.plan(100, 34).unwrap(), (34, 3));
     assert_eq!(
-        limits.plan(101, 58).unwrap_err().kind(),
+        limits.plan(101, 34).unwrap_err().kind(),
         ErrorKind::ResourceLimit
     );
     assert_eq!(
-        limits.plan(100, 57).unwrap_err().kind(),
+        limits.plan(100, 33).unwrap_err().kind(),
         ErrorKind::ResourceLimit
     );
     assert_eq!(
-        limits.plan(1, 24).unwrap_err().kind(),
+        limits.plan(1, 0).unwrap_err().kind(),
         ErrorKind::ResourceLimit
     );
     if usize::BITS > 32 {
@@ -79,7 +79,7 @@ fn opcua_send_plan_checks_exact_message_and_chunk_boundaries() {
                 bytes: usize::MAX,
                 chunks: u32::MAX
             }
-            .plan(usize::MAX, 25)
+            .plan(usize::MAX, 1)
             .unwrap_err()
             .kind(),
             ErrorKind::ResourceLimit

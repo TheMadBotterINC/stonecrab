@@ -19,10 +19,6 @@ use crate::{CancellationToken, Deadline, ErrorKind, PlcError, Result};
 const TCP_PROFILE: &str = "http://opcfoundation.org/UA-Profile/Transport/uatcp-uasc-uabinary";
 
 /// Runs on the caller's channel and connect deadline, never an automatic None fallback.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "secure-connect discovery wiring is S106")
-)]
 pub(super) async fn get_endpoints(
     lane: &Lane,
     options: &OpcuaOptions,

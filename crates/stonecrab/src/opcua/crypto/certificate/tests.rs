@@ -8,6 +8,29 @@ fn now() -> SystemTime {
 }
 
 #[test]
+fn opcua_wire_certificate_chain_is_bounded_canonical_and_borrowed() {
+    let certificate = application(&CertSpec::application("server", "server", 1));
+    let bytes = certificate.as_ref().repeat(16);
+    let parsed = chain(&bytes).unwrap();
+    assert_eq!(parsed.len(), 16);
+    assert_eq!(parsed.first().unwrap().as_ref().as_ptr(), bytes.as_ptr());
+    for rejected in [
+        Vec::new(),
+        vec![0; MAX_CERT_BYTES.saturating_add(1)],
+        certificate.as_ref().repeat(17),
+        vec![0x30],
+        vec![0x31, 0],
+        vec![0x30, 0],
+        [certificate.as_ref(), &[0]].concat(),
+    ] {
+        assert_eq!(
+            chain(&rejected).unwrap_err().kind(),
+            crate::ErrorKind::Trust
+        );
+    }
+}
+
+#[test]
 fn opcua_signature_algorithm_debug_contains_only_the_algorithm_name() {
     assert_eq!(format!("{PKCS1_SHA256:?}"), "Pkcs1");
     assert_eq!(format!("{PSS_SHA256:?}"), "Pss");

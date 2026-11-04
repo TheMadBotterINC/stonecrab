@@ -1,3 +1,4 @@
+use crate::opcua::frame::OpcuaFramer;
 use std::error::Error;
 use std::task::{Context, Poll, Waker};
 
@@ -32,7 +33,11 @@ impl Rig {
             .unwrap();
         let transport = FakeTransport::new(script, clock.clone(), limits);
         let probe = transport.probe();
-        let framed = FramedTransport::new(Box::new(transport), OpcuaFramer::new(65535, limits));
+        let framed = Wire::new(
+            Box::new(transport),
+            OpcuaFramer::new(65535, limits),
+            Arc::new(crate::opcua::crypto::Native),
+        );
         let lane = Lane::new(
             framed,
             Arc::new(clock.clone()),
@@ -529,9 +534,10 @@ fn slow_send(rig: &Rig) {
         inner: framed.into_inner(),
         clock: rig.clock.clone(),
     };
-    rig.lane.lock().framed = Some(FramedTransport::new(
+    rig.lane.lock().framed = Some(Wire::new(
         Box::new(slow),
         OpcuaFramer::new(65535, limits),
+        Arc::new(crate::opcua::crypto::Native),
     ));
 }
 
@@ -1371,13 +1377,14 @@ async fn opcua_interop_large_array_read_chunks_under_none() {
         .open(config.endpoint(), *config.limits(), deadline)
         .await
         .unwrap();
-    let channel = Channel::open_none(
+    let channel = Channel::open(
         transport,
         options,
         Arc::clone(&clock),
         deadline,
         &cancel,
-        &crate::opcua::crypto::Native,
+        Arc::new(crate::opcua::crypto::Native),
+        None,
     )
     .await
     .unwrap();
@@ -1392,6 +1399,7 @@ async fn opcua_interop_large_array_read_chunks_under_none() {
         [7; 32],
         deadline,
         &cancel,
+        None,
     )
     .await
     .unwrap();

@@ -244,7 +244,7 @@ impl Device {
 
     pub(super) fn reactor(
         &self,
-    ) -> impl FnMut(&[u8]) -> library::testkit::Reaction + Send + 'static {
+    ) -> impl FnMut(&[u8]) -> library::testkit::Reaction + Send + 'static + use<> {
         let device = self.clone();
         let mut sequence = 41_u32;
         move |bytes| {

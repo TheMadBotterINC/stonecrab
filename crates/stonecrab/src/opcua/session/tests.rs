@@ -25,6 +25,92 @@ use crate::{
 
 const URI: &str = "opcua://fake:4840/path?security-policy=NONE";
 
+#[tokio::test]
+#[expect(
+    clippy::disallowed_macros,
+    reason = "the ignored interop test records non-secret secure session results"
+)]
+#[ignore = "needs the independent open62541 peer; interop/open62541/interop.sh tests"]
+async fn opcua_interop_basic256sha256_public_sessions_read_write_and_close_in_both_modes() {
+    use crate::opcua::OpcuaAddress;
+    use crate::opcua::pki::Scratch;
+    use crate::{PlcValue, Tag, TagId};
+    let base = std::env::var("STONECRAB_INTEROP_OPEN62541").unwrap();
+    let base = base.split('?').next().unwrap();
+    let pki =
+        std::path::PathBuf::from(std::env::var("STONECRAB_INTEROP_OPEN62541_PKI_DIR").unwrap());
+    let mut pem = std::fs::read_to_string(pki.join("client.cert.pem")).unwrap();
+    pem.push_str(&std::fs::read_to_string(pki.join("client.key.pem")).unwrap());
+    let scratch = Scratch::new();
+    let key = scratch.write("client.pem", &pem);
+    for mode in ["SIGN", "SIGN_ENCRYPT"] {
+        for discovery in [false, true] {
+            let driver = OpcuaDriver::new();
+            let uri = format!(
+                "{base}?security-policy=Basic256Sha256&message-security={mode}&discovery={discovery}&tls.keystore={}&server-certificate-file={}&access=read-write&encoding.receive-buffer-size=8192&encoding.send-buffer-size=8192",
+                key.display(),
+                pki.join("server.cert.der").display()
+            );
+            let connection = driver
+                .connect(driver.parse_config(&uri).unwrap())
+                .await
+                .unwrap();
+            let tag = |name: &str, address: &str| {
+                Tag::new(
+                    TagId::new(name).unwrap(),
+                    Arc::new(OpcuaAddress::parse(address).unwrap()),
+                )
+            };
+            let request = ReadRequest::builder(connection.limits())
+                .tag(tag("scalar", "ns=1;s=scalar/Int32"))
+                .tag(tag("large", "ns=1;s=large/Int32_10000"))
+                .build()
+                .unwrap();
+            let read = connection.read(request).await.unwrap();
+            assert_eq!(read.iter_ok().count(), 2);
+            assert_eq!(
+                read.items().first().unwrap().outcome().as_ref().unwrap(),
+                &PlcValue::I32(-123_456_789)
+            );
+            let PlcValue::List(values) = read.items().get(1).unwrap().outcome().as_ref().unwrap()
+            else {
+                panic!("array")
+            };
+            assert_eq!(values.len(), 10000);
+            assert_eq!(values.last(), Some(&PlcValue::I32(9999)));
+            let write = WriteRequest::builder(connection.limits())
+                .item(
+                    tag("setpoint", "ns=1;s=writable/Int32;DINT"),
+                    PlcValue::I32(87654),
+                )
+                .build()
+                .unwrap();
+            assert_eq!(connection.write(write).await.unwrap().confirmed_count(), 1);
+            let read = ReadRequest::builder(connection.limits())
+                .tag(tag("setpoint", "ns=1;s=writable/Int32"))
+                .build()
+                .unwrap();
+            assert_eq!(
+                connection
+                    .read(read)
+                    .await
+                    .unwrap()
+                    .items()
+                    .first()
+                    .unwrap()
+                    .outcome()
+                    .as_ref()
+                    .unwrap(),
+                &PlcValue::I32(87654)
+            );
+            connection.close().await.unwrap();
+            println!(
+                "Basic256Sha256 {mode}, discovery={discovery}: public connect, chunked Read, Write/read-back and close passed"
+            );
+        }
+    }
+}
+
 fn frame(bytes: &[u8]) -> Frame {
     OpcuaFramer::new(65535, ResourceLimits::builder().build().unwrap())
         .decode(&mut BytesMut::from(bytes))
@@ -417,13 +503,14 @@ fn opcua_create_session_adopts_the_authentication_token_and_revised_timeout() {
     let deadline = Deadline::after(clock.now(), Duration::from_secs(60)).unwrap();
     let channel = block_on_with(
         &clock,
-        Channel::open_none(
+        Channel::open(
             Box::new(transport),
             options,
             Arc::new(clock.clone()),
             deadline,
             &cancel,
-            &crate::opcua::crypto::Native,
+            Arc::new(crate::opcua::crypto::Native),
+            None,
         ),
     )
     .unwrap();
@@ -440,6 +527,7 @@ fn opcua_create_session_adopts_the_authentication_token_and_revised_timeout() {
             [0xA5; 32],
             deadline,
             &cancel,
+            None,
         ),
     )
     .unwrap();
@@ -789,13 +877,14 @@ fn opcua_session_cancellation_and_drop_never_activate_a_half_open_session() {
             let deadline = Deadline::after(clock.now(), Duration::from_secs(60)).unwrap();
             let channel = block_on_with(
                 &clock,
-                Channel::open_none(
+                Channel::open(
                     Box::new(transport),
                     options,
                     Arc::new(clock.clone()),
                     deadline,
                     &cancel,
-                    &crate::opcua::crypto::Native,
+                    Arc::new(crate::opcua::crypto::Native),
+                    None,
                 ),
             )
             .unwrap();
@@ -806,6 +895,7 @@ fn opcua_session_cancellation_and_drop_never_activate_a_half_open_session() {
                 [7; 32],
                 deadline,
                 &cancel,
+                None,
             ));
             assert!(
                 session
