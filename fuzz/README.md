@@ -73,3 +73,12 @@ chunk with fixed public fixture nonces, then checks canonical protection and reo
 with opposite directional keys. Unauthenticated bytes never reach sequence/body parsing.
 The committed seed packets are Python HMAC plus OpenSSL CBC fixtures; they contain no key
 or production nonce. Includes Sign/SignEncrypt, all MSG flags, CLO and malformed input.
+
+
+`fuzz_opcua_certificate` (S104) exercises canonical DER length, UTC/GeneralizedTime and EKU
+parsing plus the production RSA server-leaf checks at the fixed 2026-10-30 reference date.
+Nine seeds include independently generated OpenSSL RSA PKCS#1/PSS public certificates
+(valid 2026-01-01 to 2036-01-01), an expired public certificate (2001 to 2002), malformed
+DER, raw time values and an EKU. Private keys were temporary and discarded; no private
+key, production identity or upstream captured certificate is committed. The connection
+string corpus also covers the S104 trust-store formats and explicit verification opt-in.

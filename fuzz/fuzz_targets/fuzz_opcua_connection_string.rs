@@ -72,6 +72,9 @@ fn check(text: &str) {
                     || key == "server-certificate-file"
                     || key == "tls.keystore"
                     || key == "tls.keystore-type"
+                    || key == "tls.trust-store"
+                    || key == "tls.trust-store-type"
+                    || key == "tls.verify"
             }));
             if let Some(path) = uri.option("tls.keystore") {
                 assert!(!path.is_empty());
@@ -79,6 +82,16 @@ fn check(text: &str) {
             }
             if let Some(kind) = uri.option("tls.keystore-type") {
                 assert_eq!(kind, "pem");
+            }
+            if let Some(path) = uri.option("tls.trust-store") {
+                assert!(!path.is_empty());
+                assert!(!path.chars().any(char::is_control));
+            }
+            if let Some(kind) = uri.option("tls.trust-store-type") {
+                assert!(["pem", "der"].contains(&kind));
+            }
+            if let Some(value) = uri.option("tls.verify") {
+                assert!(["true", "false"].contains(&value));
             }
             if let Some(value) = uri.option("allow-insecure-credentials") {
                 assert!(["true", "false"].contains(&value));

@@ -63,6 +63,10 @@ impl SecurityPolicy {
 }
 
 impl Policy {
+    /// Peer confirmation remains UNVERIFIED until S106; shared with RSA framing bounds.
+    pub(in crate::opcua) fn accepts_rsa_key(self, bytes: usize) -> bool {
+        self.nonce != 0 && (256..=512).contains(&bytes)
+    }
     pub(in crate::opcua) fn key_length(self) -> Result<usize> {
         self.signing_key
             .checked_add(self.encryption_key)
@@ -89,7 +93,7 @@ impl Policy {
             return Ok(SecuritySizes::NONE);
         }
         // Accepted RSA policies require at least a 2048-bit key; the maximum is 4096 bits.
-        if !(256..=512).contains(&signing_modulus) || !(256..=512).contains(&encryption_modulus) {
+        if !self.accepts_rsa_key(signing_modulus) || !self.accepts_rsa_key(encryption_modulus) {
             return Err(invalid());
         }
         let plain = encryption_modulus

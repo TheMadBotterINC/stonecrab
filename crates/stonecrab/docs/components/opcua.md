@@ -36,7 +36,8 @@ socket and starts no discovery.
 | Staged scalar, array and matrix writes with explicit read-write access | interoperability-tested with open62541 |
 | Browse, subscriptions | planned |
 | Bounded PEM client key loading (RSA PKCS#8), certificate chain/thumbprint and SAN application URI | build-tested |
-| Signed/encrypted security policies and server certificate validation | planned |
+| Server trust preparation: explicit opt-out, PEM/DER store, constant-time pin and fail-closed verifier (crate-private) | build-tested |
+| Signed/encrypted security policies and remote handshake verifier calls | planned |
 | Independent-server scalar Read interoperability | verified with open62541 |
 | Hardware verification | planned |
 
@@ -513,3 +514,33 @@ later secure handshake; SHA-1 here is only a protocol identifier.
 S103 validates client key material before transport I/O. A valid key store still reaches
 the secure-connect refusal: server trust, protected OPN and secure session activation are
 S104–S106. Loading client certificates does not establish server trust or chain validity.
+
+## Server certificate trust preparation
+
+S104 requires `server-certificate-file` for every secure policy before client-key or
+transport I/O. It contains exactly one bootstrap server certificate, DER or PEM. Neither
+`tls.trust-store` nor `tls.verify=false` replaces this file. No secure policy falls back
+to None; `security-policy=NONE` is the explicit unprotected choice. None does not open
+certificate or trust-store files.
+
+Trust strategies are selected in this order: explicit `tls.verify=false`, a configured
+`tls.trust-store`, the bootstrap certificate as an exact pin, otherwise reject. The store
+is PEM by default (`tls.trust-store-type=pem`) or one DER certificate with type `der`.
+Other formats and `tls.trust-store-password` are refused. Files are read once with a
+1 MiB plus one overflow-detection-byte ceiling; errors omit paths, contents and sources.
+The existing webpki individual-certificate size limit also applies. Only the selected
+trust-store file is opened, but bootstrap structure and RSA bounds always apply.
+
+The private strict verifier checks validity, RSA policy bounds and serverAuth EKU when
+present. A byte-identical trusted leaf is accepted directly; other chains need a path to
+configured, current anchors through the supplied issuers. Discovered or presented roots
+never become anchors. Native PKCS#1/PSS SHA-256 verifies chain signatures. Pins compare
+the leaf DER through AWS-LC's constant-time contents comparison; lengths are public.
+Expired/future certificates, wrong usage, unknown issuers and malformed chains fail
+with `Trust`. No OS/public roots, certificate downloads or revocation service is added.
+
+Debug and structured tracing name the strategy; permissive preparation records
+`tls.verify=false` at warning level. This bypasses trust acceptance, while cryptographic
+certificate/key/signature requirements still apply. Preparing valid files still reaches
+the existing secure-connect refusal: protected OPN is S105 and remote handshake verifier
+call sites are S106. These private verifier tests do not claim a working secure session.

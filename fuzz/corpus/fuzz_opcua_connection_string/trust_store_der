@@ -1,0 +1,1 @@
+opcua://fake:4840?tls.trust-store=anchor.der&tls.trust-store-type=der

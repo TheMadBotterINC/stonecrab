@@ -128,6 +128,13 @@ impl MessageSecurity {
     }
 }
 
+/// Explicit file format of the server trust store.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CertificateFormat {
+    Pem,
+    Der,
+}
+
 /// The connection parameters of the `opcua` driver, parsed and validated.
 ///
 /// `parse_config` reads them from the connection string and stores them in the
@@ -145,8 +152,11 @@ impl MessageSecurity {
 /// | `discovery` | `discovery` | true (secure-connect execution in S106) |
 /// | `endpoint_host` | `endpoint-host` | none (an additional advertised host match) |
 /// | `endpoint_port` | `endpoint-port` | none (an additional advertised port match) |
-/// | `server_certificate_file` | `server-certificate-file` | none (path only; trust loading in S104) |
+/// | `server_certificate_file` | `server-certificate-file` | none (required bootstrap for secure policies) |
 /// | `keystore` | `tls.keystore` | none (required for secure policies) |
+/// | `verify` | `tls.verify` | true |
+/// | `trust_store` | `tls.trust-store` | none |
+/// | `trust_store_type` | `tls.trust-store-type` | pem (or explicit der) |
 /// | `request_timeout` | `request-timeout-ms` | 30000 ms |
 /// | `receive_buffer_size` | `encoding.receive-buffer-size` | 65535 bytes |
 /// | `send_buffer_size` | `encoding.send-buffer-size` | 65535 bytes |
@@ -174,10 +184,13 @@ pub(super) struct OpcuaOptions {
     pub(super) access: crate::AccessPolicy,
     pub(super) endpoint_host: Option<String>,
     pub(super) endpoint_port: Option<u16>,
-    /// Syntactic path only until trust loading lands in S104.
+    /// Bootstrap server certificate, also the pin unless a higher-priority strategy is set.
     pub(super) server_certificate_file: Option<String>,
     /// PEM certificate chain, leaf first, and an unencrypted RSA PKCS#8 private key.
     pub(super) keystore: Option<String>,
+    pub(super) verify: bool,
+    pub(super) trust_store: Option<String>,
+    pub(super) trust_store_type: CertificateFormat,
     /// `request-timeout-ms`, shared with `Timeouts.request`.
     pub(super) request_timeout: Duration,
     pub(super) handshake_timeout: Duration,
@@ -209,6 +222,9 @@ impl OpcuaOptions {
         let mut endpoint_port = None;
         let mut server_certificate_file = None;
         let mut keystore = None;
+        let mut verify = true;
+        let mut trust_store = None;
+        let mut trust_store_type = CertificateFormat::Pem;
         let mut security_policy = SecurityPolicy::Basic256Sha256;
         let mut message_security = MessageSecurity::SignEncrypt;
         let mut request_timeout = Duration::from_secs(30);
@@ -264,6 +280,29 @@ impl OpcuaOptions {
                 "tls.keystore-password" => {
                     return Err(invalid(
                         "tls.keystore-password is not offered; use an unencrypted RSA PKCS#8 key in PEM",
+                    ));
+                }
+                "tls.verify" => verify = boolean(key, value)?,
+                "tls.trust-store" => {
+                    if value.is_empty() || value.chars().any(char::is_control) {
+                        return Err(invalid("tls.trust-store must be a nonempty file path"));
+                    }
+                    trust_store = Some(value.clone());
+                }
+                "tls.trust-store-type" => {
+                    trust_store_type = match value.as_str() {
+                        "pem" => CertificateFormat::Pem,
+                        "der" => CertificateFormat::Der,
+                        _ => {
+                            return Err(invalid(
+                                "tls.trust-store-type must be pem or der; PKCS#12 and JVM stores are not offered",
+                            ));
+                        }
+                    };
+                }
+                "tls.trust-store-password" => {
+                    return Err(invalid(
+                        "tls.trust-store-password is not offered; use PEM or DER certificates without a password",
                     ));
                 }
                 SECURITY_POLICY => security_policy = SecurityPolicy::from_name(value)?,
@@ -333,6 +372,9 @@ impl OpcuaOptions {
             endpoint_port,
             server_certificate_file,
             keystore,
+            verify,
+            trust_store,
+            trust_store_type,
             request_timeout,
             handshake_timeout,
             session_timeout,
@@ -434,8 +476,6 @@ fn unknown_key(key: &str) -> PlcError {
         " (credentials never travel in the connection string; pass Credentials)"
     } else if key == LEGACY_VERIFY {
         " (the old upstream name; tls.verify replaced it with the opposite sense)"
-    } else if key.starts_with("tls.") {
-        " (the tls. certificate options are not offered yet)"
     } else {
         ""
     };
@@ -724,7 +764,7 @@ mod tests {
         }
     }
 
-    // covers: OPCUA-QUIRK-TLS-NAMES the legacy name is an unknown key, the tls. names are held back
+    // covers: OPCUA-QUIRK-TLS-NAMES the reversed-sense legacy name stays unknown
     #[test]
     fn opcua_config_insecure_certificate_verification_is_an_unknown_key() {
         let error = refusal(&[(LEGACY_VERIFY, "true")]);
@@ -735,20 +775,6 @@ mod tests {
             2,
             "only the key is quoted, so a reader can tell it from the text around it: {error}"
         );
-    }
-
-    #[test]
-    fn opcua_config_tls_names_are_not_offered_yet() {
-        for key in [
-            "tls.trust-store",
-            "tls.trust-store-type",
-            "tls.trust-store-password",
-            "tls.verify",
-        ] {
-            let error = refusal(&[(key, "x")]);
-            assert_eq!(error.kind(), ErrorKind::InvalidConfig, "{key}");
-            assert!(error.to_string().contains("not offered yet"), "{error}");
-        }
     }
 
     // covers: OPCUA-CFG-KEYSTORE-TYPE
@@ -784,6 +810,67 @@ mod tests {
         for value in ["", "sensitive\0path", "sensitive\npath"] {
             let error = refusal(&[("tls.keystore", value)]);
             assert!(error.to_string().contains("nonempty file path"));
+            assert!(!error.to_string().contains("sensitive"));
+        }
+    }
+
+    #[test]
+    fn opcua_config_tls_verify_default_is_true() {
+        assert!(options(&[]).verify);
+        assert!(!options(&[("tls.verify", "false")]).verify);
+        assert!(options(&[("tls.verify", "true")]).verify);
+        for value in ["", "TRUE", "0", "sensitive"] {
+            let error = refusal(&[("tls.verify", value)]);
+            assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+            assert!(error.to_string().contains("tls.verify"));
+            assert!(!error.to_string().contains("sensitive"));
+        }
+    }
+
+    #[test]
+    fn opcua_config_trust_store_type_pkcs12_is_invalid_config() {
+        let default = options(&[]);
+        assert_eq!(default.trust_store, None);
+        assert_eq!(default.trust_store_type, CertificateFormat::Pem);
+        for (format, expected) in [
+            ("pem", CertificateFormat::Pem),
+            ("der", CertificateFormat::Der),
+        ] {
+            let chosen = options(&[
+                ("tls.trust-store", "public-certificates"),
+                ("tls.trust-store-type", format),
+            ]);
+            assert_eq!(chosen.trust_store.as_deref(), Some("public-certificates"));
+            assert_eq!(chosen.trust_store_type, expected);
+        }
+        for value in [
+            "pkcs12",
+            "jks",
+            "pkcs11",
+            "dks",
+            "jceks",
+            "PEM",
+            "",
+            "sensitive",
+        ] {
+            let error = refusal(&[("tls.trust-store-type", value)]);
+            assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+            assert!(error.to_string().contains("must be pem or der"));
+            assert!(!error.to_string().contains("sensitive"));
+        }
+    }
+
+    #[test]
+    fn opcua_config_trust_store_password_is_invalid_config() {
+        for value in ["", "sensitive-password"] {
+            let error = refusal(&[("tls.trust-store-password", value)]);
+            assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+            assert!(error.to_string().contains("without a password"));
+            assert!(!error.to_string().contains("sensitive-password"));
+        }
+        for value in ["", "sensitive\npath", "sensitive\0path"] {
+            let error = refusal(&[("tls.trust-store", value)]);
+            assert_eq!(error.kind(), ErrorKind::InvalidConfig);
             assert!(!error.to_string().contains("sensitive"));
         }
     }

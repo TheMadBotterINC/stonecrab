@@ -210,7 +210,14 @@ impl Driver for OpcuaDriver {
                 )
             })?;
             if options.security_policy != SecurityPolicy::None {
+                if options.server_certificate_file.is_none() {
+                    return Err(PlcError::new(
+                        ErrorKind::InvalidConfig,
+                        "OPC UA secure policy requires server-certificate-file before I/O; tls.trust-store or tls.verify=false alone cannot bootstrap it; select security-policy=NONE explicitly for an unprotected connection",
+                    ));
+                }
                 let _material = crypto::KeyMaterial::load(options.keystore.as_deref())?;
+                let (_server, _verifier) = crypto::Verifier::prepare(options)?;
                 return Err(PlcError::new(
                     ErrorKind::InvalidConfig,
                     "OPC UA secure policy is not implemented; select None explicitly",
@@ -566,6 +573,84 @@ mod nonce_tests {
     use crate::testkit::{FakeClock, FakeTransportFactory, block_on_with};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    // covers: OPCUA-POLICY-DEFAULT
+    // covers: OPCUA-QUIRK-NONE-FALLBACK
+    #[test]
+    fn opcua_a_secure_policy_never_falls_back_to_none() {
+        let clock = FakeClock::default();
+        let factory = FakeTransportFactory::new(clock.clone());
+        let driver = OpcuaDriver::new()
+            .with_clock(Arc::new(clock.clone()))
+            .with_transport_factory(Arc::new(factory.clone()));
+        for suffix in [
+            "",
+            "?tls.verify=false",
+            "?tls.trust-store=sensitive-not-opened.pem",
+            "?tls.keystore=sensitive-not-opened.pem",
+            "?security-policy=Aes128_Sha256_RsaOaep",
+            "?security-policy=Aes256_Sha256_RsaPss",
+        ] {
+            let config = driver
+                .parse_config(&format!("opcua://fake:4840{suffix}"))
+                .unwrap();
+            let error = block_on_with(&clock, driver.connect(config)).err().unwrap();
+            assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+            for key in [
+                "server-certificate-file",
+                "security-policy=NONE",
+                "tls.trust-store",
+                "tls.verify=false",
+            ] {
+                assert!(error.to_string().contains(key));
+            }
+            assert!(!format!("{error:?}").contains("sensitive"));
+        }
+        assert_eq!(factory.opens().len(), 0);
+    }
+
+    #[test]
+    fn opcua_default_policy_is_basic256sha256_sign_encrypt() {
+        let config = OpcuaDriver::new()
+            .parse_config("opcua://fake:4840")
+            .unwrap();
+        let options = config.driver_options_as::<OpcuaOptions>().unwrap();
+        assert_eq!(options.security_policy, SecurityPolicy::Basic256Sha256);
+        assert_eq!(
+            options.message_security,
+            crate::opcua::options::MessageSecurity::SignEncrypt
+        );
+        assert!(options.verify);
+    }
+
+    #[test]
+    fn opcua_a_secure_policy_with_no_trust_anchor_fails_the_connect_closed() {
+        let clock = FakeClock::default();
+        let factory = FakeTransportFactory::new(clock.clone());
+        let driver = OpcuaDriver::new()
+            .with_clock(Arc::new(clock.clone()))
+            .with_transport_factory(Arc::new(factory.clone()));
+        let config = driver
+            .parse_config("opcua://fake:4840?tls.verify=false&tls.trust-store=not-opened.pem")
+            .unwrap();
+        let error = block_on_with(&clock, driver.connect(config)).err().unwrap();
+        assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+        assert!(error.to_string().contains("server-certificate-file"));
+        assert_eq!(factory.opens().len(), 0);
+    }
+
+    #[test]
+    fn opcua_none_does_not_load_certificate_or_trust_files() {
+        let clock = FakeClock::default();
+        let factory = FakeTransportFactory::new(clock.clone());
+        let driver = OpcuaDriver::new()
+            .with_clock(Arc::new(clock.clone()))
+            .with_transport_factory(Arc::new(factory.clone()));
+        let config = driver.parse_config("opcua://fake:4840?security-policy=NONE&server-certificate-file=missing&tls.trust-store=missing&tls.verify=false").unwrap();
+        let error = block_on_with(&clock, driver.connect(config)).err().unwrap();
+        assert_ne!(error.kind(), ErrorKind::InvalidConfig);
+        assert_eq!(factory.opens().len(), 1);
+    }
+
     // covers: OPCUA-CERT-GENERATED
     // covers: OPCUA-CFG-GENERATED-KEY-SIZE
     // covers: OPCUA-QUIRK-GENERATED-CERT-URI
@@ -582,7 +667,7 @@ mod nonce_tests {
             "Aes256_Sha256_RsaPss",
         ] {
             let config = driver
-                .parse_config(&format!("opcua://fake:4840?security-policy={policy}"))
+                .parse_config(&format!("opcua://fake:4840?security-policy={policy}&server-certificate-file=not-opened.pem"))
                 .unwrap();
             let error = block_on_with(&clock, driver.connect(config)).err().unwrap();
             assert_eq!(error.kind(), ErrorKind::InvalidConfig);
@@ -616,6 +701,7 @@ mod nonce_tests {
             pki::pem("PRIVATE KEY", pki::pkcs8_2048())
         );
         let valid = scratch.write("valid.pem", &text);
+        let server = scratch.write("server.pem", &pki::pem("CERTIFICATE", &cert));
         let missing = scratch.path().join("sensitive-missing.pem");
         for (path, reason) in [
             (&valid, "secure policy is not implemented"),
@@ -623,8 +709,9 @@ mod nonce_tests {
         ] {
             let config = driver
                 .parse_config(&format!(
-                    "opcua://fake:4840?tls.keystore={}",
-                    path.display()
+                    "opcua://fake:4840?tls.keystore={}&server-certificate-file={}",
+                    path.display(),
+                    server.display()
                 ))
                 .unwrap();
             let error = block_on_with(&clock, driver.connect(config)).err().unwrap();

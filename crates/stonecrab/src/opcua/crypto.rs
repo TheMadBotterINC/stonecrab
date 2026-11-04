@@ -4,10 +4,12 @@
 //! # Compatibility: docs/parity/opcua.md#OPCUA-CRYPTO-NONCE
 
 mod backend;
+pub(super) mod certificate;
 mod derive;
 mod keystore;
 mod policy;
 mod symmetric;
+mod trust;
 pub(super) use symmetric::Symmetric;
 
 #[cfg(test)]
@@ -16,6 +18,7 @@ pub(super) use backend::{Backend, Native};
 pub(super) use derive::derive_keys;
 pub(super) use keystore::KeyMaterial;
 pub(super) use policy::Policy;
+pub(super) use trust::Verifier;
 
 use crate::opcua::codec::UaByteString;
 use crate::opcua::options::SecurityPolicy;
@@ -25,6 +28,13 @@ fn invalid() -> PlcError {
     PlcError::new(
         ErrorKind::InvalidConfig,
         "OPC UA cryptographic operation failed",
+    )
+}
+
+fn untrusted() -> PlcError {
+    PlcError::new(
+        ErrorKind::Trust,
+        "OPC UA server certificate is not trusted; configure server-certificate-file or tls.trust-store, select security-policy=NONE, or explicitly set tls.verify=false",
     )
 }
 
