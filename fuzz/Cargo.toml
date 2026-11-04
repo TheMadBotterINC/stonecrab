@@ -144,3 +144,10 @@ path = "fuzz_targets/fuzz_opcua_symmetric.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "fuzz_opcua_certificate"
+path = "fuzz_targets/fuzz_opcua_certificate.rs"
+test = false
+doc = false
+bench = false

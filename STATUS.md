@@ -5,6 +5,40 @@ Implementation baseline: the commit that last modified this file
 (`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
 its own commit; the slice log below records what each one landed.
 
+## OPC UA server trust preparation (S104, 2026-11-03)
+
+Every secure policy now requires a server-certificate-file path before client-key or
+transport I/O. A trust store or tls.verify=false alone cannot bootstrap the connection;
+there is no None fallback. None does not open these files. Preparation loads one bounded
+bootstrap DER/PEM certificate and selects explicit permissive trust, PEM/DER store,
+exact pin, or reject, in upstream order. Passwords and JVM store types are refused.
+
+The private verifier checks direct-leaf validity, RSA bounds and serverAuth EKU if present.
+Other trust-store certificates need a native PKCS1/PSS-SHA256 webpki chain through supplied
+issuers to configured, current anchors. Pins use AWS-LC constant-time contents comparison;
+length stays public. Presented/discovered roots never become anchors. Diagnostics name
+the strategy and record the explicit opt-out. Errors omit paths, contents and sources.
+
+No new dependency, feature, public API or version. Secure connect still declines after
+preparation: protected OPN is S105, remote handshake verifier calls S106. Native peer
+confirmation of RSA bounds remains UNVERIFIED until S106. E16 trust-store implementation
+is recorded; generated identities and JVM stores remain outside the accepted scope.
+
+All 2507 tests, 588+5 doctests and 367 OPC-UA-only unit cases pass. Core 6978/6978 and
+handwritten OPC UA 9329/9329 line coverage remain 100%, with unchanged floors/exclusions.
+A 120-mutant campaign catches 108 with 12 unviable; all 36 final decoder/reader mutants
+are caught. No survivors/timeouts/exclusions. All 17 fuzz targets pass 60 seconds each.
+Full strict checks, 59 isolated features, regen, dependency/machete, examples, semver,
+parity/attributes/DCO, fresh 225-file package/unpacked builds and nine native None peer
+cases pass. Peer and temporary host PKI are removed. [Evidence](docs/evidence/opcua-s104.md).
+
+Hosted run 41772988899 on 25af246 passes all 33 executed jobs, including all five
+targets, both Rust versions, quality/coverage, DCO and full fuzz smoke. Only the scheduled
+job is skipped. The previous run found a Windows-only
+fixture precision assumption; the test now uses portable one-second boundary offsets. Eleven rows close: 249 OPC UA total,
+144 implemented/67 planned/38 deferred, including the combined JVM-store divergence.
+Next: S105, asymmetric OPN protection. Normal merges retain signed-off commits.
+
 ## OPC UA client key material (S103, 2026-11-03)
 
 Client application keys now load from one bounded PEM file: leaf-first certificate chain
@@ -842,6 +876,7 @@ commit; gates named were run locally before that commit.
 
 | Slice | Date | Landed | Gates |
 | --- | --- | --- | --- |
+| S104 | 2026-11-03 | Private fail-closed server trust, bounded DER/PEM bootstrap/store loading, native exact pins and PKCS1/PSS chains, explicit opt-out diagnostics, current anchors and leaf validity/RSA/EKU; no discovery-root promotion or None fallback. E16 trust-store record, ADR-0042; [evidence](docs/evidence/opcua-s104.md) | 2507 tests, 588+5 doctests, core/opcua 100%; 108 caught/12 unviable plus 36 final caught mutants, no survivors/timeouts; 17 fuzz targets 60 s, 59 features, nine native None cases, fresh 225-file package/unpacked builds; hosted CI 41772988899: 33 jobs pass, scheduled-only skipped |
 | S103 | 2026-11-03 | Bounded one-read PEM/RSA PKCS#8 client loading, native key handles, leaf/key match, SAN URI, chain/thumbprint, redacted diagnostics and pre-I/O refusal. Shared runtime-generated RSA test PKI with CA/expired/Ed25519-negative cases; E16 client-key record, ADR-0041. [Evidence](docs/evidence/opcua-s103.md) | 2469 tests, 588+5 doctests, core/opcua 100% line coverage; 36 caught/12 unviable mutants with no survivors/timeouts; 16 fuzz targets 60 s after oracle regression fix; 59 features, nine native None peer cases, fresh 221-file package/unpacked builds; hosted CI 41761519189: 33 jobs pass, scheduled-only skipped |
 | S102 | 2026-11-03 | Private token-bound MSG/CLO signing and AES-CBC, provider HMAC verification, authenticate-before-parse and uniform protected-data errors; bounded current/previous directional keys and atomic renewal. ADR-0040; independent wire vectors and symmetric fuzz target. [Evidence](docs/evidence/opcua-s102.md) | 2453 tests, core/opcua 100% line coverage, configured mutations 56 caught/eight unviable, all 16 fuzz targets 60 s, 59 feature checks, native None peer regressions, fresh 220-file package/unpacked builds; hosted CI 41678343505: 32 jobs pass, scheduled/new-branch DCO skips expected |
 | S101 | 2026-11-03 | Private crypto backend, policy/size descriptors, bounded P_SHA1/P_SHA256 and directional keys, injected nonce generation; E15/ADR-0035 accepted, ADR-0039. Native CI/source-build requirements and measured E17 costs; Windows time fixtures and colored peer-list gate corrected. [Evidence](docs/evidence/opcua-s101.md) | 2431 tests; core/opcua 100% line coverage; 66 crypto and 15 size-model mutations pass; all 15 fuzz targets 60 s; 59 feature checks; fresh 218-file package; nine native peer cases; hosted CI 41636349368: 33 ordinary jobs pass, scheduled-only skipped |
@@ -1307,7 +1342,7 @@ decisions (2026-10-30)" below), so the slices follow their dependencies: S76 to 
 then S83 and the generator track. E14 and E15 are confirmed by the S80 and S82 evidence.
 The client design is ADR-0034
 ([`docs/adr/0034-opcua-client-design.md`](docs/adr/0034-opcua-client-design.md)), proposed
-by S76 and accepted by S97 on 2026-11-03. Current runtime support includes staged writes through S100, S102 private crypto protection and S103 client key material;
+by S76 and accepted by S97 on 2026-11-03. Current runtime support includes staged writes through S100, S102 private crypto protection, S103 client key material and S104 private trust preparation;
 accepted later-slice lifecycle and subscription contracts are not capability claims.
 
 Maintainer-only steps, which no automated run does: P1 to P3 above (P1, the private
@@ -1372,7 +1407,7 @@ recommended (option 1), and approved pushing the S82 spike branch. The full opti
   become deferred (deprecated); key and trust stores are PEM or DER only (no PKCS#12, no
   passwords); the runtime-generated client certificate is deferred. S103 implements the
   client PEM chain and unencrypted RSA PKCS#8 key, without PKCS#1 conversion, aliases or
-  a generated identity. Server trust stores remain S104; deprecated-policy parity is S107.
+  a generated identity. S104 implements bounded PEM/DER trust stores and their format/password refusals; deprecated-policy parity is S107.
 - **E17** one opt-in `opcua` feature outside `default` and `full`; every M3 change is
   additive; the release number is a separate approval when M3 is done.
 - **E18** the additive public APIs: `Connection::browse` with flat browse types,
@@ -1394,9 +1429,10 @@ recommended (option 1), and approved pushing the S82 spike branch. The full opti
 
 ADR-0034 is Accepted. This records the existing 2026-10-30 approvals, rather than
 requesting a new choice. E15 is implemented in S101 and ADR-0035 is accepted. E16 client-key
-acceptance is recorded in S103 (trust S104, deprecated policies S107); E20 remains S122.
+and trust-store acceptance is recorded in S103/S104 (deprecated policies S107); E20 remains S122.
 Current runtime operations include S100 staged writes; S101/S102 provide private crypto
-building blocks and S103 supplies client key material. Operational secure policies remain planned.
+building blocks, S103 supplies client key material and S104 prepares private server trust.
+Operational secure policies remain planned.
 
 - **E13 — OPC UA source/test redistribution.** Approved verbatim mspec and both XML suites with the ASF, precautionary OPC Foundation MIT and trademark notices; raw model/test inputs remain repository-only. S88/S93 provide provenance and evidence.
 - **E14 — Hybrid codec.** Confirmed by S80 measurements and S88 generator fixes: ship generated service bodies/enums as pub(crate), hand-write codec/framing/security, require positive/negative vectors, fuzz dispatch and deterministic regeneration. S96 has 24 enabled cases.

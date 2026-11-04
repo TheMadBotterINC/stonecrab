@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use aws_lc_rs::encoding::AsDer;
 use aws_lc_rs::rand::SystemRandom;
 use aws_lc_rs::rsa::KeySize;
-use aws_lc_rs::signature::{KeyPair, RSA_PKCS1_SHA256, RsaKeyPair};
+use aws_lc_rs::signature::{KeyPair, RSA_PKCS1_SHA256, RSA_PSS_SHA256, RsaEncoding, RsaKeyPair};
 
 /// 2026-10-30T00:00:00Z, the date of the slice, as seconds since the epoch.
 pub(super) const NOW: u64 = 1_793_318_400;
@@ -21,14 +21,12 @@ pub(super) fn tlv(tag: u8, content: &[u8]) -> Vec<u8> {
     let len = content.len();
     if len < 0x80 {
         out.push(u8::try_from(len).unwrap());
-    } else if len <= 0xff {
-        out.extend_from_slice(&[0x81, u8::try_from(len).unwrap()]);
     } else {
-        out.extend_from_slice(&[
-            0x82,
-            u8::try_from(len >> 8).unwrap(),
-            u8::try_from(len & 0xff).unwrap(),
-        ]);
+        let bytes = len.to_be_bytes();
+        let first = bytes.iter().position(|byte| *byte != 0).unwrap();
+        let encoded = bytes.get(first..).unwrap();
+        out.push(0x80 | u8::try_from(encoded.len()).unwrap());
+        out.extend_from_slice(encoded);
     }
     out.extend_from_slice(content);
     out
@@ -65,12 +63,23 @@ const SHA256_WITH_RSA: [u8; 15] = [
     0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b, 0x05, 0x00,
 ];
 
+pub(super) const SERVER_AUTH: &[u8] = &[0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x01];
+pub(super) const CLIENT_AUTH: &[u8] = &[0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x02];
+
+#[derive(Clone, Copy)]
+pub(super) enum Signature {
+    Pkcs1,
+    Pss,
+}
+
 /// What a certificate is for.
 pub(super) struct CertSpec<'a> {
     pub(super) subject: &'a str,
     pub(super) issuer: &'a str,
     pub(super) serial: u8,
     pub(super) is_ca: bool,
+    pub(super) signature: Signature,
+    pub(super) eku: Option<&'a [&'a [u8]]>,
     pub(super) dns_name: &'a str,
     pub(super) application_uris: &'a [&'a str],
     /// `YYMMDDHHMMSSZ` `UTCTime` strings.
@@ -85,6 +94,8 @@ impl<'a> CertSpec<'a> {
             issuer,
             serial,
             is_ca: false,
+            signature: Signature::Pkcs1,
+            eku: Some(&[SERVER_AUTH, CLIENT_AUTH]),
             dns_name: "plc.example",
             application_uris: &["urn:stonecrab:probe"],
             not_before: "260101000000Z",
@@ -110,11 +121,32 @@ pub(super) fn certificate_with_spki(
     spki: &[u8],
     signer: &RsaKeyPair,
 ) -> Vec<u8> {
+    let (algorithm, encoding): (Vec<u8>, &dyn RsaEncoding) = match spec.signature {
+        Signature::Pkcs1 => (SHA256_WITH_RSA.to_vec(), &RSA_PKCS1_SHA256),
+        Signature::Pss => (
+            tlv(0x30, rustls_pki_types::alg_id::RSA_PSS_SHA256.as_ref()),
+            &RSA_PSS_SHA256,
+        ),
+    };
     let version = tlv(0xa0, &tlv(0x02, &[2]));
     let serial = tlv(0x02, &[spec.serial]);
     let validity = seq(&[
-        &tlv(0x17, spec.not_before.as_bytes()),
-        &tlv(0x17, spec.not_after.as_bytes()),
+        &tlv(
+            if spec.not_before.len() == 15 {
+                0x18
+            } else {
+                0x17
+            },
+            spec.not_before.as_bytes(),
+        ),
+        &tlv(
+            if spec.not_after.len() == 15 {
+                0x18
+            } else {
+                0x17
+            },
+            spec.not_after.as_bytes(),
+        ),
     ]);
     // basicConstraints (2.5.29.19), critical
     let basic = seq(&[
@@ -142,16 +174,18 @@ pub(super) fn certificate_with_spki(
         &tlv(0x04, &tlv(0x03, &[unused_bits, usage_byte])),
     ]);
     // extendedKeyUsage (2.5.29.37): serverAuth, clientAuth
-    let eku = seq(&[
-        &oid(&[0x55, 0x1d, 0x25]),
-        &tlv(
-            0x04,
-            &seq(&[
-                &oid(&[0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x01]),
-                &oid(&[0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x02]),
-            ]),
-        ),
-    ]);
+    let eku = spec.eku.map_or_else(Vec::new, |purposes| {
+        seq(&[
+            &oid(&[0x55, 0x1d, 0x25]),
+            &tlv(
+                0x04,
+                &seq(&[&purposes
+                    .iter()
+                    .flat_map(|purpose| oid(purpose))
+                    .collect::<Vec<_>>()]),
+            ),
+        ])
+    });
     // subjectAltName (2.5.29.17): uniformResourceIdentifier [6] and dNSName [2], as OPC UA
     // application instance certificates carry
     let san = seq(&[
@@ -191,7 +225,7 @@ pub(super) fn certificate_with_spki(
     let tbs = seq(&[
         &version,
         &serial,
-        &SHA256_WITH_RSA,
+        &algorithm,
         &name(spec.issuer),
         &validity,
         &name(spec.subject),
@@ -200,16 +234,11 @@ pub(super) fn certificate_with_spki(
     ]);
     let mut signature = vec![0u8; signer.public_modulus_len()];
     signer
-        .sign(
-            &RSA_PKCS1_SHA256,
-            &SystemRandom::new(),
-            &tbs,
-            &mut signature,
-        )
+        .sign(encoding, &SystemRandom::new(), &tbs, &mut signature)
         .expect("sign tbsCertificate");
     let mut bits = vec![0u8];
     bits.extend_from_slice(&signature);
-    seq(&[&tbs, &SHA256_WITH_RSA, &tlv(0x03, &bits)])
+    seq(&[&tbs, &algorithm, &tlv(0x03, &bits)])
 }
 
 /// The PKCS #8 encoding of a 2048-bit key generated once per test binary.

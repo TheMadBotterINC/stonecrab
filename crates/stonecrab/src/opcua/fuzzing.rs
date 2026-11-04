@@ -13,6 +13,29 @@ use crate::opcua::options::OpcuaOptions;
 use crate::transport::{FrameError, Framer};
 use crate::{ConnectionConfig, ResourceLimits, Result};
 
+/// Exercise bounded DER/time/EKU parsing and server leaf checks at a fixed test date.
+///
+/// # Errors
+/// Trust for malformed, expired, wrong-usage or out-of-policy RSA certificates.
+pub fn inspect_certificate(bytes: &[u8]) -> Result<()> {
+    use crate::opcua::crypto::certificate;
+    use std::time::{Duration, UNIX_EPOCH};
+    let _element = certificate::tlv(&mut BoundedReader::new(bytes));
+    let _eku = certificate::server_eku(bytes);
+    let _properties = certificate::Properties::parse(bytes);
+    let _utc = certificate::time(0x17, bytes);
+    let _generalized = certificate::time(0x18, bytes);
+    let now = UNIX_EPOCH
+        .checked_add(Duration::from_secs(1_793_318_400))
+        .ok_or_else(|| crate::PlcError::new(crate::ErrorKind::Trust, "test date is unavailable"))?;
+    certificate::check_leaf(
+        &rustls_pki_types::CertificateDer::from(bytes),
+        crate::opcua::options::SecurityPolicy::Basic256Sha256,
+        now,
+    )
+    .map(|_certificate| ())
+}
+
 /// What the fuzz target checks of an accepted connection string.
 #[derive(Debug)]
 pub struct Parsed {

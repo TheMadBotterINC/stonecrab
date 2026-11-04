@@ -6,7 +6,7 @@ use super::pki;
 
 use std::time::Duration;
 
-use super::SHA256_RSA;
+use crate::opcua::crypto::certificate::PKCS1_SHA256;
 use aws_lc_rs::rand::SystemRandom;
 use aws_lc_rs::signature::RSA_PKCS1_SHA256;
 use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
@@ -25,7 +25,7 @@ fn a_self_signed_application_certificate_validates_against_itself() {
     let cert = EndEntityCert::try_from(&der).expect("parse");
     let path = cert
         .verify_for_usage(
-            &[&SHA256_RSA],
+            &[&PKCS1_SHA256],
             &anchors,
             &[],
             at(pki::NOW),
@@ -57,7 +57,7 @@ fn a_different_anchor_is_unknown_issuer() {
     let cert = EndEntityCert::try_from(&ee).expect("parse");
     let error = cert
         .verify_for_usage(
-            &[&SHA256_RSA],
+            &[&PKCS1_SHA256],
             &[anchor],
             &[],
             at(pki::NOW),
@@ -81,7 +81,7 @@ fn an_expired_certificate_is_refused() {
     let cert = EndEntityCert::try_from(&der).expect("parse");
     let error = cert
         .verify_for_usage(
-            &[&SHA256_RSA],
+            &[&PKCS1_SHA256],
             &[anchor],
             &[],
             at(pki::NOW),
@@ -109,7 +109,7 @@ fn a_ca_issued_application_certificate_validates_through_the_ca_anchor() {
     let anchor = anchor_from_trusted_cert(&ca).expect("anchor");
     let cert = EndEntityCert::try_from(&app).expect("parse");
     cert.verify_for_usage(
-        &[&SHA256_RSA],
+        &[&PKCS1_SHA256],
         &[anchor],
         &[],
         at(pki::NOW),
@@ -157,10 +157,10 @@ fn a_signature_by_the_certificates_key_verifies_through_the_certificate() {
         &mut signature,
     )
     .expect("sign");
-    cert.verify_signature(&SHA256_RSA, b"chunk", &signature)
+    cert.verify_signature(&PKCS1_SHA256, b"chunk", &signature)
         .expect("verify");
     assert!(
-        cert.verify_signature(&SHA256_RSA, b"chunks", &signature)
+        cert.verify_signature(&PKCS1_SHA256, b"chunks", &signature)
             .is_err()
     );
 }
