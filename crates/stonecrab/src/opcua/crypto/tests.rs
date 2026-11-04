@@ -9,6 +9,84 @@ const POLICIES: [SecurityPolicy; 3] = [
     SecurityPolicy::Aes256Sha256RsaPss,
 ];
 
+// covers: OPCUA-POLICY-AES128-SHA256-RSAOAEP
+#[test]
+fn opcua_aes128_sha256_rsaoaep_derives_the_documented_key_sizes() {
+    assert_aes_keys(SecurityPolicy::Aes128Sha256RsaOaep, 16);
+}
+
+// covers: OPCUA-POLICY-AES256-SHA256-RSAPSS
+#[test]
+fn opcua_aes256_sha256_rsapss_derives_the_documented_key_sizes() {
+    assert_aes_keys(SecurityPolicy::Aes256Sha256RsaPss, 32);
+}
+
+fn assert_aes_keys(policy: SecurityPolicy, encryption_bytes: usize) {
+    let client: Vec<u8> = (0..32).collect();
+    let server: Vec<u8> = (32..64).collect();
+    let keys = derive_keys(&Native, policy, &client, &server).unwrap();
+    // Independent Python hmac/hashlib P_SHA256 streams, server/client nonce as secret/seed
+    // for the client direction, reversed for the server direction (same vector as S101).
+    let client_stream = concat!(
+        "dd585db0c102dd1a4c1ed4dd195606dec3f7a1c789afca78f9479ed3a5d668af",
+        "ce49cb8f1c65a827f412c48e71c9f9cb3b5c2ee2fc2e4b3bd46d4098b5e45475",
+        "a77832c6215b6e7ab85f2e668be7aeff"
+    );
+    let server_stream = concat!(
+        "b72593c43fee5fafa0256cd6bb904ff40c066a225db95f66dd744e20858a2220",
+        "ddf75067e3d76ac714c08e24eabd85ff425d7f5fb25e6e083b94b174e29db89b",
+        "c513e9172274d5ed54e52a3552901ae0"
+    );
+    for (keys, expected) in [(&keys.client, client_stream), (&keys.server, server_stream)] {
+        assert_eq!(
+            (
+                keys.signing.expose().len(),
+                keys.encryption.expose().len(),
+                keys.iv.expose().len()
+            ),
+            (32, encryption_bytes, 16)
+        );
+        let joined = [
+            keys.signing.expose().as_slice(),
+            keys.encryption.expose(),
+            keys.iv.expose(),
+        ]
+        .concat();
+        assert_eq!(
+            hex(&joined),
+            expected
+                .get(..joined.len().checked_mul(2).unwrap())
+                .unwrap()
+        );
+    }
+}
+
+#[test]
+fn opcua_aes256_sha256_rsapss_plaintext_block_is_key_bytes_minus_66() {
+    let descriptor = SecurityPolicy::Aes256Sha256RsaPss.descriptor();
+    assert_eq!(descriptor.oaep_overhead, 66);
+    assert_eq!(
+        descriptor.signature_uri,
+        "http://opcfoundation.org/UA/security/rsa-pss-sha2-256"
+    );
+    assert_eq!(
+        descriptor.encryption_uri,
+        "http://opcfoundation.org/UA/security#rsa-oaep-sha2-256"
+    );
+    let sizes = descriptor.asymmetric_sizes(256, 256).unwrap();
+    assert!(sizes.max_body(527, 4).is_err());
+    assert_eq!(sizes.max_body(528, 4).unwrap(), 115);
+    assert_eq!(sizes.max_body(784, 4).unwrap(), 305);
+    assert_eq!(
+        descriptor
+            .asymmetric_sizes(512, 512)
+            .unwrap()
+            .max_body(1040, 4)
+            .unwrap(),
+        370
+    );
+}
+
 pub(in crate::opcua) struct Injected {
     calls: AtomicUsize,
     fail_at: usize,

@@ -50,12 +50,6 @@ impl Security {
         let material = KeyMaterial::load(options.keystore.as_deref())?;
         let (server, verifier) = Verifier::prepare(options)?;
         let asymmetric = Asymmetric::new(options.security_policy, material, server)?;
-        if options.security_policy != SecurityPolicy::Basic256Sha256 {
-            return Err(PlcError::new(
-                ErrorKind::InvalidConfig,
-                "OPC UA this secure policy is not implemented; use Basic256Sha256",
-            ));
-        }
         let security = Self {
             asymmetric: std::sync::Arc::new(asymmetric),
             verifier,

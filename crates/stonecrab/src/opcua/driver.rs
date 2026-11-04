@@ -723,11 +723,7 @@ mod nonce_tests {
             ))
             .unwrap();
         let error = block_on_with(&clock, driver.connect(config)).err().unwrap();
-        assert!(
-            !error
-                .to_string()
-                .contains("secure policy is not implemented")
-        );
+        assert_eq!(error.kind(), ErrorKind::Internal);
         assert_eq!(factory.opens().len(), 1);
         // None never opens the missing key store; it reaches the transport boundary.
         let config = driver

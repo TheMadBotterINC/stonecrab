@@ -98,7 +98,9 @@ if start_server 4850; then
   expect_ok "None, anonymous" 4850 None None
   expect_ok "Basic256Sha256 SignAndEncrypt" 4850 Basic256Sha256 SignAndEncrypt $SECURE
   expect_ok "Basic256Sha256 Sign" 4850 Basic256Sha256 Sign $SECURE
+  expect_ok "Aes128Sha256RsaOaep Sign" 4850 Aes128Sha256RsaOaep Sign $SECURE
   expect_ok "Aes128Sha256RsaOaep SignAndEncrypt" 4850 Aes128Sha256RsaOaep SignAndEncrypt $SECURE
+  expect_ok "Aes256Sha256RsaPss Sign" 4850 Aes256Sha256RsaPss Sign $SECURE
   expect_ok "Aes256Sha256RsaPss SignAndEncrypt" 4850 Aes256Sha256RsaPss SignAndEncrypt $SECURE
   expect_ok "Basic256Sha256 SignAndEncrypt, user name" 4850 Basic256Sha256 SignAndEncrypt $SECURE \
     --user stonecrab --password-file "$PKI/user-password"
