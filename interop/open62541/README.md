@@ -6,7 +6,10 @@ Eclipse Milo. The `interop-opcua` job of `.github/workflows/ci.yml` and `mise ru
 interop-opcua` build it, run the checks below against it and keep the evidence. It is outside
 `mise run interop`, which stays the Modbus TCP peers, until the peer has proved stable. S90 adds an ignored Stonecrab channel test: HEL/ACK, policy-None OPN Issue,
 CLO without awaiting a response, and request/sequence counter handoff to the lane.
-S91/S92 also verify public anonymous None session connect/read/close.
+S91/S92 also verify public anonymous None session connect/read/close. S105 adds an OPN-only
+Basic256Sha256 SIGN and SIGN_ENCRYPT probe with ephemeral client/server PKI. All ten
+selected Stonecrab tests run; this does not claim a secure session or protected Read.
+The harness exports STONECRAB_INTEROP_OPEN62541_PKI_DIR only for the duration of the run.
 
 ## First-party statement and provenance
 

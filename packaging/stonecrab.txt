@@ -93,6 +93,9 @@ src/opcua/codec/vectors.rs
 src/opcua/codec.rs
 src/opcua/connection/tests.rs
 src/opcua/connection.rs
+src/opcua/crypto/asymmetric/fuzzing.rs
+src/opcua/crypto/asymmetric/tests.rs
+src/opcua/crypto/asymmetric.rs
 src/opcua/crypto/backend.rs
 src/opcua/crypto/certificate/tests.rs
 src/opcua/crypto/certificate.rs

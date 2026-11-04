@@ -29,7 +29,7 @@ one bounded decrypt/authenticate path before exposing any sequence or service by
   error without native sources. Resource-limit errors remain distinct. Caller owns channel,
   request-id and sequence checks, just as for S102. Trust-list evaluation remains S106;
   accepting a different header certificate must never substitute the cryptographic peer key.
-- Reuse the existing asymmetric header codec (widen its private parse/serialize visibility)
+- Reuse the existing asymmetric header codec (widen its private parse visibility)
   and bounded DER element reader for concatenated certificate extraction. No framing layer,
   public API, dependency, feature, version, generated code or default changes. Preserve the
   existing public secure-connect refusal after validating asymmetric preparation in driver.

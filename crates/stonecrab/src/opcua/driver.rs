@@ -216,8 +216,10 @@ impl Driver for OpcuaDriver {
                         "OPC UA secure policy requires server-certificate-file before I/O; tls.trust-store or tls.verify=false alone cannot bootstrap it; select security-policy=NONE explicitly for an unprotected connection",
                     ));
                 }
-                let _material = crypto::KeyMaterial::load(options.keystore.as_deref())?;
-                let (_server, _verifier) = crypto::Verifier::prepare(options)?;
+                let material = crypto::KeyMaterial::load(options.keystore.as_deref())?;
+                let (server, _verifier) = crypto::Verifier::prepare(options)?;
+                let _asymmetric =
+                    crypto::Asymmetric::new(options.security_policy, material, server)?;
                 return Err(PlcError::new(
                     ErrorKind::InvalidConfig,
                     "OPC UA secure policy is not implemented; select None explicitly",

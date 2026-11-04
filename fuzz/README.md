@@ -82,3 +82,10 @@ Nine seeds include independently generated OpenSSL RSA PKCS#1/PSS public certifi
 DER, raw time values and an EKU. Private keys were temporary and discarded; no private
 key, production identity or upstream captured certificate is committed. The connection
 string corpus also covers the S104 trust-store formats and explicit verification opt-in.
+
+`fuzz_opcua_asymmetric` (S105) creates an ephemeral RSA key once per process and substitutes
+its SPKI into S104's public OpenSSL certificate template. The template is a parsing/public
+key carrier, not a trusted certificate or production identity. All three policies exercise
+raw ciphertext, authenticated bounded payload round trips, input-directed wire mutations
+and both padding-size formats. Seven seeds cover policy selectors, truncation, declared
+size, padding residues and a large body. No private fixture or new dependency is added.

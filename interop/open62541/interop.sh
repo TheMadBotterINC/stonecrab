@@ -47,7 +47,7 @@ HOST="127.0.0.1"
 EVIDENCE="${INTEROP_EVIDENCE_DIR:-$ROOT/target/interop-evidence}/open62541"
 PKI_OUT="${INTEROP_PKI_DIR:-$ROOT/target/interop-pki/open62541}"
 FILTER='binary(stonecrab) & test(/^opcua::(channel|session|connection|lane|endpoint)::tests::opcua_interop_/)'
-EXPECTED_TESTS=9
+EXPECTED_TESTS=10
 
 die() {
   echo "interop: $*" >&2
@@ -161,6 +161,7 @@ run_tests() {
   cd "$ROOT"
   export STONECRAB_INTEROP_OPEN62541="opcua://${HOST}:${PORT}?security-policy=NONE"
   export STONECRAB_INTEROP_OPEN62541_PASSWORD_FILE="$PKI_OUT/user-password"
+  export STONECRAB_INTEROP_OPEN62541_PKI_DIR="$PKI_OUT"
   local listed
   # CI sets CARGO_TERM_COLOR=always; color codes split qualified test names.
   cargo nextest list --locked -p stonecrab --all-features --color never \

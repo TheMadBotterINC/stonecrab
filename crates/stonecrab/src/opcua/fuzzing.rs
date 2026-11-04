@@ -13,6 +13,8 @@ use crate::opcua::options::OpcuaOptions;
 use crate::transport::{FrameError, Framer};
 use crate::{ConnectionConfig, ResourceLimits, Result};
 
+pub use crate::opcua::crypto::OpnProbe;
+
 /// Exercise bounded DER/time/EKU parsing and server leaf checks at a fixed test date.
 ///
 /// # Errors
