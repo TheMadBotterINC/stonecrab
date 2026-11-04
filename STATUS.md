@@ -1,9 +1,41 @@
 # Stonecrab status and engineering handoff
 
-Updated: 2026-11-03.
+Updated: 2026-11-04.
 Implementation baseline: the commit that last modified this file
 (`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
 its own commit; the slice log below records what each one landed.
+
+## OPC UA asymmetric OPN protection (S105, 2026-11-04)
+
+The private OPN engine signs headers, sequence, payload and padding, then encrypts exact
+RSA-OAEP blocks for every accepted secure policy, including SIGN mode. Receive binds the
+provisioned sender leaf, local thumbprint and policy, verifies crypto/padding before
+sequence/body parsing, and returns one redacted Authentication error for invalid protected
+data. Actual oversize is ResourceLimit. Sender/receiver key sizes are independent; RSA4096
+uses both padding-size bytes. No full-path equal-timing claim is made.
+
+The open62541 OPN-only probe passes Basic256Sha256 SIGN and SIGN_ENCRYPT. The driver
+prepares usable RSA material before I/O but still declines secure sessions: lane/session
+wiring and remote trust-policy call sites remain S106. RSA bounds stay independently
+UNVERIFIED until S106. No dependency, feature, public API, tool pin or version changes.
+
+All 2519 tests and 588+5 doctests pass; OPC-UA-only feature build passes 553 library cases,
+including 379 OPC UA cases. Core 6978/6978 and handwritten OPC UA 9606/9606 lines are 100%,
+with unchanged thresholds/exclusions. Focused mutations: 50 caught/seven unviable, no
+survivors/timeouts. All 18 fuzz targets pass at least 60 seconds. Full strict checks,
+59 isolated features, regen, dependencies/machete, examples, semver, parity/attributes/DCO,
+fresh 228-file package and unpacked builds pass. All ten native-peer tests and its public
+None example pass; peer and temporary PKI are removed. [Evidence](docs/evidence/opcua-s105.md).
+
+Full threaded tests found an existing tracing-core callsite-cache race. A deterministic
+cold-callsite reproduction and test-only dormant Dispatch fix now protect both log captures;
+no global subscriber, retry, relaxed assertion, production change or dependency update.
+The initial hosted Windows run hit a stack overflow. The deep-write fixture now performs
+connection setup outside its named 128 KiB worker, preserving its value/disposal limit
+and assertions. Hosted source CI 41779622898 on 7978b3a passes all 33 executed jobs,
+including both Windows versions, five-target builds, coverage and full serial fuzz smoke;
+scheduled-only skipped. Three rows close: 249 OPC UA total, 147 implemented/64 planned/38 deferred. Next: S106, first secure end-to-end connection.
+Normal signed-off merges retain every commit.
 
 ## OPC UA server trust preparation (S104, 2026-11-03)
 
@@ -876,6 +908,7 @@ commit; gates named were run locally before that commit.
 
 | Slice | Date | Landed | Gates |
 | --- | --- | --- | --- |
+| S105 | 2026-11-04 | Private asymmetric OPN signing/blockwise OAEP, sender-leaf/policy/thumbprint binding, authenticated padding and uniform receive errors; mixed RSA sizes and two-byte RSA4096 padding. ADR-0043; deterministic tracing capture regression/fix; [evidence](docs/evidence/opcua-s105.md) | 2519 tests, 588+5 doctests, core/opcua 100%; 50 caught/seven unviable mutations with no survivors/timeouts; 18 fuzz targets 60 s, 59 features, ten native peer cases including Basic256Sha256 SIGN/SIGN_ENCRYPT OPN only; fresh 228-file package/unpacked builds; hosted source CI 41779622898: 33 jobs pass, scheduled-only skipped |
 | S104 | 2026-11-03 | Private fail-closed server trust, bounded DER/PEM bootstrap/store loading, native exact pins and PKCS1/PSS chains, explicit opt-out diagnostics, current anchors and leaf validity/RSA/EKU; no discovery-root promotion or None fallback. E16 trust-store record, ADR-0042; [evidence](docs/evidence/opcua-s104.md) | 2507 tests, 588+5 doctests, core/opcua 100%; 108 caught/12 unviable plus 36 final caught mutants, no survivors/timeouts; 17 fuzz targets 60 s, 59 features, nine native None cases, fresh 225-file package/unpacked builds; hosted CI 41772988899: 33 jobs pass, scheduled-only skipped |
 | S103 | 2026-11-03 | Bounded one-read PEM/RSA PKCS#8 client loading, native key handles, leaf/key match, SAN URI, chain/thumbprint, redacted diagnostics and pre-I/O refusal. Shared runtime-generated RSA test PKI with CA/expired/Ed25519-negative cases; E16 client-key record, ADR-0041. [Evidence](docs/evidence/opcua-s103.md) | 2469 tests, 588+5 doctests, core/opcua 100% line coverage; 36 caught/12 unviable mutants with no survivors/timeouts; 16 fuzz targets 60 s after oracle regression fix; 59 features, nine native None peer cases, fresh 221-file package/unpacked builds; hosted CI 41761519189: 33 jobs pass, scheduled-only skipped |
 | S102 | 2026-11-03 | Private token-bound MSG/CLO signing and AES-CBC, provider HMAC verification, authenticate-before-parse and uniform protected-data errors; bounded current/previous directional keys and atomic renewal. ADR-0040; independent wire vectors and symmetric fuzz target. [Evidence](docs/evidence/opcua-s102.md) | 2453 tests, core/opcua 100% line coverage, configured mutations 56 caught/eight unviable, all 16 fuzz targets 60 s, 59 feature checks, native None peer regressions, fresh 220-file package/unpacked builds; hosted CI 41678343505: 32 jobs pass, scheduled/new-branch DCO skips expected |
