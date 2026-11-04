@@ -69,3 +69,9 @@ callsites consult registered subscribers rather than another thread's empty defa
 Reproduce the cold-callsite case on a subscriber-less thread in the trust diagnostics
 test. This changes only fixtures: no global subscriber, retries, dependency change or
 relaxed assertion, and production logging is untouched.
+
+The first hosted Windows current-Rust threaded run aborts with a stack overflow. Separate
+the deep-write test's connection setup from its 128 KiB worker, which is intended to
+measure rejection/abandonment of 100000-level caller values. Keep that worker's stack
+limit and assertions unchanged and name it for actionable crash diagnostics. Hosted
+Windows validation must confirm this fixture change before merging.
