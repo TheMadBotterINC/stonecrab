@@ -63,7 +63,7 @@ impl SecurityPolicy {
 }
 
 impl Policy {
-    /// Peer confirmation remains UNVERIFIED until S106; shared with RSA framing bounds.
+    /// RSA2048 is native-tested for all modern policies; other boundary sizes remain UNVERIFIED.
     pub(in crate::opcua) fn accepts_rsa_key(self, bytes: usize) -> bool {
         self.nonce != 0 && (256..=512).contains(&bytes)
     }

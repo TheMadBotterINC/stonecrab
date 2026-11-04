@@ -3,7 +3,7 @@ The OPC UA client of Stonecrab (`stonecrab::opcua`), behind the opt-in `opcua` f
 in neither `default` nor `full`, as `tls` is (decision E17, ADR-0034), and it needs the
 `transport` feature. The module is being built in slices (milestone M3, ADR-0034). It currently has the
 address grammar, public `OpcuaDriver`, binary codecs, generated services, TCP framing,
-None and `Basic256Sha256` channel/session setup and a bounded request lane. End-to-end scalar Read is available since S92; S95 adds extended values, arrays and matrices.
+None and the three modern RSA policies for channel/session setup and a bounded request lane. End-to-end scalar Read is available since S92; S95 adds extended values, arrays and matrices.
 The 23 pinned upstream vectors introduced by S93 now have 17 byte-exact round-trips,
 one existing numeric `NodeId` canonicalization and five exact disabled-service refusals
 (S100 enables the two write bodies).
@@ -36,10 +36,10 @@ socket and starts no discovery.
 | Staged scalar, array and matrix writes with explicit read-write access | interoperability-tested with open62541 |
 | Browse, subscriptions | planned |
 | Bounded PEM client key loading (RSA PKCS#8), certificate chain/thumbprint and SAN application URI | build-tested |
-| Asymmetric OPN signing/encryption and remote-key binding (crate-private) | interoperability-tested with open62541 for `Basic256Sha256` |
+| Asymmetric OPN signing/encryption and remote-key binding (crate-private) | interoperability-tested with open62541 for all three modern policies |
 | Server trust preparation: explicit opt-out, PEM/DER store, constant-time pin and fail-closed verifier (crate-private) | build-tested |
-| `Basic256Sha256` SIGN/`SIGN_ENCRYPT`, secure discovery and session certificate proofs | interoperability-tested with open62541 |
-| AES128/OAEP and AES256/PSS public connections, protected user tokens and renewal | planned |
+| All three modern policies in SIGN/`SIGN_ENCRYPT`, secure discovery and session certificate proofs | interoperability-tested with open62541 |
+| Protected user tokens and renewal | planned |
 | Independent-server scalar Read interoperability | verified with open62541 |
 | Hardware verification | planned |
 
@@ -399,7 +399,7 @@ each bounded to 256 characters; invalid or credential-bearing URLs are replaced.
 
 `discovery` is a strict boolean, default true. With a secure policy, `discovery=false`
 requires `server-certificate-file`, as does discovery=true. Bounded files and trust
-validation are prepared before I/O. `Basic256Sha256` runs `GetEndpoints` over the secure
+validation are prepared before I/O. Every modern policy runs `GetEndpoints` over the secure
 channel when discovery is enabled, verifies its certificate and reuses the channel. None connect uses
 `CreateSession`'s endpoint list and skips `GetEndpoints`. An explicit private probe against
 open62541 verifies all seven advertised policy/mode combinations and token types; it
@@ -484,7 +484,7 @@ do not combine that setting with `AWS_LC_SYS_SYSTEM_DIR`. Repository mise and CI
 The TLS feature retains its ring provider, so `tls,opcua` includes both native libraries.
 
 S101 supplies policy descriptors, bounded `P_SHA1/P_SHA256` derivation and injectable OS
-nonce generation. S106 connects `Basic256Sha256` using the S102–S105 protection and trust primitives. No public RNG
+nonce generation. S106/S107 connect all three modern policies using the S102–S105 protection and trust primitives. No public RNG
 configuration or new feature is introduced; `opcua` stays outside default/full. Key
 formatting is redacted by Secret; this does not promise zeroization of allocations.
 
@@ -492,8 +492,8 @@ S102 adds private `MSG`/`CLO` protection for `Sign` and `SignEncrypt`: provider-
 HMAC verification and AES-CBC with derived keys/IV, authenticated padding and header
 binding. Decryption and authentication precede sequence/body parsing. Current/previous
 keys are bounded by token id; installs re-derive from both nonces before replacing state.
-Previous-token expiry/scheduling belongs to S109. S106 wires these primitives into
-`Basic256Sha256` connections.
+Previous-token expiry/scheduling belongs to S109. S106/S107 wire these primitives into
+all three modern policy connections.
 Malformed protected data has one authentication error without provider/parser details;
 this does not claim equal timing of the full receive path. No new dependency or feature.
 
@@ -512,7 +512,7 @@ The leaf must supply one nonempty absolute ASCII application URI in its SAN; sec
 policies have no fallback URN. The chain and leaf SHA-1 thumbprint are prepared for the
 later secure handshake; SHA-1 here is only a protocol identifier.
 
-Client key validation precedes transport I/O. S106 connects `Basic256Sha256` with this
+Client key validation precedes transport I/O. S106/S107 connect all modern policies with this
 material. Loading client certificates does not establish server trust or chain validity.
 
 ## Server certificate trust preparation
@@ -563,7 +563,7 @@ error without provider/parser details; input above its byte ceiling is `Resource
 is an error-shape guarantee, without a full-path constant-time claim.
 
 Client/peer RSA preparation precedes transport I/O, with redacted errors and diagnostics.
-The public open62541 tests pass `Basic256Sha256` SIGN and `SIGN_ENCRYPT`, with discovery
+The public open62541 tests pass all three modern policies in SIGN and `SIGN_ENCRYPT`, with discovery
 on and off, chunked reads, writes and close. OPN is always signed and encrypted; MSG/CLO
 are signed in SIGN and signed/encrypted in `SIGN_ENCRYPT`. Secure discovery runs over that
 same protected connection, without a None fallback or a second socket.
@@ -575,7 +575,28 @@ server certificate is verified and bound to the provisioned peer before `Activat
 sends `clientSignature` over server certificate plus server nonce. Anonymous
 `userTokenSignature` remains empty. Invalid or repeated server nonces fail authentication.
 
-The remaining modern policies stay unavailable until S107, protected user tokens until
-S108 and caller-driven renewal until S109. A session currently lasts only as long as its
+Protected user tokens remain S108 and caller-driven renewal S109. A session currently lasts only as long as its
 channel token. Native interop confirms RSA2048 and 8192-byte buffers; independent boundary
 key-size and sequence-wrap behavior remain UNVERIFIED. Sequence exhaustion fails closed.
+
+## Modern policy support (S107)
+
+`Basic256Sha256` remains the default. `Aes128_Sha256_RsaOaep` and
+`Aes256_Sha256_RsaPss` now use the same protected channel/session path, including secure
+discovery, application proofs, chunked reads/writes and close. No policy downgrade or
+extra socket is introduced. OPN is encrypted in both SIGN and `SIGN_ENCRYPT`.
+
+| Policy | Symmetric encryption | Application/OPN signature | OPN encryption |
+| --- | --- | --- | --- |
+| `Basic256Sha256` | AES-256-CBC | RSA PKCS#1 SHA-256 | RSA-OAEP SHA-1 |
+| `Aes128_Sha256_RsaOaep` | AES-128-CBC | RSA PKCS#1 SHA-256 | RSA-OAEP SHA-1 |
+| `Aes256_Sha256_RsaPss` | AES-256-CBC | RSA-PSS SHA-256, 32-byte salt | RSA-OAEP SHA-256 |
+
+Every modern policy uses 32-byte HMAC-SHA256/signing keys, 32-byte nonces and 16-byte IVs.
+OAEP-SHA256 plaintext blocks hold RSA key bytes minus 66. SIGN omits symmetric encryption
+and retains HMAC authentication on each MSG/CLO chunk.
+
+Deprecated `Basic128Rsa15` and `Basic256` are refused with `InvalidConfig` naming their
+deprecation and the unavailable `SHA1withRSA` signing operation. Endpoints offering only
+these policies are not selectable. They remain deferred under E16; no legacy crypto
+provider, opt-in bypass, dependency or feature has been added.

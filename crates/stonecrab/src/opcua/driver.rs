@@ -31,12 +31,12 @@ const TRANSPORTS: &str = "the only transport code of opcua is tcp";
 
 /// Factory for OPC UA TCP connections.
 ///
-/// Supports anonymous `Basic256Sha256` SIGN/`SIGN_ENCRYPT` sessions and explicit policy-None
+/// Supports anonymous sessions with all three modern policies in SIGN/`SIGN_ENCRYPT`, and explicit policy-None
 /// sessions. Username sessions over None require explicit opt-in. HEL, OPN, optional secure
 /// discovery, `CreateSession` and `ActivateSession` finish before returning Connected. Secure
 /// sessions verify the server certificate and application proof before activation. Reads
 /// and staged writes use bounded protected chunks; writes require read-write access.
-/// Protected user tokens, other secure policies, renewal, browse and native subscriptions
+/// Protected user tokens, renewal, browse and native subscriptions
 /// remain planned.
 ///
 /// The whole attempt uses `handshake-timeout-ms` (60000 by default), and close uses

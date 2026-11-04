@@ -289,7 +289,7 @@ namespace. Existing readonly nodes, in-image checks and credentials are unchange
 
 ### S106 secure session gate
 
-The exact-count Stonecrab gate selects 12 tests. Public Basic256Sha256 sessions connect,
+The S106 exact-count Stonecrab gate selected 12 tests (14 since S107). Public Basic256Sha256 sessions connect,
 read a 10000-item chunked array, write/read back a scalar and close in SIGN and
 SIGN_ENCRYPT, with discovery both on and off. Refusal cases cover untrusted and expired
 clients, an empty server trust list, untrusted/mismatched/expired server certificates,
@@ -304,3 +304,12 @@ on the server trust list to isolate validity rejection. Exported expired client 
 and the expired server certificate are listed in PKI_FILES and removed by stop. No keys
 enter the image, repository or evidence. RSA2048/8192-byte buffers pass; other RSA boundary
 sizes and sequence wrap remain independently UNVERIFIED.
+
+### S107 remaining policies
+
+The gate selects exactly 14 tests. Separate public-driver tests exercise
+Aes128_Sha256_RsaOaep and Aes256_Sha256_RsaPss in SIGN and SIGN_ENCRYPT, each with
+discovery on/off, the chunked 10000-item read, write/read-back and close. Certificate,
+empty-trust and None-only-policy refusal cases run under all three modern policies.
+The in-image client self-check also reads using both AES policies in both modes. No
+additional PKI exports or peer processes are needed; stop removes the same temporary keys.
