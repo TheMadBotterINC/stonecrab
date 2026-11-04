@@ -33,6 +33,7 @@ async fn opcua_interop_basic256sha256_refuses_untrusted_expired_and_empty_trust_
     let base = base.split('?').next().unwrap();
     let empty = std::env::var("STONECRAB_INTEROP_OPEN62541_EMPTY_TRUST").unwrap();
     let expired = std::env::var("STONECRAB_INTEROP_OPEN62541_EXPIRED_SERVER").unwrap();
+    let none = std::env::var("STONECRAB_INTEROP_OPEN62541_NONE_ONLY").unwrap();
     let pki =
         std::path::PathBuf::from(std::env::var("STONECRAB_INTEROP_OPEN62541_PKI_DIR").unwrap());
     let scratch = Scratch::new();
@@ -43,6 +44,7 @@ async fn opcua_interop_basic256sha256_refuses_untrusted_expired_and_empty_trust_
         (base, "client", "server", true),
         (base, "client", "untrusted", true),
         (expired.as_str(), "client", "expired-server", false),
+        (none.as_str(), "client", "server", false),
     ]
     .into_iter()
     .enumerate()
@@ -74,14 +76,14 @@ async fn opcua_interop_basic256sha256_refuses_untrusted_expired_and_empty_trust_
             .unwrap();
         assert_eq!(
             error.kind(),
-            if index < 3 {
+            if index < 3 || index == 6 {
                 ErrorKind::DeviceException
             } else {
                 ErrorKind::Trust
             },
             "case {index}: {error}"
         );
-        if index < 3 {
+        if index < 3 || index == 6 {
             let mut source: &(dyn std::error::Error + 'static) = &error;
             let status = loop {
                 if let Some(status) = source.downcast_ref::<crate::opcua::service::StatusFault>() {
@@ -91,7 +93,11 @@ async fn opcua_interop_basic256sha256_refuses_untrusted_expired_and_empty_trust_
             };
             assert_eq!(
                 status,
-                if index == 1 { 0x8014_0000 } else { 0x8013_0000 },
+                match index {
+                    1 => 0x8014_0000,
+                    6 => 0x8055_0000,
+                    _ => 0x8013_0000,
+                },
                 "case {index}"
             );
         }

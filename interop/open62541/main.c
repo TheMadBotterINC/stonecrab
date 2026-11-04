@@ -31,6 +31,7 @@
  *   OPCUA_PKI_DIR              files made by pki.sh, default /pki
  *   OPCUA_TRUST                "pki" (default): the client certificate and the user
  *                              certificate are trusted; "empty": nothing is trusted
+ *   OPCUA_ONLY_NONE            1: expose only policy None (secure policy refusal probe)
  *   OPCUA_SMALL_CHUNKS         1: 8192-byte chunks, at most 4 chunks and 24 KiB per message
  *                              (large/Int32_4000 still fits, large/Int32_10000 does not)
  *   OPCUA_MAX_SESSION_TIMEOUT_MS   session timeout ceiling, default 5000
@@ -420,11 +421,12 @@ configure(UA_ServerConfig *config, const char *pki, UA_Boolean trust_pki) {
     if(!cert.length || !key.length)
         return UA_STATUSCODE_BADINTERNALERROR;
     rv = UA_ServerConfig_addSecurityPolicyNone(config, &cert);
-    if(rv == UA_STATUSCODE_GOOD)
+    UA_Boolean only_none = env_num("OPCUA_ONLY_NONE", 0) == 1;
+    if(rv == UA_STATUSCODE_GOOD && !only_none)
         rv = UA_ServerConfig_addSecurityPolicyBasic256Sha256(config, &cert, &key);
-    if(rv == UA_STATUSCODE_GOOD)
+    if(rv == UA_STATUSCODE_GOOD && !only_none)
         rv = UA_ServerConfig_addSecurityPolicyAes128Sha256RsaOaep(config, &cert, &key);
-    if(rv == UA_STATUSCODE_GOOD)
+    if(rv == UA_STATUSCODE_GOOD && !only_none)
         rv = UA_ServerConfig_addSecurityPolicyAes256Sha256RsaPss(config, &cert, &key);
     UA_ByteString_clear(&cert);
     UA_ByteString_memZero(&key);

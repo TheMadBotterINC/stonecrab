@@ -292,12 +292,13 @@ namespace. Existing readonly nodes, in-image checks and credentials are unchange
 The exact-count Stonecrab gate selects 12 tests. Public Basic256Sha256 sessions connect,
 read a 10000-item chunked array, write/read back a scalar and close in SIGN and
 SIGN_ENCRYPT, with discovery both on and off. Refusal cases cover untrusted and expired
-clients, an empty server trust list and untrusted, mismatched or expired server certificates.
+clients, an empty server trust list, untrusted/mismatched/expired server certificates,
+and a Basic256Sha256 request to the None-only server (BadSecurityPolicyRejected).
 Client certificate refusal is a typed DeviceException carrying the peer status; local
 server certificate rejection is Trust.
 
 The main container also runs servers at the base port plus one (empty trust) and plus two
-(expired server), each published only on loopback. The runtime PKI additionally creates
+(expired server), and plus three (None-only policy), each published only on loopback. The runtime PKI additionally creates
 expired-client and expired-server certificates dated January 2020. The expired client is
 on the server trust list to isolate validity rejection. Exported expired client material
 and the expired server certificate are listed in PKI_FILES and removed by stop. No keys

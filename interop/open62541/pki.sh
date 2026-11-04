@@ -18,6 +18,7 @@
 #
 # All are self-signed 2048-bit RSA leaf certificates (basicConstraints CA:FALSE, as open62541
 # requires of a leaf), valid from yesterday for 30 days, with the key usages OPC UA asks for.
+# The additional expired-client/expired-server probes are dated January 2020.
 set -eu
 
 DIR="${1:-${OPCUA_PKI_DIR:-/pki}}"
