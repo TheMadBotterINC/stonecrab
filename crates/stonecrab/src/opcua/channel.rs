@@ -61,10 +61,15 @@ impl Channel {
         crypto: Arc<dyn Backend>,
         secure: Option<&Security>,
     ) -> Result<Self> {
-        if options.security_policy.is_secure() != secure.is_some() {
+        if options.security_policy.is_secure() != secure.is_some()
+            || secure.is_some_and(|security| {
+                security.policy() != options.security_policy
+                    || options.message_security == MessageSecurity::None
+            })
+        {
             return Err(error(
                 ErrorKind::InvalidConfig,
-                "policy None must be selected explicitly",
+                "channel security does not match the selected policy and mode",
             ));
         }
         let resources = *transport.limits();
@@ -118,8 +123,9 @@ impl Channel {
         };
         let overhead = security.length_in_bytes()?.saturating_add(20);
         let header = request_header(clock.as_ref(), &NodeId::numeric(0, 0), 1, deadline)?;
-        let client_nonce =
-            crate::opcua::crypto::channel_nonce(crypto.as_ref(), options.security_policy)?;
+        let client_nonce = secure
+            .map(|_| crate::opcua::crypto::session_nonce(crypto.as_ref()))
+            .transpose()?;
         let request = Service::OpenSecureChannelRequest {
             request_header: header,
             client_protocol_version: 0,
@@ -128,14 +134,17 @@ impl Channel {
                 MessageSecurityMode::MessageSecurityModeNone
             } else {
                 match options.message_security {
-                    MessageSecurity::None => MessageSecurityMode::MessageSecurityModeNone,
-                    MessageSecurity::Sign => MessageSecurityMode::MessageSecurityModeSign,
+                    MessageSecurity::None | MessageSecurity::Sign => {
+                        MessageSecurityMode::MessageSecurityModeSign
+                    }
                     MessageSecurity::SignEncrypt => {
                         MessageSecurityMode::MessageSecurityModeSignAndEncrypt
                     }
                 }
             },
-            client_nonce: client_nonce.clone(),
+            client_nonce: client_nonce.map_or_else(UaByteString::null, |nonce| {
+                UaByteString::new(nonce.to_vec())
+            }),
             requested_lifetime: DEFAULT_LIFETIME,
         };
         let budget = if secure.is_some() {
@@ -234,13 +243,13 @@ impl Channel {
                 "invalid channel response parameters",
             ));
         }
-        if secure.is_some() {
+        if let Some(client) = &client_nonce {
             let server = server_nonce
                 .as_bytes()
                 .filter(|bytes| {
                     bytes.len() == options.security_policy.descriptor().nonce
                         && bytes.iter().any(|byte| *byte != 0)
-                        && Some(*bytes) != client_nonce.as_bytes()
+                        && Some(*bytes) != client_nonce.as_ref().map(<[u8; 32]>::as_slice)
                 })
                 .ok_or_else(|| {
                     error(
@@ -248,9 +257,6 @@ impl Channel {
                         "invalid secure channel server nonce",
                     )
                 })?;
-            let client = client_nonce
-                .as_bytes()
-                .ok_or_else(|| error(ErrorKind::Authentication, "missing client nonce"))?;
             framed.symmetric(Symmetric::new(
                 crypto.as_ref(),
                 options.security_policy,

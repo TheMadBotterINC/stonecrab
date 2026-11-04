@@ -64,6 +64,10 @@ impl Security {
         Ok(Some(security))
     }
 
+    pub(super) fn policy(&self) -> SecurityPolicy {
+        self.asymmetric.policy
+    }
+
     pub(super) fn application_uri(&self) -> &str {
         &self.asymmetric.local.application_uri
     }
@@ -149,7 +153,7 @@ pub(super) fn channel_nonce(backend: &dyn Backend, policy: SecurityPolicy) -> Re
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;
 
 #[cfg(fuzzing)]
 pub use asymmetric::fuzzing::OpnProbe;

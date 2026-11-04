@@ -63,5 +63,14 @@ make client "Stonecrab interop client" urn:stonecrab:interop:client DNS:localhos
 make untrusted "Stonecrab untrusted client" urn:stonecrab:interop:untrusted DNS:localhost
 make user "Stonecrab interop user" urn:stonecrab:interop:user DNS:localhost
 
+NOT_BEFORE=20200101000000Z
+NOT_AFTER=20200102000000Z
+make expired-client "Stonecrab expired client" urn:stonecrab:interop:expired-client DNS:localhost
+make expired-server "Stonecrab expired server" urn:stonecrab:interop:open62541 "DNS:localhost,IP:127.0.0.1,$HOST_SAN"
+
 openssl rand -hex 12 | tr -d '\n' >user-password
+mkdir -p expired-server
+cp expired-server.cert.der expired-server/server.cert.der
+cp expired-server.key.der expired-server/server.key.der
+cp client.cert.der expired-client.cert.der user.cert.der user-password expired-server/
 echo "pki: made server, client, untrusted and user certificates in $DIR"

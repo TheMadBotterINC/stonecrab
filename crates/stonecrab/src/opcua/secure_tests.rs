@@ -1,3 +1,13 @@
+// covers: OPCUA-POLICY-BASIC256SHA256
+// covers: OPCUA-MODE-SIGN
+// covers: OPCUA-MODE-SIGN-ENCRYPT
+// covers: OPCUA-MODE-DETERMINE
+// covers: OPCUA-CERT-VERIFY-DEFAULT
+// covers: OPCUA-CERT-VERIFY-POINTS
+// covers: OPCUA-CERT-VERIFY-DISCOVERY
+// covers: OPCUA-DISC-GETENDPOINTS
+// covers: OPCUA-DISC-NONE-POLICY
+
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -378,5 +388,135 @@ fn opcua_secure_chunked_requests_and_coalesced_responses_obey_negotiated_buffers
         assert!(probe.incoming().iter().all(|wire| wire.len() <= 8192));
         assert!(probe.outgoing().iter().any(|wire| wire.len() > 8192));
         block_on_with(&clock, connection.close()).unwrap();
+    }
+}
+
+#[test]
+fn opcua_secure_channel_checks_policy_trust_time_and_crypto_failures() {
+    use super::channel::Channel;
+    use super::crypto::{Native, Security, tests::Injected};
+    use super::options::{OpcuaOptions, SecurityPolicy};
+    use crate::testkit::FakeTransport;
+    use crate::{CancellationToken, Clock, Deadline, ResourceLimits};
+    let fixture = Fixture::new();
+    for fault in 0..6 {
+        let (driver, clock, _) = driver(fixture.peer(MessageSecurity::Sign).reactor(|_, _| {}));
+        let config = driver
+            .parse_config(&fixture.uri(MessageSecurity::Sign, false))
+            .unwrap();
+        let mut options = config.driver_options_as::<OpcuaOptions>().unwrap().clone();
+        let security = Security::prepare(&options, clock.wall_now())
+            .unwrap()
+            .unwrap();
+        let advanced = clock.clone();
+        let mut reactor = fixture.peer(MessageSecurity::Sign).reactor(|_, _| {});
+        let transport = FakeTransport::new(
+            Script::strict(vec![Step::react(move |request| {
+                let mut response = reactor(request);
+                if fault == 1 && request.starts_with(b"OPN") {
+                    advanced.set_wall_now(
+                        UNIX_EPOCH
+                            .checked_add(Duration::from_mins(35_000_000))
+                            .unwrap(),
+                    );
+                }
+                if fault == 0 && request.starts_with(b"HEL") {
+                    response = Reaction::Reply(super::responder::acknowledge(8192, 8192, 0, 0));
+                }
+                response
+            })]),
+            clock.clone(),
+            ResourceLimits::builder().build().unwrap(),
+        );
+        if fault == 0 {
+            options.max_message_size = 0;
+        }
+        if fault == 3 {
+            options.message_security = MessageSecurity::None;
+        }
+        if fault == 4 {
+            options.security_policy = SecurityPolicy::Aes128Sha256RsaOaep;
+        }
+        if fault == 5 {
+            options.security_policy = SecurityPolicy::Aes128Sha256RsaOaep;
+            assert_eq!(
+                Security::prepare(&options, clock.wall_now())
+                    .unwrap_err()
+                    .kind(),
+                ErrorKind::InvalidConfig
+            );
+            options.security_policy = SecurityPolicy::Aes256Sha256RsaPss;
+            assert_eq!(
+                Security::prepare(&options, clock.wall_now())
+                    .unwrap_err()
+                    .kind(),
+                ErrorKind::InvalidConfig
+            );
+            continue;
+        }
+        let backend: Arc<dyn super::crypto::Backend> = if fault == 2 {
+            Arc::new(Injected::new(1, None))
+        } else {
+            Arc::new(Native)
+        };
+        let result = block_on_with(
+            &clock,
+            Channel::open(
+                Box::new(transport),
+                &options,
+                Arc::new(clock.clone()),
+                Deadline::after(clock.now(), Duration::from_secs(5)).unwrap(),
+                &CancellationToken::new(),
+                backend,
+                Some(&security),
+            ),
+        );
+        if fault == 0 {
+            let channel = result.unwrap();
+            assert!(format!("{channel:?}").contains("SIGN"));
+            let debug = format!("{:?}", channel.framed);
+            assert!(debug.contains("Wire"));
+            assert!(!debug.contains("PRIVATE KEY"));
+        } else {
+            assert_eq!(
+                result.unwrap_err().kind(),
+                if fault == 1 {
+                    ErrorKind::Trust
+                } else {
+                    ErrorKind::InvalidConfig
+                }
+            );
+        }
+    }
+}
+
+#[test]
+fn opcua_secure_transport_limits_and_eof_keep_their_error_categories() {
+    let fixture = Fixture::new();
+    for fault in 0..2 {
+        let mut reactor = fixture.peer(MessageSecurity::Sign).reactor(|_, _| {});
+        let (driver, clock, _) = driver(move |request| {
+            let response = reactor(request);
+            if request.starts_with(b"OPN") {
+                if fault == 0 {
+                    Reaction::Close
+                } else {
+                    Reaction::Reply([b"OPNF".as_slice(), &100_000_u32.to_le_bytes()].concat())
+                }
+            } else {
+                response
+            }
+        });
+        let error = connect(&driver, &clock, &fixture.uri(MessageSecurity::Sign, false))
+            .err()
+            .unwrap();
+        assert_eq!(
+            error.kind(),
+            if fault == 0 {
+                ErrorKind::Disconnected
+            } else {
+                ErrorKind::ResourceLimit
+            }
+        );
     }
 }

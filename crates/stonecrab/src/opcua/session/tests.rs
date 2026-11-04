@@ -26,6 +26,65 @@ use crate::{
 const URI: &str = "opcua://fake:4840/path?security-policy=NONE";
 
 #[tokio::test]
+#[ignore = "needs the independent open62541 peer; interop/open62541/interop.sh tests"]
+async fn opcua_interop_basic256sha256_refuses_untrusted_expired_and_empty_trust_peers() {
+    use crate::opcua::pki::Scratch;
+    let base = std::env::var("STONECRAB_INTEROP_OPEN62541").unwrap();
+    let base = base.split('?').next().unwrap();
+    let empty = std::env::var("STONECRAB_INTEROP_OPEN62541_EMPTY_TRUST").unwrap();
+    let expired = std::env::var("STONECRAB_INTEROP_OPEN62541_EXPIRED_SERVER").unwrap();
+    let pki =
+        std::path::PathBuf::from(std::env::var("STONECRAB_INTEROP_OPEN62541_PKI_DIR").unwrap());
+    let scratch = Scratch::new();
+    for (index, (endpoint, client, certificate, trust)) in [
+        (base, "untrusted", "server", false),
+        (base, "expired-client", "server", false),
+        (empty.as_str(), "client", "server", false),
+        (base, "client", "server", true),
+        (base, "client", "untrusted", true),
+        (expired.as_str(), "client", "expired-server", false),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut pem = std::fs::read_to_string(pki.join(format!("{client}.cert.pem"))).unwrap();
+        pem.push_str(&std::fs::read_to_string(pki.join(format!("{client}.key.pem"))).unwrap());
+        let key = scratch.write("client.pem", &pem);
+        let mut uri = format!(
+            "{endpoint}?security-policy=Basic256Sha256&message-security=SIGN_ENCRYPT&tls.keystore={}&server-certificate-file={}",
+            key.display(),
+            pki.join(format!("{certificate}.cert.der")).display()
+        );
+        if trust {
+            uri = format!(
+                "{uri}&tls.trust-store={}",
+                pki.join(if index == 3 {
+                    "untrusted.cert.pem"
+                } else {
+                    "server.cert.pem"
+                })
+                .display()
+            );
+        }
+        let driver = OpcuaDriver::new();
+        let error = driver
+            .connect(driver.parse_config(&uri).unwrap())
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(
+            error.kind(),
+            if index < 3 {
+                ErrorKind::DeviceException
+            } else {
+                ErrorKind::Trust
+            },
+            "case {index}: {error}"
+        );
+    }
+}
+
+#[tokio::test]
 #[expect(
     clippy::disallowed_macros,
     reason = "the ignored interop test records non-secret secure session results"

@@ -286,3 +286,20 @@ and reads back Boolean, all eight integers, Float/Double, Unicode/NUL String, ex
 DateTime and ByteString, character-string forms, TIME, a variable-length Int32 array,
 the matrix and a single-element array range. All changes stay in the disposable writable
 namespace. Existing readonly nodes, in-image checks and credentials are unchanged.
+
+### S106 secure session gate
+
+The exact-count Stonecrab gate selects 12 tests. Public Basic256Sha256 sessions connect,
+read a 10000-item chunked array, write/read back a scalar and close in SIGN and
+SIGN_ENCRYPT, with discovery both on and off. Refusal cases cover untrusted and expired
+clients, an empty server trust list and untrusted, mismatched or expired server certificates.
+Client certificate refusal is a typed DeviceException carrying the peer status; local
+server certificate rejection is Trust.
+
+The main container also runs servers at the base port plus one (empty trust) and plus two
+(expired server), each published only on loopback. The runtime PKI additionally creates
+expired-client and expired-server certificates dated January 2020. The expired client is
+on the server trust list to isolate validity rejection. Exported expired client material
+and the expired server certificate are listed in PKI_FILES and removed by stop. No keys
+enter the image, repository or evidence. RSA2048/8192-byte buffers pass; other RSA boundary
+sizes and sequence wrap remain independently UNVERIFIED.

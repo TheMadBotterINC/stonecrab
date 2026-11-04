@@ -3,7 +3,7 @@ The OPC UA client of Stonecrab (`stonecrab::opcua`), behind the opt-in `opcua` f
 in neither `default` nor `full`, as `tls` is (decision E17, ADR-0034), and it needs the
 `transport` feature. The module is being built in slices (milestone M3, ADR-0034). It currently has the
 address grammar, public `OpcuaDriver`, binary codecs, generated services, TCP framing,
-policy-None channel/session setup and bounded request lane. End-to-end scalar Read is available since S92; S95 adds extended values, arrays and matrices.
+None and `Basic256Sha256` channel/session setup and a bounded request lane. End-to-end scalar Read is available since S92; S95 adds extended values, arrays and matrices.
 The 23 pinned upstream vectors introduced by S93 now have 17 byte-exact round-trips,
 one existing numeric `NodeId` canonicalization and five exact disabled-service refusals
 (S100 enables the two write bodies).
@@ -36,9 +36,10 @@ socket and starts no discovery.
 | Staged scalar, array and matrix writes with explicit read-write access | interoperability-tested with open62541 |
 | Browse, subscriptions | planned |
 | Bounded PEM client key loading (RSA PKCS#8), certificate chain/thumbprint and SAN application URI | build-tested |
-| Asymmetric OPN signing/encryption and remote-key binding (crate-private) | interoperability-tested with open62541 for `Basic256Sha256` OPN only |
+| Asymmetric OPN signing/encryption and remote-key binding (crate-private) | interoperability-tested with open62541 for `Basic256Sha256` |
 | Server trust preparation: explicit opt-out, PEM/DER store, constant-time pin and fail-closed verifier (crate-private) | build-tested |
-| Signed/encrypted security policies and remote handshake verifier calls | planned |
+| `Basic256Sha256` SIGN/`SIGN_ENCRYPT`, secure discovery and session certificate proofs | interoperability-tested with open62541 |
+| AES128/OAEP and AES256/PSS public connections, protected user tokens and renewal | planned |
 | Independent-server scalar Read interoperability | verified with open62541 |
 | Hardware verification | planned |
 
@@ -269,7 +270,7 @@ framer/transport minimum bounds encoded requests before a sequence number is con
 Request headers carry the session token, injected wall-clock timestamp, request handle
 and remaining timeout hint. Replies must use the expected channel/token and consecutive
 nonzero sequence numbers. Unknown request ids are discarded and counted. Wrap is refused
-explicitly pending the S106 interop check. ERR fails all pending requests immediately;
+explicitly; independent wrap behavior remains UNVERIFIED. ERR fails all pending requests immediately;
 a `ServiceFault` fails only its request with the exact status number and known name in
 a typed source. Server reason text is not echoed. No service is replayed.
 
@@ -306,9 +307,10 @@ Evidence is recorded by `interop/open62541/interop.sh tests` and CI.
 ## Public connect and anonymous session
 
 Register `Arc::new(OpcuaDriver::new())` with `DriverRegistry`, then connect to
-`opcua://host:4840/path?security-policy=NONE`. The port is required. Secure policies keep
-the secure default but are currently refused before I/O; username/password credentials
-are also refused. Read is advertised; write, ping, browse and subscriptions remain unsupported.
+`opcua://host:4840/path?security-policy=NONE` for an explicit unprotected session. The port
+is required. `Basic256Sha256` is the secure default and requires the provisioned client key
+and server certificate described below. Read and staged write are available; writes need
+read-write access. Ping, browse and subscriptions remain unsupported.
 
 TCP, HEL/ACK, OPN Issue, `CreateSession` and anonymous `ActivateSession` share one
 `handshake-timeout-ms` deadline (60000 by default, exposed as `Timeouts.connect`). The
@@ -396,10 +398,9 @@ A selection failure names these options and lists at most 16 sanitized endpoint 
 each bounded to 256 characters; invalid or credential-bearing URLs are replaced.
 
 `discovery` is a strict boolean, default true. With a secure policy, `discovery=false`
-requires `server-certificate-file`, currently accepted as a nonempty file path only.
-File loading and certificate trust validation remain S103/S104. Secure connections
-continue to be refused before I/O. `GetEndpoints` request/response codecs and a private
-lane exchange are implemented; S106 wires them into secure connect. None connect uses
+requires `server-certificate-file`, as does discovery=true. Bounded files and trust
+validation are prepared before I/O. `Basic256Sha256` runs `GetEndpoints` over the secure
+channel when discovery is enabled, verifies its certificate and reuses the channel. None connect uses
 `CreateSession`'s endpoint list and skips `GetEndpoints`. An explicit private probe against
 open62541 verifies all seven advertised policy/mode combinations and token types; it
 makes no certificate-trust or secure-channel claim.
@@ -483,8 +484,7 @@ do not combine that setting with `AWS_LC_SYS_SYSTEM_DIR`. Repository mise and CI
 The TLS feature retains its ring provider, so `tls,opcua` includes both native libraries.
 
 S101 supplies policy descriptors, bounded `P_SHA1/P_SHA256` derivation and injectable OS
-nonce generation. Operational secure connections remain S106; private protection and trust primitives
-are tested in S102–S105. The driver still refuses secure policies before I/O. No public RNG
+nonce generation. S106 connects `Basic256Sha256` using the S102–S105 protection and trust primitives. No public RNG
 configuration or new feature is introduced; `opcua` stays outside default/full. Key
 formatting is redacted by Secret; this does not promise zeroization of allocations.
 
@@ -492,8 +492,8 @@ S102 adds private `MSG`/`CLO` protection for `Sign` and `SignEncrypt`: provider-
 HMAC verification and AES-CBC with derived keys/IV, authenticated padding and header
 binding. Decryption and authentication precede sequence/body parsing. Current/previous
 keys are bounded by token id; installs re-derive from both nonces before replacing state.
-Previous-token expiry/scheduling belongs to S108. The public driver still rejects secure
-policies before I/O; these primitives are wired into protected connections in S106.
+Previous-token expiry/scheduling belongs to S109. S106 wires these primitives into
+`Basic256Sha256` connections.
 Malformed protected data has one authentication error without provider/parser details;
 this does not claim equal timing of the full receive path. No new dependency or feature.
 
@@ -512,9 +512,8 @@ The leaf must supply one nonempty absolute ASCII application URI in its SAN; sec
 policies have no fallback URN. The chain and leaf SHA-1 thumbprint are prepared for the
 later secure handshake; SHA-1 here is only a protocol identifier.
 
-S103 validates client key material before transport I/O. A valid key store still reaches
-the secure-connect refusal: S104/S105 prepare trust and protected OPN, while secure
-session activation remains S106. Loading client certificates does not establish server trust or chain validity.
+Client key validation precedes transport I/O. S106 connects `Basic256Sha256` with this
+material. Loading client certificates does not establish server trust or chain validity.
 
 ## Server certificate trust preparation
 
@@ -542,9 +541,10 @@ with `Trust`. No OS/public roots, certificate downloads or revocation service is
 
 Debug and structured tracing name the strategy; permissive preparation records
 `tls.verify=false` at warning level. This bypasses trust acceptance, while cryptographic
-certificate/key/signature requirements still apply. Preparing valid files still reaches
-the existing secure-connect refusal: remote handshake trust call sites and full secure
-connection wiring remain S106. These private verifier tests do not claim a working secure session.
+certificate/key/signature requirements still apply. S106 applies the verifier before I/O,
+to the authenticated OPN sender, to secure discovery and to the `CreateSession` certificate
+before activation. Every presented leaf must match the provisioned server, even with
+verification disabled.
 
 ## Asymmetric OPN protection
 
@@ -563,6 +563,19 @@ error without provider/parser details; input above its byte ceiling is `Resource
 is an error-shape guarantee, without a full-path constant-time claim.
 
 Client/peer RSA preparation precedes transport I/O, with redacted errors and diagnostics.
-The OPN-only open62541 probe passes `Basic256Sha256` SIGN and `SIGN_ENCRYPT`. Public secure
-sessions and protected MSG/CLO wiring remain S106; valid preparation still reaches the
-secure-connect refusal. RSA bounds remain independently UNVERIFIED until S106.
+The public open62541 tests pass `Basic256Sha256` SIGN and `SIGN_ENCRYPT`, with discovery
+on and off, chunked reads, writes and close. OPN is always signed and encrypted; MSG/CLO
+are signed in SIGN and signed/encrypted in `SIGN_ENCRYPT`. Secure discovery runs over that
+same protected connection, without a None fallback or a second socket.
+
+`CreateSession` sends the client certificate chain, its SAN application URI and a fresh
+32-byte nonce. Its request has no `clientSignature` field. The server signature must use the
+policy algorithm and cover the exact client certificate bytes plus nonce. The returned
+server certificate is verified and bound to the provisioned peer before `ActivateSession`
+sends `clientSignature` over server certificate plus server nonce. Anonymous
+`userTokenSignature` remains empty. Invalid or repeated server nonces fail authentication.
+
+The remaining modern policies stay unavailable until S107, protected user tokens until
+S108 and caller-driven renewal until S109. A session currently lasts only as long as its
+channel token. Native interop confirms RSA2048 and 8192-byte buffers; independent boundary
+key-size and sequence-wrap behavior remain UNVERIFIED. Sequence exhaustion fails closed.

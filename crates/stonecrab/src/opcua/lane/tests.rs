@@ -1017,7 +1017,7 @@ fn opcua_close_rejects_invalid_clock_and_undersized_body_before_sending() {
         assert_eq!(rig.probe.sent().len(), 0);
     }
     rig.clock.set_wall_now(std::time::SystemTime::UNIX_EPOCH);
-    rig.lane.max_frame = 24;
+    rig.lane.max_frame = 25;
     assert_eq!(
         block_on_with(&rig.clock, rig.lane.close(deadline, &rig.cancel))
             .unwrap_err()

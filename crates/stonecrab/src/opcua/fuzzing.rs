@@ -22,6 +22,7 @@ pub use crate::opcua::crypto::OpnProbe;
 pub fn inspect_certificate(bytes: &[u8]) -> Result<()> {
     use crate::opcua::crypto::certificate;
     use std::time::{Duration, UNIX_EPOCH};
+    let _chain = certificate::chain(bytes);
     let _element = certificate::tlv(&mut BoundedReader::new(bytes));
     let _eku = certificate::server_eku(bytes);
     let _properties = certificate::Properties::parse(bytes);
@@ -227,6 +228,11 @@ pub fn frame(
         return Err(FrameError::Malformed);
     };
     let mut framer = OpcuaFramer::new(receive_buffer, limits);
+    let mut raw = crate::opcua::frame::RawFramer(framer);
+    if let Ok(Some(bytes)) = raw.decode(&mut buffer.clone()) {
+        let _parsed = crate::opcua::frame::Frame::parse(&bytes);
+        let _encoded = raw.encode(&bytes, &mut BytesMut::new());
+    }
     Ok(framer.decode(buffer)?.map(|decoded| {
         let mut out = BytesMut::new();
         Framed {

@@ -47,7 +47,7 @@ HOST="127.0.0.1"
 EVIDENCE="${INTEROP_EVIDENCE_DIR:-$ROOT/target/interop-evidence}/open62541"
 PKI_OUT="${INTEROP_PKI_DIR:-$ROOT/target/interop-pki/open62541}"
 FILTER='binary(stonecrab) & test(/^opcua::(channel|session|connection|lane|endpoint)::tests::opcua_interop_/)'
-EXPECTED_TESTS=10
+EXPECTED_TESTS=12
 
 die() {
   echo "interop: $*" >&2
@@ -68,6 +68,7 @@ build() {
 
 # The files `pki` writes, so that `pki` and `stop` remove only these, never the directory.
 PKI_FILES="client.cert.der client.cert.pem client.key.der client.key.pem
+expired-client.cert.pem expired-client.key.pem expired-server.cert.der
   untrusted.cert.der untrusted.cert.pem untrusted.key.der untrusted.key.pem
   user.cert.der user.cert.pem user.key.der user.key.pem
   server.cert.der server.cert.pem user-password"
@@ -89,7 +90,15 @@ start() {
   need_docker
   stop
   docker run -d --name "$NAME" -p "127.0.0.1:${PORT}:${PORT}" \
+    -p "127.0.0.1:$((PORT + 1)):$((PORT + 1))" -p "127.0.0.1:$((PORT + 2)):$((PORT + 2))" \
     -e "OPCUA_PORT=${PORT}" -e "OPCUA_ADVERTISED_HOST=${HOST}" -e OPCUA_ALLOW_NONE_PASSWORD=1 "$IMAGE" >/dev/null
+  wait_ready
+  docker exec -d -e "OPCUA_PORT=$((PORT + 1))" -e OPCUA_TRUST=empty "$NAME" \
+    sh -c '/usr/local/bin/opcua-server > /tmp/empty-trust.log 2>&1'
+  docker exec -d -e "OPCUA_PORT=$((PORT + 2))" -e OPCUA_PKI_DIR=/pki/expired-server "$NAME" \
+    sh -c '/usr/local/bin/opcua-server > /tmp/expired-server.log 2>&1'
+  (PORT=$((PORT + 1)); wait_ready)
+  (PORT=$((PORT + 2)); wait_ready)
 }
 
 probe() {
@@ -162,6 +171,8 @@ run_tests() {
   export STONECRAB_INTEROP_OPEN62541="opcua://${HOST}:${PORT}?security-policy=NONE"
   export STONECRAB_INTEROP_OPEN62541_PASSWORD_FILE="$PKI_OUT/user-password"
   export STONECRAB_INTEROP_OPEN62541_PKI_DIR="$PKI_OUT"
+  export STONECRAB_INTEROP_OPEN62541_EMPTY_TRUST="opcua://${HOST}:$((PORT + 1))"
+  export STONECRAB_INTEROP_OPEN62541_EXPIRED_SERVER="opcua://${HOST}:$((PORT + 2))"
   local listed
   # CI sets CARGO_TERM_COLOR=always; color codes split qualified test names.
   cargo nextest list --locked -p stonecrab --all-features --color never \
@@ -192,6 +203,8 @@ evidence() {
   } >"$EVIDENCE/image-digest.txt" || return 1
   # The server log has no key or password in it; strip the color codes for the reader.
   docker logs "$NAME" 2>&1 | sed -E $'s/\x1b\\[[0-9;]*m//g' >"$EVIDENCE/server.log" || true
+  docker exec "$NAME" cat /tmp/empty-trust.log >"$EVIDENCE/empty-trust.log" || true
+  docker exec "$NAME" cat /tmp/expired-server.log >"$EVIDENCE/expired-server.log" || true
   echo "interop: evidence in $EVIDENCE"
   ls -1 "$EVIDENCE"
 }
