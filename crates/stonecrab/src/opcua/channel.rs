@@ -23,7 +23,7 @@ use crate::opcua::generated::channel_security_token::ChannelSecurityToken;
 use crate::opcua::generated::extension_object_definition::ExtensionObjectDefinition as Service;
 use crate::opcua::generated::message_security_mode::MessageSecurityMode;
 use crate::opcua::generated::security_token_request_type::SecurityTokenRequestType;
-#[cfg(test)]
+#[cfg(all(test, feature = "testkit"))]
 use crate::opcua::options::SecurityPolicy;
 use crate::opcua::options::{MessageSecurity, OpcuaOptions};
 use crate::opcua::service::{decode_service, encode_service, request_header, status_error};
@@ -40,7 +40,7 @@ pub(super) struct Channel {
     pub(super) limits: TransportLimits,
     pub(super) token: ChannelSecurityToken,
     #[cfg_attr(
-        not(test),
+        not(all(test, feature = "testkit")),
         expect(
             dead_code,
             reason = "server nonce is retained for operation-driven renewal in S109"

@@ -8,7 +8,7 @@ use crate::opcua::channel::{Channel, within};
 use crate::opcua::connection::OpcuaConnection;
 use crate::opcua::crypto::{self, Backend, Native};
 use crate::opcua::lane::Lane;
-#[cfg(test)]
+#[cfg(all(test, feature = "testkit"))]
 use crate::opcua::options::SecurityPolicy;
 use crate::opcua::options::{OpcuaOptions, endpoint};
 use crate::opcua::session::Session;
