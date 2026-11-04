@@ -5,6 +5,33 @@ Implementation baseline: the commit that last modified this file
 (`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
 its own commit; the slice log below records what each one landed.
 
+## OPC UA remaining modern policies (S107, 2026-11-04)
+
+All three modern policies now connect through the same protected channel/session path.
+Aes128_Sha256_RsaOaep uses AES128 and PKCS1-SHA256/OAEP-SHA1;
+Aes256_Sha256_RsaPss uses AES256, PSS-SHA256 with 32-byte salt and OAEP-SHA256.
+Both support SIGN/SIGN_ENCRYPT, secure discovery and application proofs, chunked
+reads/writes and close. Basic256Sha256 remains the default. Deprecated Basic128Rsa15
+and Basic256 remain refused under E16, naming unavailable SHA1withRSA signing;
+endpoints offering only those policies cannot be selected.
+
+All 2539 tests and 588+5 doctests pass; standalone OPC UA passes 559 library cases
+including 385 OPC UA tests and strict Clippy. Core 6978/6978 and handwritten OPC UA
+10022/10022 lines are 100%, with unchanged thresholds/exclusions. Focused mutations:
+11 caught/five unviable, no survivors/timeouts. All 18 fuzz targets pass at least 60
+seconds. The 59 isolated feature combinations, regen, dependencies/D23/machete,
+examples, semver, parity/attributes/DCO, fresh 230-file package and unpacked builds pass.
+All 14 open62541 tests pass, including every modern policy in both modes/discovery
+settings and certificate/empty-trust/None-only-policy refusals. Peer/keys are removed.
+
+Hosted CI 41793128103 on bfa151c passes all 32 executed jobs; scheduled and
+first-branch DCO are skipped as configured. Local DCO verifies every signed-off commit.
+[Evidence](docs/evidence/opcua-s107.md). Two rows close: 249 total,
+158 implemented/53 planned/38 deferred. No dependency, feature, public API or version
+change. Independent key bounds/sequence wrap remain UNVERIFIED beyond native RSA2048
+and 8192-byte buffers. User identities remain S108; renewal remains S109.
+Next: S108, protected identity tokens. Normal signed-off merges retain every commit.
+
 ## OPC UA Basic256Sha256 connections (S106, 2026-11-04)
 
 The public driver now connects anonymous Basic256Sha256 sessions in SIGN and
