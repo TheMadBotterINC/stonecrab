@@ -31,6 +31,37 @@ fn opcua_wire_certificate_chain_is_bounded_canonical_and_borrowed() {
 }
 
 #[test]
+fn opcua_wire_certificate_chain_accepts_the_exact_byte_limit_and_rejects_larger_valid_der() {
+    let key = pki::key_pair();
+    let large = |size: usize| {
+        let subject = "x".repeat(64_000);
+        let certificate =
+            pki::certificate(&CertSpec::application(&subject, "server", 1), &key, &key);
+        let length = subject
+            .len()
+            .checked_add(size)
+            .unwrap()
+            .checked_sub(certificate.len())
+            .unwrap();
+        let subject = "x".repeat(length);
+        let certificate =
+            pki::certificate(&CertSpec::application(&subject, "server", 1), &key, &key);
+        assert_eq!(certificate.len(), size);
+        certificate
+    };
+    let certificate = large(65_536);
+    let exact = certificate.repeat(16);
+    assert_eq!(exact.len(), MAX_CERT_BYTES);
+    assert_eq!(chain(&exact).unwrap().len(), 16);
+    let oversized = [certificate.repeat(15), large(65_537)].concat();
+    assert_eq!(oversized.len(), MAX_CERT_BYTES.saturating_add(1));
+    assert_eq!(
+        chain(&oversized).unwrap_err().kind(),
+        crate::ErrorKind::Trust
+    );
+}
+
+#[test]
 fn opcua_signature_algorithm_debug_contains_only_the_algorithm_name() {
     assert_eq!(format!("{PKCS1_SHA256:?}"), "Pkcs1");
     assert_eq!(format!("{PSS_SHA256:?}"), "Pss");

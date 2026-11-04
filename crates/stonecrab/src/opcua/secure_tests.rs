@@ -520,3 +520,37 @@ fn opcua_secure_transport_limits_and_eof_keep_their_error_categories() {
         );
     }
 }
+
+#[test]
+fn opcua_secure_session_proofs_cover_the_exact_client_certificate_chain() {
+    let mut fixture = Fixture::new();
+    let mut pem = super::pki::pem("CERTIFICATE", &fixture.client_certificate);
+    pem.push_str(&super::pki::pem("CERTIFICATE", &fixture.server_certificate));
+    pem.push_str(&super::pki::pem("PRIVATE KEY", super::pki::pkcs8_2048()));
+    fixture.client_store = fixture.scratch.write("chain.pem", &pem);
+    let peer = fixture.peer(MessageSecurity::SignEncrypt);
+    let probe = peer.probe.clone();
+    let (driver, clock, _) = driver(peer.reactor(|_, _| {}));
+    let connection = connect(
+        &driver,
+        &clock,
+        &fixture.uri(MessageSecurity::SignEncrypt, true),
+    )
+    .unwrap();
+    let requests = probe.requests();
+    let Service::CreateSessionRequest {
+        client_certificate, ..
+    } = requests
+        .iter()
+        .find(|request| matches!(request, Service::CreateSessionRequest { .. }))
+        .unwrap()
+    else {
+        panic!("create")
+    };
+    assert_eq!(
+        client_certificate.as_bytes().unwrap(),
+        [fixture.client_certificate, fixture.server_certificate].concat()
+    );
+    assert!(activated(&probe));
+    block_on_with(&clock, connection.close()).unwrap();
+}
