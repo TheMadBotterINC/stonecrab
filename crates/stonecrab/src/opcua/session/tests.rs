@@ -81,6 +81,20 @@ async fn opcua_interop_basic256sha256_refuses_untrusted_expired_and_empty_trust_
             },
             "case {index}: {error}"
         );
+        if index < 3 {
+            let mut source: &(dyn std::error::Error + 'static) = &error;
+            let status = loop {
+                if let Some(status) = source.downcast_ref::<crate::opcua::service::StatusFault>() {
+                    break status.code;
+                }
+                source = source.source().expect("native certificate status");
+            };
+            assert_eq!(
+                status,
+                if index == 1 { 0x8014_0000 } else { 0x8013_0000 },
+                "case {index}"
+            );
+        }
     }
 }
 
