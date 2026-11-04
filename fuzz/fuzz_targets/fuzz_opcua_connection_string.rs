@@ -70,7 +70,16 @@ fn check(text: &str) {
                     || key == "endpoint-host"
                     || key == "endpoint-port"
                     || key == "server-certificate-file"
+                    || key == "tls.keystore"
+                    || key == "tls.keystore-type"
             }));
+            if let Some(path) = uri.option("tls.keystore") {
+                assert!(!path.is_empty());
+                assert!(!path.chars().any(char::is_control));
+            }
+            if let Some(kind) = uri.option("tls.keystore-type") {
+                assert_eq!(kind, "pem");
+            }
             if let Some(value) = uri.option("allow-insecure-credentials") {
                 assert!(["true", "false"].contains(&value));
             }
