@@ -53,13 +53,14 @@ impl Rig {
     fn open(&mut self) -> Result<Channel> {
         block_on_with(
             &self.clock,
-            Channel::open_none(
+            Channel::open(
                 self.transport.take().unwrap(),
                 &self.options,
                 Arc::new(self.clock.clone()),
                 self.deadline,
                 &self.cancel,
-                &crate::opcua::crypto::Native,
+                Arc::new(crate::opcua::crypto::Native),
+                None,
             ),
         )
     }
@@ -445,13 +446,14 @@ fn opcua_cancelled_and_expired_handshakes_send_nothing() {
 #[test]
 fn opcua_cancelling_a_pending_handshake_releases_all_timers() {
     let mut rig = Rig::new(Script::default());
-    let mut pending = Box::pin(Channel::open_none(
+    let mut pending = Box::pin(Channel::open(
         rig.transport.take().unwrap(),
         &rig.options,
         Arc::new(rig.clock.clone()),
         rig.deadline,
         &rig.cancel,
-        &crate::opcua::crypto::Native,
+        Arc::new(crate::opcua::crypto::Native),
+        None,
     ));
     assert!(
         pending
@@ -818,13 +820,14 @@ fn opcua_channel_rejects_clocks_that_cannot_wait() {
         });
         let problem = block_on_with(
             &rig.clock,
-            Channel::open_none(
+            Channel::open(
                 rig.transport.take().unwrap(),
                 &rig.options,
                 clock,
                 rig.deadline,
                 &rig.cancel,
-                &crate::opcua::crypto::Native,
+                Arc::new(crate::opcua::crypto::Native),
+                None,
             ),
         )
         .unwrap_err();
@@ -859,13 +862,14 @@ async fn opcua_interop_peer_answers_hello_and_opens_a_none_channel() {
         .open(config.endpoint(), *config.limits(), deadline)
         .await
         .unwrap();
-    let channel = Channel::open_none(
+    let channel = Channel::open(
         transport,
         options,
         Arc::clone(&clock),
         deadline,
         &cancel,
-        &crate::opcua::crypto::Native,
+        Arc::new(crate::opcua::crypto::Native),
+        None,
     )
     .await
     .unwrap();
@@ -886,13 +890,14 @@ async fn opcua_interop_peer_answers_hello_and_opens_a_none_channel() {
         .open(config.endpoint(), *config.limits(), deadline)
         .await
         .unwrap();
-    let channel = Channel::open_none(
+    let channel = Channel::open(
         transport,
         options,
         Arc::clone(&clock),
         deadline,
         &cancel,
-        &crate::opcua::crypto::Native,
+        Arc::new(crate::opcua::crypto::Native),
+        None,
     )
     .await
     .unwrap();

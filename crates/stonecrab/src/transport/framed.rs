@@ -185,6 +185,11 @@ impl<F: Send, R: Framer<F>> FramedTransport<F, R> {
             .min(self.framer.max_frame_bytes())
     }
 
+    #[cfg(feature = "opcua")]
+    pub(crate) const fn framer(&self) -> &R {
+        &self.framer
+    }
+
     /// Apply negotiated framing limits without discarding coalesced or partial input.
     #[cfg(feature = "opcua")]
     pub(crate) fn replace_framer(&mut self, framer: R) {

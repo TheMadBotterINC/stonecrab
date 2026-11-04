@@ -47,6 +47,12 @@ pub(in crate::opcua) struct Symmetric {
 }
 
 impl Symmetric {
+    #[cfg(all(test, feature = "testkit"))]
+    pub(in crate::opcua) const fn into_server(mut self) -> Self {
+        std::mem::swap(&mut self.current.keys.client, &mut self.current.keys.server);
+        self
+    }
+
     pub(in crate::opcua) fn new(
         backend: &dyn Backend,
         policy: SecurityPolicy,
@@ -70,6 +76,13 @@ impl Symmetric {
             },
             previous: None,
         })
+    }
+
+    pub(in crate::opcua) fn max_body(&self, maximum: usize) -> Result<usize> {
+        self.policy
+            .descriptor()
+            .symmetric_sizes(self.encrypted)
+            .max_body(maximum, 4)
     }
 
     pub(in crate::opcua) const fn token_id(&self) -> u32 {

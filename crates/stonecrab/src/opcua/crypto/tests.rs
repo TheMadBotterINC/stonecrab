@@ -9,14 +9,14 @@ const POLICIES: [SecurityPolicy; 3] = [
     SecurityPolicy::Aes256Sha256RsaPss,
 ];
 
-pub(super) struct Injected {
+pub(in crate::opcua) struct Injected {
     calls: AtomicUsize,
     fail_at: usize,
     digest_length: Option<usize>,
 }
 
 impl Injected {
-    pub(super) fn new(fail_at: usize, digest_length: Option<usize>) -> Self {
+    pub(in crate::opcua) fn new(fail_at: usize, digest_length: Option<usize>) -> Self {
         Self {
             calls: AtomicUsize::new(0),
             fail_at,

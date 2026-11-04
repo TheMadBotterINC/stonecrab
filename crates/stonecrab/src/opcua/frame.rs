@@ -603,6 +603,23 @@ impl Frame {
             .ok_or(ParseError::Overflow)
     }
 
+    pub(super) fn parse(bytes: &[u8]) -> Result<Self, FrameError> {
+        let mut reader = BoundedReader::new(bytes);
+        let header = FrameHeader::parse(&mut reader).map_err(frame_error)?;
+        if usize::try_from(header.size).ok() != Some(bytes.len()) {
+            return Err(FrameError::Malformed);
+        }
+        let body = Body::parse(
+            header.message_type,
+            bytes.get(HEADER_BYTES..).ok_or(FrameError::Truncated)?,
+        )
+        .map_err(|_error| FrameError::Malformed)?;
+        Ok(Self {
+            chunk: header.chunk,
+            body,
+        })
+    }
+
     /// Writes the header, whose size field is `size`, and the body.
     pub(super) fn serialize(
         &self,
@@ -681,10 +698,15 @@ impl OpcuaFramer {
             send_frame_bytes: send.min(configured).min(MAX_SIZE),
         }
     }
-}
+    pub(super) fn receive_limit(self) -> usize {
+        usize::try_from(self.max_frame_bytes).unwrap_or(usize::MAX)
+    }
 
-impl Framer<Frame> for OpcuaFramer {
-    fn decode(&mut self, buffer: &mut BytesMut) -> Result<Option<Frame>, FrameError> {
+    pub(super) fn send_limit(self) -> usize {
+        usize::try_from(self.send_frame_bytes).unwrap_or(usize::MAX)
+    }
+
+    fn message(self, buffer: &[u8]) -> Result<Option<&[u8]>, FrameError> {
         let Some(head) = buffer.get(..HEADER_BYTES) else {
             return Ok(None);
         };
@@ -694,18 +716,19 @@ impl Framer<Frame> for OpcuaFramer {
         if header.size > self.max_frame_bytes {
             return Err(FrameError::Oversized(total));
         }
-        let Some(message) = buffer.get(..total) else {
+        Ok(buffer.get(..total))
+    }
+}
+
+impl Framer<Frame> for OpcuaFramer {
+    fn decode(&mut self, buffer: &mut BytesMut) -> Result<Option<Frame>, FrameError> {
+        let Some(message) = self.message(buffer)? else {
             return Ok(None);
         };
-        let body = message.get(HEADER_BYTES..).ok_or(FrameError::Truncated)?;
-        // The size is already bounded, so a length the body cannot hold is a malformed body.
-        let body =
-            Body::parse(header.message_type, body).map_err(|_error| FrameError::Malformed)?;
+        let total = message.len();
+        let frame = Frame::parse(message)?;
         buffer.advance(total);
-        Ok(Some(Frame {
-            chunk: header.chunk,
-            body,
-        }))
+        Ok(Some(frame))
     }
 
     fn encode(&mut self, frame: &Frame, out: &mut BytesMut) -> Result<(), FrameError> {
@@ -723,6 +746,35 @@ impl Framer<Frame> for OpcuaFramer {
 
     fn max_frame_bytes(&self) -> usize {
         usize::try_from(self.max_frame_bytes.max(self.send_frame_bytes)).unwrap_or(usize::MAX)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct RawFramer(pub(super) OpcuaFramer);
+
+impl Framer<Bytes> for RawFramer {
+    fn decode(&mut self, buffer: &mut BytesMut) -> Result<Option<Bytes>, FrameError> {
+        let Some(message) = self.0.message(buffer)? else {
+            return Ok(None);
+        };
+        let total = message.len();
+        Ok(Some(buffer.split_to(total).freeze()))
+    }
+
+    fn encode(&mut self, frame: &Bytes, out: &mut BytesMut) -> Result<(), FrameError> {
+        let header = FrameHeader::parse(&mut BoundedReader::new(frame)).map_err(frame_error)?;
+        if frame.len() > self.0.send_limit() {
+            return Err(FrameError::Oversized(frame.len()));
+        }
+        if usize::try_from(header.size).ok() != Some(frame.len()) {
+            return Err(FrameError::Malformed);
+        }
+        out.put_slice(frame);
+        Ok(())
+    }
+
+    fn max_frame_bytes(&self) -> usize {
+        usize::try_from(self.0.max_frame_bytes.max(self.0.send_frame_bytes)).unwrap_or(usize::MAX)
     }
 }
 

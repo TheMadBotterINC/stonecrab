@@ -31,6 +31,7 @@
  *   OPCUA_PKI_DIR              files made by pki.sh, default /pki
  *   OPCUA_TRUST                "pki" (default): the client certificate and the user
  *                              certificate are trusted; "empty": nothing is trusted
+ *   OPCUA_ONLY_NONE            1: expose only policy None (secure policy refusal probe)
  *   OPCUA_SMALL_CHUNKS         1: 8192-byte chunks, at most 4 chunks and 24 KiB per message
  *                              (large/Int32_4000 still fits, large/Int32_10000 does not)
  *   OPCUA_MAX_SESSION_TIMEOUT_MS   session timeout ceiling, default 5000
@@ -396,16 +397,20 @@ configure(UA_ServerConfig *config, const char *pki, UA_Boolean trust_pki) {
 
     /* Trust: the client application certificate for the channel, the user certificate for
      * the X.509 token. Set before the policies, as open62541 asks. */
-    UA_ByteString client = trust_pki ? load_file(pki, "client.cert.der") : UA_BYTESTRING_NULL;
+    UA_ByteString clients[2] = {
+        trust_pki ? load_file(pki, "client.cert.der") : UA_BYTESTRING_NULL,
+        trust_pki ? load_file(pki, "expired-client.cert.der") : UA_BYTESTRING_NULL
+    };
     UA_ByteString user = trust_pki ? load_file(pki, "user.cert.der") : UA_BYTESTRING_NULL;
-    if(trust_pki && (!client.length || !user.length))
+    if(trust_pki && (!clients[0].length || !clients[1].length || !user.length))
         return UA_STATUSCODE_BADINTERNALERROR;
     rv = set_trust(&config->secureChannelPKI, UA_NS0ID_SERVERCONFIGURATION_CERTIFICATEGROUPS_DEFAULTAPPLICATIONGROUP,
-                   &client, trust_pki ? 1 : 0, config->logging);
+                   clients, trust_pki ? 2 : 0, config->logging);
     if(rv == UA_STATUSCODE_GOOD)
         rv = set_trust(&config->sessionPKI, UA_NS0ID_SERVERCONFIGURATION_CERTIFICATEGROUPS_DEFAULTUSERTOKENGROUP,
                        &user, trust_pki ? 1 : 0, config->logging);
-    UA_ByteString_clear(&client);
+    UA_ByteString_clear(&clients[0]);
+    UA_ByteString_clear(&clients[1]);
     UA_ByteString_clear(&user);
     if(rv != UA_STATUSCODE_GOOD)
         return rv;
@@ -416,11 +421,12 @@ configure(UA_ServerConfig *config, const char *pki, UA_Boolean trust_pki) {
     if(!cert.length || !key.length)
         return UA_STATUSCODE_BADINTERNALERROR;
     rv = UA_ServerConfig_addSecurityPolicyNone(config, &cert);
-    if(rv == UA_STATUSCODE_GOOD)
+    UA_Boolean only_none = env_num("OPCUA_ONLY_NONE", 0) == 1;
+    if(rv == UA_STATUSCODE_GOOD && !only_none)
         rv = UA_ServerConfig_addSecurityPolicyBasic256Sha256(config, &cert, &key);
-    if(rv == UA_STATUSCODE_GOOD)
+    if(rv == UA_STATUSCODE_GOOD && !only_none)
         rv = UA_ServerConfig_addSecurityPolicyAes128Sha256RsaOaep(config, &cert, &key);
-    if(rv == UA_STATUSCODE_GOOD)
+    if(rv == UA_STATUSCODE_GOOD && !only_none)
         rv = UA_ServerConfig_addSecurityPolicyAes256Sha256RsaPss(config, &cert, &key);
     UA_ByteString_clear(&cert);
     UA_ByteString_memZero(&key);

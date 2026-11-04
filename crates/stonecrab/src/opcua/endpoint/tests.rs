@@ -10,7 +10,7 @@ use crate::opcua::options::SecurityPolicy;
 use crate::opcua::responder::{create_response, message, response_header};
 use crate::opcua::service::decode_service;
 use crate::testkit::{FakeClock, FakeTransport, Script, Step, block_on_with};
-use crate::transport::{FramedTransport, Framer};
+use crate::transport::Framer;
 
 const URL: &str = "opc.tcp://fake:4840/path";
 
@@ -396,7 +396,11 @@ fn exchange_response(reply: Vec<u8>) -> Result<Vec<EndpointDescription>> {
         limits,
     );
     let lane = Lane::new(
-        FramedTransport::new(Box::new(transport), OpcuaFramer::new(65535, limits)),
+        crate::opcua::wire::Wire::new(
+            Box::new(transport),
+            OpcuaFramer::new(65535, limits),
+            Arc::new(crate::opcua::crypto::Native),
+        ),
         Arc::new(clock.clone()),
         Duration::from_secs(30),
         17,
@@ -465,13 +469,14 @@ async fn opcua_interop_get_endpoints_lists_the_independent_servers_policies() {
         .open(config.endpoint(), *config.limits(), deadline)
         .await
         .unwrap();
-    let channel = Channel::open_none(
+    let channel = Channel::open(
         transport,
         options,
         clock,
         deadline,
         &cancel,
-        &crate::opcua::crypto::Native,
+        Arc::new(crate::opcua::crypto::Native),
+        None,
     )
     .await
     .unwrap();

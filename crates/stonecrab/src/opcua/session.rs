@@ -1,4 +1,4 @@
-//! Anonymous session setup on an explicitly selected None channel.
+//! Session setup bound to the channel policy and provisioned server identity.
 //!
 //! # Compatibility: docs/parity/opcua.md#OPCUA-MODE-NONE
 //! # Compatibility: docs/parity/opcua.md#OPCUA-LIFE-CREATE-SESSION
@@ -36,7 +36,20 @@ impl Session {
         nonce: [u8; 32],
         deadline: Deadline,
         cancel: &CancellationToken,
+        security: Option<&crate::opcua::crypto::Security>,
     ) -> Result<Self> {
+        if let Some(security) = security
+            && options.discovery
+        {
+            let endpoints =
+                crate::opcua::endpoint::get_endpoints(&lane, options, deadline, cancel).await?;
+            let (endpoint, _token) =
+                crate::opcua::endpoint::select(&endpoints, options, identity.token_type())?;
+            security.verify(
+                endpoint.server_certificate.as_bytes().unwrap_or_default(),
+                lane.wall_now(),
+            )?;
+        }
         let reply = lane
             .exchange_until(
                 &NodeId::numeric(0, 0),
@@ -44,7 +57,10 @@ impl Session {
                 |header| Service::CreateSessionRequest {
                     request_header: header,
                     client_description: ApplicationDescription {
-                        application_uri: UaString::new("urn:stonecrab:client"),
+                        application_uri: UaString::new(security.map_or(
+                            "urn:stonecrab:client",
+                            crate::opcua::crypto::Security::application_uri,
+                        )),
                         product_uri: UaString::new("urn:stonecrab"),
                         application_name: LocalizedText {
                             locale: None,
@@ -59,7 +75,9 @@ impl Session {
                     endpoint_url: UaString::new(&options.endpoint_url),
                     session_name: UaString::new("Stonecrab"),
                     client_nonce: UaByteString::new(nonce.to_vec()),
-                    client_certificate: UaByteString::null(),
+                    client_certificate: security.map_or_else(UaByteString::null, |security| {
+                        UaByteString::new(security.certificate().to_vec())
+                    }),
                     requested_session_timeout: options.session_timeout.as_secs_f64() * 1000.0,
                     max_response_message_size: 0,
                 },
@@ -72,6 +90,9 @@ impl Session {
             authentication_token,
             revised_session_timeout,
             server_endpoints,
+            server_certificate,
+            server_nonce,
+            server_signature,
             ..
         } = reply
         else {
@@ -85,6 +106,15 @@ impl Session {
             .ok()
             .filter(|duration| !duration.is_zero())
             .ok_or_else(|| malformed("invalid revised session timeout"))?;
+        let client_signature = if let Some(security) = security {
+            security.check_server_signature(&server_signature, &nonce, lane.wall_now())?;
+            let certificate = server_certificate.as_bytes().unwrap_or_default();
+            security.verify(certificate, lane.wall_now())?;
+            let server = secure_nonce(&server_nonce, &nonce)?;
+            security.client_signature(certificate, server)?
+        } else {
+            empty_signature()
+        };
         let endpoints = server_endpoints.unwrap_or_default();
         let (endpoint, policy) =
             crate::opcua::endpoint::select(&endpoints, options, identity.token_type())?;
@@ -101,7 +131,7 @@ impl Session {
                 467,
                 |header| Service::ActivateSessionRequest {
                     request_header: header,
-                    client_signature: empty_signature(),
+                    client_signature,
                     client_software_certificates: None,
                     locale_ids: None,
                     user_identity_token,
@@ -113,12 +143,20 @@ impl Session {
             .await
             .map_err(activation_error)?;
         let Service::ActivateSessionResponse {
-            response_header, ..
+            response_header,
+            server_nonce: activated_nonce,
+            ..
         } = reply
         else {
             return Err(malformed("expected ActivateSessionResponse"));
         };
         check_status(&response_header).map_err(activation_error)?;
+        if security.is_some() {
+            secure_nonce(
+                &activated_nonce,
+                server_nonce.as_bytes().unwrap_or_default(),
+            )?;
+        }
         Ok(Self {
             lane,
             authentication_token,
@@ -154,6 +192,22 @@ impl Session {
         let close = self.lane.close(deadline, cancel).await;
         result.and(close)
     }
+}
+
+fn secure_nonce<'a>(nonce: &'a UaByteString, previous: &[u8]) -> Result<&'a [u8]> {
+    nonce
+        .as_bytes()
+        .filter(|bytes| {
+            (32..=128).contains(&bytes.len())
+                && bytes.iter().any(|byte| *byte != 0)
+                && *bytes != previous
+        })
+        .ok_or_else(|| {
+            PlcError::new(
+                ErrorKind::Authentication,
+                "OPC UA invalid session server nonce",
+            )
+        })
 }
 
 const fn empty_signature() -> SignatureData {

@@ -42,10 +42,18 @@ mod lane;
 #[cfg(feature = "testkit")]
 #[path = "../tests/support/opcua_responder.rs"]
 mod responder;
+#[cfg(test)]
+#[cfg(feature = "testkit")]
+#[path = "../tests/support/opcua_secure.rs"]
+mod secure_responder;
+#[cfg(test)]
+#[cfg(feature = "testkit")]
+mod secure_tests;
 mod service;
 #[cfg(test)]
 mod service_tests;
 mod session;
+mod wire;
 mod write;
 // The framing is written and tested here; the secure channel of slice S90 is its first caller.
 // The fuzz entry point reaches the framer but not the constructors the channel will call.

@@ -147,12 +147,14 @@ src/opcua/lane.rs
 src/opcua/options.rs
 src/opcua/read/tests.rs
 src/opcua/read.rs
+src/opcua/secure_tests.rs
 src/opcua/service.rs
 src/opcua/service_tests.rs
 src/opcua/session/tests.rs
 src/opcua/session.rs
 src/opcua/value/tests.rs
 src/opcua/value.rs
+src/opcua/wire.rs
 src/opcua/write/tests.rs
 src/opcua/write/value/tests.rs
 src/opcua/write/value.rs
