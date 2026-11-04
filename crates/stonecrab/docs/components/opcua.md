@@ -35,7 +35,8 @@ socket and starts no discovery.
 | Read (basic scalars, UTC `DateTime`, Guid/`NodeId`/`QualifiedName`/`StatusCode` text, arrays and matrices) | interoperability-tested with open62541 |
 | Staged scalar, array and matrix writes with explicit read-write access | interoperability-tested with open62541 |
 | Browse, subscriptions | planned |
-| Signed/encrypted security policies and certificate validation | planned |
+| Bounded PEM client key loading (RSA PKCS#8), certificate chain/thumbprint and SAN application URI | build-tested |
+| Signed/encrypted security policies and server certificate validation | planned |
 | Independent-server scalar Read interoperability | verified with open62541 |
 | Hardware verification | planned |
 
@@ -493,3 +494,22 @@ Previous-token expiry/scheduling belongs to S108. The public driver still reject
 policies before I/O; these primitives are wired into protected connections in S105/S106.
 Malformed protected data has one authentication error without provider/parser details;
 this does not claim equal timing of the full receive path. No new dependency or feature.
+
+## Client application key store
+
+For a secure policy, `tls.keystore` names one PEM file containing the client certificate
+chain (leaf first) and exactly one matching unencrypted RSA PKCS#8 `PRIVATE KEY`.
+`tls.keystore-type=pem` is the default and only accepted format. PKCS#12, JVM stores,
+passwords, encrypted keys, PKCS#1/SEC1 sections and duplicate keys are refused with
+`InvalidConfig`. No client certificate is generated. None does not open a key store.
+
+Loading opens the file once, reads at most 1 MiB plus one overflow-detection byte and
+retains native signing/decryption handles. Errors and key-material Debug omit file paths,
+contents and provider details. Secret formatting is redacted, without a zeroization claim.
+The leaf must supply one nonempty absolute ASCII application URI in its SAN; secure
+policies have no fallback URN. The chain and leaf SHA-1 thumbprint are prepared for the
+later secure handshake; SHA-1 here is only a protocol identifier.
+
+S103 validates client key material before transport I/O. A valid key store still reaches
+the secure-connect refusal: server trust, protected OPN and secure session activation are
+S104–S106. Loading client certificates does not establish server trust or chain validity.

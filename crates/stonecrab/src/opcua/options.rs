@@ -145,7 +145,8 @@ impl MessageSecurity {
 /// | `discovery` | `discovery` | true (secure-connect execution in S106) |
 /// | `endpoint_host` | `endpoint-host` | none (an additional advertised host match) |
 /// | `endpoint_port` | `endpoint-port` | none (an additional advertised port match) |
-/// | `server_certificate_file` | `server-certificate-file` | none (path only; loading in S103) |
+/// | `server_certificate_file` | `server-certificate-file` | none (path only; trust loading in S104) |
+/// | `keystore` | `tls.keystore` | none (required for secure policies) |
 /// | `request_timeout` | `request-timeout-ms` | 30000 ms |
 /// | `receive_buffer_size` | `encoding.receive-buffer-size` | 65535 bytes |
 /// | `send_buffer_size` | `encoding.send-buffer-size` | 65535 bytes |
@@ -173,8 +174,10 @@ pub(super) struct OpcuaOptions {
     pub(super) access: crate::AccessPolicy,
     pub(super) endpoint_host: Option<String>,
     pub(super) endpoint_port: Option<u16>,
-    /// Syntactic path only until certificate loading/trust lands in S103/S104.
+    /// Syntactic path only until trust loading lands in S104.
     pub(super) server_certificate_file: Option<String>,
+    /// PEM certificate chain, leaf first, and an unencrypted RSA PKCS#8 private key.
+    pub(super) keystore: Option<String>,
     /// `request-timeout-ms`, shared with `Timeouts.request`.
     pub(super) request_timeout: Duration,
     pub(super) handshake_timeout: Duration,
@@ -205,6 +208,7 @@ impl OpcuaOptions {
         let mut endpoint_host = None;
         let mut endpoint_port = None;
         let mut server_certificate_file = None;
+        let mut keystore = None;
         let mut security_policy = SecurityPolicy::Basic256Sha256;
         let mut message_security = MessageSecurity::SignEncrypt;
         let mut request_timeout = Duration::from_secs(30);
@@ -243,6 +247,24 @@ impl OpcuaOptions {
                         ));
                     }
                     server_certificate_file = Some(value.clone());
+                }
+                "tls.keystore" => {
+                    if value.is_empty() || value.chars().any(char::is_control) {
+                        return Err(invalid("tls.keystore must be a nonempty file path"));
+                    }
+                    keystore = Some(value.clone());
+                }
+                "tls.keystore-type" => {
+                    if value != "pem" {
+                        return Err(invalid(
+                            "tls.keystore-type must be pem; PKCS#12 and JVM key stores are not offered",
+                        ));
+                    }
+                }
+                "tls.keystore-password" => {
+                    return Err(invalid(
+                        "tls.keystore-password is not offered; use an unencrypted RSA PKCS#8 key in PEM",
+                    ));
                 }
                 SECURITY_POLICY => security_policy = SecurityPolicy::from_name(value)?,
                 MESSAGE_SECURITY => message_security = MessageSecurity::from_name(value)?,
@@ -310,6 +332,7 @@ impl OpcuaOptions {
             endpoint_host,
             endpoint_port,
             server_certificate_file,
+            keystore,
             request_timeout,
             handshake_timeout,
             session_timeout,
@@ -717,9 +740,6 @@ mod tests {
     #[test]
     fn opcua_config_tls_names_are_not_offered_yet() {
         for key in [
-            "tls.keystore",
-            "tls.keystore-type",
-            "tls.keystore-password",
             "tls.trust-store",
             "tls.trust-store-type",
             "tls.trust-store-password",
@@ -728,6 +748,43 @@ mod tests {
             let error = refusal(&[(key, "x")]);
             assert_eq!(error.kind(), ErrorKind::InvalidConfig, "{key}");
             assert!(error.to_string().contains("not offered yet"), "{error}");
+        }
+    }
+
+    // covers: OPCUA-CFG-KEYSTORE-TYPE
+    #[test]
+    fn opcua_config_keystore_type_pkcs12_is_invalid_config() {
+        assert_eq!(options(&[]).keystore, None);
+        assert_eq!(
+            options(&[("tls.keystore", "client.pem")])
+                .keystore
+                .as_deref(),
+            Some("client.pem")
+        );
+        assert_eq!(
+            options(&[("tls.keystore-type", "pem"), ("tls.keystore", "client.pem")]),
+            options(&[("tls.keystore", "client.pem")])
+        );
+        for value in ["pkcs12", "jks", "der", "PEM", "", "sensitive-value"] {
+            let error = refusal(&[("tls.keystore-type", value)]);
+            assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+            assert!(error.to_string().contains("must be pem"));
+            assert!(!error.to_string().contains("sensitive-value"));
+        }
+    }
+
+    #[test]
+    fn opcua_config_keystore_password_and_invalid_paths_are_rejected() {
+        for value in ["", "sensitive-password"] {
+            let error = refusal(&[("tls.keystore-password", value)]);
+            assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+            assert!(error.to_string().contains("unencrypted RSA PKCS#8"));
+            assert!(!error.to_string().contains("sensitive-password"));
+        }
+        for value in ["", "sensitive\0path", "sensitive\npath"] {
+            let error = refusal(&[("tls.keystore", value)]);
+            assert!(error.to_string().contains("nonempty file path"));
+            assert!(!error.to_string().contains("sensitive"));
         }
     }
 

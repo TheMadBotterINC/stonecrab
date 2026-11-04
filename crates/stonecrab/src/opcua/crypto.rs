@@ -5,6 +5,7 @@
 
 mod backend;
 mod derive;
+mod keystore;
 mod policy;
 mod symmetric;
 pub(super) use symmetric::Symmetric;
@@ -13,6 +14,7 @@ pub(super) use symmetric::Symmetric;
 pub(super) use backend::Hash;
 pub(super) use backend::{Backend, Native};
 pub(super) use derive::derive_keys;
+pub(super) use keystore::KeyMaterial;
 pub(super) use policy::Policy;
 
 use crate::opcua::codec::UaByteString;
