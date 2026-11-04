@@ -210,6 +210,7 @@ impl Driver for OpcuaDriver {
                 )
             })?;
             if options.security_policy != SecurityPolicy::None {
+                let _material = crypto::KeyMaterial::load(options.keystore.as_deref())?;
                 return Err(PlcError::new(
                     ErrorKind::InvalidConfig,
                     "OPC UA secure policy is not implemented; select None explicitly",
@@ -564,6 +565,85 @@ mod nonce_tests {
     use crate::opcua::crypto::Hash;
     use crate::testkit::{FakeClock, FakeTransportFactory, block_on_with};
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    // covers: OPCUA-CERT-GENERATED
+    // covers: OPCUA-CFG-GENERATED-KEY-SIZE
+    // covers: OPCUA-QUIRK-GENERATED-CERT-URI
+    #[test]
+    fn opcua_a_secure_policy_without_a_keystore_is_invalid_config() {
+        let clock = FakeClock::default();
+        let factory = FakeTransportFactory::new(clock.clone());
+        let driver = OpcuaDriver::new()
+            .with_clock(Arc::new(clock.clone()))
+            .with_transport_factory(Arc::new(factory.clone()));
+        for policy in [
+            "Basic256Sha256",
+            "Aes128_Sha256_RsaOaep",
+            "Aes256_Sha256_RsaPss",
+        ] {
+            let config = driver
+                .parse_config(&format!("opcua://fake:4840?security-policy={policy}"))
+                .unwrap();
+            let error = block_on_with(&clock, driver.connect(config)).err().unwrap();
+            assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+            assert!(error.to_string().contains("tls.keystore is required"));
+            assert!(
+                error
+                    .to_string()
+                    .contains("generated client certificates are not offered")
+            );
+        }
+        assert_eq!(factory.opens().len(), 0);
+    }
+
+    #[test]
+    fn opcua_client_keys_are_checked_before_network_and_do_not_enable_secure_connect_yet() {
+        use crate::opcua::pki;
+        let scratch = pki::Scratch::new();
+        let clock = FakeClock::default();
+        let factory = FakeTransportFactory::new(clock.clone());
+        let driver = OpcuaDriver::new()
+            .with_clock(Arc::new(clock.clone()))
+            .with_transport_factory(Arc::new(factory.clone()));
+        let cert = pki::certificate(
+            &pki::CertSpec::application("client", "client", 1),
+            &pki::key_pair(),
+            &pki::key_pair(),
+        );
+        let text = format!(
+            "{}{}",
+            pki::pem("CERTIFICATE", &cert),
+            pki::pem("PRIVATE KEY", pki::pkcs8_2048())
+        );
+        let valid = scratch.write("valid.pem", &text);
+        let missing = scratch.path().join("sensitive-missing.pem");
+        for (path, reason) in [
+            (&valid, "secure policy is not implemented"),
+            (&missing, "tls.keystore could not be read"),
+        ] {
+            let config = driver
+                .parse_config(&format!(
+                    "opcua://fake:4840?tls.keystore={}",
+                    path.display()
+                ))
+                .unwrap();
+            let error = block_on_with(&clock, driver.connect(config)).err().unwrap();
+            assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+            assert!(error.to_string().contains(reason));
+            assert!(!error.to_string().contains("sensitive"));
+        }
+        assert_eq!(factory.opens().len(), 0);
+        // None never opens the missing key store; it reaches the transport boundary.
+        let config = driver
+            .parse_config(&format!(
+                "opcua://fake:4840?security-policy=NONE&tls.keystore={}",
+                missing.display()
+            ))
+            .unwrap();
+        let error = block_on_with(&clock, driver.connect(config)).err().unwrap();
+        assert!(!error.to_string().contains("tls.keystore"));
+        assert_eq!(factory.opens().len(), 1);
+    }
 
     struct RejectEntropy(AtomicUsize);
 

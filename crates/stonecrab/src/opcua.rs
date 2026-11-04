@@ -60,6 +60,9 @@ mod frame;
 #[cfg(fuzzing)]
 pub mod fuzzing;
 mod options;
+#[cfg(test)]
+#[path = "../tests/support/opcua_pki.rs"]
+mod pki;
 mod read;
 mod value;
 

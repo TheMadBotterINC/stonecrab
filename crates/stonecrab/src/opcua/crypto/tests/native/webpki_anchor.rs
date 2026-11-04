@@ -73,17 +73,18 @@ fn a_different_anchor_is_unknown_issuer() {
 #[test]
 fn an_expired_certificate_is_refused() {
     let pair = pki::key_pair();
-    let spec = pki::CertSpec::application("probe application", "probe application", 1);
+    let mut spec = pki::CertSpec::application("probe application", "probe application", 1);
+    spec.not_before = "010101000000Z";
+    spec.not_after = "020101000000Z";
     let der = CertificateDer::from(pki::certificate(&spec, &pair, &pair));
     let anchor = anchor_from_trusted_cert(&der).expect("anchor");
     let cert = EndEntityCert::try_from(&der).expect("parse");
-    // 2037-01-01, a year after notAfter.
     let error = cert
         .verify_for_usage(
             &[&SHA256_RSA],
             &[anchor],
             &[],
-            at(2_114_380_800),
+            at(pki::NOW),
             KeyUsage::server_auth(),
             None,
             None,
