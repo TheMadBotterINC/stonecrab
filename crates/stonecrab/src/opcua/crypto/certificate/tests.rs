@@ -49,20 +49,21 @@ fn opcua_direct_certificate_validity_and_server_eku_are_required() {
 fn opcua_validity_is_inclusive_and_uses_calendar_dates() {
     let cert = application(&CertSpec::application("server", "server", 2));
     let properties = Properties::parse(cert.as_ref()).unwrap();
+    // X.509 validity is second-granular; SystemTime precision differs by platform.
     assert!(current(&cert, properties.not_before));
     assert!(current(&cert, properties.not_after));
     assert!(!current(
         &cert,
         properties
             .not_before
-            .checked_sub(Duration::from_nanos(1))
+            .checked_sub(Duration::from_secs(1))
             .unwrap()
     ));
     assert!(!current(
         &cert,
         properties
             .not_after
-            .checked_add(Duration::from_nanos(1))
+            .checked_add(Duration::from_secs(1))
             .unwrap()
     ));
     for text in [
