@@ -36,6 +36,7 @@ socket and starts no discovery.
 | Staged scalar, array and matrix writes with explicit read-write access | interoperability-tested with open62541 |
 | Browse, subscriptions | planned |
 | Bounded PEM client key loading (RSA PKCS#8), certificate chain/thumbprint and SAN application URI | build-tested |
+| Asymmetric OPN signing/encryption and remote-key binding (crate-private) | interoperability-tested with open62541 for `Basic256Sha256` OPN only |
 | Server trust preparation: explicit opt-out, PEM/DER store, constant-time pin and fail-closed verifier (crate-private) | build-tested |
 | Signed/encrypted security policies and remote handshake verifier calls | planned |
 | Independent-server scalar Read interoperability | verified with open62541 |
@@ -482,8 +483,8 @@ do not combine that setting with `AWS_LC_SYS_SYSTEM_DIR`. Repository mise and CI
 The TLS feature retains its ring provider, so `tls,opcua` includes both native libraries.
 
 S101 supplies policy descriptors, bounded `P_SHA1/P_SHA256` derivation and injectable OS
-nonce generation. Operational secure channels, message protection and trust validation
-remain later slices. The driver still refuses secure policies before I/O. No public RNG
+nonce generation. Operational secure connections remain S106; private protection and trust primitives
+are tested in S102–S105. The driver still refuses secure policies before I/O. No public RNG
 configuration or new feature is introduced; `opcua` stays outside default/full. Key
 formatting is redacted by Secret; this does not promise zeroization of allocations.
 
@@ -492,7 +493,7 @@ HMAC verification and AES-CBC with derived keys/IV, authenticated padding and he
 binding. Decryption and authentication precede sequence/body parsing. Current/previous
 keys are bounded by token id; installs re-derive from both nonces before replacing state.
 Previous-token expiry/scheduling belongs to S108. The public driver still rejects secure
-policies before I/O; these primitives are wired into protected connections in S105/S106.
+policies before I/O; these primitives are wired into protected connections in S106.
 Malformed protected data has one authentication error without provider/parser details;
 this does not claim equal timing of the full receive path. No new dependency or feature.
 
@@ -512,8 +513,8 @@ policies have no fallback URN. The chain and leaf SHA-1 thumbprint are prepared 
 later secure handshake; SHA-1 here is only a protocol identifier.
 
 S103 validates client key material before transport I/O. A valid key store still reaches
-the secure-connect refusal: server trust, protected OPN and secure session activation are
-S104–S106. Loading client certificates does not establish server trust or chain validity.
+the secure-connect refusal: S104/S105 prepare trust and protected OPN, while secure
+session activation remains S106. Loading client certificates does not establish server trust or chain validity.
 
 ## Server certificate trust preparation
 
@@ -542,5 +543,26 @@ with `Trust`. No OS/public roots, certificate downloads or revocation service is
 Debug and structured tracing name the strategy; permissive preparation records
 `tls.verify=false` at warning level. This bypasses trust acceptance, while cryptographic
 certificate/key/signature requirements still apply. Preparing valid files still reaches
-the existing secure-connect refusal: protected OPN is S105 and remote handshake verifier
-call sites are S106. These private verifier tests do not claim a working secure session.
+the existing secure-connect refusal: remote handshake trust call sites and full secure
+connection wiring remain S106. These private verifier tests do not claim a working secure session.
+
+## Asymmetric OPN protection
+
+S105 adds a private OPN chunk engine. Every accepted secure policy signs and encrypts OPN,
+including SIGN mode. PKCS1-SHA256/OAEP-SHA1 protect `Basic256Sha256` and `Aes128_Sha256_RsaOaep`;
+PSS-SHA256/OAEP-SHA256 protect `Aes256_Sha256_RsaPss`. Sender signature size and receiver
+cipher block size follow their respective RSA keys. Keys over 2048 bits use the two-byte
+padding size. The clear header carries the sender chain and receiver leaf SHA-1 thumbprint.
+
+The signature covers the final wire size, headers, sequence, payload and padding. Receive
+checks the configured policy, provisioned sender leaf and local thumbprint, decrypts exact
+RSA blocks and verifies the signature/padding before parsing the sequence or payload. No
+presented certificate substitutes the provisioned cryptographic peer. Caller owns channel,
+request-id, sequence and trust-policy checks. Invalid protected input has one `Authentication`
+error without provider/parser details; input above its byte ceiling is `ResourceLimit`. This
+is an error-shape guarantee, without a full-path constant-time claim.
+
+Client/peer RSA preparation precedes transport I/O, with redacted errors and diagnostics.
+The OPN-only open62541 probe passes `Basic256Sha256` SIGN and `SIGN_ENCRYPT`. Public secure
+sessions and protected MSG/CLO wiring remain S106; valid preparation still reaches the
+secure-connect refusal. RSA bounds remain independently UNVERIFIED until S106.

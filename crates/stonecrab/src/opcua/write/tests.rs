@@ -760,11 +760,13 @@ fn opcua_write_per_tag_status_is_reported_per_tag() {
 
 #[test]
 fn opcua_deep_caller_values_are_rejected_and_abandoned_without_recursive_drop() {
+    let rig = Rig::new();
+    let connection = rig.connect();
+    // The constrained stack measures deep write/disposal, independently of handshake size.
     std::thread::Builder::new()
+        .name("opcua-deep-write".to_owned())
         .stack_size(128 * 1024)
-        .spawn(|| {
-            let rig = Rig::new();
-            let connection = rig.connect();
+        .spawn(move || {
             for abandon in [false, true] {
                 let mut value = PlcValue::I32(1);
                 for _ in 0..100_000 {

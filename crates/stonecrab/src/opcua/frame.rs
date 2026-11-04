@@ -338,7 +338,7 @@ impl AsymmetricHeader {
         }
     }
 
-    fn parse(reader: &mut BoundedReader<'_>) -> Result<Self, ParseError> {
+    pub(super) fn parse(reader: &mut BoundedReader<'_>) -> Result<Self, ParseError> {
         Ok(Self {
             security_policy_uri: UaString::parse(reader, Depth::new())?,
             sender_certificate: UaByteString::parse(reader, Depth::new())?,

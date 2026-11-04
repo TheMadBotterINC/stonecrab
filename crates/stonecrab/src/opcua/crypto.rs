@@ -3,6 +3,7 @@
 //! # Compatibility: docs/parity/opcua.md#OPCUA-CRYPTO-KEYDERIVATION
 //! # Compatibility: docs/parity/opcua.md#OPCUA-CRYPTO-NONCE
 
+mod asymmetric;
 mod backend;
 pub(super) mod certificate;
 mod derive;
@@ -10,6 +11,7 @@ mod keystore;
 mod policy;
 mod symmetric;
 mod trust;
+pub(super) use asymmetric::Asymmetric;
 pub(super) use symmetric::Symmetric;
 
 #[cfg(test)]
@@ -55,3 +57,6 @@ pub(super) fn channel_nonce(backend: &dyn Backend, policy: SecurityPolicy) -> Re
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(fuzzing)]
+pub use asymmetric::fuzzing::OpnProbe;

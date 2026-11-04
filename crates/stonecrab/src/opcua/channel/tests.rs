@@ -913,6 +913,156 @@ async fn opcua_interop_peer_answers_hello_and_opens_a_none_channel() {
     );
 }
 
+/// Read one bounded wire message without interpreting an encrypted sequence header.
+async fn opn_wire_reply(transport: &mut dyn Transport, deadline: Deadline) -> Vec<u8> {
+    let mut buffer = bytes::BytesMut::new();
+    loop {
+        if buffer.len() >= 8 {
+            let header =
+                crate::opcua::frame::FrameHeader::parse(&mut BoundedReader::new(&buffer)).unwrap();
+            let size = usize::try_from(header.size).unwrap();
+            assert!(size <= 65535);
+            if buffer.len() >= size {
+                assert_eq!(buffer.len(), size);
+                return buffer.to_vec();
+            }
+        }
+        assert_ne!(transport.recv(&mut buffer, deadline).await.unwrap(), 0);
+    }
+}
+
+#[tokio::test]
+#[expect(
+    clippy::disallowed_macros,
+    reason = "the ignored interop test records non-secret OPN results"
+)]
+#[ignore = "needs the independent open62541 peer; interop/open62541/interop.sh tests"]
+async fn opcua_interop_basic256sha256_open_secure_channel_round_trips_against_the_independent_server()
+ {
+    use crate::opcua::crypto::{Asymmetric, KeyMaterial, Native};
+    use crate::opcua::driver::OpcuaDriver;
+    use crate::opcua::pki::Scratch;
+    use crate::transport::{SystemClock, TcpFactory, TransportFactory};
+    use rustls_pki_types::CertificateDer;
+
+    let base = std::env::var("STONECRAB_INTEROP_OPEN62541").expect("interop endpoint");
+    let config = OpcuaDriver::configuration(&base).unwrap();
+    let pki =
+        std::env::var("STONECRAB_INTEROP_OPEN62541_PKI_DIR").expect("ephemeral PKI directory");
+    let pki = std::path::Path::new(&pki);
+    let mut pem = std::fs::read_to_string(pki.join("client.cert.pem")).unwrap();
+    pem.push_str(&std::fs::read_to_string(pki.join("client.key.pem")).unwrap());
+    let scratch = Scratch::new();
+    let store = scratch.write("instance.pem", &pem);
+    let server = std::fs::read(pki.join("server.cert.der")).unwrap();
+    for mode in [MessageSecurity::Sign, MessageSecurity::SignEncrypt] {
+        let protection = Asymmetric::new(
+            SecurityPolicy::Basic256Sha256,
+            KeyMaterial::load(store.to_str()).unwrap(),
+            Some(CertificateDer::from(server.clone())),
+        )
+        .unwrap();
+        let mut options = config.driver_options_as::<OpcuaOptions>().unwrap().clone();
+        options.security_policy = SecurityPolicy::Basic256Sha256;
+        options.message_security = mode;
+        let clock: Arc<dyn Clock> = Arc::new(SystemClock::default());
+        let deadline = Deadline::after(clock.now(), Duration::from_secs(10)).unwrap();
+        let mut transport = TcpFactory::default()
+            .open(config.endpoint(), *config.limits(), deadline)
+            .await
+            .unwrap();
+        let hello = Frame::single(Body::Hello(Hello {
+            protocol_version: 0,
+            limits: proposed_limits(*config.limits(), &options).unwrap(),
+            endpoint_url: UaString::new(&options.endpoint_url),
+        }));
+        let mut bytes = bytes::BytesMut::new();
+        OpcuaFramer::new(65535, *config.limits())
+            .encode(&hello, &mut bytes)
+            .unwrap();
+        transport.send(bytes.freeze(), deadline).await.unwrap();
+        let ack = frame(&opn_wire_reply(transport.as_mut(), deadline).await);
+        let Body::Acknowledge(ack) = ack.body else {
+            panic!("expected ACK")
+        };
+        let limits = negotiate(
+            proposed_limits(*config.limits(), &options).unwrap(),
+            ack.limits,
+        )
+        .unwrap();
+        let nonce = crate::opcua::crypto::channel_nonce(&Native, options.security_policy).unwrap();
+        let request = Service::OpenSecureChannelRequest {
+            request_header: request_header(clock.as_ref(), &NodeId::numeric(0, 0), 1, deadline)
+                .unwrap(),
+            client_protocol_version: 0,
+            request_type: SecurityTokenRequestType::SecurityTokenRequestTypeIssue,
+            security_mode: if mode == MessageSecurity::Sign {
+                MessageSecurityMode::MessageSecurityModeSign
+            } else {
+                MessageSecurityMode::MessageSecurityModeSignAndEncrypt
+            },
+            client_nonce: nonce.clone(),
+            requested_lifetime: DEFAULT_LIFETIME,
+        };
+        let open = Frame::single(Body::Open(OpenChunk {
+            channel_id: 0,
+            security: protection.header(),
+            sequence: SequenceHeader {
+                sequence_number: 1,
+                request_id: 1,
+            },
+            body: encode_service(
+                446,
+                &request,
+                protection
+                    .max_body(usize::try_from(limits.send_buffer_size).unwrap())
+                    .unwrap(),
+            )
+            .unwrap(),
+        }));
+        let wire = protection
+            .seal(&open, usize::try_from(limits.send_buffer_size).unwrap())
+            .unwrap();
+        transport.send(wire, deadline).await.unwrap();
+        let reply = opn_wire_reply(transport.as_mut(), deadline).await;
+        assert!(
+            !reply.starts_with(b"ERR"),
+            "OPN was refused by the independent peer"
+        );
+        let response = protection
+            .open(&reply, usize::try_from(limits.receive_buffer_size).unwrap())
+            .unwrap();
+        assert_eq!(response.chunk, ChunkType::Final);
+        let Body::Open(chunk) = response.body else {
+            panic!("expected OPN")
+        };
+        assert_eq!(chunk.sequence.request_id, 1);
+        assert_ne!(chunk.sequence.sequence_number, 0);
+        let Service::OpenSecureChannelResponse {
+            response_header,
+            security_token,
+            server_nonce,
+            server_protocol_version,
+        } = decode_service(&chunk.body).unwrap()
+        else {
+            panic!("expected channel service")
+        };
+        assert_eq!(response_header.service_result.0, 0);
+        assert_eq!(response_header.request_handle, 1);
+        assert_eq!(server_protocol_version, 0);
+        assert_ne!(security_token.channel_id, 0);
+        assert_eq!(security_token.channel_id, chunk.channel_id);
+        assert_ne!(security_token.token_id, 0);
+        assert!(security_token.revised_lifetime > 0);
+        assert_eq!(server_nonce.as_bytes().unwrap().len(), 32);
+        assert_ne!(server_nonce, nonce);
+        println!(
+            "Basic256Sha256 {mode:?}: protected OPN verified; server nonce 32 bytes; positive channel/token/lifetime"
+        );
+        transport.shutdown(deadline).await.unwrap();
+    }
+}
+
 #[test]
 fn opcua_hello_applies_all_encoding_options_and_local_memory_bounds() {
     let options = OpcuaOptions::from_parameters(
