@@ -59,3 +59,13 @@ OPC Foundation Part 6 defines the [security header](https://reference.opcfoundat
 [padding/footer](https://reference.opcfoundation.org/specs/OPC-10000-6/6.7.2.5.1) and
 [verification order](https://reference.opcfoundation.org/specs/OPC-10000-6/6.7.7).
 S106 retains independent-peer confirmation of the policy key bounds and sequence wrap rule.
+
+## Validation follow-up
+
+The full threaded unit run exposed the existing tracing-core 0.1.36 single-dispatch
+callsite-cache race ([upstream issue 3611](https://github.com/tokio-rs/tracing/issues/3611)).
+Keep a second, uninstalled `Dispatch` alive in each of the two log-capture tests so new
+callsites consult registered subscribers rather than another thread's empty default.
+Reproduce the cold-callsite case on a subscriber-less thread in the trust diagnostics
+test. This changes only fixtures: no global subscriber, retries, dependency change or
+relaxed assertion, and production logging is untouched.

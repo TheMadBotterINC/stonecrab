@@ -641,6 +641,8 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Captured {
 // covers: OPCUA-CFG-VERIFY
 #[test]
 fn opcua_tls_verify_false_is_recorded_in_diagnostics() {
+    // tracing-core#3611: keep registration off the single-dispatch TLS fast path.
+    let _registered = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
     let output = Arc::new(Mutex::new(Vec::new()));
     let subscriber = tracing_subscriber::fmt()
         .with_ansi(false)
@@ -654,6 +656,12 @@ fn opcua_tls_verify_false_is_recorded_in_diagnostics() {
     ]);
     assert!(format!("{opts:?}").contains("verify: false"));
     tracing::subscriber::with_default(subscriber, || {
+        std::thread::scope(|scope| {
+            scope
+                .spawn(|| Verifier::prepare(&opts).unwrap())
+                .join()
+                .unwrap();
+        });
         Verifier::prepare(&opts).unwrap();
     });
     let text = String::from_utf8(output.lock().unwrap().clone()).unwrap();

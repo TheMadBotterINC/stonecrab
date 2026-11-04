@@ -1068,6 +1068,8 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CapturedLog {
 
 #[test]
 fn opcua_allow_insecure_credentials_sends_the_user_name_and_warns() {
+    // tracing-core#3611: keep registration off the single-dispatch TLS fast path.
+    let _registered = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
     let output = Arc::new(Mutex::new(Vec::<u8>::new()));
     let subscriber = tracing_subscriber::fmt()
         .with_ansi(false)
