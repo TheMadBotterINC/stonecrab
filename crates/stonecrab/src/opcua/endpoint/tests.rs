@@ -106,6 +106,42 @@ fn opcua_an_endpoint_with_a_different_policy_uri_is_not_selected() {
 }
 
 #[test]
+fn opcua_endpoints_offering_only_deprecated_policies_are_not_selectable() {
+    for policy in [
+        SecurityPolicy::None,
+        SecurityPolicy::Basic256Sha256,
+        SecurityPolicy::Aes128Sha256RsaOaep,
+        SecurityPolicy::Aes256Sha256RsaPss,
+    ] {
+        let mut options = none();
+        options.security_policy = policy;
+        options.message_security = MessageSecurity::SignEncrypt;
+        let endpoints = ["Basic128Rsa15", "Basic256"].map(|deprecated| {
+            let mut endpoint = endpoint();
+            endpoint.security_policy_uri = UaString::new(format!(
+                "http://opcfoundation.org/UA/SecurityPolicy#{deprecated}"
+            ));
+            endpoint.security_mode = if policy == SecurityPolicy::None {
+                MessageSecurityMode::MessageSecurityModeNone
+            } else {
+                MessageSecurityMode::MessageSecurityModeSignAndEncrypt
+            };
+            endpoint
+        });
+        for endpoint in &endpoints {
+            assert_eq!(
+                refused(std::slice::from_ref(endpoint), &options).kind(),
+                ErrorKind::Authentication
+            );
+        }
+        assert_eq!(
+            refused(&endpoints, &options).kind(),
+            ErrorKind::Authentication
+        );
+    }
+}
+
+#[test]
 fn opcua_port_4840_does_not_match_48400() {
     for url in [
         "opc.tcp://fake:48400/path",

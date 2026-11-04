@@ -62,7 +62,7 @@ impl SecurityPolicy {
             "Aes256_Sha256_RsaPss" => Ok(Self::Aes256Sha256RsaPss),
             "Basic128Rsa15" | "Basic256" => Err(invalid(format!(
                 "{SECURITY_POLICY} Basic128Rsa15 and Basic256 are deprecated SHA-1 policies and \
-                 are not offered; use Basic256Sha256, Aes128_Sha256_RsaOaep or \
+                 are not offered because SHA1withRSA signing is unavailable; use Basic256Sha256, Aes128_Sha256_RsaOaep or \
                  Aes256_Sha256_RsaPss"
             ))),
             _ => Err(invalid(format!(
@@ -556,6 +556,11 @@ mod tests {
         let error = refusal(&[(SECURITY_POLICY, "Basic128Rsa15")]);
         assert_eq!(error.kind(), ErrorKind::InvalidConfig);
         assert!(error.to_string().contains("deprecated"), "{error}");
+        assert!(
+            error
+                .to_string()
+                .contains("SHA1withRSA signing is unavailable")
+        );
     }
 
     #[test]
@@ -563,6 +568,11 @@ mod tests {
         let error = refusal(&[(SECURITY_POLICY, "Basic256")]);
         assert_eq!(error.kind(), ErrorKind::InvalidConfig);
         assert!(error.to_string().contains("deprecated"), "{error}");
+        assert!(
+            error
+                .to_string()
+                .contains("SHA1withRSA signing is unavailable")
+        );
     }
 
     #[test]

@@ -6,7 +6,8 @@ use std::sync::{Arc, Mutex};
 use aws_lc_rs::encoding::{AsDer, Pkcs8V1Der};
 use aws_lc_rs::rand::SystemRandom;
 use aws_lc_rs::signature::{
-    KeyPair, RSA_PKCS1_2048_8192_SHA256, RSA_PKCS1_SHA256, RsaKeyPair, UnparsedPublicKey,
+    KeyPair, RSA_PKCS1_2048_8192_SHA256, RSA_PKCS1_SHA256, RSA_PSS_2048_8192_SHA256,
+    RSA_PSS_SHA256, RsaEncoding, RsaKeyPair, RsaPssSaltLength, UnparsedPublicKey,
 };
 use bytes::Bytes;
 use rustls_pki_types::CertificateDer;
@@ -72,23 +73,30 @@ impl Fixture {
         }
     }
 
-    pub(super) fn uri(&self, mode: MessageSecurity, discovery: bool) -> String {
+    pub(super) fn uri(
+        &self,
+        policy: SecurityPolicy,
+        mode: MessageSecurity,
+        discovery: bool,
+    ) -> String {
         format!(
-            "opcua://fake:4840/path?security-policy=Basic256Sha256&message-security={}&discovery={discovery}&tls.keystore={}&server-certificate-file={}&access=read-write",
+            "opcua://fake:4840/path?security-policy={}&message-security={}&discovery={discovery}&tls.keystore={}&server-certificate-file={}&access=read-write",
+            policy.name(),
             mode.name(),
             self.client_store.display(),
             self.server_file.display()
         )
     }
 
-    pub(super) fn peer(&self, mode: MessageSecurity) -> Peer {
+    pub(super) fn peer(&self, policy: SecurityPolicy, mode: MessageSecurity) -> Peer {
         Peer {
             asymmetric: Asymmetric::new(
-                SecurityPolicy::Basic256Sha256,
+                policy,
                 KeyMaterial::load(self.server_store.to_str()).unwrap(),
                 Some(CertificateDer::from(self.client_certificate.clone())),
             )
             .unwrap(),
+            policy,
             symmetric: None,
             mode,
             certificate: self.server_certificate.clone(),
@@ -121,6 +129,7 @@ impl Probe {
 }
 
 pub(super) struct Peer {
+    policy: SecurityPolicy,
     asymmetric: Asymmetric,
     symmetric: Option<Symmetric>,
     mode: MessageSecurity,
@@ -162,7 +171,7 @@ impl Peer {
             MessageSecurity::SignEncrypt => MessageSecurityMode::MessageSecurityModeSignAndEncrypt,
             MessageSecurity::None => panic!("secure mode"),
         };
-        endpoint.security_policy_uri = UaString::new(SecurityPolicy::Basic256Sha256.uri());
+        endpoint.security_policy_uri = UaString::new(self.policy.uri());
         endpoint.server_certificate = UaByteString::new(self.certificate.clone());
         endpoint
     }
@@ -292,17 +301,16 @@ impl Peer {
                 .concat();
                 let pair = self.signing.expose();
                 let mut signature = vec![0; pair.public_modulus_len()];
-                pair.sign(
-                    &RSA_PKCS1_SHA256,
-                    &SystemRandom::new(),
-                    &data,
-                    &mut signature,
-                )
-                .unwrap();
+                let encoding: &dyn RsaEncoding =
+                    if self.policy == SecurityPolicy::Aes256Sha256RsaPss {
+                        &RSA_PSS_SHA256
+                    } else {
+                        &RSA_PKCS1_SHA256
+                    };
+                pair.sign(encoding, &SystemRandom::new(), &data, &mut signature)
+                    .unwrap();
                 *server_signature = SignatureData {
-                    algorithm: UaString::new(
-                        SecurityPolicy::Basic256Sha256.descriptor().signature_uri,
-                    ),
+                    algorithm: UaString::new(self.policy.descriptor().signature_uri),
                     signature: UaByteString::new(signature),
                 };
                 *server_nonce = UaByteString::new(vec![0x66; 32]);
@@ -317,9 +325,14 @@ impl Peer {
             {
                 assert_eq!(
                     client_signature.algorithm,
-                    UaString::new(SecurityPolicy::Basic256Sha256.descriptor().signature_uri)
+                    UaString::new(self.policy.descriptor().signature_uri)
                 );
-                UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, pki::key_pair().public_key())
+                let algorithm = if self.policy == SecurityPolicy::Aes256Sha256RsaPss {
+                    &const { RSA_PSS_2048_8192_SHA256.with_pss_salt_length(RsaPssSaltLength::Custom(32)) }
+                } else {
+                    &RSA_PKCS1_2048_8192_SHA256
+                };
+                UnparsedPublicKey::new(algorithm, pki::key_pair().public_key())
                     .verify(
                         &[session_certificate.as_slice(), &session_nonce].concat(),
                         client_signature.signature.as_bytes().unwrap(),
@@ -355,7 +368,7 @@ impl Peer {
                     self.symmetric = Some(
                         Symmetric::new(
                             &Native,
-                            SecurityPolicy::Basic256Sha256,
+                            self.policy,
                             self.mode,
                             17,
                             29,

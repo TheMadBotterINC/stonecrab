@@ -37,80 +37,104 @@ async fn opcua_interop_basic256sha256_refuses_untrusted_expired_and_empty_trust_
     let pki =
         std::path::PathBuf::from(std::env::var("STONECRAB_INTEROP_OPEN62541_PKI_DIR").unwrap());
     let scratch = Scratch::new();
-    for (index, (endpoint, client, certificate, trust)) in [
-        (base, "untrusted", "server", false),
-        (base, "expired-client", "server", false),
-        (empty.as_str(), "client", "server", false),
-        (base, "client", "server", true),
-        (base, "client", "untrusted", true),
-        (expired.as_str(), "client", "expired-server", false),
-        (none.as_str(), "client", "server", false),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let mut pem = std::fs::read_to_string(pki.join(format!("{client}.cert.pem"))).unwrap();
-        pem.push_str(&std::fs::read_to_string(pki.join(format!("{client}.key.pem"))).unwrap());
-        let key = scratch.write("client.pem", &pem);
-        let mut uri = format!(
-            "{endpoint}?security-policy=Basic256Sha256&message-security=SIGN_ENCRYPT&tls.keystore={}&server-certificate-file={}",
-            key.display(),
-            pki.join(format!("{certificate}.cert.der")).display()
-        );
-        if trust {
-            uri = format!(
-                "{uri}&tls.trust-store={}",
-                pki.join(if index == 3 {
-                    "untrusted.cert.pem"
-                } else {
-                    "server.cert.pem"
-                })
-                .display()
+    for policy in [
+        "Basic256Sha256",
+        "Aes128_Sha256_RsaOaep",
+        "Aes256_Sha256_RsaPss",
+    ] {
+        for (index, (endpoint, client, certificate, trust)) in [
+            (base, "untrusted", "server", false),
+            (base, "expired-client", "server", false),
+            (empty.as_str(), "client", "server", false),
+            (base, "client", "server", true),
+            (base, "client", "untrusted", true),
+            (expired.as_str(), "client", "expired-server", false),
+            (none.as_str(), "client", "server", false),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut pem = std::fs::read_to_string(pki.join(format!("{client}.cert.pem"))).unwrap();
+            pem.push_str(&std::fs::read_to_string(pki.join(format!("{client}.key.pem"))).unwrap());
+            let key = scratch.write("client.pem", &pem);
+            let mut uri = format!(
+                "{endpoint}?security-policy={policy}&message-security=SIGN_ENCRYPT&tls.keystore={}&server-certificate-file={}",
+                key.display(),
+                pki.join(format!("{certificate}.cert.der")).display()
             );
-        }
-        let driver = OpcuaDriver::new();
-        let error = driver
-            .connect(driver.parse_config(&uri).unwrap())
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(
-            error.kind(),
-            if index < 3 || index == 6 {
-                ErrorKind::DeviceException
-            } else {
-                ErrorKind::Trust
-            },
-            "case {index}: {error}"
-        );
-        if index < 3 || index == 6 {
-            let mut source: &(dyn std::error::Error + 'static) = &error;
-            let status = loop {
-                if let Some(status) = source.downcast_ref::<crate::opcua::service::StatusFault>() {
-                    break status.code;
-                }
-                source = source.source().expect("native certificate status");
-            };
+            if trust {
+                uri = format!(
+                    "{uri}&tls.trust-store={}",
+                    pki.join(if index == 3 {
+                        "untrusted.cert.pem"
+                    } else {
+                        "server.cert.pem"
+                    })
+                    .display()
+                );
+            }
+            let driver = OpcuaDriver::new();
+            let error = driver
+                .connect(driver.parse_config(&uri).unwrap())
+                .await
+                .err()
+                .unwrap();
             assert_eq!(
-                status,
-                match index {
-                    1 => 0x8014_0000,
-                    6 => 0x8055_0000,
-                    _ => 0x8013_0000,
+                error.kind(),
+                if index < 3 || index == 6 {
+                    ErrorKind::DeviceException
+                } else {
+                    ErrorKind::Trust
                 },
-                "case {index}"
+                "case {index}: {error}"
             );
+            if index < 3 || index == 6 {
+                let mut source: &(dyn std::error::Error + 'static) = &error;
+                let status = loop {
+                    if let Some(status) =
+                        source.downcast_ref::<crate::opcua::service::StatusFault>()
+                    {
+                        break status.code;
+                    }
+                    source = source.source().expect("native certificate status");
+                };
+                assert_eq!(
+                    status,
+                    match index {
+                        1 => 0x8014_0000,
+                        6 => 0x8055_0000,
+                        _ => 0x8013_0000,
+                    },
+                    "case {index}"
+                );
+            }
         }
     }
 }
 
 #[tokio::test]
-#[expect(
-    clippy::disallowed_macros,
-    reason = "the ignored interop test records non-secret secure session results"
-)]
 #[ignore = "needs the independent open62541 peer; interop/open62541/interop.sh tests"]
 async fn opcua_interop_basic256sha256_public_sessions_read_write_and_close_in_both_modes() {
+    assert_secure_native_session("Basic256Sha256").await;
+}
+
+#[tokio::test]
+#[ignore = "needs the independent open62541 peer; interop/open62541/interop.sh tests"]
+async fn opcua_interop_aes128_sha256_rsaoaep_public_sessions_read_write_and_close_in_both_modes() {
+    assert_secure_native_session("Aes128_Sha256_RsaOaep").await;
+}
+
+#[tokio::test]
+#[ignore = "needs the independent open62541 peer; interop/open62541/interop.sh tests"]
+async fn opcua_interop_aes256_sha256_rsapss_public_sessions_read_write_and_close_in_both_modes() {
+    assert_secure_native_session("Aes256_Sha256_RsaPss").await;
+}
+
+#[expect(
+    clippy::disallowed_macros,
+    reason = "the ignored interop tests record non-secret secure session results"
+)]
+async fn assert_secure_native_session(policy: &str) {
     use crate::opcua::OpcuaAddress;
     use crate::opcua::pki::Scratch;
     use crate::{PlcValue, Tag, TagId};
@@ -126,7 +150,7 @@ async fn opcua_interop_basic256sha256_public_sessions_read_write_and_close_in_bo
         for discovery in [false, true] {
             let driver = OpcuaDriver::new();
             let uri = format!(
-                "{base}?security-policy=Basic256Sha256&message-security={mode}&discovery={discovery}&tls.keystore={}&server-certificate-file={}&access=read-write&encoding.receive-buffer-size=8192&encoding.send-buffer-size=8192",
+                "{base}?security-policy={policy}&message-security={mode}&discovery={discovery}&tls.keystore={}&server-certificate-file={}&access=read-write&encoding.receive-buffer-size=8192&encoding.send-buffer-size=8192",
                 key.display(),
                 pki.join("server.cert.der").display()
             );
@@ -184,7 +208,7 @@ async fn opcua_interop_basic256sha256_public_sessions_read_write_and_close_in_bo
             );
             connection.close().await.unwrap();
             println!(
-                "Basic256Sha256 {mode}, discovery={discovery}: public connect, chunked Read, Write/read-back and close passed"
+                "{policy} {mode}, discovery={discovery}: public connect, chunked Read, Write/read-back and close passed"
             );
         }
     }
