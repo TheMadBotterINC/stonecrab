@@ -76,4 +76,7 @@ One parity row closes: 249 total, 168 implemented, 43 planned, 38 deferred.
 OPCUA-OP-RECONNECT and OPCUA-DIV-RECONNECT document the implemented handshake portion
 but remain planned overall until S117's subscription termination.
 
-Fresh package/unpacked and hosted results will be recorded when complete.
+Fresh Cargo-cache package verification passes the reviewed 236-file inventory; only
+connection/reconnect_tests.rs is added. No fixtures/testdata ship. Unpacked all-feature
+and standalone OPC UA builds pass. Packaging follows completed doctests. Hosted results
+will be recorded after CI.
