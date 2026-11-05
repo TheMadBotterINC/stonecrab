@@ -38,7 +38,9 @@ const TRANSPORTS: &str = "the only transport code of opcua is tcp";
 /// and staged writes use bounded protected chunks; writes require read-write access.
 /// Protected username/X.509 tokens use the selected user policy. Operations renew due
 /// channel tokens and repeat the handshake after known idle channel/session expiry.
-/// General transport-loss reconnect, browse and native subscriptions remain planned.
+/// The next operation reconnects after transport loss using the configured backoff and
+/// repeats the full handshake; requests on the lost session are never replayed.
+/// Browse and native subscriptions remain planned.
 ///
 /// The whole attempt uses `handshake-timeout-ms` (60000 by default), and close uses
 /// `request-timeout-ms` (30000). `session-timeout-ms` requests 120000 by default; the

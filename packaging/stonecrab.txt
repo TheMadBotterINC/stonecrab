@@ -92,6 +92,7 @@ src/opcua/codec/support.rs
 src/opcua/codec/variant.rs
 src/opcua/codec/vectors.rs
 src/opcua/codec.rs
+src/opcua/connection/reconnect_tests.rs
 src/opcua/connection/tests.rs
 src/opcua/connection.rs
 src/opcua/crypto/asymmetric/fuzzing.rs

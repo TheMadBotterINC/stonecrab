@@ -293,7 +293,7 @@ at least 8192 bytes; a peer message-size or chunk-count zero imposes no addition
 limit, while local limits remain finite. Negotiation keeps
 buffered bytes and the framer enforces each direction separately. Message-body bounds
 apply before service decoding/encoding. The current requested channel lifetime is
-3600000 ms; configurable lifetime and renewal arrive in S109. One caller deadline and
+3600000 ms; configurable lifetime and renewal are supported in S109. One caller deadline and
 cancellation token bound the handshake, including silent peers. `handshake-timeout-ms`
 maps to the whole connect bound since S91.
 
@@ -377,7 +377,7 @@ fails. Good absent/Null values and null strings map to Null.
 A read uses the earlier of its explicit deadline and the per-attempt request timeout.
 The default is one attempt; an explicit `RetryPolicy` permits bounded safe reads while the
 same lane is usable and the explicit deadline has time left. Writes are not replayed and
-reconnect remains S110. Cancelling/dropping receives preserves partial buffered bytes;
+transport-loss reconnect is supported in S110 (below). Cancelling/dropping receives preserves partial buffered bytes;
 interrupted sends fail the lane. Close cancels pending reads with Disconnected, and a
 late read failure cannot replace Closing/Closed. An unpolled read may hold its transport
 lease until resumed/dropped; the close itself still has its request-timeout bound.
@@ -492,7 +492,7 @@ S102 adds private `MSG`/`CLO` protection for `Sign` and `SignEncrypt`: provider-
 HMAC verification and AES-CBC with derived keys/IV, authenticated padding and header
 binding. Decryption and authentication precede sequence/body parsing. Current/previous
 keys are bounded by token id; installs re-derive from both nonces before replacing state.
-Previous-token expiry/scheduling belongs to S109. S106/S107 wire these primitives into
+S109 implements previous-token expiry/scheduling. S106/S107 wire these primitives into
 all three modern policy connections.
 Malformed protected data has one authentication error without provider/parser details;
 this does not claim equal timing of the full receive path. No new dependency or feature.
@@ -575,8 +575,8 @@ server certificate is verified and bound to the provisioned peer before `Activat
 sends `clientSignature` over server certificate plus server nonce. Anonymous
 `userTokenSignature` remains empty. Invalid or repeated server nonces fail authentication.
 
-Protected user tokens are supported in S108; caller-driven renewal is supported in S109 (see below). A session currently lasts only as long as its
-channel token. Native interop confirms RSA2048 and 8192-byte buffers; independent boundary
+Protected user tokens are supported in S108; caller-driven renewal and idle expiry
+recovery are supported in S109 (see below). Native interop confirms RSA2048 and 8192-byte buffers; independent boundary
 key-size and sequence-wrap behavior remain UNVERIFIED. Sequence exhaustion fails closed.
 
 ## Modern policy support (S107)
@@ -629,7 +629,7 @@ returning a usable session certificate; this adapter does not send one on None a
 fails with `Trust`. Native successful username/X.509 evidence therefore covers secure
 channels in both modes for every modern policy. Use a secure channel with that peer.
 
-See ADR-0046 and the S108 evidence record. General transport-loss reconnect remains S110; no hardware claim.
+See ADR-0046 and the S108 evidence record. Transport-loss reconnect is covered by S110 below; no hardware claim.
 
 
 ## Caller-driven renewal and idle expiry (S109)
@@ -662,5 +662,38 @@ value/metadata checks retain the staged-write ordering.
 Native open62541 tests keep one socket alive through more than three short lifetimes
 for every modern `SIGN_ENCRYPT` policy and repeated None renewals, and recover after idle
 channel/session expiry. Forced old-token delay and sequence wrap remain independently
-UNVERIFIED. General transport-loss reconnect/backoff is S110. See ADR-0047 and S109 evidence;
+UNVERIFIED. Transport-loss reconnect/backoff is simulator-tested in S110 below. See ADR-0047 and S109 evidence;
 no hardware claim.
+
+## Request-driven reconnect (S110)
+
+A failed lane with `Disconnected` or `Timeout` schedules `Reconnecting { attempt,
+next_at }` through the existing `ConnectionConfig` reconnect policy. No operation means
+no reconnect activity. The next read/write waits for backoff on the injected clock and
+makes at most one full handshake attempt, bounded by its own deadline/cancellation and
+the connect timeout. Concurrent callers share preparation and recheck the current session.
+The defaults remain 250 ms initial delay, exponential growth capped at 30 s before
+20 percent jitter, and unlimited attempts; programmatic configuration may bound attempts.
+
+Failed retry handshakes advance the policy; exhaustion is `Failed(Disconnected)`.
+A complete authenticated session resets attempts because it includes valid replies;
+merely opening a socket does not. Cancellation, dropped preparation or an earlier caller
+deadline leaves the scheduled retry available. Known idle expiry retains immediate S109
+recovery; if that handshake fails it enters the same backoff policy. Close interrupts
+backoff/handshake and prevents publication of a replacement session.
+
+Requests already using the lost session finish on that snapshot without replay. Pending
+reads fail with `Disconnected` on transport loss; writes already transmitted remain
+Unknown. A new operation may write on the replacement session, with a fresh metadata
+cache, authentication token, nonces and reloaded credentials/key/trust material. A late
+old-session failure cannot overwrite the replacement's Connected state. Healthy request
+timeouts do not themselves force reconnect. Trust, authentication, configuration and
+malformed/protocol failures remain terminal.
+
+The first-party public contract and injected transport/clock tests cover reconnect,
+precise backoff/attempt limits and reset, caller interruptions, pending/queued requests,
+ambiguous writes, close and state-notification races. Secure tests cover every modern
+policy in both modes and fresh session/cache/key preparation. This is simulator-tested
+reconnect evidence; the existing 20 native OPC UA tests remain regression coverage.
+Real network fault recovery is S121. No session re-activation, subscription transfer or
+automatic re-creation is added; typed subscription termination remains S117. See ADR-0048.

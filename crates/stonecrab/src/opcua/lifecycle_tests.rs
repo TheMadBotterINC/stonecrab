@@ -971,7 +971,12 @@ fn opcua_a_lost_session_is_replaced_by_a_new_session_on_reconnect() {
         SecurityPolicy::Aes128Sha256RsaOaep,
         SecurityPolicy::Aes256Sha256RsaPss,
     ] {
-        for mode in [MessageSecurity::Sign, MessageSecurity::SignEncrypt] {
+        for (mode, discovery) in [
+            (MessageSecurity::Sign, false),
+            (MessageSecurity::Sign, true),
+            (MessageSecurity::SignEncrypt, false),
+            (MessageSecurity::SignEncrypt, true),
+        ] {
             let (driver, clock, factory) = setup();
             let mut probes = Vec::new();
             for index in 0..2 {
@@ -995,7 +1000,7 @@ fn opcua_a_lost_session_is_replaced_by_a_new_session_on_reconnect() {
                     } else { reply }
                 })]));
             }
-            let uri = fixture.uri(policy, mode, false);
+            let uri = fixture.uri(policy, mode, discovery);
             let connection =
                 block_on_with(&clock, driver.connect(driver.parse_config(&uri).unwrap())).unwrap();
             let write = |value| {
@@ -1036,6 +1041,13 @@ fn opcua_a_lost_session_is_replaced_by_a_new_session_on_reconnect() {
             assert_eq!(factory.opens().len(), 2);
             for probe in &probes {
                 let requests = probe.requests();
+                assert_eq!(
+                    requests
+                        .iter()
+                        .filter(|r| matches!(r, Service::GetEndpointsRequest { .. }))
+                        .count(),
+                    usize::from(discovery)
+                );
                 assert_eq!(
                     requests
                         .iter()
