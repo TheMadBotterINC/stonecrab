@@ -71,7 +71,7 @@ fn opcua_aes256_sha256_rsapss_plaintext_block_is_key_bytes_minus_66() {
     );
     assert_eq!(
         descriptor.encryption_uri,
-        "http://opcfoundation.org/UA/security#rsa-oaep-sha2-256"
+        "http://opcfoundation.org/UA/security/rsa-oaep-sha2-256"
     );
     let sizes = descriptor.asymmetric_sizes(256, 256).unwrap();
     assert!(sizes.max_body(527, 4).is_err());
@@ -471,7 +471,7 @@ fn opcua_policy_descriptors_drive_one_chunk_size_formula() {
             );
             assert_eq!(
                 descriptor.encryption_uri,
-                "http://opcfoundation.org/UA/security#rsa-oaep-sha2-256"
+                "http://opcfoundation.org/UA/security/rsa-oaep-sha2-256"
             );
             assert_eq!(descriptor.oaep_overhead, 66);
         } else {

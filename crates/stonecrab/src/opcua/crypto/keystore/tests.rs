@@ -309,3 +309,139 @@ fn opcua_keystore_read_bounds_and_io_errors_are_enforced() {
             .contains("1 MiB")
     );
 }
+
+// covers: OPCUA-AUTH-X509
+#[test]
+fn opcua_user_key_accepts_der_or_pem_leaf_without_application_uri_and_signs_each_policy() {
+    use crate::opcua::options::SecurityPolicy;
+    use aws_lc_rs::signature::{RSA_PSS_2048_8192_SHA256, RsaPssSaltLength};
+    let scratch = Scratch::new();
+    let mut spec = CertSpec::application("user", "user", 19);
+    spec.application_uris = &[];
+    let leaf = pki::certificate(&spec, &pki::key_pair(), &pki::key_pair());
+    let private = scratch.write("user-key.pem", &pem("PRIVATE KEY", pki::pkcs8_2048()));
+    let certificate = scratch.path().join("user.der");
+    for bytes in [
+        leaf.clone(),
+        pem("CERTIFICATE", &leaf).into_bytes(),
+        format!("{}{}", pem("CERTIFICATE", &leaf), pem("CERTIFICATE", &leaf)).into_bytes(),
+    ] {
+        std::fs::write(&certificate, bytes).unwrap();
+        let material = UserKey::load(&certificate, &private).unwrap();
+        assert_eq!(material.certificate(), leaf);
+        assert_eq!(format!("{material:?}"), "UserKey([REDACTED])");
+        assert_eq!(format!("{material:#?}"), "UserKey([REDACTED])");
+        assert_eq!(format!("{:?}", material.signing), "[REDACTED]");
+        for policy in [
+            SecurityPolicy::Basic256Sha256,
+            SecurityPolicy::Aes128Sha256RsaOaep,
+            SecurityPolicy::Aes256Sha256RsaPss,
+        ] {
+            let signature = material
+                .sign(policy, b"server certificate and nonce")
+                .unwrap();
+            let key = pki::key_pair();
+            if policy == SecurityPolicy::Aes256Sha256RsaPss {
+                UnparsedPublicKey::new(
+                    &const {
+                        RSA_PSS_2048_8192_SHA256.with_pss_salt_length(RsaPssSaltLength::Custom(32))
+                    },
+                    key.public_key().as_ref(),
+                )
+                .verify(b"server certificate and nonce", &signature)
+                .unwrap();
+            } else {
+                UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, key.public_key().as_ref())
+                    .verify(b"server certificate and nonce", &signature)
+                    .unwrap();
+            }
+        }
+        assert!(material.sign(SecurityPolicy::None, b"refused").is_err());
+    }
+    let material = UserKey::load(&certificate, &private).unwrap();
+    std::fs::remove_file(certificate).unwrap();
+    std::fs::remove_file(private).unwrap();
+    assert_eq!(material.certificate(), leaf);
+}
+
+#[test]
+fn opcua_user_key_refuses_missing_malformed_oversized_and_mismatched_files_without_disclosure() {
+    let scratch = Scratch::new();
+    let certificate = scratch.write(
+        "user-certificate-sentinel.pem",
+        &pem("CERTIFICATE", &leaf()),
+    );
+    let private = scratch.write(
+        "user-key-sentinel.pem",
+        &pem("PRIVATE KEY", pki::pkcs8_2048()),
+    );
+    let missing = scratch.path().join("missing-sentinel");
+    let bad = scratch.write("bad-sentinel.pem", "secret-content-sentinel");
+    let oversized = scratch.write("oversized-sentinel.pem", &" ".repeat(1_048_577));
+    let wrong = scratch.write(
+        "wrong-sentinel.pem",
+        &pem(
+            "CERTIFICATE",
+            &pki::certificate(
+                &CertSpec::application("wrong", "wrong", 20),
+                &pki::other_key_pair(),
+                &pki::key_pair(),
+            ),
+        ),
+    );
+    let combined = scratch.write(
+        "combined-sentinel.pem",
+        &store(&[leaf()], pki::pkcs8_2048()),
+    );
+    let duplicate = scratch.write(
+        "duplicate-sentinel.pem",
+        &pem("PRIVATE KEY", pki::pkcs8_2048()).repeat(2),
+    );
+    let encrypted = scratch.write(
+        "encrypted-sentinel.pem",
+        &pem("ENCRYPTED PRIVATE KEY", pki::pkcs8_2048()),
+    );
+    let ed = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
+    let non_rsa = scratch.write("ed-sentinel.pem", &pem("PRIVATE KEY", ed.as_ref()));
+    for (cert, key) in [
+        (&missing, &private),
+        (&certificate, &missing),
+        (&bad, &private),
+        (&certificate, &bad),
+        (&oversized, &private),
+        (&certificate, &oversized),
+        (&wrong, &private),
+        (&certificate, &combined),
+        (&certificate, &duplicate),
+        (&certificate, &encrypted),
+        (&certificate, &non_rsa),
+    ] {
+        let error = UserKey::load(cert, key).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+        assert!(error.source().is_none());
+        for text in [error.to_string(), format!("{error:?}")] {
+            assert!(!text.contains("sentinel"));
+            assert!(!text.contains(scratch.path().to_str().unwrap()));
+        }
+    }
+}
+
+#[test]
+fn opcua_user_key_refuses_rsa_beyond_the_supported_policy_bounds() {
+    use aws_lc_rs::encoding::{AsDer, Pkcs8V1Der};
+    use aws_lc_rs::rsa::KeySize;
+    let scratch = Scratch::new();
+    let pair = RsaKeyPair::generate(KeySize::Rsa8192).unwrap();
+    let certificate = pki::certificate(
+        &CertSpec::application("oversized", "oversized", 26),
+        &pair,
+        &pair,
+    );
+    let der: Pkcs8V1Der<'_> = pair.as_der().unwrap();
+    let cert = scratch.write("user.pem", &pem("CERTIFICATE", &certificate));
+    let key = scratch.write("user-key.pem", &pem("PRIVATE KEY", der.as_ref()));
+    assert_eq!(
+        UserKey::load(&cert, &key).unwrap_err().kind(),
+        ErrorKind::InvalidConfig
+    );
+}

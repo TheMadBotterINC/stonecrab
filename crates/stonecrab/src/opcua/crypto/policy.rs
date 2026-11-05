@@ -21,6 +21,28 @@ pub(in crate::opcua) struct Policy {
 }
 
 impl SecurityPolicy {
+    pub(in crate::opcua) fn oaep(self) -> Result<&'static aws_lc_rs::rsa::OaepAlgorithm> {
+        match self {
+            Self::None => Err(invalid()),
+            Self::Basic256Sha256 | Self::Aes128Sha256RsaOaep => {
+                Ok(&aws_lc_rs::rsa::OAEP_SHA1_MGF1SHA1)
+            }
+            Self::Aes256Sha256RsaPss => Ok(&aws_lc_rs::rsa::OAEP_SHA256_MGF1SHA256),
+        }
+    }
+
+    pub(in crate::opcua) fn encoding(
+        self,
+    ) -> Result<&'static dyn aws_lc_rs::signature::RsaEncoding> {
+        match self {
+            Self::None => Err(invalid()),
+            Self::Basic256Sha256 | Self::Aes128Sha256RsaOaep => {
+                Ok(&aws_lc_rs::signature::RSA_PKCS1_SHA256)
+            }
+            Self::Aes256Sha256RsaPss => Ok(&aws_lc_rs::signature::RSA_PSS_SHA256),
+        }
+    }
+
     pub(in crate::opcua) const fn descriptor(self) -> Policy {
         let mut policy = Policy {
             uri: "http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256",
@@ -54,7 +76,7 @@ impl SecurityPolicy {
             Self::Aes256Sha256RsaPss => {
                 policy.uri = "http://opcfoundation.org/UA/SecurityPolicy#Aes256_Sha256_RsaPss";
                 policy.signature_uri = "http://opcfoundation.org/UA/security/rsa-pss-sha2-256";
-                policy.encryption_uri = "http://opcfoundation.org/UA/security#rsa-oaep-sha2-256";
+                policy.encryption_uri = "http://opcfoundation.org/UA/security/rsa-oaep-sha2-256";
                 policy.oaep_overhead = 66;
             }
         }

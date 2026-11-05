@@ -9,11 +9,7 @@ use std::fmt;
 use aws_lc_rs::constant_time::verify_slices_are_equal;
 use aws_lc_rs::digest::{SHA1_FOR_LEGACY_USE_ONLY, digest};
 use aws_lc_rs::rand::SystemRandom;
-use aws_lc_rs::rsa::{
-    OAEP_SHA1_MGF1SHA1, OAEP_SHA256_MGF1SHA256, OaepAlgorithm, OaepPrivateDecryptingKey,
-    OaepPublicEncryptingKey,
-};
-use aws_lc_rs::signature::{RSA_PKCS1_SHA256, RSA_PSS_SHA256, RsaEncoding};
+use aws_lc_rs::rsa::{OaepPrivateDecryptingKey, OaepPublicEncryptingKey};
 use bytes::Bytes;
 use rustls_pki_types::CertificateDer;
 
@@ -109,22 +105,6 @@ impl Asymmetric {
             .max_body(maximum, self.header().length_in_bytes()?)
     }
 
-    fn oaep(&self) -> &'static OaepAlgorithm {
-        if self.policy == SecurityPolicy::Aes256Sha256RsaPss {
-            &OAEP_SHA256_MGF1SHA256
-        } else {
-            &OAEP_SHA1_MGF1SHA1
-        }
-    }
-
-    fn encoding(&self) -> &'static dyn RsaEncoding {
-        if self.policy == SecurityPolicy::Aes256Sha256RsaPss {
-            &RSA_PSS_SHA256
-        } else {
-            &RSA_PKCS1_SHA256
-        }
-    }
-
     /// Every secure OPN is signed and encrypted, including a channel in SIGN mode.
     pub(in crate::opcua) fn seal(&self, frame: &Frame, maximum: usize) -> Result<Bytes> {
         let Body::Open(chunk) = &frame.body else {
@@ -143,7 +123,7 @@ impl Asymmetric {
             .ok_or_else(limited)?;
         let plain = frame.length_in_bytes()?;
         let signature_size = self.local.signing.expose().public_modulus_len();
-        let block = self.encrypting.max_plaintext_size(self.oaep());
+        let block = self.encrypting.max_plaintext_size(self.policy.oaep()?);
         let overhead = padding_overhead(self.encrypting.key_size_bytes());
         let count = plain
             .checked_sub(clear)
@@ -183,7 +163,7 @@ impl Asymmetric {
         for part in plaintext.chunks_exact(block) {
             let encrypted = self
                 .encrypting
-                .encrypt(self.oaep(), part, &mut ciphertext, None)
+                .encrypt(self.policy.oaep()?, part, &mut ciphertext, None)
                 .ok()
                 .ok_or_else(rejected)?;
             out.write_bytes(encrypted)?;
@@ -197,7 +177,7 @@ impl Asymmetric {
             .signing
             .expose()
             .sign(
-                self.encoding(),
+                self.policy.encoding()?,
                 &SystemRandom::new(),
                 message,
                 &mut signature,
@@ -258,7 +238,7 @@ impl Asymmetric {
             .saturating_sub(self.policy.descriptor().oaep_overhead);
         for part in ciphertext.chunks_exact(key.key_size_bytes()) {
             let decrypted = key
-                .decrypt(self.oaep(), part, &mut scratch, None)
+                .decrypt(self.policy.oaep()?, part, &mut scratch, None)
                 .ok()
                 .ok_or_else(rejected)?;
             if decrypted.len() != block {

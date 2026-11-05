@@ -82,36 +82,7 @@ impl KeyMaterial {
     }
 
     fn from_pem(bytes: &[u8]) -> Result<Self> {
-        // The general PEM reader skips unknown sections, including encrypted keys.
-        // A key store must not silently accept one beside an otherwise usable key.
-        for line in bytes.split(|byte| *byte == b'\n' || *byte == b'\r') {
-            if line.starts_with(b"-----BEGIN ")
-                && line != b"-----BEGIN CERTIFICATE-----"
-                && line != b"-----BEGIN PRIVATE KEY-----"
-            {
-                return Err(malformed());
-            }
-        }
-        let mut certificates = Vec::new();
-        let mut private_key = None;
-        for section in <(SectionKind, Vec<u8>)>::pem_slice_iter(bytes) {
-            let (kind, der) = section.ok().ok_or_else(malformed)?;
-            if kind == SectionKind::Certificate {
-                let certificate = CertificateDer::from(der);
-                webpki::EndEntityCert::try_from(&certificate)
-                    .ok()
-                    .ok_or_else(malformed)?;
-                certificates.push(certificate);
-            } else if kind == SectionKind::PrivateKey && private_key.is_none() {
-                private_key = Some(Secret::new(der));
-            } else {
-                return Err(malformed());
-            }
-        }
-        let private_key = private_key.ok_or_else(malformed)?;
-        let signing = RsaKeyPair::from_pkcs8(private_key.expose())
-            .ok()
-            .ok_or_else(malformed)?;
+        let (certificates, private_key) = pem_sections(bytes)?;
         let decrypting = PrivateDecryptingKey::from_pkcs8(private_key.expose())
             .ok()
             .ok_or_else(malformed)?;
@@ -124,14 +95,7 @@ impl KeyMaterial {
         let certificate = webpki::EndEntityCert::try_from(&leaf)
             .ok()
             .ok_or_else(malformed)?;
-        let public_key = AsDer::<PublicKeyX509Der<'_>>::as_der(signing.public_key())
-            .ok()
-            .ok_or_else(malformed)?;
-        if public_key.as_ref() != certificate.subject_public_key_info().as_ref() {
-            return Err(invalid(
-                "requires the leaf certificate first and a matching RSA private key",
-            ));
-        }
+        let signing = matching_key(&leaf, private_key.expose())?;
         let application_uri = {
             let mut uris = certificate.valid_uri_names();
             let application_uri = uris.next().filter(|uri| absolute_uri(uri)).ok_or_else(|| {
@@ -156,6 +120,127 @@ impl KeyMaterial {
             decrypting: Secret::new(decrypting),
         })
     }
+}
+
+pub(in crate::opcua) struct UserKey {
+    leaf: CertificateDer<'static>,
+    signing: Secret<RsaKeyPair>,
+}
+
+impl fmt::Debug for UserKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("UserKey([REDACTED])")
+    }
+}
+
+fn user_invalid() -> PlcError {
+    PlcError::new(
+        ErrorKind::InvalidConfig,
+        "OPC UA user identity requires readable certificate and matching unencrypted RSA PKCS#8 PEM key files within 1 MiB",
+    )
+}
+
+impl UserKey {
+    pub(in crate::opcua) fn load(
+        certificate: &std::path::Path,
+        private_key: &std::path::Path,
+    ) -> Result<Self> {
+        Self::read(certificate, private_key).map_err(|_error| user_invalid())
+    }
+
+    fn read(certificate: &std::path::Path, private_key: &std::path::Path) -> Result<Self> {
+        let certificate = read_pem(File::open(certificate).ok().ok_or_else(user_invalid)?)?;
+        let certificates =
+            super::trust::parse(certificate.expose(), None).ok_or_else(user_invalid)?;
+        let leaf = certificates.into_iter().next().ok_or_else(user_invalid)?;
+        let private_key = read_pem(File::open(private_key).ok().ok_or_else(user_invalid)?)?;
+        let (extra, private_key) = pem_sections(private_key.expose())?;
+        if !extra.is_empty() {
+            return Err(user_invalid());
+        }
+        let signing = matching_key(&leaf, private_key.expose())?;
+        if !crate::opcua::options::SecurityPolicy::Basic256Sha256
+            .descriptor()
+            .accepts_rsa_key(signing.public_modulus_len())
+        {
+            return Err(user_invalid());
+        }
+        Ok(Self {
+            leaf,
+            signing: Secret::new(signing),
+        })
+    }
+
+    pub(in crate::opcua) fn certificate(&self) -> &[u8] {
+        self.leaf.as_ref()
+    }
+
+    pub(in crate::opcua) fn sign(
+        &self,
+        policy: crate::opcua::options::SecurityPolicy,
+        message: &[u8],
+    ) -> Result<Vec<u8>> {
+        let pair = self.signing.expose();
+        let mut signature = vec![0; pair.public_modulus_len()];
+        pair.sign(
+            policy.encoding()?,
+            &aws_lc_rs::rand::SystemRandom::new(),
+            message,
+            &mut signature,
+        )
+        .ok()
+        .ok_or_else(super::invalid)?;
+        Ok(signature)
+    }
+}
+
+fn pem_sections(bytes: &[u8]) -> Result<(Vec<CertificateDer<'static>>, Secret<Vec<u8>>)> {
+    // The general PEM reader skips unknown sections, including encrypted keys.
+    // A key store must not silently accept one beside an otherwise usable key.
+    for line in bytes.split(|byte| *byte == b'\n' || *byte == b'\r') {
+        if line.starts_with(b"-----BEGIN ")
+            && line != b"-----BEGIN CERTIFICATE-----"
+            && line != b"-----BEGIN PRIVATE KEY-----"
+        {
+            return Err(malformed());
+        }
+    }
+    let mut certificates = Vec::new();
+    let mut private_key = None;
+    for section in <(SectionKind, Vec<u8>)>::pem_slice_iter(bytes) {
+        let (kind, der) = section.ok().ok_or_else(malformed)?;
+        if kind == SectionKind::Certificate {
+            let certificate = CertificateDer::from(der);
+            webpki::EndEntityCert::try_from(&certificate)
+                .ok()
+                .ok_or_else(malformed)?;
+            certificates.push(certificate);
+        } else if kind == SectionKind::PrivateKey && private_key.is_none() {
+            private_key = Some(Secret::new(der));
+        } else {
+            return Err(malformed());
+        }
+    }
+    let private_key = private_key.ok_or_else(malformed)?;
+    Ok((certificates, private_key))
+}
+
+fn matching_key(leaf: &CertificateDer<'_>, private_key: &[u8]) -> Result<RsaKeyPair> {
+    let signing = RsaKeyPair::from_pkcs8(private_key)
+        .ok()
+        .ok_or_else(malformed)?;
+    let certificate = webpki::EndEntityCert::try_from(leaf)
+        .ok()
+        .ok_or_else(malformed)?;
+    let public_key = AsDer::<PublicKeyX509Der<'_>>::as_der(signing.public_key())
+        .ok()
+        .ok_or_else(malformed)?;
+    if public_key.as_ref() != certificate.subject_public_key_info().as_ref() {
+        return Err(invalid(
+            "requires the leaf certificate first and a matching RSA private key",
+        ));
+    }
+    Ok(signing)
 }
 
 fn absolute_uri(uri: &str) -> bool {
