@@ -16,10 +16,10 @@ use std::time::{Duration, Instant};
 
 use crate::future::{WakerSlots, wake_all};
 use crate::{
-    Capabilities, Clock, Connection, ConnectionState, ConnectionUri, Credentials, Diagnostics,
-    DriverRegistry, ErrorKind, FailureCategory, OpFuture, Operation, PlcError, ReadRequest,
-    ReadResponse, ResourceLimits, Result, StateWatch, SubscribeRequest, Subscription, WriteRequest,
-    WriteResponse,
+    BrowseRequest, BrowseResponse, Capabilities, Clock, Connection, ConnectionState, ConnectionUri,
+    Credentials, Diagnostics, DriverRegistry, ErrorKind, FailureCategory, OpFuture, Operation,
+    PlcError, ReadRequest, ReadResponse, ResourceLimits, Result, StateWatch, SubscribeRequest,
+    Subscription, WriteRequest, WriteResponse,
 };
 
 type CredentialProvider = dyn Fn(&ConnectionUri) -> Result<Option<Credentials>> + Send + Sync;
@@ -714,6 +714,17 @@ impl Connection for LeasedConnection {
         self.through(Operation::Subscribe, |connection| {
             connection.subscribe(request)
         })
+    }
+
+    /// Browse through the cached connection under the existing lease gate.
+    ///
+    /// # Cancel safety
+    /// As the cached connection's browse operation.
+    ///
+    /// # Wire effects
+    /// None when the lease refuses; otherwise the cached connection's.
+    fn browse(&self, request: BrowseRequest) -> OpFuture<'_, BrowseResponse> {
+        self.through(Operation::Browse, |connection| connection.browse(request))
     }
 }
 
