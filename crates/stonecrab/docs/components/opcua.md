@@ -28,7 +28,7 @@ socket and starts no discovery.
 | Built-in types of the binary encoding: String, `ByteString`, Guid, `DateTime`, `StatusCode`, `NodeId`, `ExpandedNodeId`, `QualifiedName`, `LocalizedText` (crate-private) | build-tested |
 | Recursive and open types of the binary encoding: Variant (25 types, arrays, dimensions), `DataValue`, `DiagnosticInfo`, the `ExtensionObject` envelope with Raw, Xml and Null bodies, bounded in depth and in array counts (crate-private) | build-tested |
 | TCP framing: the 8-byte header, HEL, ACK, ERR, OPN, CLO and MSG bodies, the asymmetric header of policy None, the symmetric and sequence headers, and a bounded chunk `Framer` (crate-private) | build-tested |
-| Generated 29-case connection/read/write/discovery/identity service bodies and 274 status names; Known `ExtensionObject` dispatch (crate-private) | build-tested |
+| Generated 37-case connection/read/write/discovery/identity/browse service bodies and 274 status names; Known `ExtensionObject` dispatch (crate-private) | build-tested |
 | Bounded service exchange lane: correlation, sender priority, headers, sequence/channel/token checks, ERR and `ServiceFault` (crate-private) | build-tested |
 | Policy-None HEL/ACK, OPN Issue, CLO and counter handoff (crate-private) | interoperability-tested with open62541 |
 | Public driver and anonymous None connection/session | interoperability-tested with open62541 |
@@ -158,7 +158,7 @@ opcua:tcp://[2001:db8::10]:4840/ua/server
   removes local bounds. Message bytes exclude chunk/security/sequence headers.
   `ResourceLimits` caps it before Hello, and ACK may reduce it further.
 - `browse-max-references-per-node`, `browse-max-total-nodes` and `browse-max-depth`
-  accept decimal UInt32 values with defaults 65536, 1000000 and 64. Zero removes that
+  accept decimal `UInt32` values with defaults 65536, 1000000 and 64. Zero removes that
   protocol ceiling only; the finite core response budget, deadline and cancellation
   remain effective. These configure the private S112 walk; public typed browse is S113.
 - Every other key is `InvalidConfig`, and so is a key written twice. That includes the keys

@@ -161,7 +161,7 @@ fn check(text: &str) {
             }
             for (key, default, actual) in [
                 ("browse-max-references-per-node", 65536, parsed.browse_max_references_per_node),
-                ("browse-max-total-nodes", 1000000, parsed.browse_max_total_nodes),
+                ("browse-max-total-nodes", 1_000_000, parsed.browse_max_total_nodes),
                 ("browse-max-depth", 64, parsed.browse_max_depth),
             ] {
                 let expected = uri.option(key).map_or(default, |value| {

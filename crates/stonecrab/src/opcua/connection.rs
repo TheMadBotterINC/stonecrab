@@ -253,7 +253,7 @@ impl OpcuaConnection {
     }
 
     #[cfg_attr(
-        not(test),
+        not(all(test, feature = "testkit")),
         expect(dead_code, reason = "S113 enables public typed browse")
     )]
     pub(super) async fn browse_walk(
