@@ -1,8 +1,8 @@
 # S108 protected OPC UA identity tokens
 
 Date: 2026-11-05 UTC (implementation started 2026-11-04 local).
-Product inputs: 1ced484. ADR-0046 precedes implementation. Hosted validation and final
-merge evidence are recorded below after the source run completes.
+Product inputs: 1ced484. ADR-0046 precedes implementation. Hosted source commit:
+3c32074ea6a3b9953f61b92f730a90b7dff14de2.
 
 ## Behavior and boundaries
 
@@ -85,3 +85,19 @@ was made to accept the client. Final container and exported PKI are removed.
   all-feature and standalone OPC UA builds pass. Packaging follows completed doctests.
 - Four parity rows close: 249 total, 162 implemented, 49 planned, 38 deferred.
   E16/E18 retain existing file/API decisions. Renewal remains S109.
+
+
+## Hosted and merge evidence
+
+[CI 41960362590](https://github.com/TheMadBotterINC/stonecrab/actions/runs/41960362590)
+on 3c32074ea6a3b9953f61b92f730a90b7dff14de2 passes all 32 executed jobs: both Rust
+versions on Windows/macOS/Linux, coverage, cross-target builds, native OPC UA and other
+interop, package verification and full serial fuzz smoke included. Scheduled and
+first-branch DCO skip by workflow conditions; local DCO verifies the entire commit range.
+
+The final evidence/handoff changes are root-only. Product, crate documentation,
+generator, manifest/lock, script, interop, packaging and fuzz inputs match the hosted
+source exactly. Merge uses --no-ff --no-squash --signoff, preserving the plan, generation,
+implementation and evidence commits, and pushes master. Final checks require a clean
+master synced with origin, both merge parents and feature ancestry, and matching remote
+HEAD. No release/tag/version change; next is S109 caller-driven renewal.
