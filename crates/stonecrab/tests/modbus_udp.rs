@@ -304,7 +304,7 @@ mod tests {
 
     /// The cases the fixture cannot run: the timing cases need a deterministic clock (as for
     /// the loopback TCP run), and a UDP device cannot close a connection there is none of.
-    const SKIPPED: [(&str, &str); 10] = [
+    const SKIPPED: [(&str, &str); 11] = [
         (ABSENT_DEADLINE, "fixture cannot inject timeout"),
         (TIMEOUT_DIAGNOSTICS, "fixture cannot inject timeout"),
         (RETRY_STOPS, "fixture cannot inject timeout"),
@@ -327,6 +327,10 @@ mod tests {
         ),
         (DISCONNECT, "fixture cannot inject disconnect"),
         (DISCONNECT_DIAGNOSTICS, "fixture cannot inject disconnect"),
+        (
+            "a browse correlates queries and respects the node bound",
+            "driver reports browse unsupported",
+        ),
     ];
 
     async fn contract_run() -> (Device, ContractReport) {

@@ -82,7 +82,7 @@ mod tests {
                 skipped.push((case.name, reason.as_str()));
             }
         }
-        assert_eq!(report.passed(), 24, "{report}");
+        assert_eq!(report.passed(), 25, "{report}");
         let expected = [
             "an unsupported write performs no I/O",
             "a supported ping answers and changes no state",
@@ -93,6 +93,7 @@ mod tests {
             "unsubscribing stops the polling reads",
             "closing the connection ends its subscriptions after the queued events",
             "a stalled polling read skips the ticks that came due and never bursts",
+            "a browse correlates queries and respects the node bound",
         ];
         assert_eq!(
             skipped.iter().map(|(name, _)| *name).collect::<Vec<_>>(),

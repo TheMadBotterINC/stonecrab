@@ -76,7 +76,14 @@ lengths (`reads`), so a test keeps a handle after boxing the bus into a `Max3185
 
 ## Driver contract suite
 
-`ContractSuite::run(driver, uri, fixture)` runs one set of 33 cases, named as sentences,
+S111 adds an unsupported-browse no-I/O case and a supported-browse correlation/node-bound
+case. `ContractFixture::with_browsable` supplies an accepted opaque query, including an
+empty default start. `Requires::Browse` and `Requires::BrowsableQuery` disclose missing
+capability/fixture data as named skips. Current drivers exercise the Unsupported case;
+a test-only browsing driver verifies the supported case and cached override forwarding.
+
+
+`ContractSuite::run(driver, uri, fixture)` runs one set of 35 cases, named as sentences,
 against any `Driver` and returns a `ContractReport`. A
 `ContractFixture` is the suite's window into the device: a `readable` address, a
 `rejected` one (parseable, refused by the device), a `foreign` one, an `io_probe` counter

@@ -30,11 +30,9 @@ use crate::{
 /// argument and documents that it does.
 ///
 /// # What is not here yet
-/// Browsing and discovery are not declared yet. Like
-/// [`Connection::subscribe`](crate::Connection::subscribe) (S54, polling since S55) and
-/// [`Connection::ping`](crate::Connection::ping) (S40), they will be provided methods
-/// that return [`ErrorKind::Unsupported`](crate::ErrorKind::Unsupported), which is
-/// additive for implementors; no empty request or response types ship before then
+/// [`Connection::browse`](crate::Connection::browse) is a provided method with bounded
+/// core types (S111, ADR-0049); current drivers keep its Unsupported default. Discovery
+/// remains undeclared until its request and response types have a concrete contract
 /// (ADR-0001).
 ///
 /// # Compatibility: docs/parity/core.md#CORE-DRIVER-TRAIT

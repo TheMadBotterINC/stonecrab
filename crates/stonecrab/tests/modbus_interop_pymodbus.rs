@@ -948,7 +948,7 @@ mod tests {
 
     // The suite sentences that cannot run against a server that has no fault hooks, with the
     // reason the report must give for each.
-    const SKIPPED: [(&str, &str); 16] = [
+    const SKIPPED: [(&str, &str); 17] = [
         (
             "an absent deadline uses the connection timeout",
             "fixture cannot inject timeout",
@@ -1018,6 +1018,10 @@ mod tests {
         (
             "a stalled polling read skips the ticks that came due and never bursts",
             "fixture cannot inject timeout",
+        ),
+        (
+            "a browse correlates queries and respects the node bound",
+            "driver reports browse unsupported",
         ),
     ];
 

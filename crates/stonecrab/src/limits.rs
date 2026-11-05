@@ -14,6 +14,7 @@ pub struct ResourceLimits {
     pending_requests: NonZeroUsize,
     queued_events: NonZeroUsize,
     items_per_request: NonZeroUsize,
+    browse_nodes: NonZeroUsize,
 }
 
 impl ResourceLimits {
@@ -63,12 +64,18 @@ impl ResourceLimits {
     pub const fn max_items_per_request(self) -> NonZeroUsize {
         self.items_per_request
     }
+
+    /// Maximum total nodes retained across all query results of one browse response.
+    #[must_use]
+    pub const fn max_browse_nodes(self) -> NonZeroUsize {
+        self.browse_nodes
+    }
 }
 
 /// Resource-budget configuration.
 ///
 /// Defaults: 65,536 frame bytes, 262,144 buffered bytes, 16 pending requests,
-/// 256 queued events and 1,024 items per request. Every bound must be positive,
+/// 256 queued events, 1,024 items per request and 10,000 browse nodes. Every bound must be positive,
 /// and the receive buffer must accommodate a complete frame. No allocation
 /// occurs until a future transport/driver uses the validated limits.
 #[derive(Debug, Clone, Copy)]
@@ -80,6 +87,7 @@ pub struct ResourceLimitsBuilder {
     pending_requests: usize,
     queued_events: usize,
     items_per_request: usize,
+    browse_nodes: usize,
 }
 
 impl Default for ResourceLimitsBuilder {
@@ -90,6 +98,7 @@ impl Default for ResourceLimitsBuilder {
             pending_requests: 16,
             queued_events: 256,
             items_per_request: 1_024,
+            browse_nodes: 10_000,
         }
     }
 }
@@ -130,6 +139,13 @@ impl ResourceLimitsBuilder {
         self
     }
 
+    /// Set the maximum total nodes retained in one browse response.
+    #[must_use = "builder changes must be retained"]
+    pub const fn max_browse_nodes(mut self, value: usize) -> Self {
+        self.browse_nodes = value;
+        self
+    }
+
     /// Validate all budgets without allocating resources.
     ///
     /// # Errors
@@ -143,6 +159,7 @@ impl ResourceLimitsBuilder {
             pending_requests: positive("max_pending_requests", self.pending_requests)?,
             queued_events: positive("max_queued_events", self.queued_events)?,
             items_per_request: positive("max_items_per_request", self.items_per_request)?,
+            browse_nodes: positive("max_browse_nodes", self.browse_nodes)?,
         };
         if limits.buffered_bytes < limits.frame_bytes {
             return Err(PlcError::new(

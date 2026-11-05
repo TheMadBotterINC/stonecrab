@@ -12,6 +12,9 @@
 struct CoreComponentDoc;
 
 mod address_options;
+mod browse_node;
+mod browse_request;
+mod browse_response;
 mod cancel;
 mod capability;
 mod clock;
@@ -96,6 +99,9 @@ pub mod testkit;
 pub mod transport;
 
 pub use address_options::{AddressOptions, AddressOptionsBuilder};
+pub use browse_node::BrowseNode;
+pub use browse_request::{BrowseQuery, BrowseRequest, BrowseRequestBuilder};
+pub use browse_response::{BrowseResponse, BrowseResponseBuilder, BrowseResult};
 pub use cancel::CancellationToken;
 pub use capability::{Capabilities, Operation, SubscriptionMode};
 pub use clock::Clock;

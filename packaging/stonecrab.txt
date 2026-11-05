@@ -19,6 +19,9 @@ src/boards/adxl345.rs
 src/boards/linux.rs
 src/boards/max31855.rs
 src/boards.rs
+src/browse_node.rs
+src/browse_request.rs
+src/browse_response.rs
 src/cancel.rs
 src/capability.rs
 src/clock.rs

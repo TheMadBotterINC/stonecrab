@@ -3,9 +3,9 @@
 use std::time::Duration;
 
 use crate::{
-    Capabilities, ConnectionState, Diagnostics, ErrorKind, FailureCategory, OpFuture, Operation,
-    PlcError, ReadRequest, ReadResponse, ResourceLimits, StateWatch, SubscribeRequest,
-    Subscription, WriteRequest, WriteResponse,
+    BrowseRequest, BrowseResponse, Capabilities, ConnectionState, Diagnostics, ErrorKind,
+    FailureCategory, OpFuture, Operation, PlcError, ReadRequest, ReadResponse, ResourceLimits,
+    StateWatch, SubscribeRequest, Subscription, WriteRequest, WriteResponse,
 };
 
 /// One live link to one device: state observation, reads, writes and an explicit close.
@@ -21,13 +21,12 @@ use crate::{
 /// the public [`EventPump`](crate::EventPump) for named read batches.
 ///
 /// # Narrow surface
-/// The surface is the seven required methods below (decision D2) and two provided methods
+/// The surface is the seven required methods below (decision D2) and three provided methods
 /// that return [`ErrorKind::Unsupported`](crate::ErrorKind::Unsupported) until a driver
 /// overrides them: [`ping`](Self::ping), which takes no request (ADR-0011, addendum of
 /// slice S40), and [`subscribe`](Self::subscribe), which takes a [`SubscribeRequest`]
-/// (ADR-0020). `browse` and `discover` are not here: their request and response types do
-/// not exist yet (ADR-0001 forbids empty scaffolds). They will be added as provided
-/// methods in the same way, so adding them breaks no implementor.
+/// (ADR-0020), and [`browse`](Self::browse), which takes a [`BrowseRequest`] (ADR-0049).
+/// Discover remains undeclared until its request and response types exist.
 ///
 /// # The default-deadline rule
 /// Every operation is bounded (`CODING_STANDARDS` 8.5). A request that carries an explicit
@@ -304,6 +303,54 @@ pub trait Connection: Send + Sync {
                 Operation::Subscribe,
                 self.state(),
                 "this connection does not implement subscribe",
+            ))
+        })
+    }
+
+    /// Browse named protocol queries into flat, bounded node lists.
+    ///
+    /// The default ignores query text, cancellation and deadline, performs no I/O and
+    /// returns Unsupported for Browse. An override sets `Capabilities::browse`, supplies
+    /// the connection's default request deadline when absent, and checks cancellation,
+    /// deadlines and connection limits before transmitting. Query syntax/device refusals
+    /// become per-query `ItemError` values; transport/deadline failures end the call.
+    ///
+    /// # Errors
+    /// The default returns `Unsupported(Operation::Browse)` with current state, zero latency
+    /// and Validation diagnostics. Overrides may return the transport/validation kinds of
+    /// read, and must not silently drop nodes when enforcing resource bounds.
+    ///
+    /// # Cancel safety
+    /// The default is cancel-safe. An override abandons a read-only walk on cancellation
+    /// or drop; it bounds and releases any server continuation resources it still owns.
+    ///
+    /// # Wire effects
+    /// The default sends nothing. Overrides may browse, read node metadata and release
+    /// continuations; they never write device values.
+    ///
+    /// # Compatibility: docs/parity/core.md#CORE-CONNECTION-TRAIT
+    /// Additive provided browse contract under E18 (S111); no driver support claim.
+    ///
+    /// # Examples
+    /// ```
+    /// use stonecrab::{BrowseRequest, BrowseResponse, Connection, ErrorKind, Operation, Result};
+    /// async fn try_browse(connection: &dyn Connection, request: BrowseRequest)
+    ///     -> Result<Option<BrowseResponse>>
+    /// {
+    ///     match connection.browse(request).await {
+    ///         Ok(response) => Ok(Some(response)),
+    ///         Err(error) if error.kind() == ErrorKind::Unsupported(Operation::Browse) => Ok(None),
+    ///         Err(error) => Err(error),
+    ///     }
+    /// }
+    /// ```
+    fn browse(&self, request: BrowseRequest) -> OpFuture<'_, BrowseResponse> {
+        drop(request);
+        Box::pin(async move {
+            Err(unsupported(
+                Operation::Browse,
+                self.state(),
+                "this connection does not implement browse",
             ))
         })
     }

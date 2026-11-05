@@ -11,8 +11,8 @@ use std::task::Poll;
 use std::time::{Duration, Instant};
 
 use crate::{
-    AccessPolicy, CancellationToken, Connection, ConnectionConfig, ConnectionState, Deadline,
-    Driver, ErrorKind, FailureCategory, ItemError, LossCounters, Operation, PlcError,
+    AccessPolicy, BrowseRequest, CancellationToken, Connection, ConnectionConfig, ConnectionState,
+    Deadline, Driver, ErrorKind, FailureCategory, ItemError, LossCounters, Operation, PlcError,
     ProtocolAddress, QueuePolicy, ReadItem, ReadRequest, ReadResponse, ResourceLimits, RetryPolicy,
     SubscribeRequest, Subscription, SubscriptionKind, SubscriptionMode, Tag, TagId, Timeouts,
     WriteRequest,
@@ -350,12 +350,20 @@ impl Env<'_> {
             Requires::Subscribe if !capabilities.supports(Operation::Subscribe) => {
                 Some("driver reports subscribe unsupported".into())
             }
+            Requires::Browse if !capabilities.browse => {
+                Some("driver reports browse unsupported".into())
+            }
+            Requires::BrowsableQuery if self.fx.browsable.is_none() => {
+                Some("fixture has no browsable query".into())
+            }
             Requires::Read
             | Requires::Write
             | Requires::Ping
             | Requires::WriteUnsupported
             | Requires::WritableAddress
-            | Requires::Subscribe => None,
+            | Requires::Subscribe
+            | Requires::Browse
+            | Requires::BrowsableQuery => None,
         })
     }
 
@@ -472,10 +480,12 @@ pub(super) enum Id {
     Unsubscribe,
     SubscribeClose,
     SubscribeStall,
+    UnsupportedBrowse,
+    SupportedBrowse,
 }
 
 impl Id {
-    pub(super) const ALL: [Self; 33] = [
+    pub(super) const ALL: [Self; 35] = [
         Self::Capabilities,
         Self::Lifecycle,
         Self::Correlation,
@@ -509,6 +519,8 @@ impl Id {
         Self::Unsubscribe,
         Self::SubscribeClose,
         Self::SubscribeStall,
+        Self::UnsupportedBrowse,
+        Self::SupportedBrowse,
     ];
 
     pub(super) const fn case(self) -> ContractCase {
@@ -520,6 +532,16 @@ impl Id {
                 "capabilities match behavior and unsupported operations perform no I/O",
                 "F3 unsupported capability; SPEC 'Test layers' contract suite",
                 &[],
+            ),
+            Self::UnsupportedBrowse => ContractCase::new(
+                "an unsupported browse performs no I/O and changes no state",
+                "F3 unsupported capability; E18 browse contract (S111)",
+                &[],
+            ),
+            Self::SupportedBrowse => ContractCase::new(
+                "a browse correlates queries and respects the node bound",
+                "SPEC resource bounds; E18 browse contract (S111)",
+                &[Requires::Browse, Requires::BrowsableQuery],
             ),
             Self::Lifecycle => ContractCase::new(
                 "connect and close walk the lifecycle states observed through the state watch",
@@ -724,8 +746,104 @@ impl Id {
             Self::Unsubscribe => unsubscribe(env).await,
             Self::SubscribeClose => subscribe_close(env).await,
             Self::SubscribeStall => subscribe_stall(env).await,
+            Self::UnsupportedBrowse => unsupported_browse_performs_no_io(env).await,
+            Self::SupportedBrowse => supported_browse(env).await,
         }
     }
+}
+
+async fn unsupported_browse_performs_no_io(env: &Env<'_>) -> Check {
+    if env.driver.capabilities().browse {
+        return skip("driver reports browse supported");
+    }
+    let connection = env.open().await?;
+    let state = connection.state();
+    let token = CancellationToken::new();
+    token.cancel();
+    let request = BrowseRequest::builder(connection.limits())
+        .query(TagId::new(A).must("naming a browse query")?, "")
+        .cancel(token)
+        .deadline(Deadline::at(env.fx.clock.now()))
+        .build()
+        .must("building a browse request")?;
+    let before = env.probe();
+    let error = refused(
+        connection.browse(request).await,
+        ErrorKind::Unsupported(Operation::Browse),
+        "an unsupported browse",
+    )?;
+    let found = error.diagnostics();
+    ensure_eq(
+        found.operation,
+        Some(Operation::Browse),
+        "browse diagnostics operation",
+    )?;
+    ensure_eq(
+        found.connection_state,
+        Some(state),
+        "browse diagnostics state",
+    )?;
+    ensure_eq(
+        found.category,
+        Some(FailureCategory::Validation),
+        "browse diagnostics category",
+    )?;
+    ensure_eq(
+        found.latency,
+        Some(Duration::ZERO),
+        "browse diagnostics latency",
+    )?;
+    env.no_io(before, "an unsupported browse")?;
+    ensure_eq(
+        connection.state(),
+        state,
+        "state after an unsupported browse",
+    )?;
+    release(connection).await;
+    Ok(())
+}
+
+async fn supported_browse(env: &Env<'_>) -> Check {
+    let connection = env.open().await?;
+    ensure(
+        connection.capabilities().browse,
+        "driver reports browse but connection does not",
+    )?;
+    let text = env
+        .fx
+        .browsable
+        .as_deref()
+        .ok_or_else(|| Stop::Fail("missing required browse query".into()))?;
+    let id = TagId::new(A).must("naming a browse query")?;
+    let request = BrowseRequest::builder(connection.limits())
+        .query(id.clone(), text)
+        .build()
+        .must("building a browse request")?;
+    let response = connection
+        .browse(request)
+        .await
+        .must("browsing a supported query")?;
+    ensure_eq(response.items().len(), 1, "browse query result count")?;
+    let result = response
+        .get(&id)
+        .ok_or_else(|| Stop::Fail("browse response lost the query identity".into()))?;
+    let nodes = result
+        .outcome()
+        .as_ref()
+        .map_err(|error| Stop::Fail(format!("browse query failed: {:?}", error.kind())))?;
+    ensure(
+        nodes.len() <= connection.limits().max_browse_nodes().get(),
+        "browse response exceeds the connection node bound",
+    )?;
+    ensure(
+        nodes
+            .iter()
+            .enumerate()
+            .all(|(index, node)| node.parent().is_none_or(|parent| parent < index)),
+        "browse response has a non-backward parent",
+    )?;
+    release(connection).await;
+    Ok(())
 }
 
 async fn capabilities_match(env: &Env<'_>) -> Check {

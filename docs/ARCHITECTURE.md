@@ -284,7 +284,8 @@ classDiagram
         +max_buffered_bytes: NonZeroUsize
         +max_pending_requests: NonZeroUsize
         +max_queued_events: NonZeroUsize
-        +max_items_per_request: Option~NonZeroUsize~
+        +max_items_per_request: NonZeroUsize
+        +max_browse_nodes: NonZeroUsize
     }
 
     class Capabilities {
@@ -386,10 +387,14 @@ deadline.
 | `close` | `fn close(&self) -> OpFuture<'_, ()>` (bounded by `Timeouts.request`) |
 | `ping` | provided `fn ping(&self) -> OpFuture<'_, ()>`, Unsupported unless overridden (S40) |
 | `subscribe` | provided `fn subscribe(&self, request: SubscribeRequest) -> OpFuture<'_, Subscription>`, Unsupported unless overridden (S55) |
+| `browse` | provided `fn browse(&self, request: BrowseRequest) -> OpFuture<'_, BrowseResponse>`, Unsupported unless overridden (S111) |
 
 `SubscribeRequest`, `Subscription`, `QueuePolicy` and `LossCounters` ship for polling
-subscriptions. `browse` remains an additive provided-method target in S111, with flat
-browse types; no browse or discover method is exposed yet (ADR-0001: no empty scaffolds).
+subscriptions. S111 provides the bounded browse contract and Unsupported default:
+named `BrowseRequest` queries, correlated `BrowseResult` outcomes and flat `BrowseNode`
+lists with parent indices and truncation in `BrowseResponse` (ADR-0049). No current
+protocol driver browses; the OPC UA walk and metadata remain S112/S113. Discover is
+undeclared until a concrete contract exists (ADR-0001).
 The driver owns its concurrency model: Modbus serializes through ConnectionGuard;
 OPC UA pipelines through its bounded private lane, without a spawned reader task.
 ADR-0034 decisions 6–9 define the accepted M3 target and section 5.2 separates it from

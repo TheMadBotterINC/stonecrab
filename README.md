@@ -63,6 +63,10 @@ constrained target; then pick the features you need. The crate README,
 [`crates/stonecrab/README.md`](crates/stonecrab/README.md), has the module map.
 
 ## Capability matrix
+
+S111 adds bounded core browse queries, flat node results and a provided
+`Connection::browse` method. Current drivers keep its Unsupported default; the OPC UA
+walk and typed metadata remain S112/S113 ([ADR-0049](docs/adr/0049-core-browse-contract.md)).
 Support levels use only the labels of the project's hardware-evidence policy
 ([`docs/SPEC.md`](docs/SPEC.md)): `build-tested`, `simulator-tested`,
 `interoperability-tested` and `hardware-verified`, plus `planned` and `not supported`.

@@ -65,7 +65,8 @@ operations.
 | Connection cache (`ConnectionCache`, always built): one lease at a time per connection string, waiters in order, lease, wait, idle, ping and close bounds on the injected clock, `remove` and `close`; subscriptions are not restored on a replacement connection | simulator-tested |
 | Event pump (`EventPump`, always built): named batches of tags read at an interval after an initial delay, on a connection or a cache lease, skipped ticks counted, a pause after failed fetches, delivered through `recv` with no spawned task; no subscription trigger, configuration files or value transformations | simulator-tested |
 | Object PLC Mapping (`PlcEntity`, `plc_entity!`, `EntityManager`, always built): a struct mapped to tags by a declarative macro or by hand, read, written, connected and merged through cache leases, per-field cache durations, aliases; no runtime proxy | simulator-tested |
-| Browse and discover | not supported |
+| Core browse types/builders and provided `Connection::browse` (S111) | build-tested; default Unsupported checked by the shared contract suite; no driver browse support yet |
+| Device browse and discover | not supported |
 | `sensors`: synthetic profiles against the simulator | simulator-tested |
 | `sensors`: synthetic profiles against a Modbus TCP server | interoperability-tested |
 | `boards`: MAX31855 over SPI (decode, faults, measurements) and the Linux `/dev/spidev` backend, over scripted buses and in-memory readers | simulator-tested |
