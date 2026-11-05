@@ -1,4 +1,4 @@
-# S108 / ADR-0034: the pinned connection, read and write service closure.
+# S112 / ADR-0050: the pinned connection, read, write and browse service closure.
 protocol = "opcua"
 output = "crates/stonecrab/src/opcua"
 support_module = "crate::codec"
@@ -7,7 +7,7 @@ depth = "crate::opcua::codec::Depth"
 types = [
   "ExtensionObjectDefinition", "ApplicationType", "MessageSecurityMode",
   "SecurityTokenRequestType", "TimestampsToReturn", "UserTokenType",
-  "OpcuaStatusCode", "AttributeId",
+  "OpcuaStatusCode", "AttributeId", "BrowseDirection", "NodeClass",
 ]
 
 [cases]
@@ -20,6 +20,8 @@ ExtensionObjectDefinition = [
   "AnonymousIdentityToken", "UserNameIdentityToken", "X509IdentityToken", "ActivateSessionRequest", "ActivateSessionResponse",
   "CloseSessionRequest", "CloseSessionResponse", "ReadValueId", "ReadRequest", "ReadResponse",
   "WriteValue", "WriteRequest", "WriteResponse",
+  "ViewDescription", "BrowseDescription", "ReferenceDescription", "BrowseResult",
+  "BrowseRequest", "BrowseResponse", "BrowseNextRequest", "BrowseNextResponse",
 ]
 
 [external]

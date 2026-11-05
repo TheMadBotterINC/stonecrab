@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use crate::{ErrorKind, PlcError, PlcValueType, ProtocolAddress, Result};
+use crate::{ErrorKind, ItemError, PlcError, PlcValueType, ProtocolAddress, Result};
 
 /// One immutable node in a query's flat browse result.
 ///
@@ -19,6 +19,7 @@ pub struct BrowseNode {
     value_type: Option<PlcValueType>,
     array_dimensions: Option<Vec<u32>>,
     options: BTreeMap<String, String>,
+    error: Option<Arc<ItemError>>,
 }
 
 impl BrowseNode {
@@ -59,6 +60,7 @@ impl BrowseNode {
             value_type,
             array_dimensions: None,
             options: BTreeMap::new(),
+            error: None,
         })
     }
 
@@ -67,6 +69,19 @@ impl BrowseNode {
     pub const fn with_parent(mut self, parent: usize) -> Self {
         self.parent = Some(parent);
         self
+    }
+
+    /// Retain a failure to expand this node while preserving successful siblings.
+    #[must_use]
+    pub fn with_error(mut self, error: ItemError) -> Self {
+        self.error = Some(Arc::new(error));
+        self
+    }
+
+    /// Failure encountered when expanding this node, including its original status.
+    #[must_use]
+    pub fn error(&self) -> Option<&ItemError> {
+        self.error.as_deref()
     }
 
     /// Declare whether the driver permits reads of this node's value.

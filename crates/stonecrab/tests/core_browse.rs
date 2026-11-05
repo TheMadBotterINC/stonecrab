@@ -57,6 +57,22 @@ mod tests {
     }
 
     #[test]
+    fn browse_node_failure_retains_status_through_clone() {
+        assert!(node("healthy").error().is_none());
+        let refused = node("refused")
+            .with_error(
+                ItemError::new(PlcError::new(ErrorKind::AccessDenied, "browse refused"))
+                    .with_status(ProtocolStatus::new("opcua", 0x801F_0000)),
+            )
+            .clone();
+        assert_eq!(refused.error().unwrap().kind(), ErrorKind::AccessDenied);
+        assert_eq!(
+            refused.error().unwrap().status().unwrap().code(),
+            0x801F_0000
+        );
+    }
+
+    #[test]
     fn browse_queries_keep_order_opaque_text_bounds_deadlines_and_shared_cancellation() {
         let token = CancellationToken::new();
         let ignored = CancellationToken::new();

@@ -43,6 +43,8 @@ examine_globs = [
   "crates/stonecrab/src/opcua/write.rs",
   "crates/stonecrab/src/opcua/write/*.rs",
   "crates/stonecrab/src/opcua/attributes.rs",
+  # S112: restrict selection to the pure Walk and status logic when mutating browse.
+  "crates/stonecrab/src/opcua/browse.rs",
   "crates/stonecrab/src/opcua/value.rs",
   "crates/stonecrab/src/opcua/chunk.rs",
   # S109: pure monotonic lifetime arithmetic; channel/connection I/O stays outside scope.

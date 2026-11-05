@@ -76,6 +76,8 @@ src/modbus.rs
 src/opcua/address.rs
 src/opcua/attributes/tests.rs
 src/opcua/attributes.rs
+src/opcua/browse/tests.rs
+src/opcua/browse.rs
 src/opcua/channel/lifetime.rs
 src/opcua/channel/tests.rs
 src/opcua/channel.rs
@@ -132,12 +134,17 @@ src/opcua/generated/MANIFEST.toml
 src/opcua/generated/application_description.rs
 src/opcua/generated/application_type.rs
 src/opcua/generated/attribute_id.rs
+src/opcua/generated/browse_description.rs
+src/opcua/generated/browse_direction.rs
+src/opcua/generated/browse_result.rs
 src/opcua/generated/channel_security_token.rs
 src/opcua/generated/endpoint_description.rs
 src/opcua/generated/extension_object_definition.rs
 src/opcua/generated/message_security_mode.rs
+src/opcua/generated/node_class.rs
 src/opcua/generated/opcua_status_code.rs
 src/opcua/generated/read_value_id.rs
+src/opcua/generated/reference_description.rs
 src/opcua/generated/request_header.rs
 src/opcua/generated/response_header.rs
 src/opcua/generated/security_token_request_type.rs
@@ -146,6 +153,7 @@ src/opcua/generated/signed_software_certificate.rs
 src/opcua/generated/timestamps_to_return.rs
 src/opcua/generated/user_token_policy.rs
 src/opcua/generated/user_token_type.rs
+src/opcua/generated/view_description.rs
 src/opcua/generated/write_value.rs
 src/opcua/generated.rs
 src/opcua/identity.rs

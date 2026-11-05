@@ -222,7 +222,7 @@ const fn guid_bytes(value: Guid) -> [u8; 16] {
     ]
 }
 
-fn node_text(value: NodeId) -> Result<String> {
+pub(super) fn node_text(value: NodeId) -> Result<String> {
     let identifier = match value.identifier {
         Identifier::Numeric(value) => OpcuaIdentifier::Numeric(value),
         Identifier::String(value) => {

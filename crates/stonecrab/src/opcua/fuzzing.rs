@@ -58,6 +58,12 @@ pub struct Parsed {
     pub channel_lifetime: u32,
     /// Minimum renewal scheduling lifetime in milliseconds.
     pub min_channel_lifetime: u32,
+    /// Per-node reference ceiling; zero disables the protocol ceiling.
+    pub browse_max_references_per_node: u32,
+    /// Total visited-node ceiling; zero leaves the finite core response bound.
+    pub browse_max_total_nodes: u32,
+    /// Traversal depth ceiling; zero leaves deadline/cancellation and node bounds.
+    pub browse_max_depth: u32,
 }
 
 /// Parse an `opcua` connection string as the driver does and report what was attached.
@@ -82,6 +88,9 @@ pub fn parse_config(uri: &str) -> Result<Parsed> {
     let session_timeout = options.session_timeout;
     let channel_lifetime = options.channel_lifetime;
     let min_channel_lifetime = options.min_channel_lifetime;
+    let browse_max_references_per_node = options.browse_max_references_per_node;
+    let browse_max_total_nodes = options.browse_max_total_nodes;
+    let browse_max_depth = options.browse_max_depth;
     Ok(Parsed {
         config,
         endpoint_url,
@@ -91,6 +100,9 @@ pub fn parse_config(uri: &str) -> Result<Parsed> {
         session_timeout,
         channel_lifetime,
         min_channel_lifetime,
+        browse_max_references_per_node,
+        browse_max_total_nodes,
+        browse_max_depth,
     })
 }
 

@@ -62,6 +62,9 @@ fn check(text: &str) {
                     || key == "session-timeout-ms"
                     || key == "channel-lifetime-ms"
                     || key == "min-channel-lifetime-ms"
+                    || key == "browse-max-references-per-node"
+                    || key == "browse-max-total-nodes"
+                    || key == "browse-max-depth"
                     || key == "encoding.receive-buffer-size"
                     || key == "encoding.send-buffer-size"
                     || key == "encoding.max-message-size"
@@ -155,6 +158,17 @@ fn check(text: &str) {
                 });
                 assert!(millis > 0);
                 assert_eq!(actual, millis);
+            }
+            for (key, default, actual) in [
+                ("browse-max-references-per-node", 65536, parsed.browse_max_references_per_node),
+                ("browse-max-total-nodes", 1_000_000, parsed.browse_max_total_nodes),
+                ("browse-max-depth", 64, parsed.browse_max_depth),
+            ] {
+                let expected = uri.option(key).map_or(default, |value| {
+                    assert!(value.bytes().all(|byte| byte.is_ascii_digit()));
+                    value.parse::<u32>().expect("UInt32 browse limit")
+                });
+                assert_eq!(actual, expected);
             }
             let receive = uri
                 .options()

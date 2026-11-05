@@ -336,7 +336,7 @@ channel for native protected identities. Stop removes this process and the same 
 
 ### S109 renewal and idle recovery
 
-The current gate selects exactly 20 tests. New public-driver tests keep one TCP socket
+The S109 gate selected exactly 20 tests. New public-driver tests keep one TCP socket
 through more than three short lifetimes under each modern SIGN_ENCRYPT policy, and
 through repeated None renewals. A counting TCP factory distinguishes renewal from a
 hidden reconnect. Reads keep the session active; all operations continue successfully.
@@ -350,3 +350,12 @@ nonce continuity, token-ID/old-key overlap retirement, refusal/fault/certificate
 failures, dropped/cancelled/concurrent renewal, full-table backpressure, close/recovery
 races, metadata cache reset and Unknown without replay for an in-flight write. Native
 sequence wrap and forced delayed old-token overlap remain independently UNVERIFIED.
+
+### S112 browse walk
+
+The current gate selects exactly 21 tests. The added
+`opcua_interop_browse_walks_the_test_namespace` calls the private S112 connection
+path, walks the Interop namespace, verifies counter and scalar/Int32 nodes, and
+checks a bounded Objects walk reports truncation. Public browse capability waits
+for typed variable metadata in S113. Deterministic tests cover continuation paging,
+release and interrupted exchanges; this native case proves namespace interoperability.

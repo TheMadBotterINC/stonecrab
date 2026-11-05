@@ -6,6 +6,11 @@ use crate as library;
 
 mod address;
 mod attributes;
+#[cfg_attr(
+    not(all(test, feature = "testkit")),
+    expect(dead_code, reason = "S113 enables public typed browse")
+)]
+mod browse;
 mod channel;
 mod chunk;
 // The types of the binary encoding (the built-ins and the recursive types) are written and
