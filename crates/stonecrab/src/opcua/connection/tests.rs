@@ -299,7 +299,7 @@ fn opcua_close_fails_pending_read_with_disconnected() {
 }
 
 #[test]
-fn opcua_disconnect_fails_the_connection_and_device_fault_preserves_its_status() {
+fn opcua_disconnect_schedules_reconnect_and_device_fault_preserves_its_status() {
     let rig = Rig::new();
     let connection = rig.connect();
     rig.device.exception();
@@ -325,10 +325,10 @@ fn opcua_disconnect_fails_the_connection_and_device_fault_preserves_its_status()
         .kind(),
         ErrorKind::Disconnected
     );
-    assert_eq!(
+    assert!(matches!(
         watch.current(),
-        ConnectionState::Failed(ErrorKind::Disconnected)
-    );
+        ConnectionState::Reconnecting { attempt: 1, .. }
+    ));
     let _closed = block_on_with(&rig.clock, connection.close());
     assert_eq!(connection.state(), ConnectionState::Closed);
 }
@@ -1235,10 +1235,10 @@ fn opcua_idle_reopen_failure_and_close_during_activation_do_not_publish_a_sessio
         assert!(Arc::ptr_eq(&original, &connection.current()));
         assert_eq!(factory.opens().len(), 2);
         if !closing {
-            assert_eq!(
+            assert!(matches!(
                 connection.state(),
-                ConnectionState::Failed(ErrorKind::Disconnected)
-            );
+                ConnectionState::Reconnecting { attempt: 1, .. }
+            ));
         }
         let _closed = block_on_with(&clock, connection.close());
         assert_eq!(connection.state(), ConnectionState::Closed);
@@ -1263,3 +1263,6 @@ fn opcua_close_admission_prevents_an_expired_session_from_starting_recovery() {
     let _closed = block_on_with(&clock, connection.close());
     assert_eq!(connection.state(), ConnectionState::Closed);
 }
+
+#[path = "reconnect_tests.rs"]
+mod reconnect_tests;

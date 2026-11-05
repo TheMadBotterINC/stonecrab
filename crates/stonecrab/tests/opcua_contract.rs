@@ -105,4 +105,60 @@ mod tests {
         );
         assert!(skipped.iter().all(|(_, why)| !why.is_empty()), "{report}");
     }
+
+    #[test]
+    fn opcua_public_reconnect_preserves_the_contract_after_a_lost_read() {
+        use stonecrab::{ConnectionState, Driver, ErrorKind, ReadRequest, Tag, TagId};
+        let clock = FakeClock::default();
+        let factory = FakeTransportFactory::new(clock.clone());
+        let device = Device::default();
+        for _ in 0..2 {
+            factory.push_script(Script::strict(vec![Step::react(device.reactor())]));
+        }
+        let driver = OpcuaDriver::new()
+            .with_clock(Arc::new(clock.clone()))
+            .with_transport_factory(Arc::new(factory.clone()));
+        let connection = block_on_with(
+            &clock,
+            driver.connect(
+                driver
+                    .parse_config("opcua://fake:4840/path?security-policy=NONE")
+                    .unwrap(),
+            ),
+        )
+        .unwrap();
+        let request = || {
+            ReadRequest::builder(connection.limits())
+                .tag(Tag::new(
+                    TagId::new("value").unwrap(),
+                    driver
+                        .parse_address("ns=2;i=42", &stonecrab::AddressOptions::default())
+                        .unwrap(),
+                ))
+                .build()
+                .unwrap()
+        };
+        device.disconnect();
+        assert_eq!(
+            block_on_with(&clock, connection.read(request()))
+                .unwrap_err()
+                .kind(),
+            ErrorKind::Disconnected
+        );
+        assert!(matches!(
+            connection.state(),
+            ConnectionState::Reconnecting { attempt: 1, .. }
+        ));
+        assert_eq!(factory.opens().len(), 1);
+        assert_eq!(
+            block_on_with(&clock, connection.read(request()))
+                .unwrap()
+                .iter_ok()
+                .count(),
+            1
+        );
+        assert_eq!(factory.opens().len(), 2);
+        assert_eq!(connection.state(), ConnectionState::Connected);
+        block_on_with(&clock, connection.close()).unwrap();
+    }
 }

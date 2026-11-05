@@ -381,12 +381,18 @@ fn opcua_dropping_an_inflight_renewal_never_resumes_with_the_old_token() {
     );
     drop(pending);
     let before = factory.probes().first().unwrap().sent().len();
+    let replacement = fixture.peer(SecurityPolicy::Basic256Sha256, MessageSecurity::SignEncrypt);
+    factory.push_script(Script::strict(vec![Step::react(
+        replacement.reactor(|_, _| {}),
+    )]));
     assert_eq!(
         block_on_with(&clock, connection.read(read(&*connection)))
-            .unwrap_err()
-            .kind(),
-        ErrorKind::Disconnected
+            .unwrap()
+            .iter_ok()
+            .count(),
+        1
     );
+    assert_eq!(factory.opens().len(), 2);
     assert_eq!(factory.probes().first().unwrap().sent().len(), before);
     assert_eq!(
         probe
@@ -954,5 +960,187 @@ fn opcua_a_metadata_renewal_failure_is_fatal_before_any_write_is_transmitted() {
             .filter(|r| matches!(r, Service::WriteRequest { .. }))
             .count(),
         0
+    );
+}
+
+#[test]
+fn opcua_a_lost_session_is_replaced_by_a_new_session_on_reconnect() {
+    let fixture = Fixture::new();
+    for policy in [
+        SecurityPolicy::Basic256Sha256,
+        SecurityPolicy::Aes128Sha256RsaOaep,
+        SecurityPolicy::Aes256Sha256RsaPss,
+    ] {
+        for mode in [MessageSecurity::Sign, MessageSecurity::SignEncrypt] {
+            let (driver, clock, factory) = setup();
+            let mut probes = Vec::new();
+            for index in 0..2 {
+                let peer = fixture.peer(policy, mode);
+                let probe = peer.probe.clone();
+                probes.push(probe.clone());
+                let mut reactor = peer.reactor(move |_, reply| {
+                    if index == 1
+                        && let Service::CreateSessionResponse {
+                            authentication_token,
+                            ..
+                        } = reply
+                    {
+                        *authentication_token = NodeId::numeric(0, 88);
+                    }
+                });
+                factory.push_script(Script::strict(vec![Step::react(move |wire| {
+                    let reply = reactor(wire);
+                    if index == 0 && matches!(probe.requests().last(), Some(Service::ReadRequest { nodes_to_read: Some(nodes), .. }) if nodes.iter().all(|node| node.attribute_id == 13)) {
+                        Reaction::Close
+                    } else { reply }
+                })]));
+            }
+            let uri = fixture.uri(policy, mode, false);
+            let connection =
+                block_on_with(&clock, driver.connect(driver.parse_config(&uri).unwrap())).unwrap();
+            let write = |value| {
+                crate::WriteRequest::builder(connection.limits())
+                    .item(
+                        Tag::new(
+                            TagId::new("setpoint").unwrap(),
+                            Arc::new(OpcuaAddress::parse("ns=1;i=42").unwrap()),
+                        ),
+                        PlcValue::I32(value),
+                    )
+                    .build()
+                    .unwrap()
+            };
+            assert_eq!(
+                block_on_with(&clock, connection.write(write(1)))
+                    .unwrap()
+                    .confirmed_count(),
+                1
+            );
+            assert_eq!(
+                block_on_with(&clock, connection.read(read(&*connection)))
+                    .unwrap_err()
+                    .kind(),
+                ErrorKind::Disconnected
+            );
+            assert!(matches!(
+                connection.state(),
+                crate::ConnectionState::Reconnecting { attempt: 1, .. }
+            ));
+            assert_eq!(factory.opens().len(), 1);
+            assert_eq!(
+                block_on_with(&clock, connection.write(write(2)))
+                    .unwrap()
+                    .confirmed_count(),
+                1
+            );
+            assert_eq!(factory.opens().len(), 2);
+            for probe in &probes {
+                let requests = probe.requests();
+                assert_eq!(
+                    requests
+                        .iter()
+                        .filter(|r| matches!(r, Service::CreateSessionRequest { .. }))
+                        .count(),
+                    1
+                );
+                assert_eq!(
+                    requests
+                        .iter()
+                        .filter(|r| matches!(r, Service::ActivateSessionRequest { .. }))
+                        .count(),
+                    1
+                );
+                assert_eq!(
+                    requests
+                        .iter()
+                        .filter(|r| matches!(r, Service::WriteRequest { .. }))
+                        .count(),
+                    1
+                );
+                assert_eq!(requests.iter().filter(|r| matches!(r, Service::ReadRequest { nodes_to_read: Some(nodes), .. } if nodes.iter().any(|node| node.attribute_id != 13))).count(), 1, "fresh session has no old metadata cache");
+            }
+            let requests = probes.get(1).unwrap().requests();
+            let Service::WriteRequest { request_header, .. } = requests
+                .iter()
+                .find(|r| matches!(r, Service::WriteRequest { .. }))
+                .unwrap()
+            else {
+                panic!("write")
+            };
+            assert_eq!(request_header.authentication_token, NodeId::numeric(0, 88));
+            let nonces: Vec<_> = probes
+                .iter()
+                .map(|probe| {
+                    probe
+                        .requests()
+                        .into_iter()
+                        .find_map(|request| {
+                            if let Service::OpenSecureChannelRequest { client_nonce, .. } = request
+                            {
+                                Some(client_nonce)
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap()
+                })
+                .collect();
+            assert_ne!(nonces.first().unwrap(), nonces.get(1).unwrap());
+            assert_eq!(connection.state(), crate::ConnectionState::Connected);
+            block_on_with(&clock, connection.close()).unwrap();
+        }
+    }
+}
+
+#[test]
+fn opcua_reconnect_reloads_security_material_and_keeps_preflight_failure_terminal() {
+    let fixture = Fixture::new();
+    let (driver, clock, factory) = setup();
+    let peer = fixture.peer(SecurityPolicy::Basic256Sha256, MessageSecurity::SignEncrypt);
+    let probe = peer.probe.clone();
+    let mut reactor = peer.reactor(|_, _| {});
+    factory.push_script(Script::strict(vec![Step::react(move |wire| {
+        let reply = reactor(wire);
+        if matches!(probe.requests().last(), Some(Service::ReadRequest { .. })) {
+            Reaction::Close
+        } else {
+            reply
+        }
+    })]));
+    let connection = block_on_with(
+        &clock,
+        driver.connect(
+            driver
+                .parse_config(&fixture.uri(
+                    SecurityPolicy::Basic256Sha256,
+                    MessageSecurity::SignEncrypt,
+                    false,
+                ))
+                .unwrap(),
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        block_on_with(&clock, connection.read(read(&*connection)))
+            .unwrap_err()
+            .kind(),
+        ErrorKind::Disconnected
+    );
+    std::fs::remove_file(&fixture.client_store).unwrap();
+    let error = block_on_with(&clock, connection.read(read(&*connection))).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+    assert_eq!(
+        connection.state(),
+        crate::ConnectionState::Failed(ErrorKind::InvalidConfig)
+    );
+    assert!(
+        !error
+            .to_string()
+            .contains(fixture.client_store.to_str().unwrap())
+    );
+    assert_eq!(
+        factory.opens().len(),
+        1,
+        "key preparation precedes transport opening"
     );
 }
