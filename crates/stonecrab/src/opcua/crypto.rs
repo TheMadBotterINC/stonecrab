@@ -39,7 +39,7 @@ impl Security {
     pub(super) fn prepare(
         options: &crate::opcua::options::OpcuaOptions,
         now: std::time::SystemTime,
-    ) -> Result<Option<Self>> {
+    ) -> Result<Option<std::sync::Arc<Self>>> {
         if options.security_policy == SecurityPolicy::None {
             return Ok(None);
         }
@@ -57,7 +57,7 @@ impl Security {
             verifier,
         };
         security.verify(security.asymmetric.peer.as_ref(), now)?;
-        Ok(Some(security))
+        Ok(Some(std::sync::Arc::new(security)))
     }
 
     pub(super) fn policy(&self) -> SecurityPolicy {

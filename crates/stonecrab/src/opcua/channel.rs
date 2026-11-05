@@ -32,23 +32,28 @@ use crate::transport::Transport;
 use crate::{CancellationToken, Clock, Deadline, ErrorKind, PlcError, ResourceLimits, Result};
 
 const MIN_BUFFER: u32 = 8192;
-const DEFAULT_LIFETIME: u32 = 3_600_000;
+mod lifetime;
+pub(super) use lifetime::Lifetime;
+
+#[derive(Debug, Clone)]
+pub(super) struct Renewal {
+    pub(super) token: ChannelSecurityToken,
+    pub(super) server_nonce: UaByteString,
+    pub(super) client_nonce: UaByteString,
+    pub(super) security: Option<Arc<Security>>,
+    pub(super) mode: MessageSecurity,
+    pub(super) requested: u32,
+    pub(super) minimum: u32,
+    pub(super) lifetime: Lifetime,
+    pub(super) previous: Option<(u32, Lifetime)>,
+}
 
 pub(super) struct Channel {
     pub(super) framed: Wire,
     pub(super) clock: Arc<dyn Clock>,
     pub(super) limits: TransportLimits,
-    pub(super) token: ChannelSecurityToken,
-    #[cfg_attr(
-        not(all(test, feature = "testkit")),
-        expect(
-            dead_code,
-            reason = "server nonce is retained for operation-driven renewal in S109"
-        )
-    )]
-    pub(super) server_nonce: UaByteString,
+    pub(super) renewal: Renewal,
     pub(super) received_sequence: u32,
-    configured_mode: MessageSecurity,
 }
 
 impl Channel {
@@ -59,7 +64,7 @@ impl Channel {
         deadline: Deadline,
         cancel: &CancellationToken,
         crypto: Arc<dyn Backend>,
-        secure: Option<&Security>,
+        secure: Option<&Arc<Security>>,
     ) -> Result<Self> {
         if options.security_policy.is_secure() != secure.is_some()
             || secure.is_some_and(|security| {
@@ -126,6 +131,7 @@ impl Channel {
         let client_nonce = secure
             .map(|_| crate::opcua::crypto::session_nonce(crypto.as_ref()))
             .transpose()?;
+        let issued = clock.now();
         let request = Service::OpenSecureChannelRequest {
             request_header: header,
             client_protocol_version: 0,
@@ -145,7 +151,7 @@ impl Channel {
             client_nonce: client_nonce.map_or_else(UaByteString::null, |nonce| {
                 UaByteString::new(nonce.to_vec())
             }),
-            requested_lifetime: DEFAULT_LIFETIME,
+            requested_lifetime: options.channel_lifetime,
         };
         let budget = if secure.is_some() {
             framed
@@ -236,7 +242,6 @@ impl Channel {
             || chunk.channel_id == 0
             || security_token.channel_id != chunk.channel_id
             || security_token.token_id == 0
-            || security_token.revised_lifetime == 0
         {
             return Err(error(
                 ErrorKind::MalformedData,
@@ -271,10 +276,25 @@ impl Channel {
             framed,
             clock,
             limits,
-            token: security_token,
-            server_nonce,
+            renewal: Renewal {
+                lifetime: Lifetime::new(
+                    options.channel_lifetime,
+                    security_token.revised_lifetime,
+                    options.min_channel_lifetime,
+                    issued,
+                ),
+                token: security_token,
+                server_nonce,
+                client_nonce: client_nonce.map_or_else(UaByteString::null, |nonce| {
+                    UaByteString::new(nonce.to_vec())
+                }),
+                security: secure.cloned(),
+                mode: options.message_security,
+                requested: options.channel_lifetime,
+                minimum: options.min_channel_lifetime,
+                previous: None,
+            },
             received_sequence: chunk.sequence.sequence_number,
-            configured_mode: options.message_security,
         })
     }
 }
@@ -384,16 +404,16 @@ impl fmt::Debug for Channel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Channel")
             .field("limits", &self.limits)
-            .field("configured_message_security", &self.configured_mode.name())
+            .field("configured_message_security", &self.renewal.mode.name())
             .field(
                 "effective_message_security",
                 &if self.framed.is_protected() {
-                    self.configured_mode.name()
+                    self.renewal.mode.name()
                 } else {
                     "NONE"
                 },
             )
-            .field("channel_id", &self.token.channel_id)
+            .field("channel_id", &self.renewal.token.channel_id)
             .finish_non_exhaustive()
     }
 }

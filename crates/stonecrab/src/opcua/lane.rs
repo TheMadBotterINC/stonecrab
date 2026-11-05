@@ -15,14 +15,14 @@ use std::pin::pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::Poll;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 
 use crate::future::{WakerSlots, wake_all};
-use crate::opcua::channel::Channel;
+use crate::opcua::channel::{Channel, Renewal};
 use crate::opcua::chunk::{Assembly, MessageLimits, abort, check_growth};
-use crate::opcua::codec::NodeId;
+use crate::opcua::codec::{NodeId, UaByteString};
 use crate::opcua::frame::{Body, ChunkType, Frame, SecureChunk, SequenceHeader};
 use crate::opcua::generated::extension_object_definition::ExtensionObjectDefinition as Service;
 use crate::opcua::generated::request_header::RequestHeader;
@@ -36,6 +36,7 @@ struct Pending {
     queued: bool,
     reply: Option<Result<Service>>,
     assembly: Assembly,
+    open: Option<(UaByteString, Instant)>,
 }
 
 struct State {
@@ -48,6 +49,9 @@ struct State {
     sent_sequence: u32,
     received_sequence: Option<u32>,
     discarded: u64,
+    token_id: u32,
+    renewal: Option<Renewal>,
+    last_activity: Instant,
 }
 
 /// A bounded correlation table and a single interruptible transport owner.
@@ -61,7 +65,7 @@ pub(super) struct Lane {
     message_limits: MessageLimits,
     max_buffered: usize,
     channel_id: u32,
-    token_id: u32,
+    renewal_lock: tokio::sync::Mutex<()>,
 }
 
 impl Lane {
@@ -85,6 +89,9 @@ impl Lane {
                 sent_sequence: 0,
                 received_sequence: None,
                 discarded: 0,
+                token_id,
+                renewal: None,
+                last_activity: clock.now(),
             }),
             clock,
             stopped: CancellationToken::new(),
@@ -97,7 +104,7 @@ impl Lane {
             },
             max_buffered: limits.max_buffered_bytes().get(),
             channel_id,
-            token_id,
+            renewal_lock: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -107,8 +114,8 @@ impl Lane {
             channel.framed,
             channel.clock,
             request_timeout,
-            channel.token.channel_id,
-            channel.token.token_id,
+            channel.renewal.token.channel_id,
+            channel.renewal.token.token_id,
         );
         lane.max_frame = lane
             .max_frame
@@ -126,6 +133,7 @@ impl Lane {
         state.request_id = 1;
         state.sent_sequence = 1;
         state.received_sequence = Some(channel.received_sequence);
+        state.renewal = Some(channel.renewal);
         lane
     }
 
@@ -208,7 +216,8 @@ impl Lane {
     ) -> OpFuture<'a, Service> {
         Box::pin(async move {
             self.check(deadline, cancel)?;
-            let request = self.reserve()?;
+            self.prepare(deadline, cancel).await?;
+            let request = self.reserve(None)?;
             let header = request_header(
                 self.clock.as_ref(),
                 authentication_token,
@@ -216,8 +225,15 @@ impl Lane {
                 deadline,
             )?;
             let body = encode_service(encoding_id, &build(header), self.message_limits.bytes)?;
-            self.exchange_body(request.id, body, deadline, cancel, transmitted)
-                .await
+            self.exchange_body(
+                request.id,
+                body,
+                deadline,
+                cancel,
+                transmitted,
+                authentication_token != &NodeId::numeric(0, 0),
+            )
+            .await
         })
     }
 
@@ -228,6 +244,7 @@ impl Lane {
         deadline: Deadline,
         cancel: &CancellationToken,
         transmitted: Option<&AtomicBool>,
+        session_activity: bool,
     ) -> Result<Service> {
         let mut lease = match self.acquire(request_id, true, deadline, cancel).await? {
             Acquired::Transport(lease) => lease,
@@ -257,7 +274,7 @@ impl Lane {
                 },
                 body: Body::Message(SecureChunk {
                     channel_id: self.channel_id,
-                    token_id: self.token_id,
+                    token_id: self.token_id(),
                     sequence: SequenceHeader {
                         sequence_number,
                         request_id,
@@ -275,6 +292,9 @@ impl Lane {
             sequence_number = sequence_number.saturating_add(1);
         }
         lease.sending = false;
+        if session_activity {
+            self.lock().last_activity = self.clock.now();
+        }
         drop(lease);
         self.receive(request_id, deadline, cancel).await
     }
@@ -288,7 +308,7 @@ impl Lane {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn reserve(&self) -> Result<Request<'_>> {
+    fn reserve(&self, open: Option<(UaByteString, Instant)>) -> Result<Request<'_>> {
         let (id, receiver) = {
             let mut state = self.lock();
             failure(&state)?;
@@ -306,6 +326,7 @@ impl Lane {
                     queued: true,
                     reply: None,
                     assembly: Assembly::default(),
+                    open,
                 },
             );
             (id, state.receiver.clone())
@@ -314,6 +335,10 @@ impl Lane {
             receiver.cancel();
         }
         Ok(Request { lane: self, id })
+    }
+
+    fn token_id(&self) -> u32 {
+        self.lock().token_id
     }
 
     fn next_sequence(&self) -> Result<u32> {
@@ -347,7 +372,7 @@ impl Lane {
                     ..
                 } = &mut *state;
                 let Some(pending) = pending.get_mut(&id) else {
-                    return Poll::Ready(Err(error(ErrorKind::Internal, "missing request slot")));
+                    return Poll::Ready(Err(missing_request()));
                 };
                 if let Some(reply) = pending.reply.take() {
                     return Poll::Ready(Ok(Acquired::Reply(Box::new(reply))));
@@ -396,6 +421,7 @@ impl Lane {
                 Acquired::Reply(reply) => return *reply,
                 Acquired::Transport(lease) => lease,
             };
+            self.expire_keys(lease.framed()?);
             let read = {
                 let interrupt = lease.interrupt.clone();
                 let mut interrupted = pin!(interrupt.cancelled());
@@ -410,7 +436,11 @@ impl Lane {
             };
             match read {
                 Ok(Some(frame)) => {
-                    if let Err(problem) = self.dispatch(frame) {
+                    let result = self
+                        .accept_open(&frame, lease.framed()?)
+                        .and_then(|()| self.dispatch(frame));
+                    self.expire_keys(lease.framed()?);
+                    if let Err(problem) = result {
                         self.fail(problem);
                     }
                 }
@@ -433,18 +463,25 @@ impl Lane {
         if let Body::Error(server) = frame.body {
             return Err(status_error(server.error));
         }
-        let Body::Message(chunk) = frame.body else {
-            return Err(error(
-                ErrorKind::MalformedData,
-                "expected a service message",
-            ));
+        let chunk = match frame.body {
+            Body::Message(chunk) => {
+                let mut state = self.lock();
+                self.accept_token(&mut state, chunk.channel_id, chunk.token_id)?;
+                chunk
+            }
+            Body::Open(chunk) => SecureChunk {
+                channel_id: chunk.channel_id,
+                token_id: self.token_id(),
+                sequence: chunk.sequence,
+                body: chunk.body,
+            },
+            _ => {
+                return Err(error(
+                    ErrorKind::MalformedData,
+                    "expected a service message",
+                ));
+            }
         };
-        if chunk.channel_id != self.channel_id || chunk.token_id != self.token_id {
-            return Err(error(
-                ErrorKind::MalformedData,
-                "foreign channel or token id",
-            ));
-        }
         let mut state = self.lock();
         let sequence = chunk.sequence.sequence_number;
         if sequence == 0
@@ -489,7 +526,10 @@ impl Lane {
         };
         pending.reply = Some(decode_service(&body).and_then(|service| {
             let header = match &service {
-                Service::GetEndpointsResponse {
+                Service::OpenSecureChannelResponse {
+                    response_header, ..
+                }
+                | Service::GetEndpointsResponse {
                     response_header, ..
                 }
                 | Service::CreateSessionResponse {
@@ -576,7 +616,7 @@ impl Lane {
     /// Continue the lane's counters for CLO and shut down without awaiting a reply.
     pub(super) async fn close(&self, deadline: Deadline, cancel: &CancellationToken) -> Result<()> {
         self.check(deadline, cancel)?;
-        let request = self.reserve()?;
+        let request = self.reserve(None)?;
         let mut lease = match self.acquire(request.id, true, deadline, cancel).await? {
             Acquired::Transport(lease) => lease,
             Acquired::Reply(_) => {
@@ -601,7 +641,7 @@ impl Lane {
         )?;
         let frame = Frame::single(Body::Close(SecureChunk {
             channel_id: self.channel_id,
-            token_id: self.token_id,
+            token_id: self.token_id(),
             sequence: SequenceHeader {
                 sequence_number: self.next_sequence()?,
                 request_id: request.id,
@@ -620,6 +660,8 @@ impl Lane {
             .await
     }
 }
+
+mod renewal;
 
 enum Acquired<'a> {
     Transport(Box<TransportLease<'a>>),
@@ -697,6 +739,10 @@ fn failure(state: &State) -> Result<()> {
 
 fn error(kind: ErrorKind, message: &str) -> PlcError {
     PlcError::new(kind, format!("OPC UA lane: {message}"))
+}
+
+fn missing_request() -> PlcError {
+    error(ErrorKind::Internal, "missing request slot")
 }
 
 fn exhausted() -> PlcError {

@@ -10,15 +10,10 @@ use crate::opcua::frame::{Frame, FrameHeader, MessageType, OpcuaFramer, RawFrame
 use crate::transport::{FramedTransport, Framer, Transport};
 use crate::{Deadline, Result};
 
-enum Protection {
-    Plain,
-    Asymmetric(Arc<Asymmetric>),
-    Symmetric(Box<Symmetric>),
-}
-
 pub(super) struct Wire {
     raw: FramedTransport<Bytes, RawFramer>,
-    protection: Protection,
+    asymmetric: Option<Arc<Asymmetric>>,
+    symmetric: Option<Box<Symmetric>>,
     backend: Arc<dyn Backend>,
 }
 
@@ -30,21 +25,22 @@ impl Wire {
     ) -> Self {
         Self {
             raw: FramedTransport::new(transport, RawFramer(framer)),
-            protection: Protection::Plain,
+            asymmetric: None,
+            symmetric: None,
             backend,
         }
     }
 
     pub(super) const fn is_protected(&self) -> bool {
-        !matches!(self.protection, Protection::Plain)
+        self.asymmetric.is_some() || self.symmetric.is_some()
     }
 
     pub(super) fn asymmetric(&mut self, asymmetric: Arc<Asymmetric>) {
-        self.protection = Protection::Asymmetric(asymmetric);
+        self.asymmetric = Some(asymmetric);
     }
 
     pub(super) fn symmetric(&mut self, symmetric: Symmetric) {
-        self.protection = Protection::Symmetric(Box::new(symmetric));
+        self.symmetric = Some(Box::new(symmetric));
     }
 
     #[cfg(all(test, feature = "testkit"))]
@@ -67,11 +63,42 @@ impl Wire {
 
     pub(super) fn max_body(&self, maximum: usize) -> Result<usize> {
         let maximum = maximum.min(self.raw.framer().0.send_limit());
-        match &self.protection {
-            Protection::Plain => SecuritySizes::NONE.max_body(maximum, 4),
-            Protection::Asymmetric(crypto) => crypto.max_body(maximum),
-            Protection::Symmetric(crypto) => crypto.max_body(maximum),
+        if let Some(crypto) = &self.symmetric {
+            crypto.max_body(maximum)
+        } else if let Some(crypto) = &self.asymmetric {
+            crypto.max_body(maximum)
+        } else {
+            SecuritySizes::NONE.max_body(maximum, 4)
         }
+    }
+
+    pub(super) fn max_open_body(&self, maximum: usize) -> Result<usize> {
+        let maximum = maximum.min(self.raw.framer().0.send_limit());
+        if let Some(crypto) = &self.asymmetric {
+            crypto.max_body(maximum)
+        } else {
+            SecuritySizes::NONE.max_body(
+                maximum,
+                crate::opcua::frame::AsymmetricHeader::none().length_in_bytes()?,
+            )
+        }
+    }
+
+    pub(super) fn install_token(&mut self, id: u32, client: &[u8], server: &[u8]) -> Result<()> {
+        if let Some(crypto) = &mut self.symmetric {
+            crypto.install(self.backend.as_ref(), id, client, server)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn retire_previous(&mut self) {
+        if let Some(crypto) = &mut self.symmetric {
+            crypto.retire_previous();
+        }
+    }
+
+    pub(super) fn nonce(&self) -> Result<[u8; 32]> {
+        crate::opcua::crypto::session_nonce(self.backend.as_ref())
     }
 
     pub(super) fn replace_framer(&mut self, framer: OpcuaFramer) {
@@ -80,15 +107,18 @@ impl Wire {
 
     pub(super) async fn send_frame(&mut self, frame: &Frame, deadline: Deadline) -> Result<()> {
         let limit = self.raw.framer().0.send_limit();
-        let bytes = match &self.protection {
-            Protection::Plain => {
-                let mut out = BytesMut::new();
-                let mut framer = self.raw.framer().0;
-                framer.encode(frame, &mut out)?;
-                out.freeze()
+        let bytes = if matches!(frame.body, crate::opcua::frame::Body::Open(_)) {
+            if let Some(crypto) = &self.asymmetric {
+                crypto.seal(frame, limit)?
+            } else {
+                self.plain(frame)?
             }
-            Protection::Asymmetric(crypto) => crypto.seal(frame, limit)?,
-            Protection::Symmetric(crypto) => crypto.seal(self.backend.as_ref(), frame, limit)?,
+        } else if let Some(crypto) = &self.symmetric {
+            crypto.seal(self.backend.as_ref(), frame, limit)?
+        } else if let Some(crypto) = &self.asymmetric {
+            crypto.seal(frame, limit)?
+        } else {
+            self.plain(frame)?
         };
         self.raw.send_frame(&bytes, deadline).await
     }
@@ -109,11 +139,23 @@ impl Wire {
             return Ok(Frame::parse(bytes)?);
         }
         let limit = self.raw.framer().0.receive_limit();
-        match &self.protection {
-            Protection::Plain => Ok(Frame::parse(bytes)?),
-            Protection::Asymmetric(crypto) => crypto.open(bytes, limit),
-            Protection::Symmetric(crypto) => crypto.open(self.backend.as_ref(), bytes, limit),
+        if header.message_type == MessageType::Open {
+            if let Some(crypto) = &self.asymmetric {
+                return crypto.open(bytes, limit);
+            }
+        } else if let Some(crypto) = &self.symmetric {
+            return crypto.open(self.backend.as_ref(), bytes, limit);
+        } else if let Some(crypto) = &self.asymmetric {
+            return crypto.open(bytes, limit);
         }
+        Ok(Frame::parse(bytes)?)
+    }
+
+    fn plain(&self, frame: &Frame) -> Result<Bytes> {
+        let mut out = BytesMut::new();
+        let mut framer = self.raw.framer().0;
+        framer.encode(frame, &mut out)?;
+        Ok(out.freeze())
     }
 
     fn receive_error(&self, error: crate::PlcError) -> crate::PlcError {

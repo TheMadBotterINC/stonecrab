@@ -688,13 +688,13 @@ struct EarlyClock {
     fails: bool,
 }
 impl Clock for EarlyClock {
-    fn now(&self) -> std::time::Instant {
+    fn now(&self) -> Instant {
         self.clock.now()
     }
     fn wall_now(&self) -> std::time::SystemTime {
         self.clock.wall_now()
     }
-    fn sleep_until(&self, _deadline: std::time::Instant) -> OpFuture<'_, ()> {
+    fn sleep_until(&self, _deadline: Instant) -> OpFuture<'_, ()> {
         Box::pin(std::future::ready(if self.fails {
             Err(error(ErrorKind::InvalidConfig, "broken clock"))
         } else {
@@ -759,7 +759,7 @@ fn opcua_internal_lease_invariants_fail_with_typed_errors() {
 #[test]
 fn opcua_duplicate_and_unsolicited_responses_are_rejected() {
     let rig = Rig::new(Script::default(), 1);
-    let _request = rig.lane.reserve().unwrap();
+    let _request = rig.lane.reserve(None).unwrap();
     let frame = |sequence| {
         Frame::single(Body::Message(SecureChunk {
             channel_id: 17,
@@ -962,7 +962,7 @@ fn opcua_lane_leaves_unexpected_service_types_for_the_session_to_reject() {
         458,
         &Service::SignatureData {
             algorithm: UaString::null(),
-            signature: crate::opcua::codec::UaByteString::null(),
+            signature: UaByteString::null(),
         },
         100,
     )
@@ -1504,4 +1504,124 @@ async fn opcua_interop_large_array_read_chunks_under_none() {
     println!(
         "8192-byte negotiated chunks: 4000 Int32 values exact over {response_chunks} response chunks; 600-node Read exact over {request_chunks} request chunks; close passed"
     );
+}
+
+fn scheduled(script: Script) -> Rig {
+    use crate::opcua::channel::Lifetime;
+    use crate::opcua::generated::channel_security_token::ChannelSecurityToken;
+    use crate::opcua::options::MessageSecurity;
+    let mut rig = Rig::new(script, 8);
+    let now = rig.clock.now();
+    rig.lane.state.get_mut().unwrap().renewal = Some(Renewal {
+        token: ChannelSecurityToken {
+            channel_id: 17,
+            token_id: 29,
+            created_at: 0,
+            revised_lifetime: 1000,
+        },
+        client_nonce: UaByteString::null(),
+        server_nonce: UaByteString::null(),
+        security: None,
+        mode: MessageSecurity::None,
+        requested: 1000,
+        minimum: 1,
+        lifetime: Lifetime::new(1000, 1000, 1, now),
+        previous: None,
+    });
+    rig.clock.advance(Duration::from_millis(750));
+    rig
+}
+
+fn renewal_replies() -> Script {
+    let mut sequence = 0_u32;
+    Script::strict(vec![Step::respond(move |bytes| {
+        sequence = sequence.checked_add(1).unwrap();
+        let frame = Frame::parse(bytes).unwrap();
+        match frame.body {
+            Body::Open(chunk) => Some(crate::opcua::responder::open_response(
+                sequence,
+                chunk.sequence.request_id,
+                17,
+                30,
+                1000,
+                0,
+            )),
+            Body::Message(chunk) => Some(message(
+                sequence,
+                chunk.sequence.request_id,
+                17,
+                30,
+                &read_response(chunk.sequence.request_id, 7),
+            )),
+            Body::Hello(_) | Body::Acknowledge(_) | Body::Error(_) | Body::Close(_) => {
+                panic!("service")
+            }
+        }
+    })])
+}
+
+#[test]
+fn opcua_concurrent_requests_share_one_renewal_and_cancelling_a_waiter_keeps_the_channel() {
+    let rig = scheduled(renewal_replies());
+    let gate = block_on_with(&rig.clock, rig.lane.renewal_lock.lock());
+    let mut first = rig.request();
+    let mut second = rig.request();
+    let cancel = CancellationToken::new();
+    let mut cancelled = rig.lane.exchange(&rig.token, 631, read, None, &cancel);
+    assert!(poll(&mut first).is_pending());
+    assert!(poll(&mut second).is_pending());
+    assert!(poll(&mut cancelled).is_pending());
+    cancel.cancel();
+    assert_eq!(
+        ready(&mut cancelled).unwrap_err().kind(),
+        ErrorKind::Cancelled
+    );
+    assert!(!rig.lane.is_failed());
+    assert_eq!(rig.probe.sent().len(), 0);
+    drop(gate);
+    assert_eq!(value(ready(&mut first).unwrap()), 7);
+    assert_eq!(value(ready(&mut second).unwrap()), 7);
+    assert_eq!(rig.probe.sent().len(), 3);
+    assert_eq!(
+        rig.probe
+            .sent()
+            .iter()
+            .filter(|bytes| bytes.starts_with(b"OPN"))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn opcua_renewal_service_fault_and_expired_channel_are_typed_fatal_errors() {
+    for expired in [false, true] {
+        let rig = scheduled(Script::strict(vec![Step::respond(|bytes| {
+            let Body::Open(chunk) = Frame::parse(bytes).unwrap().body else {
+                panic!("open")
+            };
+            Some(crate::opcua::responder::open(
+                1,
+                chunk.sequence.request_id,
+                17,
+                &service_fault(chunk.sequence.request_id, 0x8001_0000),
+            ))
+        })]));
+        if expired {
+            rig.clock.advance(Duration::from_millis(250));
+        }
+        let problem = block_on_with(&rig.clock, rig.request()).unwrap_err();
+        assert_eq!(
+            problem.kind(),
+            if expired {
+                ErrorKind::Disconnected
+            } else {
+                ErrorKind::DeviceException
+            }
+        );
+        if !expired {
+            assert_eq!(status_source(&problem).code, 0x8001_0000);
+        }
+        assert!(rig.lane.is_failed());
+        assert_eq!(rig.probe.sent().len(), usize::from(!expired));
+    }
 }

@@ -40,6 +40,9 @@ mod identity;
 mod lane;
 #[cfg(test)]
 #[cfg(feature = "testkit")]
+mod lifecycle_tests;
+#[cfg(test)]
+#[cfg(feature = "testkit")]
 #[path = "../tests/support/opcua_responder.rs"]
 mod responder;
 #[cfg(test)]

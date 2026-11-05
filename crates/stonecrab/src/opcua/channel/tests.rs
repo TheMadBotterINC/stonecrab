@@ -239,12 +239,12 @@ fn opcua_open_secure_channel_issue_request_carries_mode_nonce_and_lifetime() {
 fn opcua_open_secure_channel_response_sets_channel_id_token_id_and_lifetime() {
     let mut rig = Rig::new(Rig::healthy());
     let channel = rig.open().unwrap();
-    assert_eq!(channel.token.channel_id, 17);
-    assert_eq!(channel.token.token_id, 29);
-    assert_eq!(channel.token.revised_lifetime, 12345);
-    assert_eq!(channel.token.created_at, 1000);
+    assert_eq!(channel.renewal.token.channel_id, 17);
+    assert_eq!(channel.renewal.token.token_id, 29);
+    assert_eq!(channel.renewal.token.revised_lifetime, 12345);
+    assert_eq!(channel.renewal.token.created_at, 1000);
     assert_eq!(
-        channel.server_nonce.as_bytes(),
+        channel.renewal.server_nonce.as_bytes(),
         Some(b"server-nonce".as_slice())
     );
     assert_eq!(channel.received_sequence, 41);
@@ -263,7 +263,7 @@ fn opcua_policy_none_ignores_the_configured_message_security() {
         )
         .unwrap();
         let channel = rig.open().unwrap();
-        assert_eq!(channel.configured_mode.name(), mode);
+        assert_eq!(channel.renewal.mode.name(), mode);
         let shown = format!("{channel:?}");
         assert!(shown.contains("effective_message_security: \"NONE\""));
         assert!(!shown.contains("server-nonce"));
@@ -573,7 +573,6 @@ fn opcua_open_secure_channel_rejects_foreign_ids_policy_and_zero_tokens() {
         open_response(41, 9, 17, 29, 12345, 0),
         open_response(41, 1, 0, 29, 12345, 0),
         open_response(41, 1, 17, 0, 12345, 0),
-        open_response(41, 1, 17, 29, 0, 0),
         bad_policy,
         bad_channel,
         bad_handle,
@@ -755,7 +754,7 @@ fn opcua_policy_none_does_not_open_the_keystore() {
     assert_eq!(chunk.security.sender_certificate.as_bytes(), None);
     assert_eq!(chunk.security.receiver_thumbprint.as_bytes(), None);
     assert_eq!(
-        channel.token.revised_lifetime, 12345,
+        channel.renewal.token.revised_lifetime, 12345,
         "opening requires no certificate material"
     );
 }
@@ -873,12 +872,12 @@ async fn opcua_interop_peer_answers_hello_and_opens_a_none_channel() {
     )
     .await
     .unwrap();
-    assert!(channel.token.channel_id > 0);
-    assert!(channel.token.token_id > 0);
-    assert!(channel.token.revised_lifetime > 0);
+    assert!(channel.renewal.token.channel_id > 0);
+    assert!(channel.renewal.token.token_id > 0);
+    assert!(channel.renewal.token.revised_lifetime > 0);
     println!(
         "policy None HEL/ACK and OPN Issue passed; lifetime={}ms receive={} send={}",
-        channel.token.revised_lifetime,
+        channel.renewal.token.revised_lifetime,
         channel.limits.receive_buffer_size,
         channel.limits.send_buffer_size
     );
@@ -1007,7 +1006,7 @@ async fn opcua_interop_basic256sha256_open_secure_channel_round_trips_against_th
                 MessageSecurityMode::MessageSecurityModeSignAndEncrypt
             },
             client_nonce: nonce.clone(),
-            requested_lifetime: DEFAULT_LIFETIME,
+            requested_lifetime: 3_600_000,
         };
         let open = Frame::single(Body::Open(OpenChunk {
             channel_id: 0,

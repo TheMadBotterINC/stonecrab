@@ -17,8 +17,9 @@ under a bounded preparation lock and publish a fresh session snapshot.
   milliseconds. Reuse numeric parsing. A wire lifetime is UInt32 and cannot be negative;
   negative configuration is rejected. Zero/larger server revisions fall back to requested
   lifetime for compatibility, and the effective scheduling lifetime is raised to the
-  configured minimum with a static warning. Pure Lifetime arithmetic uses monotonic elapsed
-  durations and integer 75 percent scheduling. A minimum does not extend a server token's
+  configured minimum bounded by the request, with a static warning. Pure Lifetime arithmetic
+  uses monotonic elapsed durations and integer 75 percent scheduling rounded up to a
+  positive millisecond, matching the pinned upstream without float precision loss. A minimum does not extend a server token's
   actual validity; retain a separate actual expiry and old-token 25 percent grace limit.
 - Add concrete Renewal metadata in channel.rs (policy/mode, requested/minimum, token,
   client/server nonces, retained Arc<Security> and Lifetime). Channel transfers this single
@@ -55,7 +56,8 @@ under a bounded preparation lock and publish a fresh session snapshot.
   driver/config on the connection. Reopen with existing credentials/trust/options and the
   original operation deadline/cancellation bounded by handshake timeout. A new Session
   starts with an empty metadata cache. Close cancels preparation and prevents resurrection.
-  Dropping a recovery releases its lock and permits another call to retry known expiry.
+  Dropping a recovery releases its lock, leaves Reconnecting visible, and permits the
+  next call to retry known expiry.
 - Keep non-expiry transport failure behavior until S110. Already-sent operations are never
   retried across recovery; writes preserve Unknown after transmission and ordinary errors
   before transmission. Reconnecting/Connected transitions describe idle recovery; no work
