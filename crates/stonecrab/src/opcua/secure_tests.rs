@@ -599,3 +599,260 @@ fn opcua_secure_session_proofs_cover_the_exact_client_certificate_chain() {
         block_on_with(&clock, connection.close()).unwrap();
     }
 }
+
+// covers: OPCUA-AUTH-USERNAME / OPCUA-AUTH-TOKEN-POLICY
+#[test]
+fn opcua_protected_user_name_tokens_inherit_or_override_each_secure_channel_policy() {
+    use super::codec::ExtensionBody;
+    use super::generated::user_token_type::UserTokenType;
+    for channel_policy in SECURE_POLICIES {
+        let fixture = Fixture::new();
+        for token_policy in SECURE_POLICIES {
+            for mode in [MessageSecurity::Sign, MessageSecurity::SignEncrypt] {
+                for inherit in [false, true] {
+                    if inherit && token_policy != channel_policy {
+                        continue;
+                    }
+                    let uri = if inherit {
+                        UaString::null()
+                    } else {
+                        UaString::new(token_policy.uri())
+                    };
+                    let peer = fixture
+                        .peer(channel_policy, mode)
+                        .token(UserTokenType::UserTokenTypeUserName, uri);
+                    let probe = peer.probe.clone();
+                    let (driver, clock, _) = driver(peer.reactor(|_, _| {}));
+                    let mut registry = crate::DriverRegistry::new();
+                    registry.register(Arc::new(driver)).unwrap();
+                    let connection = block_on_with(
+                        &clock,
+                        registry.connect_with(
+                            &fixture.uri(channel_policy, mode, true),
+                            crate::Credentials::new("operator-sentinel", "пароль\0secret"),
+                        ),
+                    )
+                    .unwrap();
+                    let requests = probe.requests();
+                    let Service::ActivateSessionRequest {
+                        user_identity_token,
+                        user_token_signature,
+                        ..
+                    } = requests
+                        .iter()
+                        .find(|request| matches!(request, Service::ActivateSessionRequest { .. }))
+                        .unwrap()
+                    else {
+                        panic!("activate")
+                    };
+                    let ExtensionBody::Known(token) = &user_identity_token.body else {
+                        panic!("token")
+                    };
+                    let Service::UserNameIdentityToken {
+                        policy_id,
+                        user_name,
+                        password: _,
+                        encryption_algorithm,
+                    } = token.as_ref()
+                    else {
+                        panic!("username")
+                    };
+                    assert_eq!(policy_id, &UaString::new("selected-user"));
+                    assert_eq!(user_name, &UaString::new("operator-sentinel"));
+                    assert_eq!(
+                        encryption_algorithm,
+                        &UaString::new(token_policy.descriptor().encryption_uri)
+                    );
+                    let password = "пароль\0secret".as_bytes();
+                    let expected = [
+                        u32::try_from(password.len().checked_add(32).unwrap())
+                            .unwrap()
+                            .to_le_bytes()
+                            .as_slice(),
+                        password,
+                        &[0x66; 32],
+                    ]
+                    .concat();
+                    let Service::UserNameIdentityToken {
+                        password: encrypted,
+                        ..
+                    } = token.as_ref()
+                    else {
+                        panic!("username")
+                    };
+                    assert_eq!(
+                        fixture.password(token_policy, encrypted.as_bytes().unwrap()),
+                        expected
+                    );
+                    assert_eq!(user_token_signature.signature, UaByteString::null());
+                    block_on_with(&clock, connection.close()).unwrap();
+                }
+            }
+        }
+    }
+}
+
+// covers: OPCUA-AUTH-X509 / OPCUA-AUTH-CLIENT-SIGNATURE
+#[test]
+fn opcua_x509_user_signature_uses_a_separate_key_leaf_and_selected_token_policy() {
+    use super::codec::ExtensionBody;
+    use super::generated::user_token_type::UserTokenType;
+    use super::pki::{self, CertSpec};
+    use aws_lc_rs::encoding::{AsDer, Pkcs8V1Der};
+    use aws_lc_rs::signature::{
+        KeyPair, RSA_PKCS1_2048_8192_SHA256, RSA_PSS_2048_8192_SHA256, RsaPssSaltLength,
+        UnparsedPublicKey,
+    };
+    let fixture = Fixture::new();
+    let user = pki::other_key_pair();
+    let mut spec = CertSpec::application("user", "user", 25);
+    spec.application_uris = &[];
+    let leaf = pki::certificate(&spec, &user, &user);
+    let certificate = fixture
+        .scratch
+        .write("user.pem", &pki::pem("CERTIFICATE", &leaf));
+    let der: Pkcs8V1Der<'_> = user.as_der().unwrap();
+    let key = fixture
+        .scratch
+        .write("user-key.pem", &pki::pem("PRIVATE KEY", der.as_ref()));
+    for channel_policy in SECURE_POLICIES {
+        for token_policy in SECURE_POLICIES {
+            for mode in [MessageSecurity::Sign, MessageSecurity::SignEncrypt] {
+                let peer = fixture.peer(channel_policy, mode).token(
+                    UserTokenType::UserTokenTypeCertificate,
+                    UaString::new(token_policy.uri()),
+                );
+                let probe = peer.probe.clone();
+                let (driver, clock, _) = driver(peer.reactor(|_, _| {}));
+                let mut registry = crate::DriverRegistry::new();
+                registry.register(Arc::new(driver)).unwrap();
+                let connection = block_on_with(
+                    &clock,
+                    registry.connect_with(
+                        &fixture.uri(channel_policy, mode, false),
+                        crate::Credentials::x509(&certificate, &key),
+                    ),
+                )
+                .unwrap();
+                let requests = probe.requests();
+                let Service::ActivateSessionRequest {
+                    user_identity_token,
+                    user_token_signature,
+                    ..
+                } = requests
+                    .iter()
+                    .find(|request| matches!(request, Service::ActivateSessionRequest { .. }))
+                    .unwrap()
+                else {
+                    panic!("activate")
+                };
+                let ExtensionBody::Known(token) = &user_identity_token.body else {
+                    panic!("token")
+                };
+                assert_eq!(
+                    token.as_ref(),
+                    &Service::X509IdentityToken {
+                        policy_id: UaString::new("selected-user"),
+                        certificate_data: UaByteString::new(leaf.clone())
+                    }
+                );
+                assert_eq!(
+                    user_token_signature.algorithm,
+                    UaString::new(token_policy.descriptor().signature_uri)
+                );
+                let algorithm = if token_policy == SecurityPolicy::Aes256Sha256RsaPss {
+                    &const { RSA_PSS_2048_8192_SHA256.with_pss_salt_length(RsaPssSaltLength::Custom(32)) }
+                } else {
+                    &RSA_PKCS1_2048_8192_SHA256
+                };
+                UnparsedPublicKey::new(algorithm, user.public_key())
+                    .verify(
+                        &[fixture.server_certificate.as_slice(), &[0x66; 32]].concat(),
+                        user_token_signature.signature.as_bytes().unwrap(),
+                    )
+                    .unwrap();
+                block_on_with(&clock, connection.close()).unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn opcua_secure_tokens_refuse_none_unknown_policies_and_long_passwords_without_activation() {
+    use super::generated::user_token_type::UserTokenType;
+    use super::pki;
+    let fixture = Fixture::new();
+    let cert = fixture.scratch.write(
+        "user.pem",
+        &pki::pem("CERTIFICATE", &fixture.client_certificate),
+    );
+    let key = fixture
+        .scratch
+        .write("user-key.pem", &pki::pem("PRIVATE KEY", pki::pkcs8_2048()));
+    for (token_type, policy_uri, allow, mode, kind) in [
+        (
+            UserTokenType::UserTokenTypeUserName,
+            SecurityPolicy::None.uri(),
+            false,
+            MessageSecurity::SignEncrypt,
+            ErrorKind::Authentication,
+        ),
+        (
+            UserTokenType::UserTokenTypeUserName,
+            SecurityPolicy::None.uri(),
+            true,
+            MessageSecurity::Sign,
+            ErrorKind::Authentication,
+        ),
+        (
+            UserTokenType::UserTokenTypeCertificate,
+            SecurityPolicy::None.uri(),
+            false,
+            MessageSecurity::SignEncrypt,
+            ErrorKind::Authentication,
+        ),
+        (
+            UserTokenType::UserTokenTypeCertificate,
+            "unknown-policy",
+            false,
+            MessageSecurity::SignEncrypt,
+            ErrorKind::Unsupported(crate::Operation::Connect),
+        ),
+        (
+            UserTokenType::UserTokenTypeUserName,
+            SecurityPolicy::Basic256Sha256.uri(),
+            false,
+            MessageSecurity::SignEncrypt,
+            ErrorKind::ResourceLimit,
+        ),
+    ] {
+        let peer = fixture
+            .peer(SecurityPolicy::Basic256Sha256, mode)
+            .token(token_type, UaString::new(policy_uri));
+        let probe = peer.probe.clone();
+        let (driver, clock, factory) = driver(peer.reactor(|_, _| {}));
+        let mut registry = crate::DriverRegistry::new();
+        registry.register(Arc::new(driver)).unwrap();
+        let credentials = if token_type == UserTokenType::UserTokenTypeCertificate {
+            crate::Credentials::x509(&cert, &key)
+        } else {
+            crate::Credentials::new("operator-sentinel", "s".repeat(65))
+        };
+        let error = block_on_with(
+            &clock,
+            registry.connect_with(
+                &format!(
+                    "{}&allow-insecure-credentials={allow}",
+                    fixture.uri(SecurityPolicy::Basic256Sha256, mode, false)
+                ),
+                credentials,
+            ),
+        )
+        .err()
+        .unwrap();
+        assert_eq!(error.kind(), kind);
+        assert!(!activated(&probe));
+        assert_eq!(factory.opens().len(), 1);
+        assert!(!format!("{error:?}").contains("sentinel"));
+    }
+}

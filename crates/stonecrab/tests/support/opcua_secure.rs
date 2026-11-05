@@ -22,6 +22,8 @@ use crate::opcua::generated::extension_object_definition::ExtensionObjectDefinit
 use crate::opcua::generated::message_security_mode::MessageSecurityMode;
 use crate::opcua::generated::response_header::ResponseHeader;
 use crate::opcua::generated::signature_data::SignatureData;
+use crate::opcua::generated::user_token_policy::UserTokenPolicy;
+use crate::opcua::generated::user_token_type::UserTokenType;
 use crate::opcua::options::{MessageSecurity, SecurityPolicy};
 use crate::opcua::pki::{self, CertSpec, Scratch};
 use crate::opcua::responder::{self, Device};
@@ -88,6 +90,28 @@ impl Fixture {
         )
     }
 
+    pub(super) fn password(&self, policy: SecurityPolicy, ciphertext: &[u8]) -> Vec<u8> {
+        use aws_lc_rs::rsa::{
+            OAEP_SHA1_MGF1SHA1, OAEP_SHA256_MGF1SHA256, OaepPrivateDecryptingKey,
+            PrivateDecryptingKey,
+        };
+        let der: Pkcs8V1Der<'_> = self.signing.expose().as_der().unwrap();
+        let key =
+            OaepPrivateDecryptingKey::new(PrivateDecryptingKey::from_pkcs8(der.as_ref()).unwrap())
+                .unwrap();
+        let algorithm = if policy == SecurityPolicy::Aes256Sha256RsaPss {
+            &OAEP_SHA256_MGF1SHA256
+        } else {
+            &OAEP_SHA1_MGF1SHA1
+        };
+        let mut plain = Vec::new();
+        let mut block = vec![0; key.min_output_size()];
+        for part in ciphertext.as_chunks::<256>().0 {
+            plain.extend_from_slice(key.decrypt(algorithm, part, &mut block, None).unwrap());
+        }
+        plain
+    }
+
     pub(super) fn peer(&self, policy: SecurityPolicy, mode: MessageSecurity) -> Peer {
         Peer {
             asymmetric: Asymmetric::new(
@@ -97,6 +121,7 @@ impl Fixture {
             )
             .unwrap(),
             policy,
+            token: None,
             symmetric: None,
             mode,
             certificate: self.server_certificate.clone(),
@@ -130,6 +155,7 @@ impl Probe {
 
 pub(super) struct Peer {
     policy: SecurityPolicy,
+    token: Option<UserTokenPolicy>,
     asymmetric: Asymmetric,
     symmetric: Option<Symmetric>,
     mode: MessageSecurity,
@@ -158,6 +184,17 @@ fn header(handle: u32) -> ResponseHeader {
 }
 
 impl Peer {
+    pub(super) fn token(mut self, kind: UserTokenType, uri: UaString) -> Self {
+        self.token = Some(UserTokenPolicy {
+            policy_id: UaString::new("selected-user"),
+            token_type: kind,
+            issued_token_type: UaString::null(),
+            issuer_endpoint_url: UaString::null(),
+            security_policy_uri: uri,
+        });
+        self
+    }
+
     fn endpoint(&self) -> EndpointDescription {
         let Service::CreateSessionResponse {
             server_endpoints, ..
@@ -173,6 +210,9 @@ impl Peer {
         };
         endpoint.security_policy_uri = UaString::new(self.policy.uri());
         endpoint.server_certificate = UaByteString::new(self.certificate.clone());
+        if let Some(token) = &self.token {
+            endpoint.user_identity_tokens = Some(vec![token.clone()]);
+        }
         endpoint
     }
 
@@ -338,7 +378,12 @@ impl Peer {
                         client_signature.signature.as_bytes().unwrap(),
                     )
                     .unwrap();
-                assert_eq!(user_token_signature.signature, UaByteString::null());
+                if !self.token.as_ref().is_some_and(|token| {
+                    token.token_type == UserTokenType::UserTokenTypeCertificate
+                }) {
+                    assert_eq!(user_token_signature.algorithm, UaString::null());
+                    assert_eq!(user_token_signature.signature, UaByteString::null());
+                }
                 let Service::ActivateSessionResponse { server_nonce, .. } = &mut response else {
                     panic!("activate")
                 };
