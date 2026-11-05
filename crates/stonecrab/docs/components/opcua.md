@@ -636,13 +636,13 @@ See ADR-0046 and the S108 evidence record. General transport-loss reconnect rema
 
 Operations renew a due channel token on the same socket and session, with no background
 task. `channel-lifetime-ms` defaults to 3600000 and `min-channel-lifetime-ms` to 5000;
-both accept positive UInt32 milliseconds. The effective scheduling lifetime ignores a
+both accept positive `UInt32` milliseconds. The effective scheduling lifetime ignores a
 zero or larger-than-requested server revision and raises a lower revision to the minimum
 bounded by the request, with a static warning. Renewal is due at 75 percent, rounded up
 to a positive millisecond using integer arithmetic. The scheduling minimum never extends
 a server token's actual validity.
 
-Every supported policy, including None, sends OpenSecureChannel Renew. Secure renewal
+Every supported policy, including None, sends `OpenSecureChannel` Renew. Secure renewal
 checks certificates/trust again, requires fresh nonces, derives new keys and preserves
 request/sequence counters. The previous token is retained only through its original
 lifetime plus 25 percent receive grace, or until the first authenticated new-token message.
@@ -660,7 +660,7 @@ publication. Validating access, addresses, limits and cancellation still precede
 value/metadata checks retain the staged-write ordering.
 
 Native open62541 tests keep one socket alive through more than three short lifetimes
-for every modern SIGN_ENCRYPT policy and repeated None renewals, and recover after idle
+for every modern `SIGN_ENCRYPT` policy and repeated None renewals, and recover after idle
 channel/session expiry. Forced old-token delay and sequence wrap remain independently
 UNVERIFIED. General transport-loss reconnect/backoff is S110. See ADR-0047 and S109 evidence;
 no hardware claim.

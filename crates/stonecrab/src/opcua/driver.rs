@@ -102,7 +102,7 @@ impl OpcuaDriver {
     /// `message-security`. The request timeout is `request-timeout-ms` (30000 ms by default),
     /// `handshake-timeout-ms` maps to the whole connect bound (60000 ms by default),
     /// `session-timeout-ms` requests 120000 ms. `channel-lifetime-ms` requests 3600000 ms;
-    /// `min-channel-lifetime-ms` defaults to 5000 ms (both positive UInt32 milliseconds).
+    /// `min-channel-lifetime-ms` defaults to 5000 ms (both positive `UInt32` milliseconds).
     /// `encoding.receive-buffer-size` and `encoding.send-buffer-size` select the chunk
     /// ceilings (65535 each by default), and `encoding.max-message-size` and
     /// `encoding.max-chunk-count` select whole-body limits (2097152 bytes and 64 chunks,

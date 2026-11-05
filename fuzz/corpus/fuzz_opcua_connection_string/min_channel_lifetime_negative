@@ -1,0 +1,1 @@
+opcua://host:4840?security-policy=NONE&min-channel-lifetime-ms=-1
