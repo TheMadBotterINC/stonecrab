@@ -5,6 +5,45 @@ Implementation baseline: the commit that last modified this file
 (`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
 its own commit; the slice log below records what each one landed.
 
+## OPC UA browse walk (S112, 2026-11-05)
+
+The private OPC UA connection path now walks forward hierarchical references with
+Browse/BrowseNext on one Session. Blank/** starts at Objects; invalid queries and root
+refusals are per-query errors. Flat nodes retain same-name siblings, GUID/ByteString
+addresses, backward parents and exact per-node refusal status while siblings continue.
+An optional BrowseNode.error preserves expansion failures through cloning.
+
+Traversal is iterative, with the root previsited and one node/point per service request.
+Protocol ceilings default to 65536 references per node, 1000000 visited nodes and depth
+64; zero removes only that protocol ceiling. The smaller finite request/connection node
+budget spans queries. Limits report truncation; pages and references check cancellation
+and the single operation deadline. Known points are released on their original Session,
+or queued within count/byte bounds for the next caller to release. Existing transmission
+tracking distinguishes unsent admission refusals from interrupted requests that may hide
+a new point. The latter retire the lane and recover on a later call without replay.
+Unseen points require server session expiry; cleanup Drop never does I/O or spawns work.
+
+The generated closure grows to 37 cases, with BrowseDirection/NodeClass and independent
+positive/truncated fixtures. Public browse stays Unsupported/capability false until S113
+adds variable type/access/shape and metadata/filtering. Eight precise parity rows close:
+249 total, 176 implemented, 35 planned, 38 deferred. Combined public/attribute rows move
+to S113 rather than claiming they are complete.
+
+Full strict checks pass: 2624 tests and 592+5 doctests; ten core-only browse tests;
+standalone OPC UA 569 tests and strict Clippy. Core 7346/7346 and handwritten OPC UA
+11442/11442 lines are 100%, without new exclusions. All 13 selected mutations are caught;
+all 18 fuzz targets pass at least 60 seconds. The 59 isolated feature combinations,
+regen, dependency/D23/machete, examples, semver, parity and attributes pass. Native
+open62541 passes 21 tests, self-check and finite example; peer/PKI are removed. Fresh
+reviewed 247-file package and unpacked all-feature/standalone builds pass.
+
+Hosted CI 41992250373 on 5d77bae passes all 32 executed jobs. Scheduled and first-branch
+DCO skip by workflow conditions; local DCO checks the full signed-off range. Final
+root-only notes preserve the hosted-tested build inputs; normal merge pushes master. [Evidence](docs/evidence/opcua-s112.md),
+[design](docs/adr/0050-opcua-browse-walk.md). No new dependency, feature or version;
+no release or hardware claim. Next: S113 typed metadata and public browse capability.
+Normal signed-off merges retain every commit.
+
 ## Core browse contract (S111, 2026-11-05)
 
 The facade now provides bounded named browse queries, flat nodes and correlated query

@@ -569,8 +569,8 @@ Slice S76 (2026-10-30) updated the table: the five rows that decision E16 deferr
 | S108 | OPCUA-AUTH-USERNAME, OPCUA-AUTH-X509, OPCUA-AUTH-CLIENT-SIGNATURE (the CreateSession and ActivateSession signature is sent from S106; the row's user-token test closes here), OPCUA-DIV-SESSION-CERT-VERIFY |
 | S109 | OPCUA-LIFE-RENEWAL, OPCUA-CFG-CHANNEL-LIFETIME, OPCUA-CFG-MIN-CHANNEL-LIFETIME, OPCUA-QUIRK-SHARED-SCHEDULER, OPCUA-DIV-RENEWAL-FAILURE |
 | S110 | OPCUA-LIFE-NO-REACTIVATE |
-| S112 | OPCUA-OP-BROWSE, OPCUA-BROWSE-ENTRY, OPCUA-BROWSE-WALK, OPCUA-BROWSE-REFERENCES, OPCUA-CFG-BROWSE-MAX-REFERENCES, OPCUA-CFG-BROWSE-MAX-NODES, OPCUA-CFG-BROWSE-MAX-DEPTH, OPCUA-LIMIT-BROWSE, OPCUA-DIV-BROWSE-SIBLINGS, OPCUA-DIV-BROWSE-NODE-IDS, OPCUA-DIV-BROWSE-STATUS |
-| S113 | OPCUA-BROWSE-ITEM, OPCUA-BROWSE-ATTRIBUTES, OPCUA-BROWSE-INTERCEPTOR |
+| S112 | OPCUA-BROWSE-REFERENCES, OPCUA-CFG-BROWSE-MAX-REFERENCES, OPCUA-CFG-BROWSE-MAX-NODES, OPCUA-CFG-BROWSE-MAX-DEPTH, OPCUA-LIMIT-BROWSE, OPCUA-DIV-BROWSE-SIBLINGS, OPCUA-DIV-BROWSE-NODE-IDS, OPCUA-DIV-BROWSE-STATUS |
+| S113 | OPCUA-OP-BROWSE, OPCUA-BROWSE-ENTRY, OPCUA-BROWSE-WALK, OPCUA-BROWSE-ITEM, OPCUA-BROWSE-ATTRIBUTES, OPCUA-BROWSE-INTERCEPTOR |
 | S115 | OPCUA-OP-SUBSCRIBE-CHANGE, OPCUA-SUB-CREATE, OPCUA-SUB-MONITORED-ITEM, OPCUA-LIMIT-SUBSCRIPTION, OPCUA-CFG-SUBSCRIPTION-QUEUE |
 | S116 | OPCUA-SUB-PUBLISH, OPCUA-LIFE-TIMEOUTS (its Publish time-out hint test needs the publish path), OPCUA-DIV-PUBLISH-ROUTING, OPCUA-DIV-PUBLISH-ACK |
 | S117 | OPCUA-OP-UNSUBSCRIBE, OPCUA-SUB-STOP, OPCUA-SUB-ITEM-FAILURE, OPCUA-QUIRK-ITEM-LOG-ONLY, OPCUA-DIV-ITEM-FAILURE, OPCUA-OP-RECONNECT, OPCUA-DIV-RECONNECT (the handshake half is tested in S110; subscriptions ending with Disconnected need S114 to S116) |
@@ -735,3 +735,8 @@ Unknown, preserving a device status when present. Bad statuses remain typed reje
 Core's existing TimeoutAfterTransmit reason is the fallback for an unusable confirmation;
 no new public reason variant is added. Only a verified WriteResponse's wrong result count
 remains the explicit MalformedData error described above, with no automatic replay.
+
+S112 completion note (2026-11-05): its private walk closes eight precise rows. The
+combined public OP-BROWSE, ENTRY and WALK/attribute rows remain planned and are
+assigned to S113, which adds typed metadata and enables the capability. This does
+not claim a public driver browse operation in S112.

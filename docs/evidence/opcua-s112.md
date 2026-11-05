@@ -80,7 +80,19 @@ divergence rows close; OPC UA is 249 total, 176 implemented, 35 planned, 38 defe
 
 ## Hosted and merge evidence
 
-Hosted CI and final cleanup/merge checks are pending. Final handoff changes will be
-root-only, preserving the hosted-tested product, generator, scripts, interop, package
-and fuzz inputs. Merge uses --no-ff --no-squash --signoff and pushes master. Next is
-S113 typed browse metadata; it is not part of S112.
+[CI 41992250373](https://github.com/TheMadBotterINC/stonecrab/actions/runs/41992250373)
+on 5d77baeee8f2510a23231664d79b93a7b5cb4ba6 passes all 32 executed jobs: both Rust
+versions on Windows/macOS/Linux, coverage, cross builds, native OPC UA/other peers,
+package verification and all 18 sequential fuzz targets included. Scheduled and
+first-branch DCO skip by workflow conditions; local DCO verifies the full range.
+
+Final native container and exported PKI are removed; unpacked all-feature and standalone
+OPC UA builds pass. The final handoff touches only STATUS.md, POST_ALPHA_PLAN.md, this
+evidence and the root parity ownership note; final local parity/self-tests pass. Product,
+crate documentation, generator, manifest/lock, scripts, interop, package and fuzz inputs
+match the hosted source exactly. Combined public/attribute rows are assigned to S113.
+
+Merge uses --no-ff --no-squash --signoff and pushes master, retaining all seven feature
+commits. Final checks require clean master synced with origin, both merge parents,
+feature ancestry and matching remote HEAD. No release/tag/version change. Next is S113
+typed browse metadata/public capability; it is not part of S112.
