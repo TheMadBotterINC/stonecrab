@@ -82,4 +82,20 @@ no-background-tasks row remains planned until the Publish work in S116.
 
 All 18 fuzz targets pass at least 60 seconds with zero crash artifacts in the final run:
 [report](fuzz/2026-11-05-s109.md). Fuzz cfg(fuzzing) strict Clippy, deny and root/fuzz
-policy comparison pass. Hosted evidence will be appended after CI finishes.
+policy comparison pass. The fuzz report's uncommitted changes were the root-only evidence
+draft; its product and fuzz inputs match 35aa5d2 and the hosted source below.
+
+## Hosted and merge evidence
+
+[CI 41970120172](https://github.com/TheMadBotterINC/stonecrab/actions/runs/41970120172)
+on 9eef6871dfbd84678b2ee0541c70a1696d3736c8 passes all 32 executed jobs: both Rust
+versions on Windows/macOS/Linux, coverage, cross-target builds, native OPC UA and other
+interop, package verification and full serial fuzz smoke included. Scheduled and
+first-branch DCO skip by workflow conditions; local DCO verifies the entire commit range.
+
+The final evidence/handoff changes are root-only. Product, crate documentation,
+generator, manifest/lock, script, interop, packaging and fuzz inputs match the hosted
+source exactly. Merge uses --no-ff --no-squash --signoff, preserving every plan,
+implementation, test and evidence commit, and pushes master. Final checks require a clean
+master synced with origin, both merge parents and feature ancestry, and matching remote
+HEAD. No release/tag/version change; next is S110 request-driven reconnect.
