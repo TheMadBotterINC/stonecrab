@@ -1162,3 +1162,104 @@ async fn opcua_interop_write_then_read_round_trips_every_writable_type() {
     );
     connection.close().await.unwrap();
 }
+
+fn concrete(rig: Rig) -> (OpcuaConnection, FakeClock, FakeTransportFactory) {
+    let config = rig.driver.parse_config(URI).unwrap();
+    let deadline = Deadline::after(rig.clock.now(), config.timeouts().connect).unwrap();
+    let session = block_on_with(
+        &rig.clock,
+        rig.driver
+            .open_session(&config, deadline, &CancellationToken::new()),
+    )
+    .unwrap();
+    let connection = OpcuaConnection::new(session, rig.driver, config, Arc::new(rig.clock.clone()));
+    (connection, rig.clock, rig.factory)
+}
+
+#[test]
+fn opcua_concurrent_idle_callers_share_one_fresh_session() {
+    let (connection, clock, factory) = concrete(Rig::new());
+    factory.push_script(Script::strict(vec![Step::react(
+        Device::default().reactor(),
+    )]));
+    clock.advance(Duration::from_secs(120));
+    let guard = block_on_with(&clock, connection.preparation.lock());
+    let mut first = connection.read(request(&connection, vec![tag("first", 1)]));
+    let mut second = connection.read(request(&connection, vec![tag("second", 2)]));
+    assert!(
+        first
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending()
+    );
+    assert!(
+        second
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending()
+    );
+    drop(guard);
+    assert_eq!(block_on_with(&clock, first).unwrap().iter_ok().count(), 1);
+    assert_eq!(block_on_with(&clock, second).unwrap().iter_ok().count(), 1);
+    assert_eq!(factory.opens().len(), 2);
+    block_on_with(&clock, connection.close()).unwrap();
+}
+
+#[test]
+fn opcua_idle_reopen_failure_and_close_during_activation_do_not_publish_a_session() {
+    for closing in [false, true] {
+        let (connection, clock, factory) = concrete(Rig::new());
+        let original = connection.current();
+        if closing {
+            let stop = connection.operations_stopped.clone();
+            let mut reactor = Device::default().reactor();
+            factory.push_script(Script::strict(vec![Step::react(move |wire| {
+                let reply = reactor(wire);
+                if wire.starts_with(b"MSG")
+                    && matches!(body(wire), Service::ActivateSessionRequest { .. })
+                {
+                    stop.cancel();
+                }
+                reply
+            })]));
+        } else {
+            factory.push_refusal();
+        }
+        clock.advance(Duration::from_secs(120));
+        let error = block_on_with(
+            &clock,
+            connection.read(request(&connection, vec![tag("value", 1)])),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Disconnected);
+        assert!(Arc::ptr_eq(&original, &connection.current()));
+        assert_eq!(factory.opens().len(), 2);
+        if !closing {
+            assert_eq!(
+                connection.state(),
+                ConnectionState::Failed(ErrorKind::Disconnected)
+            );
+        }
+        let _closed = block_on_with(&clock, connection.close());
+        assert_eq!(connection.state(), ConnectionState::Closed);
+    }
+}
+
+#[test]
+fn opcua_close_admission_prevents_an_expired_session_from_starting_recovery() {
+    let (connection, clock, factory) = concrete(Rig::new());
+    clock.advance(Duration::from_secs(120));
+    connection.state.set(ConnectionState::Closing);
+    let deadline = Deadline::after(clock.now(), Duration::from_secs(1)).unwrap();
+    let error = block_on_with(
+        &clock,
+        connection.ready(deadline, &CancellationToken::new()),
+    )
+    .err()
+    .unwrap();
+    assert_eq!(error.kind(), ErrorKind::Disconnected);
+    assert_eq!(factory.opens().len(), 1);
+    assert_eq!(connection.state(), ConnectionState::Closing);
+    let _closed = block_on_with(&clock, connection.close());
+    assert_eq!(connection.state(), ConnectionState::Closed);
+}

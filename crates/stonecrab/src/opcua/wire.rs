@@ -186,3 +186,74 @@ impl std::fmt::Debug for Wire {
             .finish_non_exhaustive()
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "testkit")]
+mod tests {
+    use super::*;
+    use crate::opcua::frame::{Body, Frame, SecureChunk, SequenceHeader};
+    use crate::opcua::{
+        OpcuaDriver, crypto::Security, options::OpcuaOptions, secure_responder::Fixture,
+    };
+    use crate::testkit::{FakeClock, FakeTransport, Script, block_on_with};
+    use crate::{Clock, ErrorKind, ResourceLimits};
+
+    #[test]
+    fn opcua_asymmetric_only_wire_refuses_service_messages_before_symmetric_keys_exist() {
+        let fixture = Fixture::new();
+        let clock = FakeClock::default();
+        clock.set_wall_now(
+            std::time::UNIX_EPOCH
+                .checked_add(std::time::Duration::from_secs(crate::opcua::pki::NOW))
+                .unwrap(),
+        );
+        let config = OpcuaDriver::configuration(&fixture.uri(
+            crate::opcua::options::SecurityPolicy::Basic256Sha256,
+            crate::opcua::options::MessageSecurity::SignEncrypt,
+            false,
+        ))
+        .unwrap();
+        let security = Security::prepare(
+            config.driver_options_as::<OpcuaOptions>().unwrap(),
+            clock.wall_now(),
+        )
+        .unwrap()
+        .unwrap();
+        let limits = ResourceLimits::builder().build().unwrap();
+        let transport = FakeTransport::new(Script::default(), clock.clone(), limits);
+        let probe = transport.probe();
+        let mut wire = Wire::new(
+            Box::new(transport),
+            OpcuaFramer::new(65535, limits),
+            Arc::new(crate::opcua::crypto::Native),
+        );
+        wire.asymmetric(Arc::clone(&security.asymmetric));
+        let frame = Frame::single(Body::Message(SecureChunk {
+            channel_id: 17,
+            token_id: 29,
+            sequence: SequenceHeader {
+                sequence_number: 1,
+                request_id: 1,
+            },
+            body: Bytes::from_static(b"secret"),
+        }));
+        let deadline = Deadline::after(clock.now(), std::time::Duration::from_secs(1)).unwrap();
+        assert_eq!(
+            block_on_with(&clock, wire.send_frame(&frame, deadline))
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidConfig
+        );
+        assert_eq!(probe.sent().len(), 0);
+        assert!(
+            wire.decode(&crate::opcua::responder::message(
+                1,
+                1,
+                17,
+                29,
+                b"unprotected"
+            ))
+            .is_err()
+        );
+    }
+}

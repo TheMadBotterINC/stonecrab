@@ -761,3 +761,198 @@ fn opcua_cancelled_dropped_or_timed_out_idle_recovery_can_be_retried_and_close_s
         }
     }
 }
+
+#[test]
+fn opcua_idle_recovery_clears_metadata_and_never_replays_an_inflight_write() {
+    use crate::WriteRequest;
+    use std::task::{Context, Waker};
+    let fixture = Fixture::new();
+    for in_flight in [false, true] {
+        let (driver, clock, factory) = setup();
+        let mut probes = Vec::new();
+        for index in 0..2 {
+            let peer = fixture.peer(SecurityPolicy::Basic256Sha256, MessageSecurity::SignEncrypt);
+            let probe = peer.probe.clone();
+            probes.push(probe.clone());
+            let mut reactor = peer.reactor(move |_, reply| {
+                if let Service::OpenSecureChannelResponse { security_token, .. } = reply {
+                    security_token.revised_lifetime = 1000;
+                }
+                if index == 1
+                    && let Service::CreateSessionResponse {
+                        authentication_token,
+                        ..
+                    } = reply
+                {
+                    *authentication_token = NodeId::numeric(0, 88);
+                }
+            });
+            factory.push_script(Script::strict(vec![Step::react(move |wire| {
+                let reply = reactor(wire);
+                if index == 0
+                    && in_flight
+                    && matches!(probe.requests().last(), Some(Service::WriteRequest { .. }))
+                {
+                    Reaction::Silence
+                } else {
+                    reply
+                }
+            })]));
+        }
+        let connection = block_on_with(
+            &clock,
+            driver.connect(
+                driver
+                    .parse_config(&short_uri(
+                        &fixture,
+                        SecurityPolicy::Basic256Sha256,
+                        MessageSecurity::SignEncrypt,
+                    ))
+                    .unwrap(),
+            ),
+        )
+        .unwrap();
+        let write = |value| {
+            WriteRequest::builder(connection.limits())
+                .item(
+                    Tag::new(
+                        TagId::new("setpoint").unwrap(),
+                        Arc::new(OpcuaAddress::parse("ns=1;i=42").unwrap()),
+                    ),
+                    PlcValue::I32(value),
+                )
+                .build()
+                .unwrap()
+        };
+        if in_flight {
+            let mut pending = connection.write(write(501));
+            assert!(
+                pending
+                    .as_mut()
+                    .poll(&mut Context::from_waker(Waker::noop()))
+                    .is_pending()
+            );
+            clock.advance(Duration::from_millis(1000));
+            assert_eq!(
+                block_on_with(&clock, connection.read(read(&*connection)))
+                    .unwrap()
+                    .iter_ok()
+                    .count(),
+                1
+            );
+            assert_eq!(block_on_with(&clock, pending).unwrap().unknown_count(), 1);
+            assert_eq!(
+                probes
+                    .get(1)
+                    .unwrap()
+                    .requests()
+                    .iter()
+                    .filter(|r| matches!(r, Service::WriteRequest { .. }))
+                    .count(),
+                0
+            );
+            assert_eq!(connection.state(), crate::ConnectionState::Connected);
+        } else {
+            for value in [1, 2] {
+                assert_eq!(
+                    block_on_with(&clock, connection.write(write(value)))
+                        .unwrap()
+                        .confirmed_count(),
+                    1
+                );
+            }
+            clock.advance(Duration::from_millis(1000));
+            assert_eq!(
+                block_on_with(&clock, connection.write(write(3)))
+                    .unwrap()
+                    .confirmed_count(),
+                1
+            );
+            for probe in &probes {
+                assert_eq!(probe.requests().iter().filter(|r| matches!(r, Service::ReadRequest { nodes_to_read: Some(nodes), .. } if nodes.iter().any(|node| node.attribute_id != 13))).count(), 1);
+            }
+            let requests = probes.get(1).unwrap().requests();
+            let Service::WriteRequest { request_header, .. } = requests
+                .iter()
+                .find(|r| matches!(r, Service::WriteRequest { .. }))
+                .unwrap()
+            else {
+                panic!("write")
+            };
+            assert_eq!(request_header.authentication_token, NodeId::numeric(0, 88));
+        }
+        assert_eq!(factory.opens().len(), 2);
+        block_on_with(&clock, connection.close()).unwrap();
+    }
+}
+
+#[test]
+fn opcua_a_metadata_renewal_failure_is_fatal_before_any_write_is_transmitted() {
+    let fixture = Fixture::new();
+    let (driver, clock, factory) = setup();
+    let peer = fixture.peer(SecurityPolicy::Basic256Sha256, MessageSecurity::SignEncrypt);
+    let probe = peer.probe.clone();
+    factory.push_script(Script::strict(vec![Step::react(peer.reactor(
+        |request, reply| {
+            if let Service::OpenSecureChannelResponse {
+                security_token,
+                server_nonce,
+                ..
+            } = reply
+            {
+                security_token.revised_lifetime = 1000;
+                if matches!(
+                    request,
+                    Service::OpenSecureChannelRequest {
+                        request_type: SecurityTokenRequestType::SecurityTokenRequestTypeRenew,
+                        ..
+                    }
+                ) {
+                    *server_nonce = UaByteString::new(vec![0x55; 32]);
+                }
+            }
+        },
+    ))]));
+    let connection = block_on_with(
+        &clock,
+        driver.connect(
+            driver
+                .parse_config(&short_uri(
+                    &fixture,
+                    SecurityPolicy::Basic256Sha256,
+                    MessageSecurity::SignEncrypt,
+                ))
+                .unwrap(),
+        ),
+    )
+    .unwrap();
+    clock.advance(Duration::from_millis(750));
+    let write = crate::WriteRequest::builder(connection.limits())
+        .item(
+            Tag::new(
+                TagId::new("setpoint").unwrap(),
+                Arc::new(OpcuaAddress::parse("ns=1;i=42").unwrap()),
+            ),
+            PlcValue::I32(501),
+        )
+        .build()
+        .unwrap();
+    assert_eq!(
+        block_on_with(&clock, connection.write(write))
+            .unwrap_err()
+            .kind(),
+        ErrorKind::Authentication
+    );
+    assert_eq!(
+        connection.state(),
+        crate::ConnectionState::Failed(ErrorKind::Authentication)
+    );
+    assert_eq!(
+        probe
+            .requests()
+            .iter()
+            .filter(|r| matches!(r, Service::WriteRequest { .. }))
+            .count(),
+        0
+    );
+}

@@ -1110,3 +1110,46 @@ fn opcua_hello_applies_all_encoding_options_and_local_memory_bounds() {
         262_144
     );
 }
+
+#[test]
+fn opcua_issue_uses_the_configured_lifetime_and_ignores_zero_or_larger_revisions() {
+    for revised in [0, 2000] {
+        let mut rig = Rig::new(Script::strict(vec![Step::respond(move |wire| {
+            if wire.starts_with(b"HEL") {
+                Some(acknowledge(65535, 65535, 0, 0))
+            } else {
+                Some(open_response(41, 1, 17, 29, revised, 0))
+            }
+        })]));
+        rig.options.channel_lifetime = 1000;
+        rig.options.min_channel_lifetime = 1;
+        let channel = rig.open().unwrap();
+        assert_eq!(channel.renewal.token.revised_lifetime, revised);
+        let Body::Open(request) = frame(rig.probe.sent().get(1).unwrap()).body else {
+            panic!("open")
+        };
+        let Service::OpenSecureChannelRequest {
+            requested_lifetime, ..
+        } = decode_service(&request.body).unwrap()
+        else {
+            panic!("request")
+        };
+        assert_eq!(requested_lifetime, 1000);
+        assert!(
+            !channel.renewal.lifetime.due(
+                rig.clock
+                    .now()
+                    .checked_add(Duration::from_millis(749))
+                    .unwrap()
+            )
+        );
+        assert!(
+            channel.renewal.lifetime.due(
+                rig.clock
+                    .now()
+                    .checked_add(Duration::from_millis(750))
+                    .unwrap()
+            )
+        );
+    }
+}

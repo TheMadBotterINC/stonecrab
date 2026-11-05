@@ -44,7 +44,8 @@ under a bounded preparation lock and publish a fresh session snapshot.
   Interleaved MSG replies continue through normal dispatch. Keep at most one prior token,
   bounded by its original lifetime plus 25 percent grace, and retire it on the first
   authenticated new-token MSG. Reject old/foreign/expired ids and drop retired keys.
-  All renewal errors fail the lane with the original typed error; a dropped renewal also
+  Admission backpressure stays nonfatal and bounded; after admission, renewal errors
+  fail the lane with the original typed error; a dropped renewal also
   fails immediately because its epoch is uncertain. Cancellation while merely waiting
   for the renewal lock does not fail another caller's channel.
 - Record session activity only when an authenticated session service is sent; OPN renewal

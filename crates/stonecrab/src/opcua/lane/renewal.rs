@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use super::{Acquired, Lane, State, error, missing_request};
+use super::{Lane, Request, State, error, missing_request};
 use crate::opcua::channel::Lifetime;
 use crate::opcua::channel::Renewal;
 use crate::opcua::codec::{NodeId, UaByteString};
@@ -53,11 +53,12 @@ impl Lane {
         else {
             return Ok(());
         };
+        let request = self.reserve(Some((UaByteString::null(), self.clock.now())))?;
         let mut attempt = Attempt {
             lane: self,
             finished: false,
         };
-        let result = self.renew(renewal, deadline, cancel).await;
+        let result = self.renew(&request, renewal, deadline, cancel).await;
         if let Err(problem) = &result {
             self.fail(PlcError::new(problem.kind(), problem.to_string()));
         }
@@ -67,6 +68,7 @@ impl Lane {
 
     async fn renew(
         &self,
+        request: &Request<'_>,
         renewal: Renewal,
         deadline: Deadline,
         cancel: &CancellationToken,
@@ -78,16 +80,16 @@ impl Lane {
                 "channel token expired before renewal",
             ));
         }
-        let request = self.reserve(Some((UaByteString::null(), self.clock.now())))?;
-        let mut lease = match self.acquire(request.id, true, deadline, cancel).await? {
-            Acquired::Transport(lease) => lease,
-            Acquired::Reply(_) => {
-                return Err(error(ErrorKind::MalformedData, "unsolicited renewal reply"));
-            }
-        };
+        let mut lease = self.writer(request.id, deadline, cancel).await?;
         let nonce = if renewal.security.is_some() {
             let nonce = UaByteString::new(lease.framed()?.nonce()?.to_vec());
-            if nonce == renewal.client_nonce {
+            if nonce == renewal.client_nonce
+                || !nonce
+                    .as_bytes()
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|byte| *byte != 0)
+            {
                 return Err(error(
                     ErrorKind::Authentication,
                     "repeated channel client nonce",
@@ -181,11 +183,14 @@ impl Lane {
                 }
             }
         };
-        if frame.chunk != ChunkType::Final
-            || chunk.channel_id != self.channel_id
-            || chunk.body.len() > self.message_limits.bytes
-        {
+        if frame.chunk != ChunkType::Final || chunk.channel_id != self.channel_id {
             return Err(error(ErrorKind::MalformedData, "invalid renewal header"));
+        }
+        if chunk.body.len() > self.message_limits.bytes {
+            return Err(error(
+                ErrorKind::ResourceLimit,
+                "renewal response exceeds the message budget",
+            ));
         }
         if let Some(security) = &renewal.security {
             security.verify(
@@ -200,9 +205,6 @@ impl Lane {
             return Err(error(ErrorKind::MalformedData, "foreign renewal policy"));
         }
         let response = decode_service(&chunk.body)?;
-        if let Service::ServiceFault { response_header } = &response {
-            return Err(status_error(response_header.service_result));
-        }
         let Service::OpenSecureChannelResponse {
             response_header,
             server_protocol_version,
@@ -230,7 +232,7 @@ impl Lane {
             ));
         }
         if renewal.security.is_some() {
-            let server = server_nonce
+            server_nonce
                 .as_bytes()
                 .filter(|bytes| {
                     bytes.len() == 32
@@ -239,12 +241,12 @@ impl Lane {
                         && server_nonce != renewal.server_nonce
                 })
                 .ok_or_else(|| error(ErrorKind::Authentication, "invalid renewed server nonce"))?;
-            wire.install_token(
-                security_token.token_id,
-                nonce.as_bytes().unwrap_or_default(),
-                server,
-            )?;
         }
+        wire.install_token(
+            security_token.token_id,
+            nonce.as_bytes().unwrap_or_default(),
+            server_nonce.as_bytes().unwrap_or_default(),
+        )?;
         renewal.previous = Some((renewal.token.token_id, renewal.lifetime));
         renewal.lifetime = Lifetime::new(
             renewal.requested,

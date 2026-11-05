@@ -410,6 +410,18 @@ impl Lane {
         self.until(deadline, cancel, acquire).await
     }
 
+    async fn writer(
+        &self,
+        id: u32,
+        deadline: Deadline,
+        cancel: &CancellationToken,
+    ) -> Result<Box<TransportLease<'_>>> {
+        match self.acquire(id, true, deadline, cancel).await? {
+            Acquired::Transport(lease) => Ok(lease),
+            Acquired::Reply(_) => Err(error(ErrorKind::MalformedData, "unsolicited channel reply")),
+        }
+    }
+
     async fn receive(
         &self,
         id: u32,
@@ -617,12 +629,7 @@ impl Lane {
     pub(super) async fn close(&self, deadline: Deadline, cancel: &CancellationToken) -> Result<()> {
         self.check(deadline, cancel)?;
         let request = self.reserve(None)?;
-        let mut lease = match self.acquire(request.id, true, deadline, cancel).await? {
-            Acquired::Transport(lease) => lease,
-            Acquired::Reply(_) => {
-                return Err(error(ErrorKind::MalformedData, "unsolicited close reply"));
-            }
-        };
+        let mut lease = self.writer(request.id, deadline, cancel).await?;
         let header = request_header(
             self.clock.as_ref(),
             &NodeId::numeric(0, 0),

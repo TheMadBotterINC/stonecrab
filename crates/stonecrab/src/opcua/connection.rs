@@ -78,10 +78,13 @@ impl OpcuaConnection {
                 attempt: 1,
                 next_at: self.clock.now(),
             };
-            if self.operations_stopped.is_cancelled() {
+            let previous = self.state.current();
+            if !matches!(
+                previous,
+                ConnectionState::Connected | ConnectionState::Reconnecting { .. }
+            ) {
                 return Err(stopped_error());
             }
-            let previous = self.state.current();
             self.state.set_if(previous, reconnecting);
             session.lane.fail(PlcError::new(
                 ErrorKind::Disconnected,
@@ -95,12 +98,13 @@ impl OpcuaConnection {
                 .await;
             match result {
                 Ok(session) => {
+                    let session = Arc::new(session);
+                    let mut current = self.session.lock().unwrap_or_else(PoisonError::into_inner);
                     if self.operations_stopped.is_cancelled() {
                         return Err(stopped_error());
                     }
-                    let session = Arc::new(session);
-                    *self.session.lock().unwrap_or_else(PoisonError::into_inner) =
-                        Arc::clone(&session);
+                    *current = Arc::clone(&session);
+                    drop(current);
                     self.state.set_if(reconnecting, ConnectionState::Connected);
                     Ok(session)
                 }
