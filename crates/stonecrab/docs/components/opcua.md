@@ -687,8 +687,9 @@ reads fail with `Disconnected` on transport loss; writes already transmitted rem
 Unknown. A new operation may write on the replacement session, with a fresh metadata
 cache, authentication token, nonces and reloaded credentials/key/trust material. A late
 old-session failure cannot overwrite the replacement's Connected state. Healthy request
-timeouts do not themselves force reconnect. Trust, authentication, configuration and
-malformed/protocol failures remain terminal.
+timeouts and ordinary per-request service refusals preserve a usable lane. Failed lanes
+with trust, authentication, configuration or malformed/protocol errors remain terminal;
+handshake validation failures are terminal too.
 
 The first-party public contract and injected transport/clock tests cover reconnect,
 precise backoff/attempt limits and reset, caller interruptions, pending/queued requests,
