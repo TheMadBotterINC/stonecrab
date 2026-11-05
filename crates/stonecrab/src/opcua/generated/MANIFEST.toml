@@ -71,6 +71,7 @@ ExtensionObjectDefinition = [
   "WriteRequest",
   "WriteResponse",
   "WriteValue",
+  "X509IdentityToken",
 ]
 
 [options.external]
