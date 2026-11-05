@@ -622,7 +622,11 @@ impl Lane {
     }
 
     pub(super) fn is_failed(&self) -> bool {
-        self.lock().failure.is_some()
+        self.failure_kind().is_some()
+    }
+
+    pub(super) fn failure_kind(&self) -> Option<ErrorKind> {
+        self.lock().failure.as_ref().map(|problem| problem.kind())
     }
 
     /// Continue the lane's counters for CLO and shut down without awaiting a reply.

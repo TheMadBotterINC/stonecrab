@@ -326,7 +326,10 @@ fn opcua_write_disconnect_is_unknown_and_never_replayed() {
         WriteOutcome::Unknown(UnknownReason::DisconnectedAfterTransmit)
     ));
     assert_eq!(rig.writes(), 1);
-    assert!(matches!(connection.state(), ConnectionState::Failed(_)));
+    assert!(matches!(
+        connection.state(),
+        ConnectionState::Reconnecting { attempt: 1, .. }
+    ));
     assert_eq!(
         block_on_with(&rig.clock, connection.close())
             .unwrap_err()

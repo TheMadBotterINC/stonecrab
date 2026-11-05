@@ -105,19 +105,21 @@ impl StateCell {
         wake_all(wakers);
     }
 
-    /// Publish only if no competing lifecycle transition replaced `expected`.
+    /// Replace conditionally; the caller wakes these waiters after releasing its locks.
     #[cfg(feature = "opcua")]
-    pub(crate) fn set_if(&self, expected: ConnectionState, state: ConnectionState) {
-        let wakers = {
-            let mut latest = self.shared.lock();
-            if latest.state != expected {
-                return;
-            }
-            latest.state = state;
-            latest.version = latest.version.wrapping_add(1);
-            latest.waiters.drain()
-        };
-        wake_all(wakers);
+    #[must_use = "wake the waiters after releasing the caller's locks"]
+    pub(crate) fn replace_if(
+        &self,
+        expected: ConnectionState,
+        state: ConnectionState,
+    ) -> Vec<std::task::Waker> {
+        let mut latest = self.shared.lock();
+        if latest.state != expected {
+            return Vec::new();
+        }
+        latest.state = state;
+        latest.version = latest.version.wrapping_add(1);
+        latest.waiters.drain()
     }
 
     /// The latest state.

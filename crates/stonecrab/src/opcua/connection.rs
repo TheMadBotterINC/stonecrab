@@ -3,12 +3,15 @@
 //! # Compatibility: docs/parity/opcua.md#OPCUA-OP-CONNECT
 //! # Compatibility: docs/parity/opcua.md#OPCUA-OP-READ
 //! # Compatibility: docs/parity/opcua.md#OPCUA-OP-CLOSE
+//! # Compatibility: docs/parity/opcua.md#OPCUA-LIFE-NO-REACTIVATE
 
 use std::future::{Future, poll_fn};
 use std::pin::pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
+
+use crate::future::wake_all;
 
 use crate::opcua::driver::OpcuaDriver;
 use crate::opcua::generated::extension_object_definition::ExtensionObjectDefinition as Service;
@@ -21,8 +24,14 @@ use crate::{
     StateWatch, WriteRequest, WriteResponse,
 };
 
+struct Current {
+    session: Arc<Session>,
+    attempts: u32,
+    jitter: crate::transport::Jitter,
+}
+
 pub(super) struct OpcuaConnection {
-    session: Mutex<Arc<Session>>,
+    session: Mutex<Current>,
     preparation: tokio::sync::Mutex<()>,
     driver: OpcuaDriver,
     config: crate::ConnectionConfig,
@@ -44,7 +53,11 @@ impl OpcuaConnection {
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
-            session: Mutex::new(Arc::new(session)),
+            session: Mutex::new(Current {
+                session: Arc::new(session),
+                attempts: 0,
+                jitter: crate::transport::Jitter::new(),
+            }),
             preparation: tokio::sync::Mutex::new(()),
             driver,
             request_timeout: config.timeouts().request,
@@ -60,74 +73,168 @@ impl OpcuaConnection {
     }
 
     fn current(&self) -> Arc<Session> {
-        Arc::clone(&self.session.lock().unwrap_or_else(PoisonError::into_inner))
+        Arc::clone(
+            &self
+                .session
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .session,
+        )
+    }
+
+    fn observe_failure(&self) {
+        let wakers = {
+            let mut current = self.session.lock().unwrap_or_else(PoisonError::into_inner);
+            let Some(kind) = current.session.lane.failure_kind() else {
+                return;
+            };
+            if self.state.current() != ConnectionState::Connected {
+                return;
+            }
+            let wakers = self.failed(&mut current, ConnectionState::Connected, kind);
+            drop(current);
+            wakers
+        };
+        wake_all(wakers);
+    }
+
+    fn failed(
+        &self,
+        current: &mut Current,
+        previous: ConnectionState,
+        kind: ErrorKind,
+    ) -> Vec<std::task::Waker> {
+        let next = if matches!(kind, ErrorKind::Disconnected | ErrorKind::Timeout) {
+            let retry = current.attempts;
+            if self.config.reconnect().is_exhausted(retry) {
+                ConnectionState::Failed(ErrorKind::Disconnected)
+            } else {
+                let delay = self
+                    .config
+                    .reconnect()
+                    .next_delay(retry, current.jitter.next_unit());
+                let now = self.clock.now();
+                current.attempts = retry.saturating_add(1);
+                ConnectionState::Reconnecting {
+                    attempt: current.attempts,
+                    next_at: now.checked_add(delay).unwrap_or(now),
+                }
+            }
+        } else {
+            ConnectionState::Failed(kind)
+        };
+        self.state.replace_if(previous, next)
     }
 
     async fn ready(&self, deadline: Deadline, cancel: &CancellationToken) -> Result<Arc<Session>> {
-        let session = self.current();
-        if !session.lane.expired(session.revised_timeout) {
-            return Ok(session);
-        }
         let preparation = async {
-            let _guard = self.preparation.lock().await;
+            crate::opcua::channel::within(self.clock.as_ref(), deadline, cancel, async { Ok(()) })
+                .await?;
+            self.observe_failure();
             let session = self.current();
-            if !session.lane.expired(session.revised_timeout) {
+            if self.state.current() == ConnectionState::Connected
+                && !session.lane.expired(session.revised_timeout)
+            {
                 return Ok(session);
             }
-            let reconnecting = ConnectionState::Reconnecting {
-                attempt: 1,
-                next_at: self.clock.now(),
-            };
+            let _guard =
+                crate::opcua::channel::within(self.clock.as_ref(), deadline, cancel, async {
+                    Ok(self.preparation.lock().await)
+                })
+                .await?;
+            self.observe_failure();
+            let session = self.current();
             let previous = self.state.current();
-            if !matches!(
-                previous,
-                ConnectionState::Connected | ConnectionState::Reconnecting { .. }
-            ) {
-                return Err(stopped_error());
+            if previous == ConnectionState::Connected {
+                if !session.lane.expired(session.revised_timeout) {
+                    return Ok(session);
+                }
+                let wakers = {
+                    let _current = self.session.lock().unwrap_or_else(PoisonError::into_inner);
+                    self.state.replace_if(
+                        previous,
+                        ConnectionState::Reconnecting {
+                            attempt: 1,
+                            next_at: self.clock.now(),
+                        },
+                    )
+                };
+                wake_all(wakers);
+                session.lane.fail(PlcError::new(
+                    ErrorKind::Disconnected,
+                    "OPC UA idle channel or session expired",
+                ));
             }
-            self.state.set_if(previous, reconnecting);
-            session.lane.fail(PlcError::new(
-                ErrorKind::Disconnected,
-                "OPC UA idle channel or session expired",
-            ));
-            let connect_bound =
-                Deadline::after(self.clock.now(), self.config.timeouts().connect)?.min(deadline);
-            let result = self
-                .driver
-                .open_session(&self.config, connect_bound, cancel)
-                .await;
+            let reconnecting = self.state.current();
+            let ConnectionState::Reconnecting { next_at, .. } = reconnecting else {
+                return Err(stopped_error());
+            };
+            if self.clock.now() < next_at {
+                crate::opcua::channel::within(self.clock.as_ref(), deadline, cancel, async {
+                    self.clock.sleep_until(next_at).await?;
+                    if self.clock.now() < next_at {
+                        return Err(PlcError::new(
+                            ErrorKind::InvalidConfig,
+                            "clock woke before reconnect backoff",
+                        ));
+                    }
+                    Ok(())
+                })
+                .await?;
+            }
+            let connect_bound = Deadline::after(self.clock.now(), self.config.timeouts().connect);
+            let caller_bound = connect_bound.as_ref().is_ok_and(|bound| deadline < *bound);
+            let result = async {
+                self.driver
+                    .open_session(&self.config, connect_bound?.min(deadline), cancel)
+                    .await
+            }
+            .await;
             match result {
                 Ok(session) => {
                     let session = Arc::new(session);
-                    let mut current = self.session.lock().unwrap_or_else(PoisonError::into_inner);
-                    if self.operations_stopped.is_cancelled() {
-                        return Err(stopped_error());
-                    }
-                    *current = Arc::clone(&session);
-                    drop(current);
-                    self.state.set_if(reconnecting, ConnectionState::Connected);
+                    let wakers = {
+                        let mut current =
+                            self.session.lock().unwrap_or_else(PoisonError::into_inner);
+                        if self.operations_stopped.is_cancelled() {
+                            return Err(stopped_error());
+                        }
+                        current.session = Arc::clone(&session);
+                        current.attempts = 0;
+                        let wakers = self
+                            .state
+                            .replace_if(reconnecting, ConnectionState::Connected);
+                        drop(current);
+                        wakers
+                    };
+                    wake_all(wakers);
                     Ok(session)
                 }
                 Err(error) => {
-                    self.state
-                        .set_if(reconnecting, ConnectionState::Failed(error.kind()));
+                    if !(error.kind() == ErrorKind::Cancelled
+                        || caller_bound && error.kind() == ErrorKind::Timeout)
+                    {
+                        let wakers = {
+                            let mut current =
+                                self.session.lock().unwrap_or_else(PoisonError::into_inner);
+                            let wakers = self.failed(&mut current, reconnecting, error.kind());
+                            drop(current);
+                            wakers
+                        };
+                        wake_all(wakers);
+                    }
                     Err(error)
                 }
             }
         };
         let mut preparation = pin!(preparation);
         let mut stopped = pin!(self.operations_stopped.cancelled());
-        crate::opcua::channel::within(
-            self.clock.as_ref(),
-            deadline,
-            cancel,
-            poll_fn(|cx| {
-                if stopped.as_mut().poll(cx).is_ready() {
-                    return std::task::Poll::Ready(Err(stopped_error()));
-                }
-                preparation.as_mut().poll(cx)
-            }),
-        )
+        poll_fn(|cx| {
+            if stopped.as_mut().poll(cx).is_ready() {
+                return std::task::Poll::Ready(Err(stopped_error()));
+            }
+            preparation.as_mut().poll(cx)
+        })
         .await
     }
 
@@ -143,12 +250,7 @@ impl OpcuaConnection {
         started: std::time::Instant,
         error: PlcError,
     ) -> PlcError {
-        if self.current().lane.is_failed() {
-            self.state.set_if(
-                ConnectionState::Connected,
-                ConnectionState::Failed(error.kind()),
-            );
-        }
+        self.observe_failure();
         let category = match error.kind() {
             ErrorKind::InvalidAddress
             | ErrorKind::InvalidConfig
@@ -395,12 +497,7 @@ impl OpcuaConnection {
                 write::finish(request, local, started, self.clock.now())
             }
             Err(error) if transmitted => {
-                if self.current().lane.is_failed() {
-                    self.state.set_if(
-                        ConnectionState::Connected,
-                        ConnectionState::Failed(error.kind()),
-                    );
-                }
+                self.observe_failure();
                 local.extend(write::unknown(tags, error.kind()));
                 write::finish(request, local, started, self.clock.now())
             }
@@ -430,7 +527,7 @@ impl OpcuaConnection {
             )
             .await;
         }
-        self.state.set_if(previous, ConnectionState::Closing);
+        wake_all(self.state.replace_if(previous, ConnectionState::Closing));
         self.operations_stopped.cancel();
         self.current()
             .close(deadline, &CancellationToken::new())
