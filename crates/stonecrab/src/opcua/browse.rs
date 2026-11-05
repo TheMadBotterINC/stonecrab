@@ -7,6 +7,7 @@
 //! # Compatibility: docs/parity/opcua.md#OPCUA-DIV-BROWSE-STATUS
 
 use std::collections::{BTreeSet, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use crate::opcua::codec::{ExpandedNodeId, NodeId, StatusCode, UaByteString};
@@ -34,7 +35,7 @@ pub(super) struct Continuations {
 struct Points<'a> {
     session: &'a Session,
     known: Vec<UaByteString>,
-    in_flight: bool,
+    transmitted: AtomicBool,
 }
 
 impl<'a> Points<'a> {
@@ -42,7 +43,7 @@ impl<'a> Points<'a> {
         Self {
             session,
             known: Vec::new(),
-            in_flight: false,
+            transmitted: AtomicBool::new(false),
         }
     }
 
@@ -91,11 +92,11 @@ impl<'a> Points<'a> {
     ) -> Result<Page> {
         self.session.lane.check(deadline, cancel)?;
         let next = self.known.first().cloned();
-        self.in_flight = true;
+        self.transmitted.store(false, Ordering::Release);
         let reply = if let Some(point) = next.as_ref() {
             self.session
                 .lane
-                .exchange_until(
+                .exchange_tracked(
                     &self.session.authentication_token,
                     533,
                     |request_header| Service::BrowseNextRequest {
@@ -105,12 +106,13 @@ impl<'a> Points<'a> {
                     },
                     deadline,
                     cancel,
+                    Some(&self.transmitted),
                 )
                 .await
         } else {
             self.session
                 .lane
-                .exchange_until(
+                .exchange_tracked(
                     &self.session.authentication_token,
                     527,
                     |request_header| Service::BrowseRequest {
@@ -132,6 +134,7 @@ impl<'a> Points<'a> {
                     },
                     deadline,
                     cancel,
+                    Some(&self.transmitted),
                 )
                 .await
         };
@@ -140,7 +143,7 @@ impl<'a> Points<'a> {
             Err(error) => {
                 // A decoded ServiceFault cannot allocate an unseen continuation point.
                 if error.kind() == ErrorKind::DeviceException {
-                    self.in_flight = false;
+                    self.transmitted.store(false, Ordering::Release);
                 }
                 return Err(error);
             }
@@ -162,7 +165,7 @@ impl<'a> Points<'a> {
             } if next.is_some() => (response_header, results),
             _ => return Err(malformed("unexpected browse response")),
         };
-        self.in_flight = false;
+        self.transmitted.store(false, Ordering::Release);
         let mut results = results.unwrap_or_default();
         if header.service_result.0 & 0xc000_0000 == 0 && results.len() == 1 {
             self.known.clear();
@@ -184,7 +187,7 @@ impl<'a> Points<'a> {
 
 impl Drop for Points<'_> {
     fn drop(&mut self) {
-        if self.in_flight {
+        if self.transmitted.load(Ordering::Acquire) {
             self.session.lane.fail(PlcError::new(
                 ErrorKind::Disconnected,
                 "OPC UA interrupted browse may own an unseen continuation",

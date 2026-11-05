@@ -205,7 +205,7 @@ impl Lane {
         (result, transmitted.load(Ordering::Acquire))
     }
 
-    fn exchange_tracked<'a>(
+    pub(super) fn exchange_tracked<'a>(
         &'a self,
         authentication_token: &'a NodeId,
         encoding_id: u32,

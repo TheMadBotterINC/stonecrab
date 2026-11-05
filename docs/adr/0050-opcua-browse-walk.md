@@ -38,6 +38,8 @@ the lane rather than replaying a walk on a replacement session.
   subsequent callers drain it before ordinary operations. A dropped/failed exchange
   that could have allocated an unseen point fails the lane, and S110 recovery
   supplies a fresh Session on a later call. Never migrate points or retry a walk.
+  Reuse the write lane's existing transmission marker so a pre-send admission
+  refusal or cancelled wait does not retire the shared Session.
   CloseSession releases remaining server resources; an unseen point after transport
   interruption can only be reclaimed by server session expiry. Do not claim immediate
   cleanup in that case. Empty pages with continuation are legal and remain cancellable.

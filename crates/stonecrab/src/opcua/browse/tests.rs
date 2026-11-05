@@ -85,6 +85,7 @@ struct Rig {
     clock: FakeClock,
     sent: Arc<Mutex<Vec<Service>>>,
     factory: FakeTransportFactory,
+    device: Device,
 }
 impl Rig {
     fn new(options: &str, handler: impl FnMut(Service, u32) -> Reaction + Send + 'static) -> Self {
@@ -99,7 +100,8 @@ impl Rig {
         let factory = FakeTransportFactory::new(clock.clone());
         let sent = Arc::new(Mutex::new(Vec::new()));
         let log = Arc::clone(&sent);
-        let mut base = Device::default().reactor();
+        let device = Device::default();
+        let mut base = device.reactor();
         let mut sequence = 41_u32;
         factory.push_script(Script::strict(vec![Step::react(move |bytes| {
             if !bytes.starts_with(b"MSG") {
@@ -159,6 +161,7 @@ impl Rig {
             clock,
             sent,
             factory,
+            device,
         }
     }
     #[expect(
@@ -990,4 +993,47 @@ fn opcua_browse_malformed_next_reply_and_pre_send_cancel_preserve_original_point
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].as_bytes(), Some(b"original".as_slice()));
     }
+}
+
+#[test]
+fn opcua_browse_backpressure_does_not_retire_an_unsent_walk_or_lose_a_known_point() {
+    let rig = Rig::limited(
+        "",
+        ResourceLimits::builder()
+            .max_pending_requests(1)
+            .build()
+            .unwrap(),
+        |_service, _handle| panic!("no browse admitted"),
+    );
+    rig.device.timeout();
+    let session = rig.connection.current();
+    let cancel = CancellationToken::new();
+    let deadline = Deadline::after(rig.clock.now(), Duration::from_secs(1)).unwrap();
+    let mut held = std::pin::pin!(session.lane.exchange_until(&session.authentication_token, 631, |request_header| Service::ReadRequest {
+        request_header, max_age: 0.0,
+        timestamps_to_return: crate::opcua::generated::timestamps_to_return::TimestampsToReturn::TimestampsToReturnBoth,
+        nodes_to_read: None,
+    }, deadline, &cancel));
+    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+    assert!(Future::poll(held.as_mut(), &mut cx).is_pending());
+    let before = rig.factory.probes()[0].sent().len();
+    {
+        let mut points = Points::new(&session);
+        points.known.push(UaByteString::new(b"retained".to_vec()));
+        assert_eq!(
+            block_on_with(
+                &rig.clock,
+                points.page(&NodeId::numeric(0, 85), 65536, deadline, &cancel)
+            )
+            .unwrap_err()
+            .kind(),
+            ErrorKind::Backpressure
+        );
+    }
+    assert!(!session.lane.is_failed());
+    assert_eq!(rig.factory.probes()[0].sent().len(), before);
+    assert_eq!(
+        session.continuations.pending.lock().unwrap()[0].as_bytes(),
+        Some(b"retained".as_slice())
+    );
 }
