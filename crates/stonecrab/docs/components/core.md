@@ -29,7 +29,8 @@ too; an unknown write outcome is never collapsed into a rejection or replayed.
 | Connection cache: `ConnectionCache`, `LeasedConnection` (ADR-0030) | simulator-tested (the simulator and Modbus TCP over the fake transport, on the fake clock) |
 | Event pump: `EventPump`, `TagBatch`, `BatchEvent` (ADR-0031): timer batches on connections or cache leases; no subscription trigger, configuration files or value transformations | simulator-tested (the simulator and Modbus TCP over the fake transport, on the fake clock) |
 | Object PLC Mapping: `PlcEntity`, `EntityField`, `FieldValue`, `plc_entity!`, `EntityManager`, `ConnectedEntity` (ADR-0033): entities read, written, connected and merged through cache leases, per-field cache durations, aliases; no runtime proxy | simulator-tested (the simulator and Modbus TCP over the fake transport, on the fake clock) |
-| Browse and discover | not supported |
+| Browse contract: named bounded queries, flat nodes, correlated query outcomes and truncation (S111, ADR-0049) | build-tested types/builders; Unsupported default simulator-tested; no driver browse support yet |
+| Device browse and discover | not supported |
 | Calendar values: `PlcSignedDuration`, `PlcDate`, `PlcTimeOfDay`, `PlcDateTime` (ADR-0021) | build-tested (unit and property tests); no driver decodes them yet |
 | Lists: `PlcValue::List`, `PlcValueType::List` (ADR-0022) | simulator-tested (unit tests; the Modbus driver reads and writes them through array selections over the fake transport) |
 | Bytes and bounded ordered structures: `PlcValue::Bytes`, `PlcValue::Struct`, `PlcStruct` (ADR-0036) | build-tested; OPC UA ByteString/LocalizedText interoperability-tested |
@@ -278,3 +279,36 @@ List; values retain only partial equality because they can contain floats.
 `ReadItem::server_time()` defaults to None, and `with_server_time()` attaches a server's
 actual timestamp independently of source_time and local monotonic sampled_at. Both
 successful and failed reads can retain these timestamps and their original status.
+
+## Browse contract (S111)
+
+`BrowseRequest::builder(connection.limits())` accepts named queries through `query(TagId,
+&str)`, plus deadline/cancellation. Text is opaque, at most 8192 UTF-8 bytes, and blank
+means the driver's default start. Duplicate identities, empty batches and the query
+count bound are checked before insertion. Query Debug shows identity and byte length,
+not raw unvalidated text. `ResourceLimits::max_browse_nodes` defaults to 10000 positive
+nodes across the entire response; programmatic configuration can raise it. Protocol
+walk limits are separate and cannot loosen this connection safety bound.
+
+`BrowseResponse::builder` accepts one `BrowseResult` per query, restores caller order,
+and retains a typed `ItemError`/status as query data. Successful outcomes contain flat
+`Vec<BrowseNode>` lists. Each node's optional parent index must precede the child within
+that query, so cycles/dangling parents are rejected and destruction is not recursive.
+Same-name siblings and repeated addresses remain distinct. Total node overflow is a
+ResourceLimit error; a driver that stops its bounded walk reports `truncated` explicitly.
+A failed query cannot simultaneously report successful truncation.
+
+A node has a reusable `Arc<dyn ProtocolAddress>`, display name, readable/writable flags,
+optional `PlcValueType`, array dimensions and immutable string metadata. Unknown shape
+is None, scalar shape is an empty dimension list, and zero extents mean unknown length;
+metadata never allocates value arrays or infers counts. Names/option values are bounded
+to 8192 bytes, keys to 256 bytes, options to 32 and rank to 32. Type annotations cannot
+contradict an address hint. Empty and Unicode display names remain data.
+
+`Connection::browse` is additive and object safe. Its provided method always returns
+`Unsupported(Operation::Browse)` with zero-latency Validation diagnostics and no I/O,
+even if the request is cancelled/expired. Overrides must enforce the actual connection
+limits, default request deadline, cancellation and bounded continuation cleanup.
+`LeasedConnection` forwards through its existing lease gate. The simulator, Modbus and
+OPC UA still report browse unsupported. The OPC UA walk and metadata are S112/S113;
+no new driver capability or protocol traffic is claimed by these types.
