@@ -463,6 +463,26 @@ mod tests {
         state: stonecrab::StateCell,
         calls: std::sync::atomic::AtomicUsize,
     }
+
+    #[test]
+    fn browse_budgets_precede_inspection_of_oversized_metadata_and_parent_forests() {
+        let key = format!("{}\n", "k".repeat(BrowseNode::MAX_OPTION_KEY_BYTES));
+        assert_eq!(
+            node("").with_option(&key, "").unwrap_err().kind(),
+            ErrorKind::ResourceLimit
+        );
+        let request = BrowseRequest::builder(limits(1, 1))
+            .query(id("root"), "")
+            .build()
+            .unwrap();
+        let now = Instant::now();
+        let oversized = vec![node("self").with_parent(0), node("extra")];
+        let error = BrowseResponse::builder(&request, now, now)
+            .item(BrowseResult::new(id("root"), Ok(oversized)))
+            .build()
+            .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::ResourceLimit);
+    }
     impl stonecrab::Connection for DefaultBrowse {
         fn state(&self) -> stonecrab::ConnectionState {
             self.state.current()

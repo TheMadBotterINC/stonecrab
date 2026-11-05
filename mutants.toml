@@ -9,6 +9,10 @@ examine_globs = [
   # core: typed values and the connection-string grammar.
   "crates/stonecrab/src/value.rs",
   "crates/stonecrab/src/uri.rs",
+  # S111: pure bounded browse metadata and request/response validation.
+  "crates/stonecrab/src/browse_node.rs",
+  "crates/stonecrab/src/browse_request.rs",
+  "crates/stonecrab/src/browse_response.rs",
   # sim: the simulator address grammar and its configuration parser.
   "crates/stonecrab/src/sim/address.rs",
   "crates/stonecrab/src/sim/driver.rs",

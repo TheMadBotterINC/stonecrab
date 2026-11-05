@@ -156,6 +156,7 @@ pub struct BrowseResponseBuilder {
 
 impl BrowseResponseBuilder {
     /// Validate one query result before inserting it; preserve the first error.
+    /// Node counts are checked before inspecting parent links.
     #[must_use = "build and validate the retained changes"]
     pub fn item(mut self, item: BrowseResult) -> Self {
         if self.error.is_some() {
@@ -175,7 +176,19 @@ impl BrowseResponseBuilder {
             ));
             return self;
         }
-        let count = match item.outcome() {
+        let count = item.outcome().as_ref().map_or(0, Vec::len);
+        let Some(total) = self
+            .nodes
+            .checked_add(count)
+            .filter(|total| *total <= self.max_nodes.get())
+        else {
+            self.error = Some(PlcError::new(
+                ErrorKind::ResourceLimit,
+                "browse response exceeds total node budget",
+            ));
+            return self;
+        };
+        match item.outcome() {
             Ok(nodes) => {
                 if nodes
                     .iter()
@@ -188,7 +201,6 @@ impl BrowseResponseBuilder {
                     ));
                     return self;
                 }
-                nodes.len()
             }
             Err(_) if item.truncated() => {
                 self.error = Some(PlcError::new(
@@ -197,19 +209,8 @@ impl BrowseResponseBuilder {
                 ));
                 return self;
             }
-            Err(_) => 0,
-        };
-        let Some(total) = self
-            .nodes
-            .checked_add(count)
-            .filter(|total| *total <= self.max_nodes.get())
-        else {
-            self.error = Some(PlcError::new(
-                ErrorKind::ResourceLimit,
-                "browse response exceeds total node budget",
-            ));
-            return self;
-        };
+            Err(_) => {}
+        }
         self.nodes = total;
         self.items.push((position, item));
         self

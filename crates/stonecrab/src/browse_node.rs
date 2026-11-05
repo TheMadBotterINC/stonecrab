@@ -123,13 +123,13 @@ impl BrowseNode {
     /// `InvalidConfig` for an empty/control-bearing key, `ResourceLimit` for oversized text
     /// or too many distinct keys. Rejected keys/values are never echoed.
     pub fn with_option(mut self, key: &str, value: &str) -> Result<Self> {
+        text(key, Self::MAX_OPTION_KEY_BYTES)?;
         if key.is_empty() || key.chars().any(char::is_control) {
             return Err(PlcError::new(
                 ErrorKind::InvalidConfig,
                 "invalid browse metadata key",
             ));
         }
-        text(key, Self::MAX_OPTION_KEY_BYTES)?;
         text(value, Self::MAX_TEXT_BYTES)?;
         if self.options.len() >= Self::MAX_OPTIONS && !self.options.contains_key(key) {
             return Err(PlcError::new(
