@@ -5,6 +5,9 @@
 //! are read exactly: names are case-sensitive, and an error message names a key (shortened)
 //! or a fixed reason, never a value, the host or the endpoint path.
 
+//! # Compatibility: docs/parity/opcua.md#OPCUA-CFG-CHANNEL-LIFETIME
+//! # Compatibility: docs/parity/opcua.md#OPCUA-CFG-MIN-CHANNEL-LIFETIME
+
 use std::time::Duration;
 
 use crate::{DriverOptions, Endpoint, ErrorKind, PlcError, Result};
@@ -17,6 +20,8 @@ const MESSAGE_SECURITY: &str = "message-security";
 const REQUEST_TIMEOUT: &str = "request-timeout-ms";
 const HANDSHAKE_TIMEOUT: &str = "handshake-timeout-ms";
 const SESSION_TIMEOUT: &str = "session-timeout-ms";
+const CHANNEL_LIFETIME: &str = "channel-lifetime-ms";
+const MIN_CHANNEL_LIFETIME: &str = "min-channel-lifetime-ms";
 /// The largest incoming chunk advertised by Hello.
 const RECEIVE_BUFFER: &str = "encoding.receive-buffer-size";
 const SEND_BUFFER: &str = "encoding.send-buffer-size";
@@ -149,6 +154,8 @@ pub(super) enum CertificateFormat {
 /// | `message_security` | `message-security` | `SIGN_ENCRYPT` |
 /// | `handshake_timeout` | `handshake-timeout-ms` | 60000 ms |
 /// | `session_timeout` | `session-timeout-ms` | 120000 ms |
+/// | `channel_lifetime` | `channel-lifetime-ms` | 3600000 ms |
+/// | `min_channel_lifetime` | `min-channel-lifetime-ms` | 5000 ms |
 /// | `discovery` | `discovery` | true (secure-connect execution in S106) |
 /// | `endpoint_host` | `endpoint-host` | none (an additional advertised host match) |
 /// | `endpoint_port` | `endpoint-port` | none (an additional advertised port match) |
@@ -195,6 +202,8 @@ pub(super) struct OpcuaOptions {
     pub(super) request_timeout: Duration,
     pub(super) handshake_timeout: Duration,
     pub(super) session_timeout: Duration,
+    pub(super) channel_lifetime: u32,
+    pub(super) min_channel_lifetime: u32,
     /// The configured receive ceiling before applying `ResourceLimits`.
     pub(super) receive_buffer_size: u32,
     pub(super) send_buffer_size: u32,
@@ -230,6 +239,8 @@ impl OpcuaOptions {
         let mut request_timeout = Duration::from_secs(30);
         let mut handshake_timeout = Duration::from_secs(60);
         let mut session_timeout = Duration::from_secs(120);
+        let mut channel_lifetime = 3_600_000;
+        let mut min_channel_lifetime = 5000;
         let mut receive_buffer_size = 65535;
         let mut send_buffer_size = 65535;
         let mut max_message_size = 2_097_152;
@@ -322,7 +333,8 @@ impl OpcuaOptions {
                         _ => request_timeout = duration,
                     }
                 }
-                RECEIVE_BUFFER | SEND_BUFFER | MAX_MESSAGE | MAX_CHUNKS => {
+                RECEIVE_BUFFER | SEND_BUFFER | MAX_MESSAGE | MAX_CHUNKS | CHANNEL_LIFETIME
+                | MIN_CHANNEL_LIFETIME => {
                     let (minimum, maximum) = if matches!(key.as_str(), RECEIVE_BUFFER | SEND_BUFFER)
                     {
                         (8192, 0x7FFF_FFFF)
@@ -344,6 +356,8 @@ impl OpcuaOptions {
                         RECEIVE_BUFFER => receive_buffer_size = size,
                         SEND_BUFFER => send_buffer_size = size,
                         MAX_MESSAGE => max_message_size = size,
+                        CHANNEL_LIFETIME => channel_lifetime = size,
+                        MIN_CHANNEL_LIFETIME => min_channel_lifetime = size,
                         _ => max_chunk_count = size,
                     }
                 }
@@ -378,6 +392,8 @@ impl OpcuaOptions {
             request_timeout,
             handshake_timeout,
             session_timeout,
+            channel_lifetime,
+            min_channel_lifetime,
             receive_buffer_size,
             send_buffer_size,
             max_message_size,

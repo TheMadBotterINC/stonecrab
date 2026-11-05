@@ -227,6 +227,7 @@ impl Peer {
         let device = Device::default();
         let mut device = device.reactor();
         let mut sequence = 41_u32;
+        let mut token_id = 29_u32;
         let mut partial = Vec::new();
         let mut session_nonce = vec![0x66; 32];
         let mut session_certificate = self.certificate.clone();
@@ -247,19 +248,29 @@ impl Peer {
             let (request_id, request, mut response, encoding, is_open) = match &frame.body {
                 Body::Open(chunk) => {
                     let request = decode_service(&chunk.body).unwrap();
-                    let Service::OpenSecureChannelRequest { .. } = &request else {
+                    let Service::OpenSecureChannelRequest { request_type, .. } = &request else {
                         panic!("OPN request")
                     };
+                    if *request_type == crate::opcua::generated::security_token_request_type::SecurityTokenRequestType::SecurityTokenRequestTypeRenew {
+                        token_id = token_id.checked_add(1).unwrap();
+                        sequence = sequence.checked_add(1).unwrap();
+                    }
                     let response = Service::OpenSecureChannelResponse {
                         response_header: header(chunk.sequence.request_id),
                         server_protocol_version: 0,
                         security_token: ChannelSecurityToken {
                             channel_id: 17,
-                            token_id: 29,
+                            token_id,
                             created_at: 0,
                             revised_lifetime: 120_000,
                         },
-                        server_nonce: UaByteString::new(vec![0x55; 32]),
+                        server_nonce: UaByteString::new(vec![
+                            u8::try_from(
+                                token_id.checked_add(56).unwrap()
+                            )
+                            .unwrap();
+                            32
+                        ]),
                     };
                     (chunk.sequence.request_id, request, response, 449, true)
                 }
@@ -416,7 +427,7 @@ impl Peer {
                             self.policy,
                             self.mode,
                             17,
-                            29,
+                            token_id,
                             client_nonce.as_bytes().unwrap(),
                             server_nonce.as_bytes().unwrap(),
                         )
@@ -451,7 +462,7 @@ impl Peer {
                         },
                         body: Body::Message(SecureChunk {
                             channel_id: 17,
-                            token_id: 29,
+                            token_id,
                             sequence: SequenceHeader {
                                 sequence_number: sequence,
                                 request_id,

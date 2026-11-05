@@ -575,7 +575,7 @@ server certificate is verified and bound to the provisioned peer before `Activat
 sends `clientSignature` over server certificate plus server nonce. Anonymous
 `userTokenSignature` remains empty. Invalid or repeated server nonces fail authentication.
 
-Protected user tokens are supported in S108; caller-driven renewal remains S109. A session currently lasts only as long as its
+Protected user tokens are supported in S108; caller-driven renewal is supported in S109 (see below). A session currently lasts only as long as its
 channel token. Native interop confirms RSA2048 and 8192-byte buffers; independent boundary
 key-size and sequence-wrap behavior remain UNVERIFIED. Sequence exhaustion fails closed.
 
@@ -629,4 +629,38 @@ returning a usable session certificate; this adapter does not send one on None a
 fails with `Trust`. Native successful username/X.509 evidence therefore covers secure
 channels in both modes for every modern policy. Use a secure channel with that peer.
 
-See ADR-0046 and the S108 evidence record. Renewal remains S109; no hardware claim.
+See ADR-0046 and the S108 evidence record. General transport-loss reconnect remains S110; no hardware claim.
+
+
+## Caller-driven renewal and idle expiry (S109)
+
+Operations renew a due channel token on the same socket and session, with no background
+task. `channel-lifetime-ms` defaults to 3600000 and `min-channel-lifetime-ms` to 5000;
+both accept positive `UInt32` milliseconds. The effective scheduling lifetime ignores a
+zero or larger-than-requested server revision and raises a lower revision to the minimum
+bounded by the request, with a static warning. Renewal is due at 75 percent, rounded up
+to a positive millisecond using integer arithmetic. The scheduling minimum never extends
+a server token's actual validity.
+
+Every supported policy, including None, sends `OpenSecureChannel` Renew. Secure renewal
+checks certificates/trust again, requires fresh nonces, derives new keys and preserves
+request/sequence counters. The previous token is retained only through its original
+lifetime plus 25 percent receive grace, or until the first authenticated new-token message.
+Concurrent callers share a renewal. Full-table backpressure before admission is nonfatal;
+a failed or dropped admitted renewal fails the channel immediately. No call sends user
+requests with an uncertain old epoch.
+
+Nothing happens while idle. If the channel or session has expired, the next read/write
+repeats the handshake with a fresh session and empty metadata cache, using existing
+credentials/trust settings and the operation's deadline/cancellation. Renewal itself
+uses retained key material; a fresh handshake reloads the configured files. Read retry
+limits are retained. Already-transmitted writes are never replayed and may return Unknown.
+Cancelled/dropped idle preparation can be retried by another call; close prevents session
+publication. Validating access, addresses, limits and cancellation still precedes recovery;
+value/metadata checks retain the staged-write ordering.
+
+Native open62541 tests keep one socket alive through more than three short lifetimes
+for every modern `SIGN_ENCRYPT` policy and repeated None renewals, and recover after idle
+channel/session expiry. Forced old-token delay and sequence wrap remain independently
+UNVERIFIED. General transport-loss reconnect/backoff is S110. See ADR-0047 and S109 evidence;
+no hardware claim.

@@ -1,9 +1,44 @@
 # Stonecrab status and engineering handoff
 
-Updated: 2026-11-04.
+Updated: 2026-11-05.
 Implementation baseline: the commit that last modified this file
 (`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
 its own commit; the slice log below records what each one landed.
+
+## OPC UA caller-driven renewal and idle expiry (S109, 2026-11-05)
+
+Operations renew due channel tokens on the existing socket with continued counters,
+asymmetric OPN and symmetric MSG/CLO protection. Positive UInt32 lifetime options use
+integer ceil(75 percent) scheduling; the minimum never extends actual token validity.
+Previous-token receive grace is bounded and ends on the first authenticated new-token
+MSG. Concurrent callers share one renewal. Admission backpressure is nonfatal; admitted
+renewal errors or abandoned renewal futures fail the lane with a typed error.
+
+Known idle channel/session expiry repeats the complete handshake on the next operation,
+with a new session and empty metadata cache. Operations retain one session snapshot;
+already-sent writes remain Unknown and are never replayed. Cancellation/deadline/drop
+and close/publication races are tested. There is no task or activity without a caller.
+General transport-loss reconnect/backoff remains S110; Publish driving remains S116.
+
+All 2574 tests and 588+5 doctests pass; standalone OPC UA passes 568 library cases,
+including 394 OPC UA cases, and strict Clippy. Core 6978/6978 and handwritten OPC UA
+10866/10866 lines are 100%, with unchanged floors/exclusions. All 15 focused mutations
+finish: 14 caught/one unviable, zero survivors/timeouts. All 18 fuzz targets pass at least
+60 seconds. New lifetime seeds caught a stale fuzz assertion, corrected with independent
+value/default invariants and a successful replay. The 59 isolated features, regen,
+dependencies/D23/machete, examples, semver, parity/attributes, fresh 235-file package and
+unpacked builds pass. Native 20-test gate/self-check/example pass; a counting factory
+proves renewal keeps one socket and idle recovery opens one replacement. Peer and PKI
+are removed. Independent forced old-token delay/sequence wrap remain UNVERIFIED.
+
+Hosted CI 41970120172 on 9eef687 passes all 32 executed jobs. Scheduled and first-branch
+DCO skip by workflow conditions; local DCO verifies the full signed-off range. Final
+root-only notes preserve hosted-tested product inputs; a normal merge pushes master.
+[Evidence](docs/evidence/opcua-s109.md),
+[design](docs/adr/0047-opcua-caller-driven-renewal.md). Five parity rows close: 249 total,
+167 implemented/44 planned/38 deferred. No dependency, feature, normal public API or
+version change; no hardware claim. Next: S110, request-driven reconnect. Normal signed-off
+merges retain every commit.
 
 ## OPC UA protected identities (S108, 2026-11-04)
 

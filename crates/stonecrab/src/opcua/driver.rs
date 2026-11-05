@@ -36,8 +36,9 @@ const TRANSPORTS: &str = "the only transport code of opcua is tcp";
 /// discovery, `CreateSession` and `ActivateSession` finish before returning Connected. Secure
 /// sessions verify the server certificate and application proof before activation. Reads
 /// and staged writes use bounded protected chunks; writes require read-write access.
-/// Protected user tokens, renewal, browse and native subscriptions
-/// remain planned.
+/// Protected username/X.509 tokens use the selected user policy. Operations renew due
+/// channel tokens and repeat the handshake after known idle channel/session expiry.
+/// General transport-loss reconnect, browse and native subscriptions remain planned.
 ///
 /// The whole attempt uses `handshake-timeout-ms` (60000 by default), and close uses
 /// `request-timeout-ms` (30000). `session-timeout-ms` requests 120000 by default; the
@@ -100,7 +101,8 @@ impl OpcuaDriver {
     /// (`opc.tcp://host:port` and the path, verbatim), `security-policy` and
     /// `message-security`. The request timeout is `request-timeout-ms` (30000 ms by default),
     /// `handshake-timeout-ms` maps to the whole connect bound (60000 ms by default),
-    /// `session-timeout-ms` requests 120000 ms,
+    /// `session-timeout-ms` requests 120000 ms. `channel-lifetime-ms` requests 3600000 ms;
+    /// `min-channel-lifetime-ms` defaults to 5000 ms (both positive `UInt32` milliseconds).
     /// `encoding.receive-buffer-size` and `encoding.send-buffer-size` select the chunk
     /// ceilings (65535 each by default), and `encoding.max-message-size` and
     /// `encoding.max-chunk-count` select whole-body limits (2097152 bytes and 64 chunks,
@@ -151,6 +153,61 @@ impl OpcuaDriver {
             .build()
     }
 
+    pub(super) async fn open_session(
+        &self,
+        config: &ConnectionConfig,
+        deadline: Deadline,
+        cancel: &CancellationToken,
+    ) -> Result<Session> {
+        if config.scheme() != SCHEME || !matches!(config.endpoint(), Endpoint::Tcp { .. }) {
+            return Err(PlcError::new(
+                ErrorKind::InvalidConfig,
+                "OPC UA requires its TCP configuration",
+            ));
+        }
+        let options = config.driver_options_as::<OpcuaOptions>().ok_or_else(|| {
+            PlcError::new(
+                ErrorKind::InvalidConfig,
+                "OPC UA requires parsed driver options",
+            )
+        })?;
+        let security = crypto::Security::prepare(options, self.clock.wall_now())?;
+        let identity = crate::opcua::identity::Identity::resolve(
+            config.credentials().map(crate::Secret::expose),
+            options,
+        )?;
+        let nonce = crypto::session_nonce(self.crypto.as_ref())?;
+        let transport = within(
+            self.clock.as_ref(),
+            deadline,
+            cancel,
+            self.factory
+                .open(config.endpoint(), *config.limits(), deadline),
+        )
+        .await?;
+        let channel = Channel::open(
+            transport,
+            options,
+            Arc::clone(&self.clock),
+            deadline,
+            cancel,
+            Arc::clone(&self.crypto),
+            security.as_ref(),
+        )
+        .await?;
+        let lane = Lane::from_channel(channel, config.timeouts().request);
+        Session::open(
+            lane,
+            options,
+            identity,
+            nonce,
+            deadline,
+            cancel,
+            security.as_deref(),
+        )
+        .await
+    }
+
     /// Parse an OPC UA tag address; see [`OpcuaAddress::parse`] for the grammar.
     ///
     /// The address options carry nothing OPC UA reads: the grammar has no address convention.
@@ -199,62 +256,19 @@ impl Driver for OpcuaDriver {
     }
     fn connect(&self, config: ConnectionConfig) -> OpFuture<'_, Box<dyn Connection>> {
         Box::pin(async move {
-            if config.scheme() != SCHEME || !matches!(config.endpoint(), Endpoint::Tcp { .. }) {
-                return Err(PlcError::new(
-                    ErrorKind::InvalidConfig,
-                    "OPC UA requires its TCP configuration",
-                ));
-            }
-            let options = config.driver_options_as::<OpcuaOptions>().ok_or_else(|| {
-                PlcError::new(
-                    ErrorKind::InvalidConfig,
-                    "OPC UA requires parsed driver options",
-                )
-            })?;
-            let security = crypto::Security::prepare(options, self.clock.wall_now())?;
-            let identity = crate::opcua::identity::Identity::resolve(
-                config.credentials().map(crate::Secret::expose),
-                options,
-            )?;
             let deadline = Deadline::after(self.clock.now(), config.timeouts().connect)?;
-            let cancel = CancellationToken::new();
-            let nonce = crypto::session_nonce(self.crypto.as_ref())?;
-            let transport = within(
-                self.clock.as_ref(),
-                deadline,
-                &cancel,
-                self.factory
-                    .open(config.endpoint(), *config.limits(), deadline),
-            )
-            .await?;
-            let channel = Channel::open(
-                transport,
-                options,
-                Arc::clone(&self.clock),
-                deadline,
-                &cancel,
-                Arc::clone(&self.crypto),
-                security.as_ref(),
-            )
-            .await?;
-            let lane = Lane::from_channel(channel, config.timeouts().request);
-            let session = Session::open(
-                lane,
-                options,
-                identity,
-                nonce,
-                deadline,
-                &cancel,
-                security.as_ref(),
-            )
-            .await?;
+            let session = self
+                .open_session(&config, deadline, &CancellationToken::new())
+                .await?;
             let connection: Box<dyn Connection> = Box::new(OpcuaConnection::new(
                 session,
+                Self {
+                    clock: Arc::clone(&self.clock),
+                    factory: Arc::clone(&self.factory),
+                    crypto: Arc::clone(&self.crypto),
+                },
+                config,
                 Arc::clone(&self.clock),
-                config.timeouts().request,
-                *config.limits(),
-                config.retry().clone(),
-                config.access(),
             ));
             Ok(connection)
         })
@@ -561,6 +575,33 @@ mod tests {
         assert_eq!(address.canonical(), "ns=2;s=Boiler.Temperature;REAL");
         let error = OpcuaDriver::address("not an address", &options).expect_err("refused");
         assert_eq!(error.kind(), ErrorKind::InvalidAddress);
+    }
+    #[test]
+    fn opcua_channel_lifetime_options_are_positive_uint32_milliseconds() {
+        let defaults = config_of("opcua://host:4840");
+        let options = options_of(&defaults);
+        assert_eq!(options.channel_lifetime, 3_600_000);
+        assert_eq!(options.min_channel_lifetime, 5000);
+        for key in ["channel-lifetime-ms", "min-channel-lifetime-ms"] {
+            for number in [1, 1000, u32::MAX] {
+                let config = config_of(&format!("opcua://host:4840?{key}={number}"));
+                let options = options_of(&config);
+                assert_eq!(
+                    if key == "channel-lifetime-ms" {
+                        options.channel_lifetime
+                    } else {
+                        options.min_channel_lifetime
+                    },
+                    number
+                );
+            }
+            for value in ["0", "-1", "+1", "4294967296", "1.5", "secret-sentinel"] {
+                let error = OpcuaDriver::configuration(&format!("opcua://host:4840?{key}={value}"))
+                    .unwrap_err();
+                assert_eq!(error.kind(), ErrorKind::InvalidConfig);
+                assert!(!format!("{error:?}").contains("sentinel"));
+            }
+        }
     }
 }
 

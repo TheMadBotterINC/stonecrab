@@ -618,7 +618,7 @@ fn opcua_create_session_adopts_the_authentication_token_and_revised_timeout() {
     )
     .unwrap();
     assert_eq!(
-        channel.server_nonce.as_bytes(),
+        channel.renewal.server_nonce.as_bytes(),
         Some(b"server-nonce".as_slice())
     );
     let session = block_on_with(
@@ -643,11 +643,9 @@ fn opcua_create_session_adopts_the_authentication_token_and_revised_timeout() {
     assert_eq!(client_nonce.as_bytes(), Some([0xA5; 32].as_slice()));
     let connection = OpcuaConnection::new(
         session,
+        OpcuaDriver::new().with_clock(Arc::new(clock.clone())),
+        config,
         Arc::new(clock.clone()),
-        Duration::from_secs(30),
-        ResourceLimits::builder().build().unwrap(),
-        crate::RetryPolicy::default(),
-        crate::AccessPolicy::ReadOnly,
     );
     let shown = format!("{connection:?}");
     assert!(shown.contains("54.321s"));
