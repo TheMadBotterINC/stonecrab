@@ -97,6 +97,64 @@ fn envelope(id: u16, body: &[u8]) -> Vec<u8> {
 
 fn vectors() -> Vec<(&'static str, u16, Vec<u8>)> {
     vec![
+        ("ViewDescription", 513, [vec![0, 0], vec![0; 12]].concat()),
+        (
+            "BrowseDescription",
+            516,
+            [
+                vec![0, 85],
+                vec![0; 4],
+                vec![0, 33, 1],
+                vec![0; 4],
+                63_u32.to_le_bytes().to_vec(),
+            ]
+            .concat(),
+        ),
+        (
+            "ReferenceDescription",
+            520,
+            [
+                vec![0, 33, 1, 0, 85],
+                vec![0; 2],
+                NULL.to_vec(),
+                vec![0],
+                1_u32.to_le_bytes().to_vec(),
+                vec![0, 0],
+            ]
+            .concat(),
+        ),
+        (
+            "BrowseResult",
+            524,
+            [vec![0; 4], NULL.to_vec(), NULL.to_vec()].concat(),
+        ),
+        (
+            "BrowseRequest",
+            527,
+            [
+                request_header(),
+                vec![0, 0],
+                vec![0; 12],
+                65536_u32.to_le_bytes().to_vec(),
+                NULL.to_vec(),
+            ]
+            .concat(),
+        ),
+        (
+            "BrowseResponse",
+            530,
+            [response_header(), NULL.to_vec(), NULL.to_vec()].concat(),
+        ),
+        (
+            "BrowseNextRequest",
+            533,
+            [request_header(), vec![1], NULL.to_vec()].concat(),
+        ),
+        (
+            "BrowseNextResponse",
+            536,
+            [response_header(), NULL.to_vec(), NULL.to_vec()].concat(),
+        ),
         (
             "WriteValue",
             670,
@@ -310,7 +368,7 @@ fn local(id: u32) -> ExpandedNodeId {
 #[test]
 fn opcua_every_generated_service_has_positive_and_negative_vectors() {
     let all = vectors();
-    assert_eq!(all.len(), 29, "S108 connection/read/write/identity closure");
+    assert_eq!(all.len(), 37, "S112 connection/read/write/browse closure");
     for (name, id, body) in all {
         assert_eq!(
             fixture(name, false),

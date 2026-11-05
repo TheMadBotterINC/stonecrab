@@ -180,3 +180,51 @@ name = "X509IdentityToken"
 encoding_id = 327
 valid = "X509IdentityToken.hex"
 negative = "X509IdentityToken-truncated.hex"
+
+[[vector]]
+name = "ViewDescription"
+encoding_id = 513
+valid = "ViewDescription.hex"
+negative = "ViewDescription-truncated.hex"
+
+[[vector]]
+name = "BrowseDescription"
+encoding_id = 516
+valid = "BrowseDescription.hex"
+negative = "BrowseDescription-truncated.hex"
+
+[[vector]]
+name = "ReferenceDescription"
+encoding_id = 520
+valid = "ReferenceDescription.hex"
+negative = "ReferenceDescription-truncated.hex"
+
+[[vector]]
+name = "BrowseResult"
+encoding_id = 524
+valid = "BrowseResult.hex"
+negative = "BrowseResult-truncated.hex"
+
+[[vector]]
+name = "BrowseRequest"
+encoding_id = 527
+valid = "BrowseRequest.hex"
+negative = "BrowseRequest-truncated.hex"
+
+[[vector]]
+name = "BrowseResponse"
+encoding_id = 530
+valid = "BrowseResponse.hex"
+negative = "BrowseResponse-truncated.hex"
+
+[[vector]]
+name = "BrowseNextRequest"
+encoding_id = 533
+valid = "BrowseNextRequest.hex"
+negative = "BrowseNextRequest-truncated.hex"
+
+[[vector]]
+name = "BrowseNextResponse"
+encoding_id = 536
+valid = "BrowseNextResponse.hex"
+negative = "BrowseNextResponse-truncated.hex"

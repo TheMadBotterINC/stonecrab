@@ -18,6 +18,7 @@ use crate::codec::{join_bits, split_bits};
 use crate::opcua::codec::DataValue;
 use crate::opcua::codec::Depth;
 use crate::opcua::codec::DiagnosticInfo;
+use crate::opcua::codec::ExpandedNodeId;
 use crate::opcua::codec::ExtensionObject;
 use crate::opcua::codec::LocalizedText;
 use crate::opcua::codec::NodeId;
@@ -28,10 +29,15 @@ use crate::opcua::codec::UaString as PascalString;
 
 use super::application_description::ApplicationDescription;
 use super::application_type::ApplicationType;
+use super::browse_description::BrowseDescription;
+use super::browse_direction::BrowseDirection;
+use super::browse_result::BrowseResult;
 use super::channel_security_token::ChannelSecurityToken;
 use super::endpoint_description::EndpointDescription;
 use super::message_security_mode::MessageSecurityMode;
+use super::node_class::NodeClass;
 use super::read_value_id::ReadValueId;
+use super::reference_description::ReferenceDescription;
 use super::request_header::RequestHeader;
 use super::response_header::ResponseHeader;
 use super::security_token_request_type::SecurityTokenRequestType;
@@ -40,6 +46,7 @@ use super::signed_software_certificate::SignedSoftwareCertificate;
 use super::timestamps_to_return::TimestampsToReturn;
 use super::user_token_policy::UserTokenPolicy;
 use super::user_token_type::UserTokenType;
+use super::view_description::ViewDescription;
 use super::write_value::WriteValue;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -191,6 +198,54 @@ pub(crate) enum ExtensionObjectDefinition {
     },
     CloseSessionResponse {
         response_header: ResponseHeader,
+    },
+    ViewDescription {
+        view_id: NodeId,
+        timestamp: i64,
+        view_version: u32,
+    },
+    BrowseDescription {
+        node_id: NodeId,
+        browse_direction: BrowseDirection,
+        reference_type_id: NodeId,
+        include_subtypes: bool,
+        node_class_mask: u32,
+        result_mask: u32,
+    },
+    ReferenceDescription {
+        reference_type_id: NodeId,
+        is_forward: bool,
+        node_id: ExpandedNodeId,
+        browse_name: QualifiedName,
+        display_name: LocalizedText,
+        node_class: NodeClass,
+        type_definition: ExpandedNodeId,
+    },
+    BrowseResult {
+        status_code: StatusCode,
+        continuation_point: PascalByteString,
+        references: Option<Vec<ReferenceDescription>>,
+    },
+    BrowseRequest {
+        request_header: RequestHeader,
+        view: ViewDescription,
+        requested_max_references_per_node: u32,
+        nodes_to_browse: Option<Vec<BrowseDescription>>,
+    },
+    BrowseResponse {
+        response_header: ResponseHeader,
+        results: Option<Vec<BrowseResult>>,
+        diagnostic_infos: Option<Vec<DiagnosticInfo>>,
+    },
+    BrowseNextRequest {
+        request_header: RequestHeader,
+        release_continuation_points: bool,
+        continuation_points: Option<Vec<PascalByteString>>,
+    },
+    BrowseNextResponse {
+        response_header: ResponseHeader,
+        results: Option<Vec<BrowseResult>>,
+        diagnostic_infos: Option<Vec<DiagnosticInfo>>,
     },
     ReadValueId {
         node_id: NodeId,
@@ -996,38 +1051,14 @@ impl ExtensionObjectDefinition {
                 field: "ExtensionObjectDefinition.DeleteReferencesResponse (disabled)",
                 value: i64::from(extension_id).cast_unsigned(),
             }),
-            513 => Err(ParseError::InvalidDiscriminator {
-                field: "ExtensionObjectDefinition.ViewDescription (disabled)",
-                value: i64::from(extension_id).cast_unsigned(),
-            }),
-            516 => Err(ParseError::InvalidDiscriminator {
-                field: "ExtensionObjectDefinition.BrowseDescription (disabled)",
-                value: i64::from(extension_id).cast_unsigned(),
-            }),
-            520 => Err(ParseError::InvalidDiscriminator {
-                field: "ExtensionObjectDefinition.ReferenceDescription (disabled)",
-                value: i64::from(extension_id).cast_unsigned(),
-            }),
-            524 => Err(ParseError::InvalidDiscriminator {
-                field: "ExtensionObjectDefinition.BrowseResult (disabled)",
-                value: i64::from(extension_id).cast_unsigned(),
-            }),
-            527 => Err(ParseError::InvalidDiscriminator {
-                field: "ExtensionObjectDefinition.BrowseRequest (disabled)",
-                value: i64::from(extension_id).cast_unsigned(),
-            }),
-            530 => Err(ParseError::InvalidDiscriminator {
-                field: "ExtensionObjectDefinition.BrowseResponse (disabled)",
-                value: i64::from(extension_id).cast_unsigned(),
-            }),
-            533 => Err(ParseError::InvalidDiscriminator {
-                field: "ExtensionObjectDefinition.BrowseNextRequest (disabled)",
-                value: i64::from(extension_id).cast_unsigned(),
-            }),
-            536 => Err(ParseError::InvalidDiscriminator {
-                field: "ExtensionObjectDefinition.BrowseNextResponse (disabled)",
-                value: i64::from(extension_id).cast_unsigned(),
-            }),
+            513 => Self::parse_view_description(reader, depth),
+            516 => Self::parse_browse_description(reader, depth),
+            520 => Self::parse_reference_description(reader, depth),
+            524 => Self::parse_browse_result(reader, depth),
+            527 => Self::parse_browse_request(reader, depth),
+            530 => Self::parse_browse_response(reader, depth),
+            533 => Self::parse_browse_next_request(reader, depth),
+            536 => Self::parse_browse_next_response(reader, depth),
             539 => Err(ParseError::InvalidDiscriminator {
                 field: "ExtensionObjectDefinition.RelativePathElement (disabled)",
                 value: i64::from(extension_id).cast_unsigned(),
@@ -2395,6 +2426,403 @@ impl ExtensionObjectDefinition {
         Ok(Self::CloseSessionResponse { response_header })
     }
 
+    fn parse_view_description(
+        reader: &mut BoundedReader<'_>,
+        depth: Depth,
+    ) -> Result<Self, ParseError> {
+        let view_id = NodeId::parse(reader, depth)?;
+        let timestamp = reader.read_i64(ByteOrder::LittleEndian)?;
+        let view_version = reader.read_u32(ByteOrder::LittleEndian)?;
+        Ok(Self::ViewDescription {
+            view_id,
+            timestamp,
+            view_version,
+        })
+    }
+
+    fn parse_browse_description(
+        reader: &mut BoundedReader<'_>,
+        depth: Depth,
+    ) -> Result<Self, ParseError> {
+        let node_id = NodeId::parse(reader, depth)?;
+        let browse_direction = BrowseDirection::parse(reader)?;
+        let reference_type_id = NodeId::parse(reader, depth)?;
+        let bits_1 = reader.read_u8()?;
+        let include_subtypes = split_bits(bits_1, 7, 1)? != 0;
+        let node_class_mask = reader.read_u32(ByteOrder::LittleEndian)?;
+        let result_mask = reader.read_u32(ByteOrder::LittleEndian)?;
+        Ok(Self::BrowseDescription {
+            node_id,
+            browse_direction,
+            reference_type_id,
+            include_subtypes,
+            node_class_mask,
+            result_mask,
+        })
+    }
+
+    fn parse_reference_description(
+        reader: &mut BoundedReader<'_>,
+        depth: Depth,
+    ) -> Result<Self, ParseError> {
+        let reference_type_id = NodeId::parse(reader, depth)?;
+        let bits_2 = reader.read_u8()?;
+        let is_forward = split_bits(bits_2, 7, 1)? != 0;
+        let node_id = ExpandedNodeId::parse(reader, depth)?;
+        let browse_name = QualifiedName::parse(reader, depth)?;
+        let display_name = LocalizedText::parse(reader, depth)?;
+        let node_class = NodeClass::parse(reader)?;
+        let type_definition = ExpandedNodeId::parse(reader, depth)?;
+        Ok(Self::ReferenceDescription {
+            reference_type_id,
+            is_forward,
+            node_id,
+            browse_name,
+            display_name,
+            node_class,
+            type_definition,
+        })
+    }
+
+    fn parse_browse_result(
+        reader: &mut BoundedReader<'_>,
+        depth: Depth,
+    ) -> Result<Self, ParseError> {
+        let status_code = StatusCode::parse(reader, depth)?;
+        let continuation_point = PascalByteString::parse(reader, depth)?;
+        let no_of_references = reader.read_i32(ByteOrder::LittleEndian)?;
+        let references = {
+            let array_count = i64::from(no_of_references);
+            if array_count == -1 {
+                None
+            } else {
+                let array_count = usize::try_from(array_count).map_err(|_overflow| {
+                    ParseError::InvalidDiscriminator {
+                        field: "references",
+                        value: array_count.unsigned_abs(),
+                    }
+                })?;
+                if array_count > reader.remaining() {
+                    return Err(ParseError::CountLimit {
+                        field: "references",
+                        count: array_count,
+                        max: reader.remaining(),
+                    });
+                }
+                let mut array_items = Vec::new();
+                for _ in 0..array_count {
+                    array_items.push(ReferenceDescription::parse(reader, depth, 520)?);
+                }
+                Some(array_items)
+            }
+        };
+        if i64::from(no_of_references)
+            != (if references.is_none() {
+                -1_i64
+            } else {
+                i64::try_from(references.as_ref().map_or(0, Vec::len))
+                    .map_err(|_overflow| ParseError::Overflow)?
+            })
+        {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "noOfReferences",
+                value: u64::from(no_of_references.unsigned_abs()),
+            });
+        }
+        Ok(Self::BrowseResult {
+            status_code,
+            continuation_point,
+            references,
+        })
+    }
+
+    fn parse_browse_request(
+        reader: &mut BoundedReader<'_>,
+        depth: Depth,
+    ) -> Result<Self, ParseError> {
+        let request_header = RequestHeader::parse(reader, depth, 391)?;
+        let view = ViewDescription::parse(reader, depth, 513)?;
+        let requested_max_references_per_node = reader.read_u32(ByteOrder::LittleEndian)?;
+        let no_of_nodes_to_browse = reader.read_i32(ByteOrder::LittleEndian)?;
+        let nodes_to_browse = {
+            let array_count = i64::from(no_of_nodes_to_browse);
+            if array_count == -1 {
+                None
+            } else {
+                let array_count = usize::try_from(array_count).map_err(|_overflow| {
+                    ParseError::InvalidDiscriminator {
+                        field: "nodesToBrowse",
+                        value: array_count.unsigned_abs(),
+                    }
+                })?;
+                if array_count > reader.remaining() {
+                    return Err(ParseError::CountLimit {
+                        field: "nodesToBrowse",
+                        count: array_count,
+                        max: reader.remaining(),
+                    });
+                }
+                let mut array_items = Vec::new();
+                for _ in 0..array_count {
+                    array_items.push(BrowseDescription::parse(reader, depth, 516)?);
+                }
+                Some(array_items)
+            }
+        };
+        if i64::from(no_of_nodes_to_browse)
+            != (if nodes_to_browse.is_none() {
+                -1_i64
+            } else {
+                i64::try_from(nodes_to_browse.as_ref().map_or(0, Vec::len))
+                    .map_err(|_overflow| ParseError::Overflow)?
+            })
+        {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "noOfNodesToBrowse",
+                value: u64::from(no_of_nodes_to_browse.unsigned_abs()),
+            });
+        }
+        Ok(Self::BrowseRequest {
+            request_header,
+            view,
+            requested_max_references_per_node,
+            nodes_to_browse,
+        })
+    }
+
+    fn parse_browse_response(
+        reader: &mut BoundedReader<'_>,
+        depth: Depth,
+    ) -> Result<Self, ParseError> {
+        let response_header = ResponseHeader::parse(reader, depth, 394)?;
+        let no_of_results = reader.read_i32(ByteOrder::LittleEndian)?;
+        let results = {
+            let array_count = i64::from(no_of_results);
+            if array_count == -1 {
+                None
+            } else {
+                let array_count = usize::try_from(array_count).map_err(|_overflow| {
+                    ParseError::InvalidDiscriminator {
+                        field: "results",
+                        value: array_count.unsigned_abs(),
+                    }
+                })?;
+                if array_count > reader.remaining() {
+                    return Err(ParseError::CountLimit {
+                        field: "results",
+                        count: array_count,
+                        max: reader.remaining(),
+                    });
+                }
+                let mut array_items = Vec::new();
+                for _ in 0..array_count {
+                    array_items.push(BrowseResult::parse(reader, depth, 524)?);
+                }
+                Some(array_items)
+            }
+        };
+        let no_of_diagnostic_infos = reader.read_i32(ByteOrder::LittleEndian)?;
+        let diagnostic_infos = {
+            let array_count = i64::from(no_of_diagnostic_infos);
+            if array_count == -1 {
+                None
+            } else {
+                let array_count = usize::try_from(array_count).map_err(|_overflow| {
+                    ParseError::InvalidDiscriminator {
+                        field: "diagnosticInfos",
+                        value: array_count.unsigned_abs(),
+                    }
+                })?;
+                if array_count > reader.remaining() {
+                    return Err(ParseError::CountLimit {
+                        field: "diagnosticInfos",
+                        count: array_count,
+                        max: reader.remaining(),
+                    });
+                }
+                let mut array_items = Vec::new();
+                for _ in 0..array_count {
+                    array_items.push(DiagnosticInfo::parse(reader, depth)?);
+                }
+                Some(array_items)
+            }
+        };
+        if i64::from(no_of_results)
+            != (if results.is_none() {
+                -1_i64
+            } else {
+                i64::try_from(results.as_ref().map_or(0, Vec::len))
+                    .map_err(|_overflow| ParseError::Overflow)?
+            })
+        {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "noOfResults",
+                value: u64::from(no_of_results.unsigned_abs()),
+            });
+        }
+        if i64::from(no_of_diagnostic_infos)
+            != (if diagnostic_infos.is_none() {
+                -1_i64
+            } else {
+                i64::try_from(diagnostic_infos.as_ref().map_or(0, Vec::len))
+                    .map_err(|_overflow| ParseError::Overflow)?
+            })
+        {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "noOfDiagnosticInfos",
+                value: u64::from(no_of_diagnostic_infos.unsigned_abs()),
+            });
+        }
+        Ok(Self::BrowseResponse {
+            response_header,
+            results,
+            diagnostic_infos,
+        })
+    }
+
+    fn parse_browse_next_request(
+        reader: &mut BoundedReader<'_>,
+        depth: Depth,
+    ) -> Result<Self, ParseError> {
+        let request_header = RequestHeader::parse(reader, depth, 391)?;
+        let bits_3 = reader.read_u8()?;
+        let release_continuation_points = split_bits(bits_3, 7, 1)? != 0;
+        let no_of_continuation_points = reader.read_i32(ByteOrder::LittleEndian)?;
+        let continuation_points = {
+            let array_count = i64::from(no_of_continuation_points);
+            if array_count == -1 {
+                None
+            } else {
+                let array_count = usize::try_from(array_count).map_err(|_overflow| {
+                    ParseError::InvalidDiscriminator {
+                        field: "continuationPoints",
+                        value: array_count.unsigned_abs(),
+                    }
+                })?;
+                if array_count > reader.remaining() {
+                    return Err(ParseError::CountLimit {
+                        field: "continuationPoints",
+                        count: array_count,
+                        max: reader.remaining(),
+                    });
+                }
+                let mut array_items = Vec::new();
+                for _ in 0..array_count {
+                    array_items.push(PascalByteString::parse(reader, depth)?);
+                }
+                Some(array_items)
+            }
+        };
+        if i64::from(no_of_continuation_points)
+            != (if continuation_points.is_none() {
+                -1_i64
+            } else {
+                i64::try_from(continuation_points.as_ref().map_or(0, Vec::len))
+                    .map_err(|_overflow| ParseError::Overflow)?
+            })
+        {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "noOfContinuationPoints",
+                value: u64::from(no_of_continuation_points.unsigned_abs()),
+            });
+        }
+        Ok(Self::BrowseNextRequest {
+            request_header,
+            release_continuation_points,
+            continuation_points,
+        })
+    }
+
+    fn parse_browse_next_response(
+        reader: &mut BoundedReader<'_>,
+        depth: Depth,
+    ) -> Result<Self, ParseError> {
+        let response_header = ResponseHeader::parse(reader, depth, 394)?;
+        let no_of_results = reader.read_i32(ByteOrder::LittleEndian)?;
+        let results = {
+            let array_count = i64::from(no_of_results);
+            if array_count == -1 {
+                None
+            } else {
+                let array_count = usize::try_from(array_count).map_err(|_overflow| {
+                    ParseError::InvalidDiscriminator {
+                        field: "results",
+                        value: array_count.unsigned_abs(),
+                    }
+                })?;
+                if array_count > reader.remaining() {
+                    return Err(ParseError::CountLimit {
+                        field: "results",
+                        count: array_count,
+                        max: reader.remaining(),
+                    });
+                }
+                let mut array_items = Vec::new();
+                for _ in 0..array_count {
+                    array_items.push(BrowseResult::parse(reader, depth, 524)?);
+                }
+                Some(array_items)
+            }
+        };
+        let no_of_diagnostic_infos = reader.read_i32(ByteOrder::LittleEndian)?;
+        let diagnostic_infos = {
+            let array_count = i64::from(no_of_diagnostic_infos);
+            if array_count == -1 {
+                None
+            } else {
+                let array_count = usize::try_from(array_count).map_err(|_overflow| {
+                    ParseError::InvalidDiscriminator {
+                        field: "diagnosticInfos",
+                        value: array_count.unsigned_abs(),
+                    }
+                })?;
+                if array_count > reader.remaining() {
+                    return Err(ParseError::CountLimit {
+                        field: "diagnosticInfos",
+                        count: array_count,
+                        max: reader.remaining(),
+                    });
+                }
+                let mut array_items = Vec::new();
+                for _ in 0..array_count {
+                    array_items.push(DiagnosticInfo::parse(reader, depth)?);
+                }
+                Some(array_items)
+            }
+        };
+        if i64::from(no_of_results)
+            != (if results.is_none() {
+                -1_i64
+            } else {
+                i64::try_from(results.as_ref().map_or(0, Vec::len))
+                    .map_err(|_overflow| ParseError::Overflow)?
+            })
+        {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "noOfResults",
+                value: u64::from(no_of_results.unsigned_abs()),
+            });
+        }
+        if i64::from(no_of_diagnostic_infos)
+            != (if diagnostic_infos.is_none() {
+                -1_i64
+            } else {
+                i64::try_from(diagnostic_infos.as_ref().map_or(0, Vec::len))
+                    .map_err(|_overflow| ParseError::Overflow)?
+            })
+        {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "noOfDiagnosticInfos",
+                value: u64::from(no_of_diagnostic_infos.unsigned_abs()),
+            });
+        }
+        Ok(Self::BrowseNextResponse {
+            response_header,
+            results,
+            diagnostic_infos,
+        })
+    }
+
     fn parse_read_value_id(
         reader: &mut BoundedReader<'_>,
         depth: Depth,
@@ -2763,6 +3191,16 @@ impl ExtensionObjectDefinition {
             Self::CloseSessionResponse { .. } => {
                 self.serialize_close_session_response(writer, depth)
             }
+            Self::ViewDescription { .. } => self.serialize_view_description(writer, depth),
+            Self::BrowseDescription { .. } => self.serialize_browse_description(writer, depth),
+            Self::ReferenceDescription { .. } => {
+                self.serialize_reference_description(writer, depth)
+            }
+            Self::BrowseResult { .. } => self.serialize_browse_result(writer, depth),
+            Self::BrowseRequest { .. } => self.serialize_browse_request(writer, depth),
+            Self::BrowseResponse { .. } => self.serialize_browse_response(writer, depth),
+            Self::BrowseNextRequest { .. } => self.serialize_browse_next_request(writer, depth),
+            Self::BrowseNextResponse { .. } => self.serialize_browse_next_response(writer, depth),
             Self::ReadValueId { .. } => self.serialize_read_value_id(writer, depth),
             Self::ReadRequest { .. } => self.serialize_read_request(writer, depth),
             Self::ReadResponse { .. } => self.serialize_read_response(writer, depth),
@@ -3448,6 +3886,284 @@ impl ExtensionObjectDefinition {
             });
         };
         response_header.serialize(writer, depth)
+    }
+
+    fn serialize_view_description(
+        &self,
+        writer: &mut BoundedWriter,
+        depth: Depth,
+    ) -> Result<(), ParseError> {
+        let Self::ViewDescription {
+            view_id,
+            timestamp,
+            view_version,
+        } = self
+        else {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "ExtensionObjectDefinition.ViewDescription",
+                value: 0,
+            });
+        };
+        view_id.serialize(writer, depth)?;
+        writer.write_i64(*timestamp, ByteOrder::LittleEndian)?;
+        writer.write_u32(*view_version, ByteOrder::LittleEndian)
+    }
+
+    fn serialize_browse_description(
+        &self,
+        writer: &mut BoundedWriter,
+        depth: Depth,
+    ) -> Result<(), ParseError> {
+        let Self::BrowseDescription {
+            node_id,
+            browse_direction,
+            reference_type_id,
+            include_subtypes,
+            node_class_mask,
+            result_mask,
+        } = self
+        else {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "ExtensionObjectDefinition.BrowseDescription",
+                value: 0,
+            });
+        };
+        node_id.serialize(writer, depth)?;
+        browse_direction.serialize(writer)?;
+        reference_type_id.serialize(writer, depth)?;
+        writer.write_u8(join_bits(0x00, 7, 1, u8::from(*include_subtypes))?)?;
+        writer.write_u32(*node_class_mask, ByteOrder::LittleEndian)?;
+        writer.write_u32(*result_mask, ByteOrder::LittleEndian)
+    }
+
+    fn serialize_reference_description(
+        &self,
+        writer: &mut BoundedWriter,
+        depth: Depth,
+    ) -> Result<(), ParseError> {
+        let Self::ReferenceDescription {
+            reference_type_id,
+            is_forward,
+            node_id,
+            browse_name,
+            display_name,
+            node_class,
+            type_definition,
+        } = self
+        else {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "ExtensionObjectDefinition.ReferenceDescription",
+                value: 0,
+            });
+        };
+        reference_type_id.serialize(writer, depth)?;
+        writer.write_u8(join_bits(0x00, 7, 1, u8::from(*is_forward))?)?;
+        node_id.serialize(writer, depth)?;
+        browse_name.serialize(writer, depth)?;
+        display_name.serialize(writer, depth)?;
+        node_class.serialize(writer)?;
+        type_definition.serialize(writer, depth)
+    }
+
+    fn serialize_browse_result(
+        &self,
+        writer: &mut BoundedWriter,
+        depth: Depth,
+    ) -> Result<(), ParseError> {
+        let Self::BrowseResult {
+            status_code,
+            continuation_point,
+            references,
+        } = self
+        else {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "ExtensionObjectDefinition.BrowseResult",
+                value: 0,
+            });
+        };
+        status_code.serialize(writer, depth)?;
+        continuation_point.serialize(writer, depth)?;
+        let no_of_references = i32::try_from(if references.is_none() {
+            -1_i64
+        } else {
+            i64::try_from(references.as_ref().map_or(0, Vec::len))
+                .map_err(|_overflow| ParseError::Overflow)?
+        })
+        .map_err(|_overflow| ParseError::Overflow)?;
+        writer.write_i32(no_of_references, ByteOrder::LittleEndian)?;
+        if let Some(array_items) = references {
+            for array_item in array_items {
+                array_item.serialize(writer, depth)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn serialize_browse_request(
+        &self,
+        writer: &mut BoundedWriter,
+        depth: Depth,
+    ) -> Result<(), ParseError> {
+        let Self::BrowseRequest {
+            request_header,
+            view,
+            requested_max_references_per_node,
+            nodes_to_browse,
+        } = self
+        else {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "ExtensionObjectDefinition.BrowseRequest",
+                value: 0,
+            });
+        };
+        request_header.serialize(writer, depth)?;
+        view.serialize(writer, depth)?;
+        writer.write_u32(*requested_max_references_per_node, ByteOrder::LittleEndian)?;
+        let no_of_nodes_to_browse = i32::try_from(if nodes_to_browse.is_none() {
+            -1_i64
+        } else {
+            i64::try_from(nodes_to_browse.as_ref().map_or(0, Vec::len))
+                .map_err(|_overflow| ParseError::Overflow)?
+        })
+        .map_err(|_overflow| ParseError::Overflow)?;
+        writer.write_i32(no_of_nodes_to_browse, ByteOrder::LittleEndian)?;
+        if let Some(array_items) = nodes_to_browse {
+            for array_item in array_items {
+                array_item.serialize(writer, depth)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn serialize_browse_response(
+        &self,
+        writer: &mut BoundedWriter,
+        depth: Depth,
+    ) -> Result<(), ParseError> {
+        let Self::BrowseResponse {
+            response_header,
+            results,
+            diagnostic_infos,
+        } = self
+        else {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "ExtensionObjectDefinition.BrowseResponse",
+                value: 0,
+            });
+        };
+        response_header.serialize(writer, depth)?;
+        let no_of_results = i32::try_from(if results.is_none() {
+            -1_i64
+        } else {
+            i64::try_from(results.as_ref().map_or(0, Vec::len))
+                .map_err(|_overflow| ParseError::Overflow)?
+        })
+        .map_err(|_overflow| ParseError::Overflow)?;
+        writer.write_i32(no_of_results, ByteOrder::LittleEndian)?;
+        if let Some(array_items) = results {
+            for array_item in array_items {
+                array_item.serialize(writer, depth)?;
+            }
+        }
+        let no_of_diagnostic_infos = i32::try_from(if diagnostic_infos.is_none() {
+            -1_i64
+        } else {
+            i64::try_from(diagnostic_infos.as_ref().map_or(0, Vec::len))
+                .map_err(|_overflow| ParseError::Overflow)?
+        })
+        .map_err(|_overflow| ParseError::Overflow)?;
+        writer.write_i32(no_of_diagnostic_infos, ByteOrder::LittleEndian)?;
+        if let Some(array_items) = diagnostic_infos {
+            for array_item in array_items {
+                array_item.serialize(writer, depth)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn serialize_browse_next_request(
+        &self,
+        writer: &mut BoundedWriter,
+        depth: Depth,
+    ) -> Result<(), ParseError> {
+        let Self::BrowseNextRequest {
+            request_header,
+            release_continuation_points,
+            continuation_points,
+        } = self
+        else {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "ExtensionObjectDefinition.BrowseNextRequest",
+                value: 0,
+            });
+        };
+        request_header.serialize(writer, depth)?;
+        writer.write_u8(join_bits(
+            0x00,
+            7,
+            1,
+            u8::from(*release_continuation_points),
+        )?)?;
+        let no_of_continuation_points = i32::try_from(if continuation_points.is_none() {
+            -1_i64
+        } else {
+            i64::try_from(continuation_points.as_ref().map_or(0, Vec::len))
+                .map_err(|_overflow| ParseError::Overflow)?
+        })
+        .map_err(|_overflow| ParseError::Overflow)?;
+        writer.write_i32(no_of_continuation_points, ByteOrder::LittleEndian)?;
+        if let Some(array_items) = continuation_points {
+            for array_item in array_items {
+                array_item.serialize(writer, depth)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn serialize_browse_next_response(
+        &self,
+        writer: &mut BoundedWriter,
+        depth: Depth,
+    ) -> Result<(), ParseError> {
+        let Self::BrowseNextResponse {
+            response_header,
+            results,
+            diagnostic_infos,
+        } = self
+        else {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "ExtensionObjectDefinition.BrowseNextResponse",
+                value: 0,
+            });
+        };
+        response_header.serialize(writer, depth)?;
+        let no_of_results = i32::try_from(if results.is_none() {
+            -1_i64
+        } else {
+            i64::try_from(results.as_ref().map_or(0, Vec::len))
+                .map_err(|_overflow| ParseError::Overflow)?
+        })
+        .map_err(|_overflow| ParseError::Overflow)?;
+        writer.write_i32(no_of_results, ByteOrder::LittleEndian)?;
+        if let Some(array_items) = results {
+            for array_item in array_items {
+                array_item.serialize(writer, depth)?;
+            }
+        }
+        let no_of_diagnostic_infos = i32::try_from(if diagnostic_infos.is_none() {
+            -1_i64
+        } else {
+            i64::try_from(diagnostic_infos.as_ref().map_or(0, Vec::len))
+                .map_err(|_overflow| ParseError::Overflow)?
+        })
+        .map_err(|_overflow| ParseError::Overflow)?;
+        writer.write_i32(no_of_diagnostic_infos, ByteOrder::LittleEndian)?;
+        if let Some(array_items) = diagnostic_infos {
+            for array_item in array_items {
+                array_item.serialize(writer, depth)?;
+            }
+        }
+        Ok(())
     }
 
     fn serialize_read_value_id(
