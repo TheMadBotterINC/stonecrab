@@ -78,5 +78,19 @@ but remain planned overall until S117's subscription termination.
 
 Fresh Cargo-cache package verification passes the reviewed 236-file inventory; only
 connection/reconnect_tests.rs is added. No fixtures/testdata ship. Unpacked all-feature
-and standalone OPC UA builds pass. Packaging follows completed doctests. Hosted results
-will be recorded after CI.
+and standalone OPC UA builds pass. Packaging follows completed doctests.
+
+## Hosted and merge evidence
+
+[CI 41974550905](https://github.com/TheMadBotterINC/stonecrab/actions/runs/41974550905)
+on d37725edc3c224b481a45369e8582faaf09ad918 passes all 32 executed jobs: both Rust
+versions on Windows/macOS/Linux, coverage, cross-target builds, native OPC UA and other
+interop, package verification and full serial fuzz smoke included. Scheduled and
+first-branch DCO skip by workflow conditions; local DCO verifies the entire commit range.
+
+The final evidence/handoff changes are root-only. Product, crate documentation,
+generator, manifest/lock, script, interop, packaging and fuzz inputs match the hosted
+source exactly. Merge uses --no-ff --no-squash --signoff, preserving every plan,
+implementation, test and evidence commit, and pushes master. Final checks require a clean
+master synced with origin, both merge parents and feature ancestry, and matching remote
+HEAD. No release/tag/version change; next is S111 browse API/types.

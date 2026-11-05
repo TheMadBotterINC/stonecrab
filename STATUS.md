@@ -5,6 +5,45 @@ Implementation baseline: the commit that last modified this file
 (`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
 its own commit; the slice log below records what each one landed.
 
+## OPC UA request-driven reconnect (S110, 2026-11-05)
+
+Observed transport failures now schedule the configured reconnect backoff. The next
+operation waits on the injected clock and makes one full handshake attempt; concurrent
+callers share preparation. Failed attempts advance the policy and exhaustion is terminal.
+A complete session resets attempts, while a socket open alone does not. Cancellation,
+drop or an earlier caller deadline leaves the scheduled retry available. Known idle
+expiry retains immediate S109 recovery. No operation means no background reconnect work.
+
+Old operations keep their session snapshot: pending/queued reads fail Disconnected and
+transmitted writes remain Unknown, with no replay on the replacement. New sessions have
+fresh tokens/nonces, reloaded security preparation and empty metadata caches. State
+notifications wake outside the session lock; late failures cannot poison the replacement.
+Close interrupts backoff/handshake and prevents resurrection. Healthy request timeouts
+and service refusals preserve a usable lane; failed lanes with non-transport errors and
+handshake validation failures remain terminal.
+
+All 2591 tests and 588+5 doctests pass; standalone OPC UA passes 568 library cases,
+including 394 OPC UA cases, and strict Clippy. Core 6980/6980 and handwritten OPC UA
+10952/10952 lines are 100%, with unchanged thresholds/exclusions. All 18 fuzz targets
+pass at least 60 seconds. The 59 isolated features, regen, dependencies/D23/machete,
+examples, semver, parity/attributes and native 20-test gate/self-check/example pass.
+Secure deterministic recovery covers every modern policy in both modes with discovery
+on/off. No new mutation score is claimed: the changed I/O/state publication is outside
+the existing pure-code mutation scope. Reconnect is simulator-tested; real network
+fault evidence remains S121. Native peer and exported PKI are removed.
+
+Fresh package verification passes the reviewed 236-file inventory and unpacked
+all-feature/standalone OPC UA builds. Hosted CI 41974550905 on d37725e passes all 32
+executed jobs. Scheduled and first-branch DCO skip by workflow conditions; local DCO
+verifies the full signed-off range. Final root-only notes preserve hosted-tested inputs;
+a normal merge pushes master.
+[Evidence](docs/evidence/opcua-s110.md),
+[design](docs/adr/0048-opcua-request-driven-reconnect.md). One parity row closes:
+249 total, 168 implemented/43 planned/38 deferred. The two general reconnect rows retain
+planned status until S117's subscription termination. No dependency, feature, public API
+or version change; no hardware claim. Next: S111, browse API/types. Normal signed-off
+merges retain every commit.
+
 ## OPC UA caller-driven renewal and idle expiry (S109, 2026-11-05)
 
 Operations renew due channel tokens on the existing socket with continued counters,
