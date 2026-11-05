@@ -108,15 +108,19 @@ mod tests {
         assert!(report.is_green(), "the suite is green:\n{report}");
         assert_eq!(report.failed(), 0, "no failures:\n{report}");
         assert_eq!(
+            report.outcome("an unsupported browse performs no I/O and changes no state"),
+            Some(&CaseOutcome::Passed)
+        );
+        assert_eq!(
             report.passed().saturating_add(report.skipped()),
             ContractSuite::cases().len(),
             "every case has an outcome"
         );
         assert_eq!(
             report.skipped(),
-            4,
+            5,
             "only the unsupported-write case, the two supported-ping cases and the \
-             unsupported-subscribe case are skipped:\n{report}"
+             unsupported-subscribe and supported-browse cases are skipped:\n{report}"
         );
         for name in [
             "a supported ping answers and changes no state",

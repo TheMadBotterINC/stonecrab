@@ -190,9 +190,9 @@ mod tests {
         );
         assert_eq!(
             report.skipped(),
-            11,
+            12,
             "exactly the eight timing skips, the unsupported-write skip, the unsupported-ping \
-             skip and the unsupported-subscribe skip:\n{report}"
+             skip, the unsupported-subscribe skip and supported browse:\n{report}"
         );
         assert_eq!(
             report.outcome(UNSUPPORTED_PING),

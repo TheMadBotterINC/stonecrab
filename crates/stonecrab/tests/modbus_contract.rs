@@ -198,15 +198,19 @@ mod tests {
         assert!(report.is_green(), "the suite is green:\n{report}");
         assert_eq!(report.failed(), 0, "no failures:\n{report}");
         assert_eq!(
+            report.outcome("an unsupported browse performs no I/O and changes no state"),
+            Some(&CaseOutcome::Passed)
+        );
+        assert_eq!(
             report.passed().saturating_add(report.skipped()),
             ContractSuite::cases().len(),
             "every case has an outcome:\n{report}"
         );
         assert_eq!(
             report.skipped(),
-            3,
+            4,
             "exactly the unsupported-write, the unsupported-ping and the unsupported-subscribe \
-             skips:\n{report}"
+             and supported-browse skips:\n{report}"
         );
         // The driver supports ping, so the unsupported-ping case has nothing to prove here
         // and the two cases of a supported ping run.

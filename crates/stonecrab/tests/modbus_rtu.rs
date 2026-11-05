@@ -1518,8 +1518,8 @@ mod tests {
         );
         assert_eq!(
             report.skipped(),
-            3,
-            "the three unsupported-operation cases:\n{report}"
+            4,
+            "three unsupported-operation cases and supported browse:\n{report}"
         );
         for name in [
             "a supported ping answers and changes no state",

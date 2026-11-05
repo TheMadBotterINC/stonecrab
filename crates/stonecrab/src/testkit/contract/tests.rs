@@ -152,13 +152,13 @@ fn case(name: &'static str) -> ContractCase {
 }
 
 #[test]
-fn the_suite_names_thirty_three_distinct_cases_each_with_a_coverage_mapping() {
+fn the_suite_names_thirty_five_distinct_cases_each_with_a_coverage_mapping() {
     let cases = ContractSuite::cases();
-    assert_eq!(cases.len(), 33, "the case list");
+    assert_eq!(cases.len(), 35, "the case list");
     let mut names: Vec<&str> = cases.iter().map(|case| case.name).collect();
     names.sort_unstable();
     names.dedup();
-    assert_eq!(names.len(), 33, "every sentence is distinct");
+    assert_eq!(names.len(), 35, "every sentence is distinct");
     assert!(
         cases.iter().all(|case| !case.covers.is_empty()),
         "every case maps to a mandatory case"
@@ -447,6 +447,7 @@ fn a_driver_with_nothing_passes_the_cases_it_can_and_skips_the_rest_with_reasons
         "an unsupported write performs no I/O",
         "an unsupported ping performs no I/O and changes no state",
         "an unsupported subscribe performs no I/O and changes no state",
+        "an unsupported browse performs no I/O and changes no state",
     ] {
         assert_eq!(
             report.outcome(name),
@@ -454,10 +455,10 @@ fn a_driver_with_nothing_passes_the_cases_it_can_and_skips_the_rest_with_reasons
             "{name}:\n{report}"
         );
     }
-    assert_eq!(report.passed(), 6, "exactly the six:\n{report}");
+    assert_eq!(report.passed(), 7, "exactly the seven:\n{report}");
     assert_eq!(
         report.skipped(),
-        27,
+        28,
         "everything else is skipped:\n{report}"
     );
     for name in [
@@ -486,6 +487,195 @@ fn a_driver_with_nothing_passes_the_cases_it_can_and_skips_the_rest_with_reasons
         )),
         "write cases:\n{report}"
     );
+}
+
+struct Browsing {
+    inner: Nothing,
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+    wrong_query: bool,
+}
+
+struct BrowsingConnection {
+    inner: Box<dyn Connection>,
+    clock: Arc<FakeClock>,
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+    wrong_query: bool,
+}
+
+impl Driver for Browsing {
+    fn scheme(&self) -> &'static str {
+        self.inner.scheme()
+    }
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            browse: true,
+            ..Capabilities::default()
+        }
+    }
+    fn parse_config(&self, uri: &str) -> Result<ConnectionConfig> {
+        self.inner.parse_config(uri)
+    }
+    fn parse_address(
+        &self,
+        text: &str,
+        options: &crate::AddressOptions,
+    ) -> Result<Arc<dyn ProtocolAddress>> {
+        self.inner.parse_address(text, options)
+    }
+    fn connect(&self, config: ConnectionConfig) -> OpFuture<'_, Box<dyn Connection>> {
+        Box::pin(async move {
+            let connection: Box<dyn Connection> = Box::new(BrowsingConnection {
+                inner: self.inner.connect(config).await?,
+                clock: Arc::clone(&self.inner.clock),
+                calls: Arc::clone(&self.calls),
+                wrong_query: self.wrong_query,
+            });
+            Ok(connection)
+        })
+    }
+}
+
+impl Connection for BrowsingConnection {
+    fn state(&self) -> ConnectionState {
+        self.inner.state()
+    }
+    fn watch_state(&self) -> StateWatch {
+        self.inner.watch_state()
+    }
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            browse: true,
+            ..self.inner.capabilities()
+        }
+    }
+    fn limits(&self) -> ResourceLimits {
+        self.inner.limits()
+    }
+    fn read(&self, request: ReadRequest) -> OpFuture<'_, ReadResponse> {
+        self.inner.read(request)
+    }
+    fn write(&self, request: WriteRequest) -> OpFuture<'_, WriteResponse> {
+        self.inner.write(request)
+    }
+    fn close(&self) -> OpFuture<'_, ()> {
+        self.inner.close()
+    }
+    fn browse(&self, request: crate::BrowseRequest) -> OpFuture<'_, crate::BrowseResponse> {
+        Box::pin(async move {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let request = if self.wrong_query {
+                crate::BrowseRequest::builder(self.limits())
+                    .query(TagId::new("foreign")?, "")
+                    .build()?
+            } else {
+                request
+            };
+            let now = self.clock.now();
+            let mut response = crate::BrowseResponse::builder(&request, now, now);
+            for query in request.queries() {
+                let node = crate::BrowseNode::new(
+                    Arc::new(FixtureAddress::new("nothing", None)),
+                    query.text(),
+                )?;
+                response =
+                    response.item(crate::BrowseResult::new(query.id().clone(), Ok(vec![node])));
+            }
+            response.build()
+        })
+    }
+}
+
+#[test]
+fn browse_contract_requirements_and_supported_correlation_are_exercised() {
+    for wrong_query in [false, true] {
+        let (clock, inner) = nothing(false, false);
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let driver = Browsing {
+            inner,
+            calls: Arc::clone(&calls),
+            wrong_query,
+        };
+        let missing =
+            block_on_with(&clock, ContractSuite::run(&driver, "x", &fixture(&clock))).unwrap();
+        assert_eq!(
+            missing.outcome("a browse correlates queries and respects the node bound"),
+            Some(&CaseOutcome::Skipped(
+                "fixture has no browsable query".into()
+            ))
+        );
+        assert_eq!(
+            missing.outcome("an unsupported browse performs no I/O and changes no state"),
+            Some(&CaseOutcome::Skipped(
+                "driver reports browse supported".into()
+            ))
+        );
+        let fx = fixture(&clock).with_browsable("opaque fixture query");
+        assert_eq!(fx.browsable.as_deref(), Some("opaque fixture query"));
+        assert!(!format!("{fx:?}").contains("opaque fixture query"));
+        assert_eq!(Requires::Browse.to_string(), "driver supports browse");
+        assert_eq!(
+            Requires::BrowsableQuery.to_string(),
+            "fixture names a browsable query"
+        );
+        let report = block_on_with(&clock, ContractSuite::run(&driver, "x", &fx)).unwrap();
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(report.is_green(), !wrong_query, "{report}");
+        if wrong_query {
+            assert!(
+                matches!(report.outcome("a browse correlates queries and respects the node bound"), Some(CaseOutcome::Failed(reason)) if reason.contains("identity"))
+            );
+        } else {
+            assert_eq!(
+                report.outcome("a browse correlates queries and respects the node bound"),
+                Some(&CaseOutcome::Passed)
+            );
+        }
+    }
+}
+
+#[test]
+fn cached_browse_forwards_the_override_and_a_released_lease_does_not_call_it() {
+    let (clock, inner) = nothing(false, false);
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let driver = Browsing {
+        inner,
+        calls: Arc::clone(&calls),
+        wrong_query: false,
+    };
+    let mut registry = crate::DriverRegistry::new();
+    registry.register(Arc::new(driver)).unwrap();
+    let cache =
+        crate::ConnectionCache::builder(Arc::new(registry), Arc::<FakeClock>::clone(&clock))
+            .build()
+            .unwrap();
+    let lease = block_on_with(&clock, cache.get("nothing://peer")).unwrap();
+    let request = || {
+        crate::BrowseRequest::builder(lease.limits())
+            .query(TagId::new("root").unwrap(), "start")
+            .build()
+            .unwrap()
+    };
+    let response = block_on_with(&clock, lease.browse(request())).unwrap();
+    assert_eq!(response.items().len(), 1);
+    assert_eq!(
+        response
+            .items()
+            .first()
+            .unwrap()
+            .outcome()
+            .as_ref()
+            .unwrap()
+            .first()
+            .unwrap()
+            .name(),
+        "start"
+    );
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    block_on_with(&clock, lease.close()).unwrap();
+    let error = block_on_with(&clock, lease.browse(request())).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Disconnected);
+    assert_eq!(error.diagnostics().operation, Some(Operation::Browse));
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
 
 // covers: SPEC 'Contract suite' / a skip names the missing fixture requirement

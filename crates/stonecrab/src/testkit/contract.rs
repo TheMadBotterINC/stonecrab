@@ -77,6 +77,10 @@ pub enum Requires {
     Fault(Fault),
     /// The driver reports subscriptions supported (`Capabilities.subscribe`).
     Subscribe,
+    /// The driver reports `Capabilities.browse`.
+    Browse,
+    /// The fixture supplies a query accepted by the browsing driver.
+    BrowsableQuery,
 }
 
 impl fmt::Display for Requires {
@@ -89,6 +93,8 @@ impl fmt::Display for Requires {
             Self::WritableAddress => f.write_str("fixture names a writable address"),
             Self::Fault(fault) => write!(f, "fixture fault: {fault}"),
             Self::Subscribe => f.write_str("driver supports subscribe"),
+            Self::Browse => f.write_str("driver supports browse"),
+            Self::BrowsableQuery => f.write_str("fixture names a browsable query"),
         }
     }
 }
@@ -346,6 +352,8 @@ pub struct ContractFixture {
     /// the write half of the capabilities case need it. The uri given to `run` must grant
     /// write access for a driver that supports write.
     pub writable: Option<(String, PlcValue)>,
+    /// Query text accepted by the browsing driver, including an empty default start.
+    pub browsable: Option<String>,
     /// True when the driver reports device time, so `source_time` is expected.
     pub declares_device_time: bool,
     /// A counter that must not move when the suite says "no I/O".
@@ -396,6 +404,7 @@ impl ContractFixture {
             rejected: rejected.into(),
             foreign,
             writable: None,
+            browsable: None,
             declares_device_time: false,
             io_probe: Box::new(io_probe),
             device_reads: Box::new(device_reads),
@@ -410,6 +419,13 @@ impl ContractFixture {
     #[must_use]
     pub fn with_writable(mut self, address: impl Into<String>, value: PlcValue) -> Self {
         self.writable = Some((address.into(), value));
+        self
+    }
+
+    /// Name a query the device accepts; blank text requests the driver's default start.
+    #[must_use]
+    pub fn with_browsable(mut self, query: impl Into<String>) -> Self {
+        self.browsable = Some(query.into());
         self
     }
 
@@ -459,6 +475,7 @@ impl fmt::Debug for ContractFixture {
             .field("rejected", &self.rejected)
             .field("foreign_protocol", &self.foreign.protocol())
             .field("writable", &self.writable.as_ref().map(|(text, _)| text))
+            .field("browsable_bytes", &self.browsable.as_ref().map(String::len))
             .field("declares_device_time", &self.declares_device_time)
             .field("inject_disconnect", &self.inject_disconnect.is_some())
             .field("inject_timeout", &self.inject_timeout.is_some())
@@ -502,11 +519,11 @@ impl ContractSuite {
     /// use stonecrab::testkit::ContractSuite;
     ///
     /// let cases = ContractSuite::cases();
-    /// assert_eq!(cases.len(), 33);
+    /// assert_eq!(cases.len(), 35);
     /// let mut names: Vec<_> = cases.iter().map(|case| case.name).collect();
     /// names.sort_unstable();
     /// names.dedup();
-    /// assert_eq!(names.len(), 33, "case names are unique");
+    /// assert_eq!(names.len(), 35, "case names are unique");
     /// ```
     #[must_use]
     pub fn cases() -> Vec<ContractCase> {
