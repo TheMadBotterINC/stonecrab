@@ -167,6 +167,10 @@ pub(crate) enum ExtensionObjectDefinition {
         password: PascalByteString,
         encryption_algorithm: PascalString,
     },
+    X509IdentityToken {
+        policy_id: PascalString,
+        certificate_data: PascalByteString,
+    },
     ActivateSessionRequest {
         request_header: RequestHeader,
         client_signature: SignatureData,
@@ -879,10 +883,7 @@ impl ExtensionObjectDefinition {
             }),
             321 => Self::parse_anonymous_identity_token(reader, depth),
             324 => Self::parse_user_name_identity_token(reader, depth),
-            327 => Err(ParseError::InvalidDiscriminator {
-                field: "ExtensionObjectDefinition.X509IdentityToken (disabled)",
-                value: i64::from(extension_id).cast_unsigned(),
-            }),
+            327 => Self::parse_x509_identity_token(reader, depth),
             940 => Err(ParseError::InvalidDiscriminator {
                 field: "ExtensionObjectDefinition.IssuedIdentityToken (disabled)",
                 value: i64::from(extension_id).cast_unsigned(),
@@ -2173,6 +2174,18 @@ impl ExtensionObjectDefinition {
         })
     }
 
+    fn parse_x509_identity_token(
+        reader: &mut BoundedReader<'_>,
+        depth: Depth,
+    ) -> Result<Self, ParseError> {
+        let policy_id = PascalString::parse(reader, depth)?;
+        let certificate_data = PascalByteString::parse(reader, depth)?;
+        Ok(Self::X509IdentityToken {
+            policy_id,
+            certificate_data,
+        })
+    }
+
     fn parse_activate_session_request(
         reader: &mut BoundedReader<'_>,
         depth: Depth,
@@ -2739,6 +2752,7 @@ impl ExtensionObjectDefinition {
             Self::UserNameIdentityToken { .. } => {
                 self.serialize_user_name_identity_token(writer, depth)
             }
+            Self::X509IdentityToken { .. } => self.serialize_x509_identity_token(writer, depth),
             Self::ActivateSessionRequest { .. } => {
                 self.serialize_activate_session_request(writer, depth)
             }
@@ -3282,6 +3296,25 @@ impl ExtensionObjectDefinition {
         user_name.serialize(writer, depth)?;
         password.serialize(writer, depth)?;
         encryption_algorithm.serialize(writer, depth)
+    }
+
+    fn serialize_x509_identity_token(
+        &self,
+        writer: &mut BoundedWriter,
+        depth: Depth,
+    ) -> Result<(), ParseError> {
+        let Self::X509IdentityToken {
+            policy_id,
+            certificate_data,
+        } = self
+        else {
+            return Err(ParseError::InvalidDiscriminator {
+                field: "ExtensionObjectDefinition.X509IdentityToken",
+                value: 0,
+            });
+        };
+        policy_id.serialize(writer, depth)?;
+        certificate_data.serialize(writer, depth)
     }
 
     fn serialize_activate_session_request(

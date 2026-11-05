@@ -81,7 +81,7 @@ fn decrypted(receiver: &Asymmetric, wire: &[u8]) -> Vec<u8> {
         .chunks_exact(key.key_size_bytes())
     {
         plain.extend_from_slice(
-            key.decrypt(receiver.oaep(), block, &mut scratch, None)
+            key.decrypt(receiver.policy.oaep().unwrap(), block, &mut scratch, None)
                 .unwrap(),
         );
     }
@@ -98,15 +98,15 @@ fn encrypted(sender: &Asymmetric, plain: &[u8]) -> Vec<u8> {
             .len()
             .checked_sub(offset)
             .unwrap()
-            .is_multiple_of(key.max_plaintext_size(sender.oaep()))
+            .is_multiple_of(key.max_plaintext_size(sender.policy.oaep().unwrap()))
     );
     for block in plain
         .get(offset..)
         .unwrap()
-        .chunks_exact(key.max_plaintext_size(sender.oaep()))
+        .chunks_exact(key.max_plaintext_size(sender.policy.oaep().unwrap()))
     {
         out.extend_from_slice(
-            key.encrypt(sender.oaep(), block, &mut scratch, None)
+            key.encrypt(sender.policy.oaep().unwrap(), block, &mut scratch, None)
                 .unwrap(),
         );
     }
@@ -123,7 +123,12 @@ fn resign(sender: &Asymmetric, plain: &mut [u8]) {
         .local
         .signing
         .expose()
-        .sign(sender.encoding(), &SystemRandom::new(), message, signature)
+        .sign(
+            sender.policy.encoding().unwrap(),
+            &SystemRandom::new(),
+            message,
+            signature,
+        )
         .unwrap();
 }
 
@@ -229,7 +234,7 @@ fn opcua_asymmetric_headers_carry_the_chain_and_leaf_thumbprint() {
 fn opcua_asymmetric_padding_and_exact_chunk_limits_cover_every_residue() {
     for policy in POLICIES {
         let (a, b) = endpoints(policy);
-        let block = a.encrypting.max_plaintext_size(a.oaep());
+        let block = a.encrypting.max_plaintext_size(a.policy.oaep().unwrap());
         for length in 0..block {
             let request = frame(&a, &vec![0x91; length]);
             let wire = a.seal(&request, 65535).unwrap();
@@ -332,7 +337,7 @@ fn opcua_signed_bad_padding_and_short_rsa_blocks_are_refused() {
         let mut scratch = vec![0; 256];
         short.extend_from_slice(
             a.encrypting
-                .encrypt(a.oaep(), b"short", &mut scratch, None)
+                .encrypt(a.policy.oaep().unwrap(), b"short", &mut scratch, None)
                 .unwrap(),
         );
         let size = u32::try_from(short.len()).unwrap().to_le_bytes();

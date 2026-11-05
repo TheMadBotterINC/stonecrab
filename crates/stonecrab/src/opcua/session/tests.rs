@@ -1311,9 +1311,15 @@ fn opcua_an_endpoint_without_a_matching_user_token_policy_is_not_selected() {
 
 #[test]
 fn opcua_protected_username_policy_is_never_downgraded_to_plain() {
-    for token_uri in [
-        "http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256",
-        "unrecognized-protected-policy",
+    for (token_uri, kind) in [
+        (
+            "http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256",
+            ErrorKind::Authentication,
+        ),
+        (
+            "unrecognized-protected-policy",
+            ErrorKind::Unsupported(Operation::Connect),
+        ),
     ] {
         let (driver, clock, factory) = driver(scripted_response(
             2,
@@ -1329,7 +1335,7 @@ fn opcua_protected_username_policy_is_never_downgraded_to_plain() {
         )
         .err()
         .unwrap();
-        assert_eq!(problem.kind(), ErrorKind::Unsupported(Operation::Connect));
+        assert_eq!(problem.kind(), kind);
         assert_eq!(factory.probes().remove(0).sent().len(), 3);
         assert!(!problem.to_string().contains("password-sentinel"));
     }
@@ -1351,7 +1357,7 @@ fn opcua_a_password_without_a_user_name_is_invalid_config() {
     assert_eq!(factory.opens().len(), 0);
 }
 #[test]
-fn opcua_an_unsupported_credential_kind_is_invalid_config() {
+fn opcua_missing_user_certificate_or_key_is_invalid_config_before_io() {
     let (driver, clock, factory) = driver(Script::strict(vec![]));
     let registry = registry(driver);
     let error = block_on_with(
@@ -1456,4 +1462,403 @@ async fn opcua_interop_username_over_none_requires_opt_in_and_wrong_password_is_
     println!(
         "public username/None opt-in connect/close passed; missing opt-in and wrong password refused without credential disclosure"
     );
+}
+
+#[tokio::test]
+#[ignore = "needs the independent open62541 peer; interop/open62541/interop.sh tests"]
+async fn opcua_interop_protected_user_name_and_x509_sessions_use_each_policy_in_both_modes() {
+    use crate::opcua::pki::Scratch;
+    let base = std::env::var("STONECRAB_INTEROP_OPEN62541").unwrap();
+    let base = base.split('?').next().unwrap();
+    let pki =
+        std::path::PathBuf::from(std::env::var("STONECRAB_INTEROP_OPEN62541_PKI_DIR").unwrap());
+    let password = std::fs::read_to_string(pki.join("user-password")).unwrap();
+    let scratch = Scratch::new();
+    let pem = format!(
+        "{}{}",
+        std::fs::read_to_string(pki.join("client.cert.pem")).unwrap(),
+        std::fs::read_to_string(pki.join("client.key.pem")).unwrap()
+    );
+    let key = scratch.write("client.pem", &pem);
+    let mut registry = DriverRegistry::new();
+    registry.register(Arc::new(OpcuaDriver::new())).unwrap();
+    for policy in [
+        "Basic256Sha256",
+        "Aes128_Sha256_RsaOaep",
+        "Aes256_Sha256_RsaPss",
+    ] {
+        for mode in ["SIGN", "SIGN_ENCRYPT"] {
+            for discovery in [false, true] {
+                let uri = format!(
+                    "{base}?security-policy={policy}&message-security={mode}&discovery={discovery}&tls.keystore={}&server-certificate-file={}",
+                    key.display(),
+                    pki.join("server.cert.der").display()
+                );
+                for credentials in [
+                    crate::Credentials::new("stonecrab", password.trim()),
+                    crate::Credentials::x509(pki.join("user.cert.der"), pki.join("user.key.pem")),
+                ] {
+                    let connection = registry
+                        .connect_with(&uri, credentials)
+                        .await
+                        .unwrap_or_else(|error| {
+                            panic!("{policy} {mode} discovery={discovery}: {error:?}")
+                        });
+                    connection.close().await.unwrap();
+                }
+            }
+        }
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs the independent open62541 peer; interop/open62541/interop.sh tests"]
+async fn opcua_interop_protected_identities_refuse_wrong_password_and_untrusted_user_certificate() {
+    use crate::opcua::pki::Scratch;
+    let base = std::env::var("STONECRAB_INTEROP_OPEN62541").unwrap();
+    let base = base.split('?').next().unwrap();
+    let pki =
+        std::path::PathBuf::from(std::env::var("STONECRAB_INTEROP_OPEN62541_PKI_DIR").unwrap());
+    let scratch = Scratch::new();
+    let pem = format!(
+        "{}{}",
+        std::fs::read_to_string(pki.join("client.cert.pem")).unwrap(),
+        std::fs::read_to_string(pki.join("client.key.pem")).unwrap()
+    );
+    let key = scratch.write("client.pem", &pem);
+    let mut registry = DriverRegistry::new();
+    registry.register(Arc::new(OpcuaDriver::new())).unwrap();
+    for policy in [
+        "Basic256Sha256",
+        "Aes128_Sha256_RsaOaep",
+        "Aes256_Sha256_RsaPss",
+    ] {
+        let uri = format!(
+            "{base}?security-policy={policy}&message-security=SIGN_ENCRYPT&tls.keystore={}&server-certificate-file={}",
+            key.display(),
+            pki.join("server.cert.der").display()
+        );
+        for credentials in [
+            crate::Credentials::new("stonecrab", "wrong-password-sentinel"),
+            crate::Credentials::x509(
+                pki.join("untrusted.cert.der"),
+                pki.join("untrusted.key.pem"),
+            ),
+        ] {
+            let error = registry
+                .connect_with(&uri, credentials)
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(
+                error.kind(),
+                ErrorKind::Authentication,
+                "{policy}: {error:?}"
+            );
+            assert!(!format!("{error:?}").contains("sentinel"));
+        }
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs the independent open62541 peer; interop/open62541/interop.sh tests"]
+async fn opcua_interop_protected_none_without_an_application_certificate_fails_closed() {
+    let base = std::env::var("STONECRAB_INTEROP_OPEN62541_PROTECTED_NONE").unwrap();
+    let pki =
+        std::path::PathBuf::from(std::env::var("STONECRAB_INTEROP_OPEN62541_PKI_DIR").unwrap());
+    let password = std::fs::read_to_string(pki.join("user-password")).unwrap();
+    let mut registry = DriverRegistry::new();
+    registry.register(Arc::new(OpcuaDriver::new())).unwrap();
+    for discovery in [false, true] {
+        let uri = format!(
+            "{base}?security-policy=NONE&discovery={discovery}&server-certificate-file={}",
+            pki.join("server.cert.der").display()
+        );
+        for credentials in [
+            crate::Credentials::new("stonecrab", password.trim()),
+            crate::Credentials::x509(pki.join("user.cert.der"), pki.join("user.key.pem")),
+        ] {
+            let error = registry
+                .connect_with(&uri, credentials)
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(error.kind(), ErrorKind::Trust);
+        }
+    }
+    let uri = format!(
+        "{base}?security-policy=NONE&server-certificate-file={}&tls.verify=false",
+        pki.join("untrusted.cert.der").display()
+    );
+    let error = registry
+        .connect_with(&uri, crate::Credentials::new("stonecrab", password.trim()))
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), ErrorKind::Trust);
+}
+
+fn protected_none_script(
+    certificate: Vec<u8>,
+    kind: UserTokenType,
+    token_policy: UaString,
+    fault: u8,
+) -> Script {
+    Script::strict(vec![Step::respond(move |wire| {
+        let response = reply(wire)?;
+        if !wire.starts_with(b"MSG") {
+            return Some(response);
+        }
+        let mut service = payload(&response);
+        if !matches!(
+            service,
+            Service::CreateSessionResponse { .. } | Service::ActivateSessionResponse { .. }
+        ) {
+            return Some(response);
+        }
+        if let Service::CreateSessionResponse {
+            server_nonce,
+            server_certificate,
+            server_endpoints,
+            ..
+        } = &mut service
+        {
+            *server_nonce = UaByteString::new(vec![0x66; 32]);
+            *server_certificate = UaByteString::new(certificate.clone());
+            let endpoint = server_endpoints.as_mut().unwrap().first_mut().unwrap();
+            let token = endpoint
+                .user_identity_tokens
+                .as_mut()
+                .unwrap()
+                .first_mut()
+                .unwrap();
+            token.token_type = kind;
+            token.security_policy_uri = token_policy.clone();
+            match fault {
+                1 => *server_nonce = UaByteString::null(),
+                2 => *server_nonce = UaByteString::new(vec![0; 32]),
+                3 => *server_certificate = UaByteString::new(vec![]),
+                4 => {
+                    let Service::CreateSessionRequest { client_nonce, .. } = payload(wire) else {
+                        panic!("create")
+                    };
+                    *server_nonce = client_nonce;
+                }
+                _ => {}
+            }
+        }
+        if let Service::ActivateSessionResponse { server_nonce, .. } = &mut service {
+            *server_nonce = UaByteString::new(if fault == 5 {
+                vec![0x66; 32]
+            } else {
+                vec![0x77; 32]
+            });
+        }
+        let Body::Message(chunk) = frame(&response).body else {
+            panic!("response")
+        };
+        Some(message(
+            chunk.sequence.sequence_number,
+            chunk.sequence.request_id,
+            chunk.channel_id,
+            chunk.token_id,
+            &encode(&service),
+        ))
+    })])
+}
+
+// covers: OPCUA-DIV-SESSION-CERT-VERIFY / OPCUA-AUTH-USERNAME
+#[test]
+fn opcua_protected_tokens_on_none_validate_bootstrap_trust_and_nonces_before_sending() {
+    use crate::opcua::options::SecurityPolicy;
+    use crate::opcua::secure_responder::Fixture;
+    let fixture = Fixture::new();
+    for policy in [
+        SecurityPolicy::Basic256Sha256,
+        SecurityPolicy::Aes128Sha256RsaOaep,
+        SecurityPolicy::Aes256Sha256RsaPss,
+    ] {
+        for fault in 0..10 {
+            let returned = if fault == 6 {
+                fixture.client_certificate.clone()
+            } else {
+                fixture.server_certificate.clone()
+            };
+            let (driver, clock, factory) = driver(protected_none_script(
+                returned,
+                UserTokenType::UserTokenTypeUserName,
+                UaString::new(policy.uri()),
+                fault,
+            ));
+            clock.set_wall_now(
+                std::time::UNIX_EPOCH
+                    .checked_add(Duration::from_secs(crate::opcua::pki::NOW))
+                    .unwrap(),
+            );
+            let registry = registry(driver);
+            let extra = match fault {
+                7 => format!(
+                    "&tls.trust-store={}",
+                    fixture
+                        .scratch
+                        .write(
+                            "untrusted.pem",
+                            &crate::opcua::pki::pem("CERTIFICATE", &fixture.client_certificate)
+                        )
+                        .display()
+                ),
+                8 => "&tls.verify=false".into(),
+                _ => String::new(),
+            };
+            let uri = if fault == 9 {
+                format!("{URI}&allow-insecure-credentials=true")
+            } else {
+                format!(
+                    "{URI}&server-certificate-file={}{extra}",
+                    fixture.server_file.display()
+                )
+            };
+            let result = block_on_with(
+                &clock,
+                registry.connect_with(&uri, crate::Credentials::new("operator", "secret-sentinel")),
+            );
+            if fault == 0 || fault == 8 {
+                let connection = result.unwrap();
+                let sent = factory.probes().remove(0).sent();
+                let Service::ActivateSessionRequest {
+                    user_identity_token,
+                    client_signature,
+                    user_token_signature,
+                    ..
+                } = payload(sent.get(3).unwrap())
+                else {
+                    panic!("activate")
+                };
+                assert_eq!(client_signature, empty_signature());
+                assert_eq!(user_token_signature, empty_signature());
+                let ExtensionBody::Known(token) = user_identity_token.body else {
+                    panic!("token")
+                };
+                let Service::UserNameIdentityToken {
+                    password,
+                    encryption_algorithm,
+                    ..
+                } = token.as_ref()
+                else {
+                    panic!("username")
+                };
+                assert_eq!(
+                    encryption_algorithm,
+                    &UaString::new(policy.descriptor().encryption_uri)
+                );
+                assert_eq!(
+                    fixture.password(policy, password.as_bytes().unwrap()),
+                    [
+                        47_u32.to_le_bytes().as_slice(),
+                        b"secret-sentinel",
+                        &[0x66; 32]
+                    ]
+                    .concat()
+                );
+                block_on_with(&clock, connection.close()).unwrap();
+            } else {
+                let error = result.err().unwrap();
+                assert_eq!(
+                    error.kind(),
+                    if matches!(fault, 3 | 6 | 7) {
+                        ErrorKind::Trust
+                    } else if fault == 9 {
+                        ErrorKind::InvalidConfig
+                    } else {
+                        ErrorKind::Authentication
+                    },
+                    "fault {fault}: {error}"
+                );
+                assert_eq!(
+                    factory.probes().remove(0).sent().len(),
+                    if fault == 5 { 4 } else { 3 }
+                );
+                assert!(!format!("{error:?}").contains("sentinel"));
+            }
+        }
+    }
+}
+
+// covers: OPCUA-AUTH-X509 / OPCUA-DIV-SESSION-CERT-VERIFY
+#[test]
+fn opcua_x509_user_token_on_none_signs_only_after_server_validation_and_refuses_none_policy() {
+    use crate::opcua::{options::SecurityPolicy, pki, secure_responder::Fixture};
+    use aws_lc_rs::signature::{
+        KeyPair, RSA_PKCS1_2048_8192_SHA256, RSA_PSS_2048_8192_SHA256, RsaPssSaltLength,
+        UnparsedPublicKey,
+    };
+    let fixture = Fixture::new();
+    let certificate = fixture.scratch.write(
+        "user.pem",
+        &pki::pem("CERTIFICATE", &fixture.client_certificate),
+    );
+    let key = fixture
+        .scratch
+        .write("user-key.pem", &pki::pem("PRIVATE KEY", pki::pkcs8_2048()));
+    for policy in [
+        SecurityPolicy::None,
+        SecurityPolicy::Basic256Sha256,
+        SecurityPolicy::Aes128Sha256RsaOaep,
+        SecurityPolicy::Aes256Sha256RsaPss,
+    ] {
+        let (driver, clock, factory) = driver(protected_none_script(
+            fixture.server_certificate.clone(),
+            UserTokenType::UserTokenTypeCertificate,
+            UaString::new(policy.uri()),
+            0,
+        ));
+        clock.set_wall_now(
+            std::time::UNIX_EPOCH
+                .checked_add(Duration::from_secs(pki::NOW))
+                .unwrap(),
+        );
+        let registry = registry(driver);
+        let result = block_on_with(
+            &clock,
+            registry.connect_with(
+                &format!(
+                    "{URI}&server-certificate-file={}",
+                    fixture.server_file.display()
+                ),
+                crate::Credentials::x509(&certificate, &key),
+            ),
+        );
+        if policy == SecurityPolicy::None {
+            assert_eq!(result.err().unwrap().kind(), ErrorKind::Authentication);
+            assert_eq!(factory.probes().remove(0).sent().len(), 3);
+        } else {
+            let connection = result.unwrap();
+            let sent = factory.probes().remove(0).sent();
+            let Service::ActivateSessionRequest {
+                user_token_signature,
+                client_signature,
+                ..
+            } = payload(sent.get(3).unwrap())
+            else {
+                panic!("activate")
+            };
+            assert_eq!(client_signature, empty_signature());
+            assert_eq!(
+                user_token_signature.algorithm,
+                UaString::new(policy.descriptor().signature_uri)
+            );
+            let algorithm = if policy == SecurityPolicy::Aes256Sha256RsaPss {
+                &const { RSA_PSS_2048_8192_SHA256.with_pss_salt_length(RsaPssSaltLength::Custom(32)) }
+            } else {
+                &RSA_PKCS1_2048_8192_SHA256
+            };
+            UnparsedPublicKey::new(algorithm, pki::key_pair().public_key())
+                .verify(
+                    &[fixture.server_certificate.as_slice(), &[0x66; 32]].concat(),
+                    user_token_signature.signature.as_bytes().unwrap(),
+                )
+                .unwrap();
+            block_on_with(&clock, connection.close()).unwrap();
+        }
+    }
 }

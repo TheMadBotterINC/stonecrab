@@ -174,3 +174,9 @@ name = "WriteResponse"
 encoding_id = 676
 valid = "WriteResponse.hex"
 negative = "WriteResponse-truncated.hex"
+
+[[vector]]
+name = "X509IdentityToken"
+encoding_id = 327
+valid = "X509IdentityToken.hex"
+negative = "X509IdentityToken-truncated.hex"

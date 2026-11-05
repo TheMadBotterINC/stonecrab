@@ -5,6 +5,40 @@ Implementation baseline: the commit that last modified this file
 (`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
 its own commit; the slice log below records what each one landed.
 
+## OPC UA protected identities (S108, 2026-11-04)
+
+Protected username and X.509 identities now use the existing Credentials API and the
+selected token policy independently of the channel policy. Username encrypts exact
+length/password/nonce bytes with OAEP; legacy passwords are bounded to 64 UTF-8 bytes.
+X.509 loads separate bounded certificate/key files before I/O, matches RSA keys, needs
+no user application URI, sends the user leaf and signs server certificate+nonce with
+the user key. Application proofs remain separate. None/unknown token-policy refusals,
+plain-username opt-in and secret/path redaction remain explicit. The generated closure
+adds X509IdentityToken (29 cases); the existing AES256/PSS OAEP URI delimiter is fixed.
+
+Protected tokens on None verify and bind the returned certificate to a provisioned
+peer even with trust disabled. Deterministic positive and substitution/nonce tests pass.
+Native open62541 requires an application certificate on None before returning a usable
+session certificate; the adapter sends it only on secure channels and fails Trust on
+that None path. Successful native username/X.509 evidence covers all modern policies
+in both secure modes, with discovery on/off. This limitation is recorded in ADR-0046.
+Anonymous/UserName userTokenSignature is empty and accepted by the native peer.
+
+All 2549 tests and 588+5 doctests pass; standalone OPC UA passes 564 library cases
+including 390 OPC UA tests and strict Clippy. Core 6978/6978 and handwritten OPC UA
+10246/10246 lines are 100%, with unchanged floors/exclusions. All 22 focused mutations
+finish: 19 caught/three unviable, no survivors/timeouts. All 18 fuzz targets pass at
+least 60 seconds. The 59 isolated features, regen, dependencies/D23/machete, examples,
+semver, parity/attributes/DCO, fresh 232-file package and unpacked builds pass. Native
+17-test gate/self-check/example pass; final container and PKI are removed.
+
+Hosted CI 41960362590 on 3c32074 passes all 32 executed jobs. Scheduled and first-branch
+DCO skip by workflow conditions; local DCO verifies every signed-off commit. Final
+root-only notes preserve hosted-tested product inputs; normal merge pushes master. [Evidence](docs/evidence/opcua-s108.md), [design](docs/adr/0046-opcua-protected-identity-tokens.md).
+Four rows close: 249 total, 162 implemented/49 planned/38 deferred. No dependency,
+feature, public API or version change; no hardware claim. Next: S109, caller-driven
+channel renewal. Normal signed-off merges retain every commit.
+
 ## OPC UA remaining modern policies (S107, 2026-11-04)
 
 All three modern policies now connect through the same protected channel/session path.

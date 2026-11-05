@@ -54,6 +54,7 @@ impl Verifier {
 
     pub(in crate::opcua) fn prepare(
         options: &OpcuaOptions,
+        policy: SecurityPolicy,
     ) -> Result<(Option<CertificateDer<'static>>, Self)> {
         let bootstrap = options
             .server_certificate_file
@@ -67,7 +68,7 @@ impl Verifier {
             })
             .transpose()?;
         if let Some(der) = &bootstrap {
-            certificate::server_key(der, options.security_policy)?;
+            certificate::server_key(der, policy)?;
         }
         let verifier = if !options.verify {
             Self::Permissive
@@ -150,6 +151,21 @@ impl Verifier {
             }
         }
     }
+
+    pub(in crate::opcua) fn verify_bound(
+        &self,
+        bytes: &[u8],
+        peer: &CertificateDer<'_>,
+        policy: SecurityPolicy,
+        now: SystemTime,
+    ) -> Result<()> {
+        let chain = certificate::chain(bytes)?;
+        self.verify(&chain, policy, now)?;
+        let leaf = chain.first().ok_or_else(untrusted)?;
+        verify_slices_are_equal(leaf.as_ref(), peer.as_ref())
+            .ok()
+            .ok_or_else(untrusted)
+    }
 }
 
 fn bounded_chain(chain: &[CertificateDer<'_>]) -> Result<()> {
@@ -193,7 +209,10 @@ fn load(
     parse(&read(&mut file, option)?, format).ok_or_else(|| invalid(option))
 }
 
-fn parse(bytes: &[u8], format: Option<CertificateFormat>) -> Option<Vec<CertificateDer<'static>>> {
+pub(super) fn parse(
+    bytes: &[u8],
+    format: Option<CertificateFormat>,
+) -> Option<Vec<CertificateDer<'static>>> {
     if bytes.len() > MAX_CERT_BYTES {
         return None;
     }

@@ -119,12 +119,32 @@ impl Session {
         let (endpoint, policy) =
             crate::opcua::endpoint::select(&endpoints, options, identity.token_type())?;
         let selected_endpoint = crate::opcua::endpoint::display_url(&endpoint.endpoint_url);
-        let user_identity_token = identity.token(policy, &endpoint.security_policy_uri)?;
-        if matches!(identity, Identity::UserName(_)) {
-            tracing::warn!(
-                "OPC UA sending plain username credentials: allow-insecure-credentials=true"
-            );
+        let effective = identity.policy(policy, &endpoint.security_policy_uri)?;
+        if identity.requires_server(effective) {
+            secure_nonce(&server_nonce, &nonce)?;
+            if security.is_none() {
+                let (peer, verifier) = crate::opcua::crypto::Verifier::prepare(options, effective)?;
+                let peer = peer.ok_or_else(|| {
+                    PlcError::new(
+                        ErrorKind::InvalidConfig,
+                        "OPC UA protected identity requires server-certificate-file",
+                    )
+                })?;
+                verifier.verify_bound(
+                    server_certificate.as_bytes().unwrap_or_default(),
+                    &peer,
+                    effective,
+                    lane.wall_now(),
+                )?;
+            }
         }
+        let (user_identity_token, user_token_signature) = identity.token(
+            policy,
+            effective,
+            server_certificate.as_bytes().unwrap_or_default(),
+            server_nonce.as_bytes().unwrap_or_default(),
+            options,
+        )?;
         let reply = lane
             .exchange_until(
                 &authentication_token,
@@ -135,7 +155,7 @@ impl Session {
                     client_software_certificates: None,
                     locale_ids: None,
                     user_identity_token,
-                    user_token_signature: empty_signature(),
+                    user_token_signature,
                 },
                 deadline,
                 cancel,
@@ -151,7 +171,7 @@ impl Session {
             return Err(malformed("expected ActivateSessionResponse"));
         };
         check_status(&response_header).map_err(activation_error)?;
-        if security.is_some() {
+        if security.is_some() || identity.requires_server(effective) {
             secure_nonce(
                 &activated_nonce,
                 server_nonce.as_bytes().unwrap_or_default(),

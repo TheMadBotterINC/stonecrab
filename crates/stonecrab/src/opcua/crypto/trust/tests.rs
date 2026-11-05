@@ -49,11 +49,14 @@ fn assert_trust(error: &PlcError) {
 fn opcua_verify_false_beats_trust_store_and_pinning() {
     let scratch = Scratch::new();
     let pin = scratch.write("server.pem", &pki::pem("CERTIFICATE", leaf().as_ref()));
-    let (server, verifier) = Verifier::prepare(&options(&[
-        ("server-certificate-file", pin.to_str().unwrap()),
-        ("tls.trust-store", "missing-sensitive.pem"),
-        ("tls.verify", "false"),
-    ]))
+    let (server, verifier) = Verifier::prepare(
+        &options(&[
+            ("server-certificate-file", pin.to_str().unwrap()),
+            ("tls.trust-store", "missing-sensitive.pem"),
+            ("tls.verify", "false"),
+        ]),
+        SecurityPolicy::Basic256Sha256,
+    )
     .unwrap();
     assert_eq!(server.unwrap(), leaf());
     assert_eq!(verifier.name(), "permissive");
@@ -65,7 +68,11 @@ fn opcua_verify_false_beats_trust_store_and_pinning() {
 
 #[test]
 fn opcua_tls_verify_false_accepts_a_self_signed_server_certificate() {
-    let (_, verifier) = Verifier::prepare(&options(&[("tls.verify", "false")])).unwrap();
+    let (_, verifier) = Verifier::prepare(
+        &options(&[("tls.verify", "false")]),
+        SecurityPolicy::Basic256Sha256,
+    )
+    .unwrap();
     verifier.verify(&[leaf()], policy(), at()).unwrap();
 }
 
@@ -84,10 +91,13 @@ fn opcua_trust_bypass_does_not_supply_a_non_rsa_bootstrap_key() {
     );
     let scratch = Scratch::new();
     let path = scratch.write("server.pem", &pki::pem("CERTIFICATE", &der));
-    let error = Verifier::prepare(&options(&[
-        ("server-certificate-file", path.to_str().unwrap()),
-        ("tls.verify", "false"),
-    ]))
+    let error = Verifier::prepare(
+        &options(&[
+            ("server-certificate-file", path.to_str().unwrap()),
+            ("tls.verify", "false"),
+        ]),
+        SecurityPolicy::Basic256Sha256,
+    )
     .unwrap_err();
     assert_trust(&error);
 }
@@ -165,7 +175,8 @@ fn opcua_an_expired_pinned_certificate_is_rejected() {
 // covers: OPCUA-DIV-FAIL-CLOSED
 #[test]
 fn opcua_default_verifier_rejects_every_server_certificate() {
-    let (server, verifier) = Verifier::prepare(&options(&[])).unwrap();
+    let (server, verifier) =
+        Verifier::prepare(&options(&[]), SecurityPolicy::Basic256Sha256).unwrap();
     assert_eq!(server, None);
     assert_eq!(verifier.name(), "reject");
     for chain in [vec![], vec![leaf()], vec![CertificateDer::from(vec![0xff])]] {
@@ -249,7 +260,7 @@ fn opcua_trust_store_rejects_an_unknown_issuer() {
 #[test]
 fn opcua_a_certificate_from_discovery_is_not_an_anchor() {
     let [root, issuer, server] = chain(pki::Signature::Pkcs1);
-    let (_, verifier) = Verifier::prepare(&options(&[])).unwrap();
+    let (_, verifier) = Verifier::prepare(&options(&[]), SecurityPolicy::Basic256Sha256).unwrap();
     assert_trust(
         &verifier
             .verify(&[server, issuer, root], policy(), at())
@@ -375,10 +386,13 @@ fn opcua_trust_store_beats_pinning() {
     let [root, issuer, server] = chain(pki::Signature::Pkcs1);
     let pin = scratch.write("pin.pem", &pki::pem("CERTIFICATE", leaf().as_ref()));
     let store = scratch.write("trust.pem", &pki::pem("CERTIFICATE", root.as_ref()));
-    let (_, verifier) = Verifier::prepare(&options(&[
-        ("server-certificate-file", pin.to_str().unwrap()),
-        ("tls.trust-store", store.to_str().unwrap()),
-    ]))
+    let (_, verifier) = Verifier::prepare(
+        &options(&[
+            ("server-certificate-file", pin.to_str().unwrap()),
+            ("tls.trust-store", store.to_str().unwrap()),
+        ]),
+        SecurityPolicy::Basic256Sha256,
+    )
     .unwrap();
     assert_eq!(verifier.name(), "trust-store");
     verifier.verify(&[server, issuer], policy(), at()).unwrap();
@@ -390,10 +404,10 @@ fn opcua_pinning_alone_is_used_when_nothing_else_is_set() {
     let scratch = Scratch::new();
     let certificate = leaf();
     let pin = scratch.write("pin.pem", &pki::pem("CERTIFICATE", certificate.as_ref()));
-    let (_, verifier) = Verifier::prepare(&options(&[(
-        "server-certificate-file",
-        pin.to_str().unwrap(),
-    )]))
+    let (_, verifier) = Verifier::prepare(
+        &options(&[("server-certificate-file", pin.to_str().unwrap())]),
+        SecurityPolicy::Basic256Sha256,
+    )
     .unwrap();
     assert_eq!(verifier.name(), "pinned");
     verifier.verify(&[certificate], policy(), at()).unwrap();
@@ -408,10 +422,10 @@ fn opcua_server_certificate_file_accepts_der_and_pem() {
     std::fs::write(&der, certificate.as_ref()).unwrap();
     let pem = scratch.write("server.pem", &pki::pem("CERTIFICATE", certificate.as_ref()));
     for path in [der, pem] {
-        let (bootstrap, verifier) = Verifier::prepare(&options(&[(
-            "server-certificate-file",
-            path.to_str().unwrap(),
-        )]))
+        let (bootstrap, verifier) = Verifier::prepare(
+            &options(&[("server-certificate-file", path.to_str().unwrap())]),
+            SecurityPolicy::Basic256Sha256,
+        )
         .unwrap();
         assert_eq!(bootstrap.unwrap(), certificate);
         verifier
@@ -531,10 +545,13 @@ fn opcua_trust_store_pem_and_der_load_the_anchors() {
         ),
     );
     for (path, format) in [(der, "der"), (pem, "pem")] {
-        let (_, verifier) = Verifier::prepare(&options(&[
-            ("tls.trust-store", path.to_str().unwrap()),
-            ("tls.trust-store-type", format),
-        ]))
+        let (_, verifier) = Verifier::prepare(
+            &options(&[
+                ("tls.trust-store", path.to_str().unwrap()),
+                ("tls.trust-store-type", format),
+            ]),
+            SecurityPolicy::Basic256Sha256,
+        )
         .unwrap();
         verifier
             .verify(std::slice::from_ref(&certificate), policy(), at())
@@ -551,10 +568,10 @@ fn opcua_certificate_file_errors_are_redacted_and_bounded() {
         }
     }
     let scratch = Scratch::new();
-    let error = Verifier::prepare(&options(&[(
-        "server-certificate-file",
-        scratch.path().to_str().unwrap(),
-    )]))
+    let error = Verifier::prepare(
+        &options(&[("server-certificate-file", scratch.path().to_str().unwrap())]),
+        SecurityPolicy::Basic256Sha256,
+    )
     .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidConfig);
     assert!(error.source().is_none());
@@ -568,17 +585,20 @@ fn opcua_certificate_file_errors_are_redacted_and_bounded() {
         duplicate,
         scratch.path().join("sensitive-missing.pem"),
     ] {
-        let error = Verifier::prepare(&options(&[(
-            "server-certificate-file",
-            path.to_str().unwrap(),
-        )]))
+        let error = Verifier::prepare(
+            &options(&[("server-certificate-file", path.to_str().unwrap())]),
+            SecurityPolicy::Basic256Sha256,
+        )
         .unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidConfig);
         assert!(error.source().is_none());
         assert!(!format!("{error:?}").contains("sensitive"));
     }
-    let error =
-        Verifier::prepare(&options(&[("tls.trust-store", "sensitive-missing.pem")])).unwrap_err();
+    let error = Verifier::prepare(
+        &options(&[("tls.trust-store", "sensitive-missing.pem")]),
+        SecurityPolicy::Basic256Sha256,
+    )
+    .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidConfig);
     assert!(!format!("{error:?}").contains("sensitive"));
     let error = read(&mut Broken, "tls.trust-store").unwrap_err();
@@ -658,11 +678,11 @@ fn opcua_tls_verify_false_is_recorded_in_diagnostics() {
     tracing::subscriber::with_default(subscriber, || {
         std::thread::scope(|scope| {
             scope
-                .spawn(|| Verifier::prepare(&opts).unwrap())
+                .spawn(|| Verifier::prepare(&opts, SecurityPolicy::Basic256Sha256).unwrap())
                 .join()
                 .unwrap();
         });
-        Verifier::prepare(&opts).unwrap();
+        Verifier::prepare(&opts, SecurityPolicy::Basic256Sha256).unwrap();
     });
     let text = String::from_utf8(output.lock().unwrap().clone()).unwrap();
     for value in ["WARN", "tls_verify=false", "tls.verify=false", "permissive"] {

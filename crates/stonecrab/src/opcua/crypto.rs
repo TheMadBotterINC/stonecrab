@@ -10,6 +10,7 @@ mod derive;
 mod keystore;
 mod policy;
 mod symmetric;
+pub(super) mod token;
 mod trust;
 pub(super) use asymmetric::Asymmetric;
 pub(super) use symmetric::Symmetric;
@@ -19,6 +20,7 @@ pub(super) use backend::Hash;
 pub(super) use backend::{Backend, Native};
 pub(super) use derive::derive_keys;
 pub(super) use keystore::KeyMaterial;
+pub(super) use keystore::UserKey;
 pub(super) use policy::Policy;
 pub(super) use trust::Verifier;
 
@@ -48,7 +50,7 @@ impl Security {
             ));
         }
         let material = KeyMaterial::load(options.keystore.as_deref())?;
-        let (server, verifier) = Verifier::prepare(options)?;
+        let (server, verifier) = Verifier::prepare(options, options.security_policy)?;
         let asymmetric = Asymmetric::new(options.security_policy, material, server)?;
         let security = Self {
             asymmetric: std::sync::Arc::new(asymmetric),
@@ -70,15 +72,8 @@ impl Security {
     }
 
     pub(super) fn verify(&self, bytes: &[u8], now: std::time::SystemTime) -> Result<()> {
-        let chain = certificate::chain(bytes)?;
-        self.verifier.verify(&chain, self.asymmetric.policy, now)?;
-        let leaf = chain.first().ok_or_else(untrusted)?;
-        aws_lc_rs::constant_time::verify_slices_are_equal(
-            leaf.as_ref(),
-            self.asymmetric.peer.as_ref(),
-        )
-        .ok()
-        .ok_or_else(untrusted)
+        self.verifier
+            .verify_bound(bytes, &self.asymmetric.peer, self.asymmetric.policy, now)
     }
 
     pub(super) fn check_server_signature(
