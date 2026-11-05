@@ -112,6 +112,8 @@ src/opcua/crypto/tests/native/rsa_sign.rs
 src/opcua/crypto/tests/native/webpki_anchor.rs
 src/opcua/crypto/tests/native.rs
 src/opcua/crypto/tests.rs
+src/opcua/crypto/token/tests.rs
+src/opcua/crypto/token.rs
 src/opcua/crypto/trust/tests.rs
 src/opcua/crypto/trust.rs
 src/opcua/crypto.rs

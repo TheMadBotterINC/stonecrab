@@ -313,3 +313,22 @@ discovery on/off, the chunked 10000-item read, write/read-back and close. Certif
 empty-trust and None-only-policy refusal cases run under all three modern policies.
 The in-image client self-check also reads using both AES policies in both modes. No
 additional PKI exports or peer processes are needed; stop removes the same temporary keys.
+
+
+### S108 protected identities
+
+The current gate selects exactly 17 tests. Public username and X.509 credentials
+activate on all three modern policies in SIGN and SIGN_ENCRYPT with discovery on/off.
+Wrong passwords and untrusted user certificates return Authentication. Empty Anonymous
+and UserName userTokenSignature is accepted; X.509 uses a separate user key/proof.
+The AES256/PSS token test caught and corrected the OAEP algorithm URI to
+`http://opcfoundation.org/UA/security/rsa-oaep-sha2-256`.
+
+A fifth process at base port plus four disables plain None passwords. Its advertised
+protected identities cannot complete with this adapter on None: pinned native
+ua_services_session.c selects a session authentication policy only when CreateSession
+includes an application certificate, which this adapter sends only on secure channels.
+The resulting missing session certificate returns Trust before any password/user proof
+is sent. This named native refusal complements deterministic positive protected-None
+and substitution/nonce tests; it does not claim native None success. Use a secure
+channel for native protected identities. Stop removes this process and the same PKI files.

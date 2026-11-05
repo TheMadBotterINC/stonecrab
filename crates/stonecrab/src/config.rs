@@ -364,7 +364,8 @@ impl fmt::Display for AccessPolicy {
 /// The identity form carried separately from connection-string text.
 ///
 /// Certificate paths name files to be loaded by a driver, not in-memory key material.
-/// Formatting redacts those paths. X.509 OPC UA activation remains S108 (ADR-0037).
+/// Formatting redacts those paths. OPC UA supports separate DER/PEM certificate and
+/// unencrypted RSA PKCS#8 PEM key files (ADR-0037, ADR-0046).
 #[non_exhaustive]
 pub enum CredentialIdentity {
     /// The existing username/password fields on [`Credentials`].

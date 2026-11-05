@@ -28,7 +28,7 @@ socket and starts no discovery.
 | Built-in types of the binary encoding: String, `ByteString`, Guid, `DateTime`, `StatusCode`, `NodeId`, `ExpandedNodeId`, `QualifiedName`, `LocalizedText` (crate-private) | build-tested |
 | Recursive and open types of the binary encoding: Variant (25 types, arrays, dimensions), `DataValue`, `DiagnosticInfo`, the `ExtensionObject` envelope with Raw, Xml and Null bodies, bounded in depth and in array counts (crate-private) | build-tested |
 | TCP framing: the 8-byte header, HEL, ACK, ERR, OPN, CLO and MSG bodies, the asymmetric header of policy None, the symmetric and sequence headers, and a bounded chunk `Framer` (crate-private) | build-tested |
-| Generated 28-case connection/read/write/discovery service bodies and 274 status names; Known `ExtensionObject` dispatch (crate-private) | build-tested |
+| Generated 29-case connection/read/write/discovery/identity service bodies and 274 status names; Known `ExtensionObject` dispatch (crate-private) | build-tested |
 | Bounded service exchange lane: correlation, sender priority, headers, sequence/channel/token checks, ERR and `ServiceFault` (crate-private) | build-tested |
 | Policy-None HEL/ACK, OPN Issue, CLO and counter handoff (crate-private) | interoperability-tested with open62541 |
 | Public driver and anonymous None connection/session | interoperability-tested with open62541 |
@@ -436,7 +436,7 @@ token policy None. Selected protected policies are refused without downgrade. Th
 identity/access refusals map to Authentication with the source retained. Missing credentials
 or an empty pair selects anonymous; password without username is invalid before I/O.
 `Credentials::x509` represents certificate/key paths without loading them; certificate
-activation and protected username tokens remain S108. Eight native cases pass against
+activation and protected username tokens are supported in S108 (see below). Eight native cases pass against
 open62541, including correct/wrong-password username sessions; no hardware claim.
 
 ## Staged writes (S100)
@@ -575,7 +575,7 @@ server certificate is verified and bound to the provisioned peer before `Activat
 sends `clientSignature` over server certificate plus server nonce. Anonymous
 `userTokenSignature` remains empty. Invalid or repeated server nonces fail authentication.
 
-Protected user tokens remain S108 and caller-driven renewal S109. A session currently lasts only as long as its
+Protected user tokens are supported in S108; caller-driven renewal remains S109. A session currently lasts only as long as its
 channel token. Native interop confirms RSA2048 and 8192-byte buffers; independent boundary
 key-size and sequence-wrap behavior remain UNVERIFIED. Sequence exhaustion fails closed.
 
@@ -600,3 +600,33 @@ Deprecated `Basic128Rsa15` and `Basic256` are refused with `InvalidConfig` namin
 deprecation and the unavailable `SHA1withRSA` signing operation. Endpoints offering only
 these policies are not selectable. They remain deferred under E16; no legacy crypto
 provider, opt-in bypass, dependency or feature has been added.
+
+
+## Protected user identities (S108)
+
+Use the existing `Credentials::new` for a username/password or
+`Credentials::x509(certificate_file, private_key_file)` for a user certificate. The
+application `tls.keystore` remains separate. The user certificate may be DER or PEM;
+the key file must contain one unencrypted RSA PKCS#8 PEM key and no certificates.
+Both files are bounded to 1 MiB, loaded before transport I/O, and must match. User
+certificates need no application URI. Diagnostics redact paths and key contents.
+
+All three modern token policies support username OAEP encryption and X.509 user
+signatures. An explicit token policy controls its own algorithms; null/empty inherits
+the endpoint policy. Password encryption includes a four-byte LE password+nonce length
+and a fresh server nonce. Passwords above 64 UTF-8 bytes fail `ResourceLimit` pending
+the enhanced secret format. X.509 sends only the user leaf and signs the exact server
+certificate and nonce, separately from the application's client signature. Anonymous
+and username `userTokenSignature` stay empty, confirmed by open62541. None token policy
+is refused for X.509; plain username requires `allow-insecure-credentials=true` and a
+static warning. SIGN also refuses plain username tokens.
+
+Protected tokens on a None channel require `server-certificate-file`; trust and exact
+bootstrap binding precede encryption/signing even with `tls.verify=false`. Deterministic
+peers verify this path and refuse substitution, malformed certificates and bad/replayed
+nonces. Native open62541 v1.5.9 requires an application certificate on None before
+returning a usable session certificate; this adapter does not send one on None and
+fails with `Trust`. Native successful username/X.509 evidence therefore covers secure
+channels in both modes for every modern policy. Use a secure channel with that peer.
+
+See ADR-0046 and the S108 evidence record. Renewal remains S109; no hardware claim.

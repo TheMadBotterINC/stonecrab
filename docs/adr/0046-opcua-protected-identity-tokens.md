@@ -83,3 +83,21 @@ OPC Foundation [legacy secret encoding](https://reference.opcfoundation.org/spec
 [signature inputs](https://reference.opcfoundation.org/specs/OPC-10000-4/6.1.8)
 were checked. Newer enhanced secret/channel-bound formats are outside the pinned legacy
 policy closure and are not silently substituted. Native peer confirmation owns interop claims.
+
+
+## Native observations
+
+open62541 accepts empty Anonymous/UserName userTokenSignature, and authenticates
+username/X.509 across all modern policies/modes. S108 fixes the existing AES256/PSS
+OAEP URI delimiter using the OPC Foundation
+[algorithm identifier](https://profiles.opcfoundation.org/testsuite/5134).
+
+Protected identities on None are deterministic-tested, with trust and binding checks.
+Native open62541 v1.5.9 only instantiates the session authentication policy when
+CreateSession supplies an application certificate (pinned ua_services_session.c:617–638),
+then returns its server certificate (671–679). This adapter sends its application
+certificate on secure channels only. The fifth native process therefore records a
+fail-closed Trust refusal, not successful None authentication. Supporting application
+proofs on None would widen the channel/session preparation boundary and is left as an
+explicit interop limitation; successful protected-identity evidence uses secure channels.
+No server or upstream source was modified to accept the client.
