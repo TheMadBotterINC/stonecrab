@@ -1,5 +1,8 @@
 //! Serialized OPN renewal on the same correlation and transport lane.
 
+//! # Compatibility: docs/parity/opcua.md#OPCUA-LIFE-RENEWAL
+//! # Compatibility: docs/parity/opcua.md#OPCUA-DIV-RENEWAL-FAILURE
+
 use std::time::Duration;
 
 use super::{Lane, Request, State, error, missing_request};

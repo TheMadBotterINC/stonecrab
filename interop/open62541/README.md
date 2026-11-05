@@ -332,3 +332,21 @@ The resulting missing session certificate returns Trust before any password/user
 is sent. This named native refusal complements deterministic positive protected-None
 and substitution/nonce tests; it does not claim native None success. Use a secure
 channel for native protected identities. Stop removes this process and the same PKI files.
+
+
+### S109 renewal and idle recovery
+
+The current gate selects exactly 20 tests. New public-driver tests keep one TCP socket
+through more than three short lifetimes under each modern SIGN_ENCRYPT policy, and
+through repeated None renewals. A counting TCP factory distinguishes renewal from a
+hidden reconnect. Reads keep the session active; all operations continue successfully.
+Separate None/Basic256Sha256 cases let the channel or session expire while idle, verify
+that no connection attempt happens without a call, and then require exactly one fresh
+handshake before the next successful read. These use the same five peer processes and
+runtime PKI/export/cleanup list. Existing 17 identity/channel/read/write/refusal cases pass.
+
+Deterministic coverage additionally verifies exact 75 percent boundaries, counter and
+nonce continuity, token-ID/old-key overlap retirement, refusal/fault/certificate/nonce
+failures, dropped/cancelled/concurrent renewal, full-table backpressure, close/recovery
+races, metadata cache reset and Unknown without replay for an in-flight write. Native
+sequence wrap and forced delayed old-token overlap remain independently UNVERIFIED.

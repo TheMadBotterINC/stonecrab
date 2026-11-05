@@ -5,6 +5,9 @@
 //! are read exactly: names are case-sensitive, and an error message names a key (shortened)
 //! or a fixed reason, never a value, the host or the endpoint path.
 
+//! # Compatibility: docs/parity/opcua.md#OPCUA-CFG-CHANNEL-LIFETIME
+//! # Compatibility: docs/parity/opcua.md#OPCUA-CFG-MIN-CHANNEL-LIFETIME
+
 use std::time::Duration;
 
 use crate::{DriverOptions, Endpoint, ErrorKind, PlcError, Result};
@@ -151,6 +154,8 @@ pub(super) enum CertificateFormat {
 /// | `message_security` | `message-security` | `SIGN_ENCRYPT` |
 /// | `handshake_timeout` | `handshake-timeout-ms` | 60000 ms |
 /// | `session_timeout` | `session-timeout-ms` | 120000 ms |
+/// | `channel_lifetime` | `channel-lifetime-ms` | 3600000 ms |
+/// | `min_channel_lifetime` | `min-channel-lifetime-ms` | 5000 ms |
 /// | `discovery` | `discovery` | true (secure-connect execution in S106) |
 /// | `endpoint_host` | `endpoint-host` | none (an additional advertised host match) |
 /// | `endpoint_port` | `endpoint-port` | none (an additional advertised port match) |

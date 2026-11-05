@@ -1,5 +1,8 @@
 //! Monotonic token scheduling, independently bounded receive grace and session expiry.
 
+//! # Compatibility: docs/parity/opcua.md#OPCUA-LIFE-RENEWAL
+//! # Compatibility: docs/parity/opcua.md#OPCUA-QUIRK-SHARED-SCHEDULER
+
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy)]

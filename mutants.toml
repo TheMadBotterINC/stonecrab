@@ -41,6 +41,8 @@ examine_globs = [
   "crates/stonecrab/src/opcua/attributes.rs",
   "crates/stonecrab/src/opcua/value.rs",
   "crates/stonecrab/src/opcua/chunk.rs",
+  # S109: pure monotonic lifetime arithmetic; channel/connection I/O stays outside scope.
+  "crates/stonecrab/src/opcua/channel/lifetime.rs",
   "crates/stonecrab/src/opcua/crypto.rs",
   "crates/stonecrab/src/opcua/crypto/*.rs",
   # sensors: the measurement scaling module.

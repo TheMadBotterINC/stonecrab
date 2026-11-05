@@ -36,8 +36,9 @@ const TRANSPORTS: &str = "the only transport code of opcua is tcp";
 /// discovery, `CreateSession` and `ActivateSession` finish before returning Connected. Secure
 /// sessions verify the server certificate and application proof before activation. Reads
 /// and staged writes use bounded protected chunks; writes require read-write access.
-/// Protected user tokens, renewal, browse and native subscriptions
-/// remain planned.
+/// Protected username/X.509 tokens use the selected user policy. Operations renew due
+/// channel tokens and repeat the handshake after known idle channel/session expiry.
+/// General transport-loss reconnect, browse and native subscriptions remain planned.
 ///
 /// The whole attempt uses `handshake-timeout-ms` (60000 by default), and close uses
 /// `request-timeout-ms` (30000). `session-timeout-ms` requests 120000 by default; the
@@ -100,7 +101,8 @@ impl OpcuaDriver {
     /// (`opc.tcp://host:port` and the path, verbatim), `security-policy` and
     /// `message-security`. The request timeout is `request-timeout-ms` (30000 ms by default),
     /// `handshake-timeout-ms` maps to the whole connect bound (60000 ms by default),
-    /// `session-timeout-ms` requests 120000 ms,
+    /// `session-timeout-ms` requests 120000 ms. `channel-lifetime-ms` requests 3600000 ms;
+    /// `min-channel-lifetime-ms` defaults to 5000 ms (both positive UInt32 milliseconds).
     /// `encoding.receive-buffer-size` and `encoding.send-buffer-size` select the chunk
     /// ceilings (65535 each by default), and `encoding.max-message-size` and
     /// `encoding.max-chunk-count` select whole-body limits (2097152 bytes and 64 chunks,

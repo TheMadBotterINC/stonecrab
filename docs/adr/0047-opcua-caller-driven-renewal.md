@@ -62,7 +62,8 @@ under a bounded preparation lock and publish a fresh session snapshot.
 - Keep non-expiry transport failure behavior until S110. Already-sent operations are never
   retried across recovery; writes preserve Unknown after transmission and ordinary errors
   before transmission. Reconnecting/Connected transitions describe idle recovery; no work
-  occurs without a caller. Invalid local requests must still perform no network I/O.
+  occurs without a caller. Access/address/limit/deadline/cancellation checks precede
+  recovery; value validation retains the existing staged-write ordering.
 - Extend deterministic responders for Renew/new tokens/nonces, overlap, interleaved replies,
   malformed/refused/dropped renewal, concurrency, cancellation, partial sends, exact 75
   percent boundaries and idle channel/session recovery. Native exact-count tests exercise

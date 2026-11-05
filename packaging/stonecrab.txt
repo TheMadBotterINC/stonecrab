@@ -73,6 +73,7 @@ src/modbus.rs
 src/opcua/address.rs
 src/opcua/attributes/tests.rs
 src/opcua/attributes.rs
+src/opcua/channel/lifetime.rs
 src/opcua/channel/tests.rs
 src/opcua/channel.rs
 src/opcua/chunk/tests.rs
@@ -144,8 +145,10 @@ src/opcua/generated/user_token_type.rs
 src/opcua/generated/write_value.rs
 src/opcua/generated.rs
 src/opcua/identity.rs
+src/opcua/lane/renewal.rs
 src/opcua/lane/tests.rs
 src/opcua/lane.rs
+src/opcua/lifecycle_tests.rs
 src/opcua/options.rs
 src/opcua/read/tests.rs
 src/opcua/read.rs
