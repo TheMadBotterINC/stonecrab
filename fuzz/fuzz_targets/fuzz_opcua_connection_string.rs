@@ -60,6 +60,8 @@ fn check(text: &str) {
                     || key == "request-timeout-ms"
                     || key == "handshake-timeout-ms"
                     || key == "session-timeout-ms"
+                    || key == "channel-lifetime-ms"
+                    || key == "min-channel-lifetime-ms"
                     || key == "encoding.receive-buffer-size"
                     || key == "encoding.send-buffer-size"
                     || key == "encoding.max-message-size"
@@ -142,6 +144,17 @@ fn check(text: &str) {
                 );
                 assert!(millis > 0);
                 assert_eq!(actual, Duration::from_millis(millis));
+            }
+            for (key, default, actual) in [
+                ("channel-lifetime-ms", 3_600_000, parsed.channel_lifetime),
+                ("min-channel-lifetime-ms", 5000, parsed.min_channel_lifetime),
+            ] {
+                let millis = uri.option(key).map_or(default, |value| {
+                    assert!(value.bytes().all(|byte| byte.is_ascii_digit()));
+                    value.parse::<u32>().expect("UInt32 channel lifetime")
+                });
+                assert!(millis > 0);
+                assert_eq!(actual, millis);
             }
             let receive = uri
                 .options()

@@ -54,6 +54,10 @@ pub struct Parsed {
     pub receive_buffer_size: u32,
     /// Requested session timeout, independent of connect and request bounds.
     pub session_timeout: std::time::Duration,
+    /// Requested channel token lifetime in milliseconds.
+    pub channel_lifetime: u32,
+    /// Minimum renewal scheduling lifetime in milliseconds.
+    pub min_channel_lifetime: u32,
 }
 
 /// Parse an `opcua` connection string as the driver does and report what was attached.
@@ -76,6 +80,8 @@ pub fn parse_config(uri: &str) -> Result<Parsed> {
     );
     let receive_buffer_size = options.receive_buffer_size;
     let session_timeout = options.session_timeout;
+    let channel_lifetime = options.channel_lifetime;
+    let min_channel_lifetime = options.min_channel_lifetime;
     Ok(Parsed {
         config,
         endpoint_url,
@@ -83,6 +89,8 @@ pub fn parse_config(uri: &str) -> Result<Parsed> {
         message_security,
         receive_buffer_size,
         session_timeout,
+        channel_lifetime,
+        min_channel_lifetime,
     })
 }
 
