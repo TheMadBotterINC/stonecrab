@@ -80,5 +80,19 @@ CORE-CONNECTION-TRAIT and architecture/support documentation describe the additi
 without claiming device browse support. No new parity row closes: OPC UA stays at
 249 total, 168 implemented, 43 planned and 38 deferred.
 
-Unpacked all-feature and standalone OPC UA builds pass. Hosted evidence will be appended
-after CI completes.
+Unpacked all-feature and standalone OPC UA builds pass.
+
+## Hosted and merge evidence
+
+[CI 41984563228](https://github.com/TheMadBotterINC/stonecrab/actions/runs/41984563228)
+on 2c3f17cfb892b02ccddf359acca7832c0d63305c passes all 32 executed jobs: both Rust
+versions on Windows/macOS/Linux, coverage, cross-target builds, native OPC UA and other
+interop, package verification and full serial fuzz smoke included. Scheduled and
+first-branch DCO skip by workflow conditions; local DCO verifies the entire commit range.
+
+The final evidence/handoff changes are root-only. Product, crate documentation,
+generator, manifest/lock, script, interop, packaging and fuzz inputs match the hosted
+source exactly. Merge uses --no-ff --no-squash --signoff, preserving every plan,
+implementation, test and evidence commit, and pushes master. Final checks require a clean
+master synced with origin, both merge parents and feature ancestry, and matching remote
+HEAD. No release/tag/version change; next is S112 OPC UA browse walk.

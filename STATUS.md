@@ -5,6 +5,42 @@ Implementation baseline: the commit that last modified this file
 (`git log -1 --format=%h -- STATUS.md`). Every alpha slice updates this file in
 its own commit; the slice log below records what each one landed.
 
+## Core browse contract (S111, 2026-11-05)
+
+The facade now provides bounded named browse queries, flat nodes and correlated query
+results, plus an additive Connection::browse default. Current simulator, Modbus and OPC
+UA drivers still return Unsupported without I/O; the OPC UA walk and metadata remain
+S112/S113. No driver capability is enabled by these core types.
+
+Requests retain opaque query text, deadline/cancellation and a total node budget, default
+10000 across all queries. Duplicate/empty/oversized requests fail before copying more
+data. Nodes preserve same-name siblings and reusable addresses, access/type/shape metadata,
+bounded options and backward local parent indices. Response assembly validates exact query
+correlation/order, time, total nodes and acyclic parents; typed errors and explicit
+truncation remain data. Early budgets precede text/parent inspection. Default diagnostics
+name Browse/current state, zero latency and Validation; leases forward through their
+existing gate and refuse after release without invoking an override.
+
+The shared contract suite now has 35 cases, including unsupported browse/no-I/O and
+supported correlation/bounds. A dedicated test-only browsing driver verifies supported
+and missing-fixture paths, wrong identity and cached forwarding. All 2602 tests and
+592+5 doctests pass; all nine public browse tests also pass with no default features.
+Standalone OPC UA passes 568 library tests/strict Clippy. Core 7338/7338 and handwritten
+OPC UA 10952/10952 lines are 100%, with unchanged thresholds/exclusions. All 18 focused
+mutations are caught; all 18 fuzz targets pass at least 60 seconds. The 59 isolated
+features, regen, dependencies/D23/machete, examples, semver and parity/attributes pass.
+The existing native 20-test gate/self-check/example passes as regression evidence;
+peer and PKI are removed. Fresh reviewed 239-file package and unpacked builds pass.
+
+Hosted CI 41984563228 on 2c3f17c passes all 32 executed jobs. Scheduled and first-branch
+DCO skip by workflow conditions; local DCO verifies the full signed-off range. Final
+root-only handoff notes preserve hosted-tested inputs; a normal merge pushes master.
+[Evidence](docs/evidence/opcua-s111.md), [design](docs/adr/0049-core-browse-contract.md).
+CORE-CONNECTION-TRAIT and architecture/support documentation reflect the new API; no
+OPC UA parity row closes (249 total, 168 implemented/43 planned/38 deferred). No new
+dependency, feature or version; no release or hardware claim. Next: S112, OPC UA browse
+walk. Normal signed-off merges retain every commit.
+
 ## OPC UA request-driven reconnect (S110, 2026-11-05)
 
 Observed transport failures now schedule the configured reconnect backoff. The next
