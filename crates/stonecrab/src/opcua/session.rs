@@ -26,6 +26,7 @@ pub(super) struct Session {
     pub(super) revised_timeout: Duration,
     pub(super) selected_endpoint: String,
     pub(super) attributes: Mutex<Vec<(NodeId, crate::opcua::attributes::Attributes)>>,
+    pub(super) continuations: crate::opcua::browse::Continuations,
 }
 
 impl Session {
@@ -183,6 +184,7 @@ impl Session {
             revised_timeout,
             selected_endpoint,
             attributes: Mutex::new(Vec::new()),
+            continuations: crate::opcua::browse::Continuations::default(),
         })
     }
 

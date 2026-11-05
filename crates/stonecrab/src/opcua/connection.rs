@@ -72,7 +72,7 @@ impl OpcuaConnection {
         }
     }
 
-    fn current(&self) -> Arc<Session> {
+    pub(super) fn current(&self) -> Arc<Session> {
         Arc::clone(
             &self
                 .session
@@ -135,6 +135,13 @@ impl OpcuaConnection {
             if self.state.current() == ConnectionState::Connected
                 && !session.lane.expired(session.revised_timeout)
             {
+                crate::opcua::browse::release_pending(
+                    &session,
+                    self.clock.as_ref(),
+                    deadline,
+                    cancel,
+                )
+                .await?;
                 return Ok(session);
             }
             let _guard =
@@ -147,6 +154,13 @@ impl OpcuaConnection {
             let previous = self.state.current();
             if previous == ConnectionState::Connected {
                 if !session.lane.expired(session.revised_timeout) {
+                    crate::opcua::browse::release_pending(
+                        &session,
+                        self.clock.as_ref(),
+                        deadline,
+                        cancel,
+                    )
+                    .await?;
                     return Ok(session);
                 }
                 let wakers = {
@@ -236,6 +250,99 @@ impl OpcuaConnection {
             preparation.as_mut().poll(cx)
         })
         .await
+    }
+
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "S113 enables public typed browse")
+    )]
+    pub(super) async fn browse_walk(
+        &self,
+        request: crate::BrowseRequest,
+    ) -> Result<crate::BrowseResponse> {
+        let started = self.clock.now();
+        let result = async {
+            let mut stopped = pin!(self.operations_stopped.cancelled());
+            let mut browse = pin!(self.browse_batch(&request, started));
+            poll_fn(|cx| {
+                if stopped.as_mut().poll(cx).is_ready() {
+                    return std::task::Poll::Ready(Err(stopped_error()));
+                }
+                browse.as_mut().poll(cx)
+            })
+            .await
+        }
+        .await;
+        result.map_err(|error| self.operation_error(Operation::Browse, started, error))
+    }
+
+    async fn browse_batch(
+        &self,
+        request: &crate::BrowseRequest,
+        started: std::time::Instant,
+    ) -> Result<crate::BrowseResponse> {
+        if request.queries().len() > self.limits.max_items_per_request().get() {
+            return Err(PlcError::new(
+                ErrorKind::ResourceLimit,
+                "OPC UA browse exceeds connection query budget",
+            ));
+        }
+        let cancel = request.cancel().cloned().unwrap_or_default();
+        let default = Deadline::after(started, self.request_timeout)?;
+        let deadline = request
+            .deadline()
+            .map_or(default, |requested| requested.min(default));
+        crate::opcua::channel::within(self.clock.as_ref(), deadline, &cancel, async { Ok(()) })
+            .await?;
+        let options = self
+            .config
+            .driver_options_as::<crate::opcua::options::OpcuaOptions>()
+            .ok_or_else(|| {
+                PlcError::new(ErrorKind::Internal, "OPC UA connection options absent")
+            })?;
+        let mut session = None;
+        let mut budget = request
+            .max_nodes()
+            .get()
+            .min(self.limits.max_browse_nodes().get());
+        let mut results = Vec::with_capacity(request.queries().len());
+        for query in request.queries() {
+            let parsed =
+                crate::opcua::OpcuaAddress::parse_query(query.text()).and_then(|address| {
+                    crate::opcua::read::node(&crate::Tag::new(
+                        query.id().clone(),
+                        Arc::new(address),
+                    ))
+                    .map(|value| value.node_id)
+                });
+            let (outcome, truncated) = match parsed {
+                Err(error) => (Err(crate::ItemError::new(error)), false),
+                Ok(root) => {
+                    let session = match &session {
+                        Some(session) => session,
+                        None => session.insert(self.ready(deadline, &cancel).await?),
+                    };
+                    let (outcome, truncated) = crate::opcua::browse::walk(
+                        session, root, options, budget, deadline, &cancel,
+                    )
+                    .await?;
+                    if let Ok(nodes) = &outcome {
+                        budget = budget.saturating_sub(nodes.len());
+                    }
+                    (outcome, truncated)
+                }
+            };
+            results.push(
+                crate::BrowseResult::new(query.id().clone(), outcome).with_truncated(truncated),
+            );
+        }
+        results
+            .into_iter()
+            .fold(
+                crate::BrowseResponse::builder(request, started, self.clock.now()),
+                crate::BrowseResponseBuilder::item,
+            )
+            .build()
     }
 
     async fn read_inner(&self, request: ReadRequest) -> Result<ReadResponse> {

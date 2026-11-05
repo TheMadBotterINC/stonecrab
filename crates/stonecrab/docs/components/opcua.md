@@ -122,7 +122,10 @@ assert_eq!(start.namespace(), 2);
 # Ok::<(), stonecrab::PlcError>(())
 ```
 A browse query is the address of the node to start from; an empty or blank query, or `**`,
-means the Objects folder, `ns=0;i=85`. Browse itself is not implemented yet.
+means the Objects folder, `ns=0;i=85`. S112 implements and tests the private iterative
+Browse/BrowseNext walk, continuation cleanup, limits and per-node status. Public
+`Connection::browse` remains Unsupported until S113 adds typed variable metadata;
+`Capabilities.browse` remains false.
 
 ## Connection string
 The string the driver will take, parsed since slice S84 but not yet reachable: the parser is
@@ -154,6 +157,10 @@ opcua:tcp://[2001:db8::10]:4840/ua/server
   on send. Aggregate partial responses share that local receive budget. A peer zero never
   removes local bounds. Message bytes exclude chunk/security/sequence headers.
   `ResourceLimits` caps it before Hello, and ACK may reduce it further.
+- `browse-max-references-per-node`, `browse-max-total-nodes` and `browse-max-depth`
+  accept decimal UInt32 values with defaults 65536, 1000000 and 64. Zero removes that
+  protocol ceiling only; the finite core response budget, deadline and cancellation
+  remain effective. These configure the private S112 walk; public typed browse is S113.
 - Every other key is `InvalidConfig`, and so is a key written twice. That includes the keys
   the framework fills (`protocol-code`, `transport-code`, `transport-config`), the
   credentials a connection string must not carry (`username`, `password`; they arrive in

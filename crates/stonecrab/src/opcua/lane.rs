@@ -556,6 +556,12 @@ impl Lane {
                 }
                 | Service::WriteResponse {
                     response_header, ..
+                }
+                | Service::BrowseResponse {
+                    response_header, ..
+                }
+                | Service::BrowseNextResponse {
+                    response_header, ..
                 } => Some(response_header),
                 _ => None,
             };
@@ -568,7 +574,7 @@ impl Lane {
         Ok(())
     }
 
-    fn check(&self, deadline: Deadline, cancel: &CancellationToken) -> Result<()> {
+    pub(super) fn check(&self, deadline: Deadline, cancel: &CancellationToken) -> Result<()> {
         if cancel.is_cancelled() {
             return Err(error(ErrorKind::Cancelled, "request cancelled"));
         }
@@ -577,6 +583,10 @@ impl Lane {
             return Err(error(ErrorKind::Timeout, "request deadline elapsed"));
         }
         Ok(())
+    }
+
+    pub(super) const fn continuation_budget(&self) -> (usize, usize) {
+        (self.max_pending, self.max_buffered)
     }
 
     async fn until<T>(

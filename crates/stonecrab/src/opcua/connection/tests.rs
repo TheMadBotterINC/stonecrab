@@ -15,11 +15,101 @@ use std::task::{Context, Waker};
 
 const URI: &str = "opcua://fake:4840/path?security-policy=NONE&request-timeout-ms=25";
 
+#[tokio::test]
+#[ignore = "needs the independent open62541 peer; interop/open62541/interop.sh tests"]
+async fn opcua_interop_browse_walks_the_test_namespace() {
+    let uri = std::env::var("STONECRAB_INTEROP_OPEN62541").unwrap();
+    let driver = OpcuaDriver::new();
+    let config = driver.parse_config(&uri).unwrap();
+    let clock = Arc::new(crate::transport::SystemClock);
+    let session = driver
+        .open_session(
+            &config,
+            Deadline::after(clock.now(), Duration::from_secs(30)).unwrap(),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let connection = OpcuaConnection::new(session, driver, config, clock);
+    let request = crate::BrowseRequest::builder(connection.limits())
+        .query(TagId::new("interop").unwrap(), "ns=1;s=Interop")
+        .build()
+        .unwrap();
+    let response = connection.browse_walk(request).await.unwrap();
+    let item = response.items().first().unwrap();
+    assert!(!item.truncated());
+    let nodes = item.outcome().as_ref().unwrap();
+    assert!(
+        nodes
+            .iter()
+            .any(|node| node.address().canonical() == "ns=1;s=counter")
+    );
+    assert!(
+        nodes
+            .iter()
+            .any(|node| node.address().canonical() == "ns=1;s=scalar/Int32")
+    );
+    assert!(nodes.iter().all(|node| node.error().is_none()));
+    let request = crate::BrowseRequest::builder(
+        ResourceLimits::builder()
+            .max_browse_nodes(1)
+            .build()
+            .unwrap(),
+    )
+    .query(TagId::new("objects").unwrap(), "")
+    .build()
+    .unwrap();
+    let response = connection.browse_walk(request).await.unwrap();
+    assert!(response.items().first().unwrap().truncated());
+    assert_eq!(
+        response
+            .items()
+            .first()
+            .unwrap()
+            .outcome()
+            .as_ref()
+            .unwrap()
+            .len(),
+        1
+    );
+    connection.close().await.unwrap();
+}
+
 struct Rig {
     driver: OpcuaDriver,
     clock: FakeClock,
     factory: FakeTransportFactory,
     device: Device,
+}
+
+#[test]
+fn opcua_browse_missing_attached_options_is_an_internal_error() {
+    let rig = Rig::new();
+    let parsed = rig.driver.parse_config(URI).unwrap();
+    let session = block_on_with(
+        &rig.clock,
+        rig.driver.open_session(
+            &parsed,
+            Deadline::after(rig.clock.now(), Duration::from_secs(1)).unwrap(),
+            &CancellationToken::new(),
+        ),
+    )
+    .unwrap();
+    let invalid = crate::ConnectionConfig::builder("opcua", parsed.endpoint().clone())
+        .build()
+        .unwrap();
+    let connection =
+        OpcuaConnection::new(session, rig.driver, invalid, Arc::new(rig.clock.clone()));
+    let request = crate::BrowseRequest::builder(connection.limits())
+        .query(TagId::new("root").unwrap(), "")
+        .build()
+        .unwrap();
+    assert_eq!(
+        block_on_with(&rig.clock, connection.browse_walk(request))
+            .unwrap_err()
+            .kind(),
+        ErrorKind::Internal
+    );
 }
 impl Rig {
     fn new() -> Self {

@@ -7,6 +7,9 @@
 
 //! # Compatibility: docs/parity/opcua.md#OPCUA-CFG-CHANNEL-LIFETIME
 //! # Compatibility: docs/parity/opcua.md#OPCUA-CFG-MIN-CHANNEL-LIFETIME
+//! # Compatibility: docs/parity/opcua.md#OPCUA-CFG-BROWSE-MAX-REFERENCES
+//! # Compatibility: docs/parity/opcua.md#OPCUA-CFG-BROWSE-MAX-NODES
+//! # Compatibility: docs/parity/opcua.md#OPCUA-CFG-BROWSE-MAX-DEPTH
 
 use std::time::Duration;
 
@@ -22,6 +25,9 @@ const HANDSHAKE_TIMEOUT: &str = "handshake-timeout-ms";
 const SESSION_TIMEOUT: &str = "session-timeout-ms";
 const CHANNEL_LIFETIME: &str = "channel-lifetime-ms";
 const MIN_CHANNEL_LIFETIME: &str = "min-channel-lifetime-ms";
+const BROWSE_REFERENCES: &str = "browse-max-references-per-node";
+const BROWSE_NODES: &str = "browse-max-total-nodes";
+const BROWSE_DEPTH: &str = "browse-max-depth";
 /// The largest incoming chunk advertised by Hello.
 const RECEIVE_BUFFER: &str = "encoding.receive-buffer-size";
 const SEND_BUFFER: &str = "encoding.send-buffer-size";
@@ -204,6 +210,9 @@ pub(super) struct OpcuaOptions {
     pub(super) session_timeout: Duration,
     pub(super) channel_lifetime: u32,
     pub(super) min_channel_lifetime: u32,
+    pub(super) browse_max_references_per_node: u32,
+    pub(super) browse_max_total_nodes: u32,
+    pub(super) browse_max_depth: u32,
     /// The configured receive ceiling before applying `ResourceLimits`.
     pub(super) receive_buffer_size: u32,
     pub(super) send_buffer_size: u32,
@@ -212,6 +221,51 @@ pub(super) struct OpcuaOptions {
 }
 
 impl DriverOptions for OpcuaOptions {}
+
+#[cfg(test)]
+mod browse_tests {
+    use super::*;
+
+    #[test]
+    fn opcua_browse_limits_accept_zero_and_uint32_without_affecting_other_numeric_options() {
+        let defaults =
+            OpcuaOptions::from_parameters("opc.tcp://fake:4840".to_owned(), &[]).unwrap();
+        assert_eq!(
+            (
+                defaults.browse_max_references_per_node,
+                defaults.browse_max_total_nodes,
+                defaults.browse_max_depth
+            ),
+            (65536, 1_000_000, 64)
+        );
+        for key in [BROWSE_REFERENCES, BROWSE_NODES, BROWSE_DEPTH] {
+            for value in ["0", "1", "4294967295"] {
+                let options = OpcuaOptions::from_parameters(
+                    "opc.tcp://fake:4840".to_owned(),
+                    &[(key.to_owned(), value.to_owned())],
+                )
+                .unwrap();
+                let actual = match key {
+                    BROWSE_REFERENCES => options.browse_max_references_per_node,
+                    BROWSE_NODES => options.browse_max_total_nodes,
+                    _ => options.browse_max_depth,
+                };
+                assert_eq!(actual, value.parse::<u32>().unwrap());
+            }
+            for value in ["", "-1", "+1", "4294967296", " 1", "1.0"] {
+                assert_eq!(
+                    OpcuaOptions::from_parameters(
+                        "opc.tcp://fake:4840".to_owned(),
+                        &[(key.to_owned(), value.to_owned())]
+                    )
+                    .unwrap_err()
+                    .kind(),
+                    ErrorKind::InvalidConfig
+                );
+            }
+        }
+    }
+}
 
 impl OpcuaOptions {
     /// Read the query parameters of a connection string for the endpoint `endpoint_url`.
@@ -241,6 +295,9 @@ impl OpcuaOptions {
         let mut session_timeout = Duration::from_secs(120);
         let mut channel_lifetime = 3_600_000;
         let mut min_channel_lifetime = 5000;
+        let mut browse_max_references_per_node = 65536;
+        let mut browse_max_total_nodes = 1_000_000;
+        let mut browse_max_depth = 64;
         let mut receive_buffer_size = 65535;
         let mut send_buffer_size = 65535;
         let mut max_message_size = 2_097_152;
@@ -334,10 +391,15 @@ impl OpcuaOptions {
                     }
                 }
                 RECEIVE_BUFFER | SEND_BUFFER | MAX_MESSAGE | MAX_CHUNKS | CHANNEL_LIFETIME
-                | MIN_CHANNEL_LIFETIME => {
+                | MIN_CHANNEL_LIFETIME | BROWSE_REFERENCES | BROWSE_NODES | BROWSE_DEPTH => {
                     let (minimum, maximum) = if matches!(key.as_str(), RECEIVE_BUFFER | SEND_BUFFER)
                     {
                         (8192, 0x7FFF_FFFF)
+                    } else if matches!(
+                        key.as_str(),
+                        BROWSE_REFERENCES | BROWSE_NODES | BROWSE_DEPTH
+                    ) {
+                        (0, u32::MAX)
                     } else {
                         (1, u32::MAX)
                     };
@@ -358,6 +420,9 @@ impl OpcuaOptions {
                         MAX_MESSAGE => max_message_size = size,
                         CHANNEL_LIFETIME => channel_lifetime = size,
                         MIN_CHANNEL_LIFETIME => min_channel_lifetime = size,
+                        BROWSE_REFERENCES => browse_max_references_per_node = size,
+                        BROWSE_NODES => browse_max_total_nodes = size,
+                        BROWSE_DEPTH => browse_max_depth = size,
                         _ => max_chunk_count = size,
                     }
                 }
@@ -394,6 +459,9 @@ impl OpcuaOptions {
             session_timeout,
             channel_lifetime,
             min_channel_lifetime,
+            browse_max_references_per_node,
+            browse_max_total_nodes,
+            browse_max_depth,
             receive_buffer_size,
             send_buffer_size,
             max_message_size,
